@@ -1,0 +1,164 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/product_card.dart';
+import '../../cart/presentation/cart_providers.dart';
+import '../domain/product_models.dart';
+import 'product_detail_screen.dart';
+import 'products_providers.dart';
+
+class SearchScreen extends ConsumerStatefulWidget {
+  const SearchScreen({super.key});
+
+  @override
+  ConsumerState<SearchScreen> createState() => _SearchScreenState();
+}
+
+class _SearchScreenState extends ConsumerState<SearchScreen> {
+  final _controller = TextEditingController();
+  Timer? _debounce;
+
+  List<Product> _results = [];
+  bool _isLoading = false;
+  String? _errorMessage;
+  bool _hasSearched = false;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onQueryChanged(String query) {
+    _debounce?.cancel();
+
+    if (query.trim().isEmpty) {
+      setState(() {
+        _results = [];
+        _hasSearched = false;
+        _errorMessage = null;
+      });
+      return;
+    }
+
+    // Debounced - avoids firing a real backend search request on every single
+    // keystroke, which would be wasteful and could visibly lag on a slow
+    // connection (village/tier-3 network conditions matter here).
+    _debounce = Timer(const Duration(milliseconds: 400), () => _search(query.trim()));
+  }
+
+  Future<void> _search(String query) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _hasSearched = true;
+    });
+
+    try {
+      final results = await ref.read(productsRepositoryProvider).searchInstant(query);
+      if (!mounted) return;
+      setState(() {
+        _results = results;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = "Couldn't search right now - check your connection";
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: TextField(
+          controller: _controller,
+          autofocus: true,
+          onChanged: _onQueryChanged,
+          decoration: const InputDecoration(
+            hintText: 'Search for atta, milk, snacks...',
+            border: InputBorder.none,
+          ),
+        ),
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (!_hasSearched) {
+      return const Center(
+        child: Text('Search for products', style: TextStyle(color: AppColors.textSecondary)),
+      );
+    }
+
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    }
+
+    if (_errorMessage != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_errorMessage!),
+            TextButton(
+              onPressed: () => _search(_controller.text.trim()),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_results.isEmpty) {
+      return const Center(
+        child: Text('No products found', style: TextStyle(color: AppColors.textSecondary)),
+      );
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        childAspectRatio: 0.62,
+      ),
+      itemCount: _results.length,
+      itemBuilder: (context, index) {
+        final product = _results[index];
+        return ProductCard(
+          product: product,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
+          ),
+          onAddPressed: () => _addToCart(product),
+        );
+      },
+    );
+  }
+
+  Future<void> _addToCart(Product product) async {
+    final variant = product.primaryVariant;
+    if (variant == null) return;
+
+    try {
+      await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${product.name} added to cart')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't add to cart - please try again")),
+      );
+    }
+  }
+}
