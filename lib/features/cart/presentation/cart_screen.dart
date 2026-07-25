@@ -1,0 +1,233 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/theme/app_theme.dart';
+import '../../checkout/presentation/checkout_screen.dart';
+import '../domain/cart_models.dart';
+import 'cart_providers.dart';
+
+class CartScreen extends ConsumerWidget {
+  const CartScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cartAsync = ref.watch(cartControllerProvider);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('My Cart')),
+      body: cartAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        error: (error, stackTrace) => Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Couldn't load your cart - check your connection"),
+              TextButton(
+                onPressed: () => ref.invalidate(cartControllerProvider),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+        data: (cart) => _CartBody(cart: cart),
+      ),
+    );
+  }
+}
+
+class _CartBody extends ConsumerWidget {
+  const _CartBody({required this.cart});
+
+  final CartModel cart;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (cart.items.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.shopping_cart_outlined, size: 64, color: AppColors.textSecondary),
+            SizedBox(height: 12),
+            Text('Your cart is empty', style: TextStyle(color: AppColors.textSecondary)),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: cart.items.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) => _CartItemTile(item: cart.items[index]),
+          ),
+        ),
+        _CartSummary(cart: cart),
+      ],
+    );
+  }
+}
+
+class _CartItemTile extends ConsumerWidget {
+  const _CartItemTile({required this.item});
+
+  final CartItemModel item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isAvailable = item.available ?? true;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.cardBackground,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+            child: item.imageUrl != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      item.imageUrl!,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary),
+                    ),
+                  )
+                : const Icon(Icons.shopping_basket_outlined, color: AppColors.textSecondary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.productName ?? 'Product',
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                ),
+                if (item.variantQuantity != null && item.unit != null)
+                  Text(
+                    '${item.variantQuantity} ${item.unit}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
+                  ),
+                if (!isAvailable)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      'No longer available',
+                      style: TextStyle(color: AppColors.error, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Text('₹${item.totalPrice.toStringAsFixed(0)}',
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    const Spacer(),
+                    _QuantityStepper(item: item),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuantityStepper extends ConsumerWidget {
+  const _QuantityStepper({required this.item});
+
+  final CartItemModel item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.primary),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.remove, size: 16),
+            color: AppColors.primary,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            padding: EdgeInsets.zero,
+            tooltip: item.quantity <= 1 ? 'Remove from cart' : 'Decrease quantity',
+            onPressed: () {
+              final newQuantity = item.quantity - 1;
+              if (newQuantity <= 0) {
+                ref.read(cartControllerProvider.notifier).removeItem(cartItemId: item.cartItemId);
+              } else {
+                ref
+                    .read(cartControllerProvider.notifier)
+                    .updateQuantity(cartItemId: item.cartItemId, quantity: newQuantity);
+              }
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text('${item.quantity}', style: const TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add, size: 16),
+            color: AppColors.primary,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            padding: EdgeInsets.zero,
+            tooltip: 'Increase quantity',
+            onPressed: () => ref
+                .read(cartControllerProvider.notifier)
+                .updateQuantity(cartItemId: item.cartItemId, quantity: item.quantity + 1),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CartSummary extends StatelessWidget {
+  const _CartSummary({required this.cart});
+
+  final CartModel cart;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('${cart.totalItems} items', style: Theme.of(context).textTheme.bodyMedium),
+                Text('₹${cart.totalAmount.toStringAsFixed(0)}',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CheckoutScreen()),
+              ),
+              child: const Text('Proceed to Checkout'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

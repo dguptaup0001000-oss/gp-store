@@ -1,0 +1,58 @@
+name: gpstore
+description: GP-Store customer app
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management - Flutter-team-recommended, compile-safe providers,
+  # pairs cleanly with async API calls (which is most of this app).
+  flutter_riverpod: ^2.5.1
+
+  # HTTP client with interceptor support - needed to auto-attach the JWT and
+  # auto-refresh it on expiry (see core/api/api_client.dart).
+  dio: ^5.4.3
+
+  # Navigation - declarative, works well with Riverpod for auth-gated routes
+  # (e.g. redirect to login if not authenticated).
+  go_router: ^14.2.0
+
+  # Stores the refresh token securely on-device (Keychain on iOS, Keystore on
+  # Android) - NEVER store a refresh token in plain SharedPreferences.
+  flutter_secure_storage: ^9.2.2
+
+  # Immutable model classes with generated equality/copyWith - reduces a
+  # whole category of "forgot to update a field" bugs when order/product
+  # models change.
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  cupertino_icons: ^1.0.6
+
+  # Real device GPS for "use my location" when adding an address - the
+  # backend's deliverability/distance calculation needs real coordinates,
+  # and a full interactive map picker is out of scope for now.
+  geolocator: ^13.0.1
+
+  # Opens the real UPI deep link (upi://pay?...) in whatever UPI app the
+  # customer has installed (GPay, PhonePe, Paytm) - needed to actually act on
+  # the link the backend generates, not just display it as text.
+  url_launcher: ^6.3.1
+  package_info_plus: ^8.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+  build_runner: ^2.4.11
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+
+flutter:
+  uses-material-design: true
