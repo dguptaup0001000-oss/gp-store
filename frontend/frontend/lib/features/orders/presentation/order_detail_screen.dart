@@ -1,0 +1,292 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/theme/app_theme.dart';
+import '../domain/order_models.dart';
+import 'orders_providers.dart';
+
+class OrderDetailScreen extends ConsumerWidget {
+  const OrderDetailScreen({super.key, required this.orderId});
+
+  final int orderId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final orderAsync = ref.watch(orderDetailProvider(orderId));
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Order Details')),
+      body: orderAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        error: (error, stackTrace) => Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Couldn't load this order - check your connection"),
+              TextButton(
+                onPressed: () => ref.invalidate(orderDetailProvider(orderId)),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+        data: (order) => _OrderDetailBody(order: order),
+      ),
+    );
+  }
+}
+
+class _OrderDetailBody extends ConsumerStatefulWidget {
+  const _OrderDetailBody({required this.order});
+
+  final OrderDetail order;
+
+  @override
+  ConsumerState<_OrderDetailBody> createState() => _OrderDetailBodyState();
+}
+
+class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
+  bool _isCancelling = false;
+
+  Future<void> _cancelOrder() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel this order?'),
+        content: const Text('This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('No')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Yes, cancel')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _isCancelling = true);
+
+    try {
+      await ref.read(ordersRepositoryProvider).cancelOrder(widget.order.orderId);
+      ref.invalidate(orderDetailProvider(widget.order.orderId));
+      ref.invalidate(myOrdersProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Order cancelled')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't cancel this order - please try again")),
+      );
+    } finally {
+      if (mounted) setState(() => _isCancelling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final order = widget.order;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('#${order.orderNumber}', style: Theme.of(context).textTheme.titleLarge),
+            _StatusBadge(status: order.orderStatus),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        if (order.delivery != null) _DeliveryTrackingCard(delivery: order.delivery!),
+
+        const SizedBox(height: 16),
+        Text('Items', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        ...order.items.map((item) => _OrderItemTile(item: item)),
+
+        const SizedBox(height: 16),
+        if (order.address != null) ...[
+          Text('Delivery Address', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(order.address!.fullName, style: const TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                Text(order.address!.fullAddress, style: Theme.of(context).textTheme.bodyMedium),
+                const SizedBox(height: 4),
+                Text(order.address!.mobileNumber, style: Theme.of(context).textTheme.bodyMedium),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        Text('Bill Details', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+          child: Column(
+            children: [
+              if (order.discountAmount != null && order.discountAmount! > 0)
+                _billRow('Discount${order.appliedCouponCode != null ? ' (${order.appliedCouponCode})' : ''}',
+                    '-₹${order.discountAmount!.toStringAsFixed(0)}'),
+              if (order.deliveryFee != null)
+                _billRow('Delivery Fee',
+                    order.deliveryFee == 0 ? 'FREE' : '₹${order.deliveryFee!.toStringAsFixed(0)}'),
+              const Divider(height: 20),
+              _billRow('Total Paid', '₹${order.totalAmount.toStringAsFixed(0)}', bold: true),
+              const SizedBox(height: 4),
+              Text('Payment: ${order.paymentStatus.replaceAll('_', ' ')}',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12)),
+            ],
+          ),
+        ),
+
+        if (order.isCancellable) ...[
+          const SizedBox(height: 24),
+          OutlinedButton(
+            onPressed: _isCancelling ? null : _cancelOrder,
+            style: OutlinedButton.styleFrom(foregroundColor: AppColors.error, side: const BorderSide(color: AppColors.error)),
+            child: _isCancelling
+                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Cancel Order'),
+          ),
+        ],
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _billRow(String label, String value, {bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
+          Text(value, style: TextStyle(fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeliveryTrackingCard extends StatelessWidget {
+  const _DeliveryTrackingCard({required this.delivery});
+
+  final DeliveryTrackingInfo delivery;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.local_shipping_outlined, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Text(
+                delivery.deliveryStatus?.replaceAll('_', ' ') ?? 'Preparing your order',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          if (delivery.estimatedDeliveryTime != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Estimated: ${_formatTime(delivery.estimatedDeliveryTime!)}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+          if (delivery.deliveryPersonName != null) ...[
+            const SizedBox(height: 8),
+            Text('Delivery partner: ${delivery.deliveryPersonName}', style: Theme.of(context).textTheme.bodyMedium),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatTime(String iso) {
+    try {
+      final date = DateTime.parse(iso);
+      return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}, ${date.day}/${date.month}';
+    } catch (_) {
+      return iso;
+    }
+  }
+}
+
+class _OrderItemTile extends StatelessWidget {
+  const _OrderItemTile({required this.item});
+
+  final OrderItemDetail item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(8)),
+            child: item.imageUrl != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      item.imageUrl!,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const Icon(Icons.image_not_supported_outlined, size: 18, color: AppColors.textSecondary),
+                    ),
+                  )
+                : const Icon(Icons.shopping_basket_outlined, size: 18, color: AppColors.textSecondary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.productName ?? 'Product', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                Text('Qty ${item.quantity}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12)),
+              ],
+            ),
+          ),
+          Text('₹${item.totalPrice.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final isPositive = status != 'CANCELLED';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: (isPositive ? AppColors.success : AppColors.error).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        status.replaceAll('_', ' '),
+        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11, color: isPositive ? AppColors.success : AppColors.error),
+      ),
+    );
+  }
+}
