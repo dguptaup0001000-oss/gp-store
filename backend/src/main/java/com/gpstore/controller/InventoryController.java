@@ -1,5 +1,6 @@
 package com.gpstore.controller;
 
+import com.gpstore.dto.response.InventoryResponse;
 import com.gpstore.entity.Inventory;
 import com.gpstore.service.InventoryService;
 import org.springframework.web.bind.annotation.*;
@@ -18,35 +19,35 @@ public class InventoryController {
     }
 
     @PostMapping
-    public Inventory create(@RequestBody Inventory inventory) {
-        return inventoryService.save(inventory);
+    public InventoryResponse create(@RequestBody Inventory inventory) {
+        return InventoryResponse.from(inventoryService.save(inventory));
     }
 
     @GetMapping
-    public List<Inventory> getAll() {
-        return inventoryService.getAll();
+    public List<InventoryResponse> getAll() {
+        return inventoryService.getAll().stream().map(InventoryResponse::from).toList();
     }
 
     @GetMapping("/{id}")
-    public Inventory getById(@PathVariable Long id) {
-        return inventoryService.getById(id);
+    public InventoryResponse getById(@PathVariable Long id) {
+        return InventoryResponse.from(inventoryService.getById(id));
     }
 
     // The actual restock list - items at or below their reorder point.
     @GetMapping("/low-stock")
-    public List<Inventory> getLowStock() {
-        return inventoryService.getLowStock();
+    public List<InventoryResponse> getLowStock() {
+        return inventoryService.getLowStock().stream().map(InventoryResponse::from).toList();
     }
 
     // Full manual correction (e.g. stock-take reconciliation).
     @PutMapping("/{id}")
-    public Inventory update(@PathVariable Long id, @RequestBody Inventory inventory) {
-        return inventoryService.update(id, inventory);
+    public InventoryResponse update(@PathVariable Long id, @RequestBody Inventory inventory) {
+        return InventoryResponse.from(inventoryService.update(id, inventory));
     }
 
     // The real day-to-day operation: "we received N more units" - additive, audited.
     @PutMapping("/{id}/restock")
-    public Inventory restock(@PathVariable Long id, @RequestParam int quantity) {
-        return inventoryService.restock(id, quantity);
+    public InventoryResponse restock(@PathVariable Long id, @RequestParam int quantity) {
+        return InventoryResponse.from(inventoryService.restock(id, quantity));
     }
 }

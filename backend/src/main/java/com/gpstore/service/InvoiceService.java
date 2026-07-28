@@ -101,6 +101,26 @@ public class InvoiceService {
         return invoiceRepository.findByOrderId(orderId);
     }
 
+    /**
+     * Customer-facing - their own invoice for one of THEIR OWN orders.
+     * Every existing /api/invoices/** endpoint before this was admin-only,
+     * meaning a customer had no way to view their own GST invoice at all -
+     * a real gap for an Indian business where customers legitimately need
+     * this for tax/expense records.
+     */
+    public com.gpstore.dto.response.InvoiceResponse getOwnedInvoiceForOrder(Long orderId, Long customerId) {
+        Invoice invoice = invoiceRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("No invoice found for this order"));
+
+        if (invoice.getCustomer() == null || !invoice.getCustomer().getId().equals(customerId)) {
+            // Same "hide with generic not-found" pattern used everywhere
+            // else in this codebase for ownership violations.
+            throw new ResourceNotFoundException("No invoice found for this order");
+        }
+
+        return com.gpstore.dto.response.InvoiceResponse.from(invoice);
+    }
+
     public Optional<Invoice> getInvoiceByInvoiceNumber(String invoiceNumber) {
         return invoiceRepository.findByInvoiceNumber(invoiceNumber);
     }

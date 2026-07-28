@@ -11,6 +11,18 @@ public class OrderResponse {
     private String orderStatus;
     private String paymentStatus;
     private LocalDateTime orderDate;
+    // Only populated for the admin "all orders" list - null for a
+    // customer's own /my-orders list, where it would be redundant (they
+    // already know it's their own order).
+    private String customerName;
+
+    public String getCustomerName() {
+        return customerName;
+    }
+
+    public void setCustomerName(String customerName) {
+        this.customerName = customerName;
+    }
 
     public Long getOrderId() {
         return orderId;

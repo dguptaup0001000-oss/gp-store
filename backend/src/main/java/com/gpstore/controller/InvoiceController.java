@@ -1,6 +1,7 @@
 package com.gpstore.controller;
 
 import com.gpstore.entity.Invoice;
+import com.gpstore.security.CurrentUser;
 import com.gpstore.service.InvoiceService;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,9 +13,19 @@ import java.util.Optional;
 public class InvoiceController {
 
     private final InvoiceService invoiceService;
+    private final CurrentUser currentUser;
 
-    public InvoiceController(InvoiceService invoiceService) {
+    public InvoiceController(InvoiceService invoiceService, CurrentUser currentUser) {
         this.invoiceService = invoiceService;
+        this.currentUser = currentUser;
+    }
+
+    // Customer-facing - their own invoice for one of their own orders.
+    // Ownership is verified server-side, never trusted from the order id
+    // alone. This is the only non-admin endpoint on this controller.
+    @GetMapping("/my-order/{orderId}")
+    public com.gpstore.dto.response.InvoiceResponse getMyInvoiceForOrder(@PathVariable Long orderId) {
+        return invoiceService.getOwnedInvoiceForOrder(orderId, currentUser.customerId());
     }
 
     // No request body - every amount is computed from the order itself, never

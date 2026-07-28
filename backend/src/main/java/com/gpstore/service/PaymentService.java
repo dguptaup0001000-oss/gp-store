@@ -132,8 +132,10 @@ public class PaymentService {
         return new PaymentInitiationResponse(saved, upiLink);
     }
 
-    public List<Payment> getAllPayments() {
-        return paymentRepository.findAll();
+    public List<com.gpstore.dto.response.PaymentResponse> getAllPayments() {
+        return paymentRepository.findAll().stream()
+                .map(com.gpstore.dto.response.PaymentResponse::from)
+                .toList();
     }
 
     public Optional<Payment> getPaymentByOrderId(Long orderId) {

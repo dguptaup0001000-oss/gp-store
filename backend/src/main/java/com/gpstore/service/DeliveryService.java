@@ -28,6 +28,7 @@ public class DeliveryService {
     private final DeliveryEstimateService deliveryEstimateService;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
+    private final PaymentService paymentService;
     private final int bulkOrderItemThreshold;
 
     public DeliveryService(
@@ -39,6 +40,7 @@ public class DeliveryService {
             DeliveryEstimateService deliveryEstimateService,
             NotificationService notificationService,
             AuditLogService auditLogService,
+            PaymentService paymentService,
             @org.springframework.beans.factory.annotation.Value("${delivery.bulk-order-item-threshold}") int bulkOrderItemThreshold) {
 
         this.deliveryRepository = deliveryRepository;
@@ -49,6 +51,7 @@ public class DeliveryService {
         this.deliveryEstimateService = deliveryEstimateService;
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
+        this.paymentService = paymentService;
         this.bulkOrderItemThreshold = bulkOrderItemThreshold;
     }
 
@@ -87,6 +90,38 @@ public class DeliveryService {
 
         DeliveryPartner partner = deliveryPartnerService.getLeastLoadedAvailablePartner(preferredVehicleType);
         return assignDelivery(orderId, partner.getId());
+    }
+
+    /**
+     * Best-effort wrapper for OrderService.placeOrder to call right after an
+     * order is placed - this used to not exist anywhere at all, meaning NO
+     * order in this entire app ever got assigned to a delivery partner
+     * unless someone manually called the assign endpoint directly. This is
+     * the fix, designed specifically so a failure here (e.g. no delivery
+     * partners currently available, which is entirely plausible for a small
+     * roster) can NEVER cause the customer's already-successful, already-paid
+     * order to fail or roll back:
+     * - REQUIRES_NEW propagation means this runs in its own transaction,
+     *   completely separate from placeOrder's. Spring marks a transaction
+     *   rollback-only the instant an exception exits ANY @Transactional
+     *   method within it, even if the caller catches that exception
+     *   afterward - so simply catching the exception in placeOrder would
+     *   NOT have been enough to protect it. A separate transaction is what
+     *   actually prevents that.
+     * - Every exception is caught HERE, never rethrown, so placeOrder never
+     *   needs to know this failed at all - it just logs it for admin
+     *   visibility (the order remains real and valid, just unassigned,
+     *   needing manual assignment via the existing /assign endpoint).
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void autoAssignBestEffort(Long orderId) {
+        try {
+            autoAssignDelivery(orderId);
+        } catch (Exception ex) {
+            auditLogService.log("AUTO_ASSIGN_FAILED", "Order", orderId,
+                    "Order placed but could not be auto-assigned a delivery partner: " + ex.getMessage()
+                            + " - needs manual assignment.");
+        }
     }
 
     /**
@@ -159,10 +194,28 @@ public class DeliveryService {
     }
 
     @Transactional
-    public Delivery updateDeliveryStatus(Long deliveryId, String status) {
+    public Delivery updateDeliveryStatus(Long deliveryId, String status, Long callerCustomerId, boolean isAdmin) {
 
         Delivery delivery = deliveryRepository.findById(deliveryId)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery not found"));
+
+        // Admins can update any delivery; a delivery partner can only update
+        // ones actually assigned to them - this was previously missing
+        // entirely, meaning any logged-in DELIVERY_BOY could update ANY
+        // delivery by guessing an id, not just their own.
+        if (!isAdmin) {
+            DeliveryPartner caller = deliveryPartnerService.getByAccountIdOrThrow(callerCustomerId);
+            Long assignedPartnerId = delivery.getBatch() != null && delivery.getBatch().getDeliveryPartner() != null
+                    ? delivery.getBatch().getDeliveryPartner().getId()
+                    : null;
+
+            if (assignedPartnerId == null || !assignedPartnerId.equals(caller.getId())) {
+                // Same "hide with generic not-found" pattern used for every
+                // other ownership check in this codebase - don't reveal that
+                // the delivery exists but belongs to someone else.
+                throw new ResourceNotFoundException("Delivery not found");
+            }
+        }
 
         delivery.setDeliveryStatus(status);
 
@@ -194,10 +247,31 @@ public class DeliveryService {
                 order.setOrderStatus(OrderStatus.DELIVERED);
                 orderRepository.save(order);
                 notificationService.notifyOrderStatusChange(order, OrderStatus.DELIVERED);
+
+                // This was never triggered anywhere before - a COD payment
+                // record would stay stuck at COD_PENDING forever, even after
+                // a real, successful delivery, since nothing else in the
+                // app ever called PaymentService.completeCodPayment. Only
+                // acts if it's actually a still-pending COD payment - a UPI
+                // order's delivery completion must not be affected by this.
+                paymentService.getPaymentByOrderId(order.getId()).ifPresent(payment -> {
+                    if (payment.getPaymentMethod() == com.gpstore.enums.PaymentMethod.COD
+                            && payment.getPaymentStatus() == com.gpstore.enums.PaymentStatus.COD_PENDING) {
+                        paymentService.completeCodPayment(order.getId());
+                    }
+                });
             }
         }
 
         return deliveryRepository.save(delivery);
+    }
+
+    /** A delivery partner's own active assignments - resolved via their linked Customer account, never a client-supplied partner id. */
+    public List<com.gpstore.dto.response.MyDeliveryResponse> getMyAssignments(Long callerCustomerId) {
+        DeliveryPartner partner = deliveryPartnerService.getByAccountIdOrThrow(callerCustomerId);
+        return deliveryRepository.findActiveByPartnerId(partner.getId()).stream()
+                .map(com.gpstore.dto.response.MyDeliveryResponse::from)
+                .toList();
     }
 
     /**

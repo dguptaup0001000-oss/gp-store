@@ -1,10 +1,14 @@
 package com.gpstore.service;
 
+import com.gpstore.entity.Customer;
 import com.gpstore.entity.DeliveryPartner;
+import com.gpstore.entity.Role;
 import com.gpstore.exception.ResourceNotFoundException;
+import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliveryRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
 import java.util.List;
@@ -15,14 +19,60 @@ public class DeliveryPartnerService {
 
     private final DeliveryPartnerRepository repository;
     private final DeliveryRepository deliveryRepository;
+    private final CustomerRepository customerRepository;
 
-    public DeliveryPartnerService(DeliveryPartnerRepository repository, DeliveryRepository deliveryRepository) {
+    public DeliveryPartnerService(
+            DeliveryPartnerRepository repository,
+            DeliveryRepository deliveryRepository,
+            CustomerRepository customerRepository) {
         this.repository = repository;
         this.deliveryRepository = deliveryRepository;
+        this.customerRepository = customerRepository;
     }
 
+    /**
+     * A DeliveryPartner row was never a login identity on its own, just a
+     * name on a roster. Creating one now also creates the linked Customer
+     * account (role=DELIVERY_BOY) that actually lets this person log in via
+     * mobile OTP - the same OTP endpoints customers use, since the OTP flow
+     * already looks up by mobile number and logs in with whatever role that
+     * account has (see AuthService.verifyOtpAndAuthenticate) - no changes
+     * needed there. verified=true because an admin creating this record IS
+     * the verification, unlike a customer's own self-registered number.
+     */
+    @Transactional
     public DeliveryPartner save(DeliveryPartner partner) {
-        return repository.save(partner);
+        boolean isNewPartner = partner.getId() == null;
+
+        DeliveryPartner saved = repository.save(partner);
+
+        if (isNewPartner && saved.getAccount() == null) {
+            Customer account = customerRepository.findByMobileNumber(saved.getMobile())
+                    .orElseGet(() -> {
+                        Customer newAccount = new Customer();
+                        newAccount.setFullName(saved.getName());
+                        newAccount.setMobileNumber(saved.getMobile());
+                        newAccount.setEnabled(true);
+                        newAccount.setVerified(true);
+                        newAccount.setActive(true);
+                        return newAccount;
+                    });
+
+            // Whether brand new or an existing Customer becoming a partner
+            // (e.g. someone who already shopped here before you hired them) -
+            // they need DELIVERY_BOY role to pass SecurityConfig's role check
+            // on any delivery endpoint, or this link would be meaningless.
+            // Never downgrades an existing ADMIN, though.
+            if (account.getRole() != Role.ADMIN) {
+                account.setRole(Role.DELIVERY_BOY);
+            }
+            account = customerRepository.save(account);
+
+            saved.setAccount(account);
+            saved = repository.save(saved);
+        }
+
+        return saved;
     }
 
     public List<DeliveryPartner> getAll() {
@@ -34,6 +84,26 @@ public class DeliveryPartnerService {
     }
 
     public DeliveryPartner update(DeliveryPartner partner) {
+        return repository.save(partner);
+    }
+
+    /** Resolves a logged-in Customer (role=DELIVERY_BOY) back to their roster record - throws if not linked to one. */
+    public DeliveryPartner getByAccountIdOrThrow(Long customerId) {
+        return repository.findByAccountId(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("No delivery partner profile linked to this account"));
+    }
+
+    /**
+     * Self-service - a delivery partner setting THEIR OWN availability
+     * (e.g. going off duty). Deliberately only touches the `available`
+     * field on their own resolved record - unlike the bulk update() above,
+     * this can never be used to edit someone else's record, since the
+     * partner is resolved from the caller's own account, never a
+     * client-supplied id.
+     */
+    public DeliveryPartner setMyAvailability(Long customerId, boolean available) {
+        DeliveryPartner partner = getByAccountIdOrThrow(customerId);
+        partner.setAvailable(available);
         return repository.save(partner);
     }
 

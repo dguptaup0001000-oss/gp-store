@@ -94,7 +94,14 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Public: auth endpoints and read-only catalog browsing
                 .requestMatchers(HttpMethod.POST, "/api/auth/logout-all").authenticated()
+                // Same reasoning as logout-all above - without this explicit
+                // override, change-password would fall under the blanket
+                // permitAll below and be reachable with NO authentication.
+                .requestMatchers(HttpMethod.PUT, "/api/auth/change-password").authenticated()
                 .requestMatchers("/api/auth/**").permitAll()
+                // Public - a customer needs this even before logging in
+                // (e.g. locked out and needing to contact support).
+                .requestMatchers("/api/store-info").permitAll()
                 .requestMatchers("/api/health/**").permitAll()
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/actuator/**").hasRole("ADMIN")
@@ -108,6 +115,14 @@ public class SecurityConfig {
                 // Security matches rules in declared order and "/**" would otherwise
                 // also match this exact path first.
                 .requestMatchers(HttpMethod.GET, "/api/reviews").hasRole("ADMIN")
+                // Same reasoning - moderation (deleting someone else's review)
+                // must be admin-only, and there's no other rule that would
+                // cover this DELETE path otherwise.
+                .requestMatchers(HttpMethod.DELETE, "/api/reviews/*/moderate").hasRole("ADMIN")
+                // Same ordering reason as /api/reviews above - the admin
+                // "everything including inactive" product list must come
+                // before the broad public GET /api/products/** rule below.
+                .requestMatchers(HttpMethod.GET, "/api/products/admin/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET,
                         "/api/products/**",
                         "/api/categories/**",
@@ -120,6 +135,9 @@ public class SecurityConfig {
                 // Any logged-in customer can preview a coupon's discount before checkout -
                 // must come before the broader /api/coupons/** admin-only rule below.
                 .requestMatchers(HttpMethod.GET, "/api/coupons/validate").authenticated()
+                // Public "what offers exist right now" list - same ordering
+                // reason as /validate above.
+                .requestMatchers(HttpMethod.GET, "/api/coupons/active").permitAll()
 
                 // Admin-only: catalog and inventory management, cross-customer views,
                 // payment/order status mutation, delivery operations
@@ -128,6 +146,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.DELETE, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasRole("ADMIN")
                 .requestMatchers("/api/inventory/**").hasRole("ADMIN")
                 .requestMatchers("/api/orders").hasRole("ADMIN")
+                .requestMatchers("/api/orders/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/orders/customer/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/orders/*/status").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/payments").hasAnyRole("ADMIN", "CUSTOMER")
@@ -141,13 +160,36 @@ public class SecurityConfig {
                 // NOTE: your real controller path is /api/deliveries/** (plural) - the
                 // earlier /api/delivery/** pattern here never matched it, leaving delivery
                 // status updates open to any authenticated customer. Fixed below.
-                .requestMatchers("/api/deliveries/**", "/api/delivery-partners/**", "/api/delivery-batches/**").hasAnyRole("ADMIN", "DELIVERY_BOY")
+                // A delivery partner setting their own availability - must
+                // come before the broader delivery-partners admin-only rule
+                // below, same ordering reason used throughout this file.
+                .requestMatchers(HttpMethod.PUT, "/api/delivery-partners/me/availability").hasAnyRole("ADMIN", "DELIVERY_BOY")
+                .requestMatchers(HttpMethod.GET, "/api/delivery-partners/me").hasAnyRole("ADMIN", "DELIVERY_BOY")
+                // Roster management (create, view everyone, bulk-edit ANY
+                // partner's record) is admin-only - a delivery partner has
+                // no legitimate need to see or edit the whole roster, only
+                // their own assignments (covered by /api/deliveries/** below)
+                // and their own availability (covered just above).
+                .requestMatchers("/api/delivery-partners/**").hasRole("ADMIN")
+                // Batch management is a dispatch/admin concern - a delivery
+                // partner interacts with their OWN deliveries, never batches directly.
+                .requestMatchers("/api/delivery-batches/**").hasRole("ADMIN")
+                .requestMatchers("/api/deliveries/**").hasAnyRole("ADMIN", "DELIVERY_BOY")
                 .requestMatchers("/api/coupons/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/notifications/mine").authenticated()
+                // Same ordering reason as /mine above - these must come
+                // before the broader /api/notifications/** admin-only rule.
+                .requestMatchers(HttpMethod.PUT, "/api/notifications/*/read").authenticated()
+                .requestMatchers(HttpMethod.PUT, "/api/notifications/read-all").authenticated()
+                .requestMatchers(HttpMethod.DELETE, "/api/notifications/*").authenticated()
                 .requestMatchers("/api/notifications/**").hasRole("ADMIN")
                 // These were missing entirely and fell through to plain "authenticated",
                 // which let any logged-in customer read/cancel ANY invoice, or read/write
                 // ANY customer's cart items / order items / wishlist directly.
+                // A customer's own invoice - must come before the broader
+                // /api/invoices/** admin-only rule below, same ordering
+                // reason used throughout this file.
+                .requestMatchers(HttpMethod.GET, "/api/invoices/my-order/**").authenticated()
                 .requestMatchers("/api/invoices/**").hasRole("ADMIN")
                 .requestMatchers("/api/audit-logs/**").hasRole("ADMIN")
                 .requestMatchers("/api/analytics/**").hasRole("ADMIN")
@@ -157,6 +199,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/customers").hasRole("ADMIN")
                 .requestMatchers("/api/customers/email/**", "/api/customers/mobile/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/customers").hasRole("ADMIN")
+                // Without this, any authenticated customer could deactivate
+                // (or reactivate) ANY other customer's account.
+                .requestMatchers(HttpMethod.PUT, "/api/customers/*/active").hasRole("ADMIN")
 
                 // Everything else requires a valid, authenticated customer
                 .anyRequest().authenticated()

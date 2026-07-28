@@ -49,6 +49,8 @@ public class OrderService {
     private final AuditLogService auditLogService;
     private final InvoiceService invoiceService;
     private final TaxService taxService;
+    private final com.gpstore.repository.DeliveryRepository deliveryRepository;
+    private final DeliveryService deliveryService;
 
     public OrderService(
             OrderRepository repository,
@@ -64,7 +66,14 @@ public class OrderService {
             NotificationService notificationService,
             AuditLogService auditLogService,
             InvoiceService invoiceService,
-            TaxService taxService) {
+            TaxService taxService,
+            com.gpstore.repository.DeliveryRepository deliveryRepository,
+            // @Lazy breaks a real circular dependency: DeliveryService now
+            // depends on PaymentService (added for the COD-completion fix),
+            // and PaymentService already depended on OrderService - without
+            // @Lazy here, Spring would fail to start the whole application
+            // at boot, not just this feature.
+            @org.springframework.context.annotation.Lazy DeliveryService deliveryService) {
 
         this.repository = repository;
         this.orderItemRepository = orderItemRepository;
@@ -80,6 +89,8 @@ public class OrderService {
         this.auditLogService = auditLogService;
         this.invoiceService = invoiceService;
         this.taxService = taxService;
+        this.deliveryRepository = deliveryRepository;
+        this.deliveryService = deliveryService;
     }
 
     public Order save(Order order) {
@@ -90,8 +101,97 @@ public class OrderService {
         return repository.findAll();
     }
 
-    public List<Order> getCustomerOrders(Long customerId) {
-        return repository.findByCustomerId(customerId);
+    /** Ownership-checked single order lookup with real items/tracking info - see OrderDetailResponse. */
+    /**
+     * isAdmin bypasses the ownership check entirely - same pattern already
+     * used for cancelOrder and updateDeliveryStatus. A customer calling this
+     * still only ever sees their own order; an admin can view any order to
+     * actually fulfill/manage it.
+     */
+    public com.gpstore.dto.response.OrderDetailResponse getOwnedOrderDetail(Long orderId, Long customerId, boolean isAdmin) {
+        Order order = repository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        if (!isAdmin && (order.getCustomer() == null || !order.getCustomer().getId().equals(customerId))) {
+            throw new ResourceNotFoundException("Order not found");
+        }
+
+        var delivery = deliveryRepository.findByOrderId(orderId).orElse(null);
+
+        return com.gpstore.dto.response.OrderDetailResponse.from(order, delivery);
+    }
+
+    /**
+     * Read-only - does NOT redeem the coupon, lock inventory, or create
+     * anything. Lets the app show a real cost breakdown (subtotal, discount,
+     * delivery fee, estimated total) before the customer commits to placing
+     * the order, instead of only finding out the final cost afterward.
+     */
+    public com.gpstore.dto.response.CheckoutPreviewResponse previewCheckout(
+            Long customerId, Long addressId, String couponCode) {
+
+        Address address = addressService.getOwnedAddress(addressId, customerId);
+
+        Customer customer = customerService.getById(customerId);
+        if (customer == null || customer.getCart() == null) {
+            throw new BadRequestException("Cart is empty");
+        }
+
+        List<CartItem> cartItems = cartItemService.getCartItems(customer.getCart().getId());
+        if (cartItems == null || cartItems.isEmpty()) {
+            throw new BadRequestException("Cart is empty");
+        }
+
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (CartItem item : cartItems) {
+            // Same check as placeOrder - surfaced here too so the customer
+            // sees "this item is no longer available" while still on the
+            // checkout preview, not only after tapping Place Order.
+            var variant = item.getProductVariant();
+            if (variant.getAvailable() == null || !variant.getAvailable()
+                    || variant.getProduct() == null
+                    || variant.getProduct().getActive() == null
+                    || !variant.getProduct().getActive()) {
+                throw new ConflictException(
+                        (variant.getProduct() != null ? variant.getProduct().getName() : "An item")
+                                + " is no longer available - please remove it from your cart.");
+            }
+
+            subtotal = subtotal.add(
+                    item.getProductVariant().getSellingPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+        }
+
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        String couponError = null;
+        if (couponCode != null && !couponCode.isBlank()) {
+            try {
+                discountAmount = couponService.previewDiscount(couponCode, subtotal);
+            } catch (Exception ex) {
+                couponError = ex.getMessage();
+            }
+        }
+
+        boolean deliverable = deliveryEstimateService.isWithinServiceableRadius(
+                address.getLatitude(), address.getLongitude());
+
+        BigDecimal deliveryFee = BigDecimal.ZERO;
+        boolean freeDeliveryApplied = false;
+        Integer estimatedMinutes = null;
+
+        if (deliverable) {
+            double distanceKm = deliveryEstimateService.distanceFromStoreKm(address.getLatitude(), address.getLongitude());
+            deliveryFee = deliveryFeeService.calculateDeliveryFee(distanceKm);
+            BigDecimal grossProfit = deliveryFeeService.calculateGrossProfit(cartItems);
+            freeDeliveryApplied = deliveryFeeService.isFreeDeliveryEligible(grossProfit, deliveryFee);
+            estimatedMinutes = deliveryEstimateService.estimateMinutes(address.getLatitude(), address.getLongitude());
+        }
+
+        BigDecimal effectiveDeliveryFee = freeDeliveryApplied ? BigDecimal.ZERO : deliveryFee;
+        BigDecimal estimatedTotal = subtotal.subtract(discountAmount).add(effectiveDeliveryFee);
+
+        return new com.gpstore.dto.response.CheckoutPreviewResponse(
+                subtotal, discountAmount, effectiveDeliveryFee, estimatedTotal,
+                freeDeliveryApplied, deliverable, estimatedMinutes, couponError);
     }
 
     /**
@@ -142,6 +242,21 @@ public class OrderService {
         List<Inventory> lockedInventories = new ArrayList<>();
 
         for (CartItem item : cartItems) {
+
+            // A product/variant that's been deactivated since it was added
+            // to this cart must not be purchasable, even if inventory still
+            // shows stock - "deactivated" means the store has stopped
+            // selling it, which is a separate concept from stock count and
+            // was never actually checked here before this.
+            var variant = item.getProductVariant();
+            if (variant.getAvailable() == null || !variant.getAvailable()
+                    || variant.getProduct() == null
+                    || variant.getProduct().getActive() == null
+                    || !variant.getProduct().getActive()) {
+                throw new ConflictException(
+                        (variant.getProduct() != null ? variant.getProduct().getName() : "An item")
+                                + " is no longer available - please remove it from your cart.");
+            }
 
             Inventory inventory = inventoryService
                     .getByProductVariantForUpdate(item.getProductVariant().getId());
@@ -250,6 +365,15 @@ public class OrderService {
                 "total=" + order.getTotalAmount() + ", paymentMethod=" + request.getPaymentMethod());
         invoiceService.generateForOrder(order.getId());
 
+        // This was never triggered anywhere in the entire application before
+        // this - meaning NO order, ever, would actually get assigned to a
+        // delivery partner unless someone manually called the assign
+        // endpoint directly via the API. Best-effort and fully isolated
+        // (see DeliveryService.autoAssignBestEffort's doc comment) - if no
+        // delivery partner happens to be available right now, the order
+        // still succeeds; it just needs manual assignment afterward.
+        deliveryService.autoAssignBestEffort(order.getId());
+
         PlaceOrderResponse response = new PlaceOrderResponse();
 
         response.setSuccess(true);
@@ -261,14 +385,35 @@ public class OrderService {
     }
 
     public List<OrderResponse> getMyOrders(Long customerId) {
+        List<Order> orders = repository.findByCustomerIdOrderByOrderDateDesc(customerId);
+        return toOrderResponseList(orders, false);
+    }
 
-        List<Order> orders =
-                repository.findByCustomerIdOrderByOrderDateDesc(customerId);
+    /** Every order in the system, newest first, WITH customer name - the raw entity alone can't show this (Order.customer is hidden from JSON). */
+    public List<OrderResponse> getAllOrdersForAdmin() {
+        List<Order> orders = repository.findAll();
+        orders.sort((a, b) -> b.getOrderDate().compareTo(a.getOrderDate()));
+        return toOrderResponseList(orders, true);
+    }
 
+    /**
+     * A specific customer's order history, admin-only - for support/dispute
+     * lookups ("this customer says their order never arrived"). Previously
+     * returned a raw, unsorted List<Order> that no Flutter screen ever
+     * actually called - now uses the same clean DTO and newest-first
+     * ordering as every other order list in the app.
+     */
+    public List<OrderResponse> getCustomerOrdersForAdmin(Long customerId) {
+        List<Order> orders = repository.findByCustomerId(customerId);
+        orders.sort((a, b) -> b.getOrderDate().compareTo(a.getOrderDate()));
+        return toOrderResponseList(orders, false);
+    }
+
+    /** Shared by all three list methods above - kept as one method so they can never silently drift apart in shape. */
+    private List<OrderResponse> toOrderResponseList(List<Order> orders, boolean includeCustomerName) {
         List<OrderResponse> responseList = new ArrayList<>();
 
         for (Order order : orders) {
-
             OrderResponse response = new OrderResponse();
 
             response.setOrderId(order.getId());
@@ -277,6 +422,10 @@ public class OrderService {
             response.setOrderStatus(order.getOrderStatus().name());
             response.setPaymentStatus(order.getPaymentStatus().name());
             response.setOrderDate(order.getOrderDate());
+
+            if (includeCustomerName) {
+                response.setCustomerName(order.getCustomer() != null ? order.getCustomer().getFullName() : null);
+            }
 
             responseList.add(response);
         }
@@ -378,6 +527,13 @@ public class OrderService {
 
         Order savedOrder = repository.save(order);
         notificationService.notifyOrderStatusChange(savedOrder, savedOrder.getOrderStatus());
+
+        // This was never triggered anywhere before - a cancelled order's
+        // invoice would stay in whatever state it was, still implying a
+        // valid sale for GST/accounting purposes even though the order
+        // itself no longer represents one.
+        invoiceService.getInvoiceByOrderId(orderId).ifPresent(invoice -> invoiceService.cancelInvoice(invoice.getId()));
+
         auditLogService.log("ORDER_CANCELLED", "Order", savedOrder.getId(),
                 "cancelled by " + (isAdmin ? "admin/staff" : "customer"));
         return savedOrder;

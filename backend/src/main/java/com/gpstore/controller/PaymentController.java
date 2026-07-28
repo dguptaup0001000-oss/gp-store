@@ -34,7 +34,7 @@ public class PaymentController {
 
     // Admin only (enforced in SecurityConfig).
     @GetMapping
-    public List<Payment> getAllPayments() {
+    public List<com.gpstore.dto.response.PaymentResponse> getAllPayments() {
         return paymentService.getAllPayments();
     }
 
@@ -58,29 +58,29 @@ public class PaymentController {
 
     // Admin only (enforced in SecurityConfig).
     @PutMapping("/order/{orderId}/refund")
-    public Payment refundPayment(@PathVariable Long orderId) {
-        return paymentService.refundPayment(orderId);
+    public com.gpstore.dto.response.PaymentResponse refundPayment(@PathVariable Long orderId) {
+        return com.gpstore.dto.response.PaymentResponse.from(paymentService.refundPayment(orderId));
     }
 
     // Admin only (enforced in SecurityConfig).
     @PutMapping("/order/{orderId}/refund/complete")
-    public Payment completeRefund(@PathVariable Long orderId) {
-        return paymentService.completeRefund(orderId);
+    public com.gpstore.dto.response.PaymentResponse completeRefund(@PathVariable Long orderId) {
+        return com.gpstore.dto.response.PaymentResponse.from(paymentService.completeRefund(orderId));
     }
 
     // Admin or delivery partner (enforced in SecurityConfig).
     @PutMapping("/order/{orderId}/cod/complete")
-    public Payment completeCodPayment(@PathVariable Long orderId) {
-        return paymentService.completeCodPayment(orderId);
+    public com.gpstore.dto.response.PaymentResponse completeCodPayment(@PathVariable Long orderId) {
+        return com.gpstore.dto.response.PaymentResponse.from(paymentService.completeCodPayment(orderId));
     }
 
     // Admin only (enforced in SecurityConfig) - confirms a UPI payment
     // actually arrived, since there's no gateway webhook doing this
     // automatically for direct (fee-free) UPI.
     @PutMapping("/order/{orderId}/upi/confirm")
-    public Payment confirmUpiPayment(
+    public com.gpstore.dto.response.PaymentResponse confirmUpiPayment(
             @PathVariable Long orderId,
             @RequestParam(required = false) String transactionId) {
-        return paymentService.confirmUpiPayment(orderId, transactionId);
+        return com.gpstore.dto.response.PaymentResponse.from(paymentService.confirmUpiPayment(orderId, transactionId));
     }
 }

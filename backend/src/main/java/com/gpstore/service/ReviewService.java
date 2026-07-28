@@ -84,4 +84,15 @@ public class ReviewService {
                 .orElseThrow(() -> new ResourceNotFoundException("Review not found"));
         reviewRepository.delete(review);
     }
+
+    /**
+     * Moderation - admin can remove ANY review (e.g. abusive/spam content),
+     * not just their own. This didn't exist before: admin could view every
+     * review but had no way to actually act on a bad one.
+     */
+    public void moderateDeleteReview(Long id) {
+        Review review = reviewRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Review not found"));
+        reviewRepository.delete(review);
+    }
 }

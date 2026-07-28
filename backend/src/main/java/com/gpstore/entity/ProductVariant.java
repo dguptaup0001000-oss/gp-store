@@ -1,6 +1,7 @@
 package com.gpstore.entity;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
 import lombok.Getter;
 import lombok.Setter;
@@ -43,6 +44,10 @@ private Product product;
     // What YOU pay to stock this item - never shown to customers. This is what
     // makes the profit-based free-delivery rule possible: profit = sellingPrice
     // - costPrice, not just sellingPrice on its own.
+    // WRITE_ONLY: an admin can still set this via PUT/POST, but it was
+    // missing this protection entirely before - meaning every customer
+    // viewing any product was seeing your wholesale margin.
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private BigDecimal costPrice;
 
     private Integer displayOrder;

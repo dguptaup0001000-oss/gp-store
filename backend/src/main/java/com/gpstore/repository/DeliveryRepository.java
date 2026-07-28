@@ -39,4 +39,10 @@ public interface DeliveryRepository
     List<Delivery> findLateNotYetFlagged(@Param("now") LocalDateTime now);
 
     List<Delivery> findByGuaranteeBreachedTrueOrderByEstimatedDeliveryTimeDesc();
+
+    /** A delivery partner's own currently-active (not delivered/cancelled) assignments - what their app screen shows. */
+    @Query("select d from Delivery d where d.batch.deliveryPartner.id = :partnerId " +
+            "and d.deliveryStatus not in ('DELIVERED', 'CANCELLED') " +
+            "order by d.assignedAt asc")
+    List<Delivery> findActiveByPartnerId(@Param("partnerId") Long partnerId);
 }

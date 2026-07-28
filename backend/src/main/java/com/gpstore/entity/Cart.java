@@ -1,5 +1,6 @@
 package com.gpstore.entity;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -17,7 +18,13 @@ public class Cart {
 @JoinColumn(name = "customer_id")
 private Customer customer;
 
+    // Without the ManagedReference/BackReference pair below (see
+    // CartItem.cart), serializing this to JSON would infinite-loop: Cart ->
+    // items -> CartItem.cart -> Cart -> items -> ... This was a real,
+    // previously-uncaught bug - GET /api/carts/mine would have crashed the
+    // moment a cart actually had items in it.
     @OneToMany(mappedBy = "cart", cascade = CascadeType.ALL)
+    @JsonManagedReference
     private List<CartItem> items = new ArrayList<>();
 
     private BigDecimal totalAmount = BigDecimal.ZERO;

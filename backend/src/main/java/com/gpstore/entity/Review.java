@@ -1,5 +1,6 @@
 package com.gpstore.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.time.LocalDateTime;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -16,6 +17,7 @@ public class Review {
     private Long id;
 
     @ManyToOne
+    @JsonIgnore
     private Customer customer;
 
     @ManyToOne

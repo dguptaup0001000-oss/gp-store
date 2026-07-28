@@ -37,8 +37,58 @@ public class CouponService {
         return saved;
     }
 
+    public Coupon getByIdOrThrow(Long id) {
+        return couponRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Coupon not found"));
+    }
+
+    /** Didn't exist before - a coupon could be created but never edited afterward. */
+    public Coupon update(Long id, Coupon updated) {
+        Coupon existing = getByIdOrThrow(id);
+
+        existing.setDiscountType(updated.getDiscountType());
+        existing.setDiscountValue(updated.getDiscountValue());
+        existing.setMaxDiscountAmount(updated.getMaxDiscountAmount());
+        existing.setMinimumOrderAmount(updated.getMinimumOrderAmount());
+        existing.setExpiryDate(updated.getExpiryDate());
+        existing.setUsageLimit(updated.getUsageLimit());
+        existing.setActive(updated.getActive());
+        // Deliberately NOT copying couponCode or usedCount - the code is
+        // effectively the coupon's identity (customers may already have it
+        // written down/bookmarked), and usedCount is a system-tracked
+        // counter that must never be reset by an edit form.
+
+        Coupon saved = couponRepository.save(existing);
+        auditLogService.log("COUPON_UPDATED", "Coupon", saved.getId(), "code=" + saved.getCouponCode());
+        return saved;
+    }
+
+    /** Soft-delete only - a hard delete would break every past order that references this coupon by code. */
+    public void deactivate(Long id) {
+        Coupon coupon = getByIdOrThrow(id);
+        coupon.setActive(false);
+        couponRepository.save(coupon);
+        auditLogService.log("COUPON_DEACTIVATED", "Coupon", coupon.getId(), "code=" + coupon.getCouponCode());
+    }
+
     public List<Coupon> getAllCoupons() {
         return couponRepository.findAll();
+    }
+
+    /**
+     * The public "what offers exist right now" list - genuinely active AND
+     * not expired. This didn't exist before; coupons were 100% admin-only,
+     * meaning a customer could never actually see what offers were available
+     * without already knowing a code - no real storefront can show an
+     * "Offers" banner without this.
+     */
+    public List<Coupon> getActiveCoupons() {
+        return couponRepository.findAll().stream()
+                .filter(c -> Boolean.TRUE.equals(c.getActive()))
+                .filter(c -> c.getExpiryDate() == null || !c.getExpiryDate().isBefore(java.time.LocalDate.now()))
+                .filter(c -> c.getUsageLimit() == null || c.getUsageLimit() <= 0
+                        || c.getUsedCount() == null || c.getUsedCount() < c.getUsageLimit())
+                .toList();
     }
 
     /** Read-only check used to preview a discount before checkout - does not consume a usage slot. */

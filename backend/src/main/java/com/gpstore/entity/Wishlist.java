@@ -1,5 +1,6 @@
 package com.gpstore.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -15,6 +16,7 @@ public class Wishlist {
     private Long id;
 
     @ManyToOne
+    @JsonIgnore
     private Customer customer;
 
     @ManyToOne

@@ -31,10 +31,19 @@ public class ReviewController {
         return reviewService.submitReview(currentUser.customerId(), request);
     }
 
-    // Admin only (enforced in SecurityConfig).
+    // Admin only (enforced in SecurityConfig) - includes customer name/email
+    // for moderation, which the raw entity deliberately hides (see
+    // AdminReviewResponse's doc comment for why that needed its own DTO).
     @GetMapping
-    public List<Review> getAllReviews() {
-        return reviewService.getAllReviews();
+    public List<com.gpstore.dto.response.AdminReviewResponse> getAllReviews() {
+        return reviewService.getAllReviews().stream().map(com.gpstore.dto.response.AdminReviewResponse::from).toList();
+    }
+
+    // Admin only - moderation: remove any review, not just your own.
+    @DeleteMapping("/{id}/moderate")
+    public String moderateDeleteReview(@PathVariable Long id) {
+        reviewService.moderateDeleteReview(id);
+        return "Review removed";
     }
 
     // Public - what a product page actually shows.

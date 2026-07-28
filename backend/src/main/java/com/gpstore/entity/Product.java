@@ -35,4 +35,13 @@ public class Product {
 private List<ProductVariant> variants;
 
     private Boolean active;
+
+    // Auto-set on creation (@PrePersist below) - never client-supplied.
+    // This is what "New Arrivals" actually sorts by.
+    private java.time.LocalDateTime createdAt;
+
+    @PrePersist
+    protected void onCreate() {
+        this.createdAt = java.time.LocalDateTime.now();
+    }
 }

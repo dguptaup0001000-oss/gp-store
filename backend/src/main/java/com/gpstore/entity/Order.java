@@ -1,5 +1,7 @@
 package com.gpstore.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import java.math.BigDecimal;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.enums.PaymentStatus;
@@ -20,13 +22,26 @@ public class Order {
     @Column(unique = true, nullable = false)
     private String orderNumber;
 
+    // Hidden from JSON - same reason as Address.customer: the full Customer
+    // object (including their cart, etc.) has no business being nested in
+    // every order response. Controllers use an explicit DTO instead (see
+    // OrderDetailResponse) for whatever customer info an order response
+    // actually needs.
     @ManyToOne
+    @JsonIgnore
     private Customer customer;
 
     @ManyToOne
     private Address address;
 
+    // Without the ManagedReference/BackReference pair below (see
+    // OrderItem.order), serializing this would infinite-loop: Order ->
+    // orderItems -> OrderItem.order -> Order -> orderItems -> ... This was a
+    // real, previously-uncaught bug - the admin GET /api/orders endpoint
+    // already returns raw Order entities and would have crashed the moment
+    // it was called with any order that actually had items.
     @OneToMany(mappedBy = "order")
+    @JsonManagedReference
     private List<OrderItem> orderItems;
 
     private BigDecimal totalAmount;

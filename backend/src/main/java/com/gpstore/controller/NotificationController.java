@@ -26,6 +26,14 @@ public class NotificationController {
         return notificationService.sendNotification(notification);
     }
 
+    // Admin only (enforced in SecurityConfig) - store-wide announcement,
+    // one real notification row per active customer.
+    @PostMapping("/broadcast")
+    public String broadcast(@RequestBody java.util.Map<String, String> request) {
+        int count = notificationService.broadcastToAll(request.get("title"), request.get("message"));
+        return "Sent to " + count + " customer" + (count == 1 ? "" : "s");
+    }
+
     // Admin only (enforced in SecurityConfig).
     @GetMapping
     public List<Notification> getAllNotifications() {
@@ -37,5 +45,26 @@ public class NotificationController {
     @GetMapping("/mine")
     public List<Notification> getMyNotifications() {
         return notificationService.getNotificationsByCustomerId(currentUser.customerId());
+    }
+
+    // Ownership verified server-side - can only mark the caller's own notification.
+    @PutMapping("/{id}/read")
+    public String markAsRead(@PathVariable Long id) {
+        notificationService.markAsRead(id, currentUser.customerId());
+        return "Marked as read";
+    }
+
+    // Only ever affects the caller's own notifications.
+    @PutMapping("/read-all")
+    public String markAllAsRead() {
+        notificationService.markAllAsRead(currentUser.customerId());
+        return "All notifications marked as read";
+    }
+
+    // Ownership verified server-side - can only delete the caller's own notification.
+    @DeleteMapping("/{id}")
+    public String deleteMyNotification(@PathVariable Long id) {
+        notificationService.deleteOwnNotification(id, currentUser.customerId());
+        return "Notification removed";
     }
 }

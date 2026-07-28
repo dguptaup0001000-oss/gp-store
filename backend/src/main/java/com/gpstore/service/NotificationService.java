@@ -24,15 +24,18 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final CustomerRepository customerRepository;
     private final OrderRepository orderRepository;
+    private final AuditLogService auditLogService;
 
     public NotificationService(
             NotificationRepository notificationRepository,
             CustomerRepository customerRepository,
-            OrderRepository orderRepository) {
+            OrderRepository orderRepository,
+            AuditLogService auditLogService) {
 
         this.notificationRepository = notificationRepository;
         this.customerRepository = customerRepository;
         this.orderRepository = orderRepository;
+        this.auditLogService = auditLogService;
     }
 
     public Notification sendNotification(Notification notification) {
@@ -72,6 +75,42 @@ public class NotificationService {
     }
 
     /**
+     * Store-wide announcement (e.g. "New Year Sale!") - didn't exist before,
+     * only single-customer notification did. Only reaches active accounts -
+     * a deactivated account shouldn't be pinged with new content. Creates
+     * one real notification row per customer (not a single shared one),
+     * consistent with how every other notification in this app works -
+     * each customer can independently mark their own copy read/delete it
+     * without affecting anyone else's.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public int broadcastToAll(String title, String message) {
+        if (title == null || title.isBlank() || message == null || message.isBlank()) {
+            throw new BadRequestException("Title and message are required");
+        }
+
+        List<Customer> activeCustomers = customerRepository.findAll().stream()
+                .filter(c -> Boolean.TRUE.equals(c.getActive()))
+                .toList();
+
+        LocalDateTime now = LocalDateTime.now();
+
+        for (Customer customer : activeCustomers) {
+            Notification notification = new Notification();
+            notification.setCustomer(customer);
+            notification.setTitle(title);
+            notification.setMessage(message);
+            notification.setNotificationType(NotificationType.PUSH);
+            notification.setNotificationStatus(NotificationStatus.PENDING);
+            notification.setSentAt(now);
+            notification.setActive(true);
+            notificationRepository.save(notification);
+        }
+
+        return activeCustomers.size();
+    }
+
+    /**
      * The actual "real-time order tracking" trigger - called automatically by
      * OrderService/DeliveryService whenever a status changes, instead of
      * requiring someone to manually POST a notification every time. This only
@@ -80,6 +119,24 @@ public class NotificationService {
      * real API keys, not something to fake here.
      */
     public void notifyOrderStatusChange(Order order, OrderStatus status) {
+        // Defensive isolation - this is called from every critical order
+        // flow (placement, cancellation, every status change), all of which
+        // are @Transactional. This method has no known failure mode today,
+        // but if creating a notification record ever did throw for any
+        // reason, without this it would currently roll back whichever
+        // critical business operation triggered it - a customer's paid
+        // order failing because of an unrelated notification bug would be
+        // a much worse outcome than the customer simply not getting
+        // notified this one time.
+        try {
+            notifyOrderStatusChangeInternal(order, status);
+        } catch (Exception ex) {
+            auditLogService.log("NOTIFICATION_FAILED", "Order", order != null ? order.getId() : null,
+                    "Failed to create status-change notification: " + ex.getMessage());
+        }
+    }
+
+    private void notifyOrderStatusChangeInternal(Order order, OrderStatus status) {
         String title;
         String message;
 
@@ -145,6 +202,46 @@ public class NotificationService {
 
     public List<Notification> getNotificationsByOrderId(Long orderId) {
         return notificationRepository.findByOrderId(orderId);
+    }
+
+    /** Ownership-checked - a customer marking one of THEIR OWN notifications as read. */
+    public void markAsRead(Long notificationId, Long customerId) {
+        Notification notification = notificationRepository.findById(notificationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Notification not found"));
+
+        if (notification.getCustomer() == null || !notification.getCustomer().getId().equals(customerId)) {
+            throw new ResourceNotFoundException("Notification not found");
+        }
+
+        notification.setIsRead(true);
+        notificationRepository.save(notification);
+    }
+
+    /** Only ever touches the caller's own notifications - never a client-supplied customer id. */
+    public void markAllAsRead(Long customerId) {
+        List<Notification> notifications = notificationRepository.findByCustomerId(customerId);
+        for (Notification notification : notifications) {
+            notification.setIsRead(true);
+        }
+        notificationRepository.saveAll(notifications);
+    }
+
+    /**
+     * Ownership-checked delete - a customer removing one of THEIR OWN
+     * notifications from their own list. Distinct from the existing bare
+     * deleteNotification(id) above, which has no ownership check at all and
+     * is deliberately left as-is rather than reused here (it isn't wired to
+     * any endpoint currently, so it poses no risk sitting unused).
+     */
+    public void deleteOwnNotification(Long notificationId, Long customerId) {
+        Notification notification = notificationRepository.findById(notificationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Notification not found"));
+
+        if (notification.getCustomer() == null || !notification.getCustomer().getId().equals(customerId)) {
+            throw new ResourceNotFoundException("Notification not found");
+        }
+
+        notificationRepository.delete(notification);
     }
 
     public void deleteNotification(Long id) {

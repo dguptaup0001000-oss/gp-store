@@ -24,8 +24,16 @@ public class Customer {
 
     private String fullName;
 
+    // unique=true still allows multiple NULLs (an OTP-only account may have no
+    // email yet; an email+password account created before phone verification
+    // may have no mobile). Neither of these had a DB-level uniqueness
+    // guarantee before - only application-level checks, which don't protect
+    // against a race condition creating two accounts with the same
+    // email/phone at the same instant.
+    @Column(unique = true)
     private String mobileNumber;
 
+    @Column(unique = true)
     private String email;
 
     // WRITE_ONLY: the client can send a password when creating/updating, but it

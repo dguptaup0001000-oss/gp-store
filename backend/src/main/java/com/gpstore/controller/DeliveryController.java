@@ -78,7 +78,15 @@ public class DeliveryController {
             @PathVariable Long id,
             @RequestParam String status) {
 
-        return deliveryService.updateDeliveryStatus(id, status);
+        boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
+        return deliveryService.updateDeliveryStatus(id, status, currentUser.customerId(), isAdmin);
+    }
+
+    // A delivery partner's own active assignments - resolved from their
+    // logged-in account, never a client-supplied partner id.
+    @GetMapping("/my-assignments")
+    public List<com.gpstore.dto.response.MyDeliveryResponse> getMyAssignments() {
+        return deliveryService.getMyAssignments(currentUser.customerId());
     }
 
     // The manual-review list for your delivery guarantee - every delivery

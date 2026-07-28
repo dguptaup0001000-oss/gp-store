@@ -58,6 +58,13 @@ public class AddressService {
     address.setState(updatedAddress.getState());
     address.setPincode(updatedAddress.getPincode());
     address.setCountry(updatedAddress.getCountry());
+    // These were missing entirely before - an edited address would keep its
+    // OLD coordinates even if the customer corrected a wrong location,
+    // silently breaking delivery distance/ETA/radius calculations for that
+    // address going forward.
+    address.setLatitude(updatedAddress.getLatitude());
+    address.setLongitude(updatedAddress.getLongitude());
+    address.setDefaultAddress(updatedAddress.getDefaultAddress());
 
     return repository.save(address);
 }
@@ -66,6 +73,15 @@ public void deleteAddress(Long id) {
         throw new ResourceNotFoundException("Address not found");
     }
 
-    repository.deleteById(id);
+    try {
+        repository.deleteById(id);
+    } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+        // Past orders reference this address directly (not a copy) - deleting
+        // it would orphan their delivery-address record. Without this catch,
+        // the customer would just see a generic "unexpected error" with no
+        // idea why - this tells them the real, actionable reason.
+        throw new com.gpstore.exception.ConflictException(
+                "This address is used in a past order and can't be deleted");
+    }
 }
 }

@@ -1,5 +1,6 @@
 package com.gpstore.entity;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import java.math.BigDecimal;
 
 import jakarta.persistence.*;
@@ -13,6 +14,7 @@ public class OrderItem {
     private Long id;
 
     @ManyToOne
+    @JsonBackReference
     private Order order;
 
     @ManyToOne

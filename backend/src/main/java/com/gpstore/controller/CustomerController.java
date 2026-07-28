@@ -44,18 +44,29 @@ public class CustomerController {
         return customerService.getByMobileNumber(mobileNumber);
     }
 
+    // Admin only - deactivating also force-logs-out every device they're
+    // signed into (see CustomerService.setAccountActive's doc comment).
+    @PutMapping("/{id}/active")
+    public Customer setAccountActive(@PathVariable Long id, @RequestParam boolean active) {
+        return customerService.setAccountActive(id, active);
+    }
+
     // The customer's own profile - this didn't exist before at all.
     @GetMapping("/me")
     public Customer getMyProfile() {
         return customerService.getOwnProfile(currentUser.customerId());
     }
 
-    // Deliberately narrow: name + mobile only, never email/password/role here.
+    // Deliberately narrow: name + mobile only, never password/role here.
+    // email can be ADDED if the account doesn't have one yet (see
+    // CustomerService.updateOwnProfile's doc comment for why this is
+    // add-only, not change-anytime).
     @PutMapping("/me")
     public Customer updateMyProfile(@RequestBody Map<String, String> request) {
         return customerService.updateOwnProfile(
                 currentUser.customerId(),
                 request.get("fullName"),
-                request.get("mobileNumber"));
+                request.get("mobileNumber"),
+                request.get("email"));
     }
 }
