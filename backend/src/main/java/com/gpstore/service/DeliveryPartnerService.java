@@ -47,11 +47,15 @@ public class DeliveryPartnerService {
         DeliveryPartner saved = repository.save(partner);
 
         if (isNewPartner && saved.getAccount() == null) {
+            // saved is reassigned later in this method (line below the if-block),
+            // so it can't be captured directly by the lambda. This extra
+            // reference is never reassigned, so it satisfies "effectively final".
+            final DeliveryPartner savedForAccount = saved;
             Customer account = customerRepository.findByMobileNumber(saved.getMobile())
                     .orElseGet(() -> {
                         Customer newAccount = new Customer();
-                        newAccount.setFullName(saved.getName());
-                        newAccount.setMobileNumber(saved.getMobile());
+                        newAccount.setFullName(savedForAccount.getName());
+                        newAccount.setMobileNumber(savedForAccount.getMobile());
                         newAccount.setEnabled(true);
                         newAccount.setVerified(true);
                         newAccount.setActive(true);
