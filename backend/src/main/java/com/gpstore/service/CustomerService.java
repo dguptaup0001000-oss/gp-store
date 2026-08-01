@@ -4,11 +4,17 @@ import com.gpstore.entity.Customer;
 import com.gpstore.entity.Role;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
+import com.gpstore.repository.AddressRepository;
+import com.gpstore.repository.CartRepository;
 import com.gpstore.repository.CustomerRepository;
+import com.gpstore.repository.NotificationRepository;
+import com.gpstore.repository.WishlistRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class CustomerService {
@@ -16,14 +22,26 @@ public class CustomerService {
     private final CustomerRepository customerRepository;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
+    private final AddressRepository addressRepository;
+    private final CartRepository cartRepository;
+    private final WishlistRepository wishlistRepository;
+    private final NotificationRepository notificationRepository;
 
     public CustomerService(
             CustomerRepository customerRepository,
             PasswordEncoder passwordEncoder,
-            RefreshTokenService refreshTokenService) {
+            RefreshTokenService refreshTokenService,
+            AddressRepository addressRepository,
+            CartRepository cartRepository,
+            WishlistRepository wishlistRepository,
+            NotificationRepository notificationRepository) {
         this.customerRepository = customerRepository;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
+        this.addressRepository = addressRepository;
+        this.cartRepository = cartRepository;
+        this.wishlistRepository = wishlistRepository;
+        this.notificationRepository = notificationRepository;
     }
 
     /**
@@ -140,5 +158,59 @@ public class CustomerService {
         customer.setFullName(fullName);
 
         return customerRepository.save(customer);
+    }
+
+    /**
+     * Google Play's Account Deletion Requirement (user data policy) means
+     * every app that supports account creation must offer a genuine
+     * in-app self-service deletion path - see PLAY_STORE_CHECKLIST.md.
+     *
+     * This is ANONYMIZATION, not a hard row delete, and that's deliberate:
+     * Orders/Invoices/Payments reference this customer via a foreign key,
+     * and Invoice records specifically have real-world tax retention
+     * requirements (GST invoices in India) that outlive any one customer's
+     * account. Hard-deleting the Customer row would either violate that FK
+     * constraint or silently destroy invoice history depending on cascade
+     * config - both are worse than the standard e-commerce industry
+     * pattern of scrubbing personal fields while retaining the transaction
+     * record itself. Reviews work the same way: the review text stays (it's
+     * content other customers may already be relying on), but it will now
+     * display against "Deleted User" since that's what customer.fullName
+     * becomes below - no separate change needed in Review itself.
+     *
+     * What's genuinely and permanently deleted outright, not just
+     * scrubbed: refresh tokens (all sessions end immediately), saved
+     * addresses, wishlist, cart/cart items, and notifications - none of
+     * these have any legitimate reason to survive the account.
+     *
+     * mobileNumber/email are set to null rather than a placeholder string -
+     * both columns are unique-constrained, and a placeholder like
+     * "deleted" would collide the second time this method ever runs.
+     * Customer.java's existing column comments confirm unique=true still
+     * permits multiple NULLs, so this is safe.
+     */
+    @Transactional
+    public void deleteOwnAccount(Long customerId) {
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+
+        refreshTokenService.revokeAllForCustomer(customerId);
+        notificationRepository.deleteAll(notificationRepository.findByCustomerId(customerId));
+        wishlistRepository.deleteAll(wishlistRepository.findByCustomerId(customerId));
+        addressRepository.deleteAll(addressRepository.findByCustomerId(customerId));
+        cartRepository.findByCustomerId(customerId).ifPresent(cartRepository::delete);
+
+        customer.setFullName("Deleted User");
+        customer.setMobileNumber(null);
+        customer.setEmail(null);
+        // Random, never-communicated value - not "no password", which would
+        // mean "log in via OTP to this now-nonexistent phone number" is
+        // still somehow a live path back into the account. This guarantees
+        // both login methods are actually dead.
+        customer.setPassword(passwordEncoder.encode(UUID.randomUUID().toString()));
+        customer.setEnabled(false);
+        customer.setActive(false);
+
+        customerRepository.save(customer);
     }
 }

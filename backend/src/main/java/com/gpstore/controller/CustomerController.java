@@ -69,4 +69,17 @@ public class CustomerController {
                 request.get("mobileNumber"),
                 request.get("email"));
     }
+
+    // Google Play Account Deletion Requirement - see the doc comment on
+    // CustomerService.deleteOwnAccount for what this actually does
+    // (anonymize + end all sessions, not a literal row delete) and why.
+    // No confirmation/re-auth step here deliberately - the frontend is
+    // responsible for a confirmation dialog before ever calling this: once
+    // it's called, session tokens are already revoked, so a "type your
+    // password to confirm" step here would need to happen BEFORE the JWT
+    // this request is authenticated with could itself become invalid mid-flow.
+    @DeleteMapping("/me")
+    public void deleteMyAccount() {
+        customerService.deleteOwnAccount(currentUser.customerId());
+    }
 }

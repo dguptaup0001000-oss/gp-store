@@ -1,0 +1,78 @@
+name: gpstore
+description: GP-Store customer app
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management - Flutter-team-recommended, compile-safe providers,
+  # pairs cleanly with async API calls (which is most of this app).
+  flutter_riverpod: ^2.5.1
+
+  # HTTP client with interceptor support - needed to auto-attach the JWT and
+  # auto-refresh it on expiry (see core/api/api_client.dart).
+  dio: ^5.4.3
+
+  # Navigation - declarative, works well with Riverpod for auth-gated routes
+  # (e.g. redirect to login if not authenticated).
+  go_router: ^14.2.0
+
+  # Stores the refresh token securely on-device (Keychain on iOS, Keystore on
+  # Android) - NEVER store a refresh token in plain SharedPreferences.
+  flutter_secure_storage: ^9.2.2
+
+  # Immutable model classes with generated equality/copyWith - reduces a
+  # whole category of "forgot to update a field" bugs when order/product
+  # models change.
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  cupertino_icons: ^1.0.6
+
+  # Real device GPS for "use my location" when adding an address - the
+  # backend's deliverability/distance calculation needs real coordinates,
+  # and a full interactive map picker is out of scope for now.
+  geolocator: ^13.0.1
+
+  # Opens the real UPI deep link (upi://pay?...) in whatever UPI app the
+  # customer has installed (GPay, PhonePe, Paytm) - needed to actually act on
+  # the link the backend generates, not just display it as text.
+  url_launcher: ^6.3.1
+  package_info_plus: ^8.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+  build_runner: ^2.4.11
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+
+  # Generates every required Android/iOS launcher icon size from one source
+  # image - run `dart run flutter_launcher_icons` after replacing
+  # assets/icon/icon.png with a real logo. See PLAY_STORE_CHECKLIST.md item 3.
+  flutter_launcher_icons: ^0.14.1
+
+flutter:
+  uses-material-design: true
+
+# Config for the flutter_launcher_icons package above. image_path must point
+# to a real square PNG (1024x1024 recommended) before running the generator -
+# the placeholder path below doesn't exist yet on purpose, so running the
+# generator before you've added a real icon fails loudly instead of silently
+# baking in nothing.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/icon.png"
+  min_sdk_android: 21
+  # Matches the placeholder vector's green - update if your real logo uses a
+  # different brand color, this only affects the adaptive icon background.
+  adaptive_icon_background: "#1DB954"
+  adaptive_icon_foreground: "assets/icon/icon.png"

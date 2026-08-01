@@ -1,0 +1,32 @@
+pluginManagement {
+    def flutterSdkPath = {
+        def properties = new Properties()
+        file("local.properties").withInputStream { properties.load(it) }
+        def flutterSdkPath = properties.getProperty("flutter.sdk")
+        assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
+        return flutterSdkPath
+    }()
+
+    includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
+
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id "dev.flutter.flutter-plugin-loader" version "1.0.0"
+    // AGP/Kotlin versions below are known-good as of mid-2026. If Gradle
+    // reports an incompatible-version error when you build, that error
+    // message tells you exactly which version to put here instead - or,
+    // simpler: delete this whole android/ folder and run
+    // `flutter create --platforms=android .` in the project root once you
+    // have Flutter installed, which regenerates it correctly for your exact
+    // installed Flutter/Gradle/JDK combination.
+    id "com.android.application" version "8.3.0" apply false
+    id "org.jetbrains.kotlin.android" version "1.9.22" apply false
+}
+
+include ":app"
