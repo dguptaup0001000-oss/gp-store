@@ -1,5 +1,6 @@
 package com.gpstore.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
@@ -50,6 +51,17 @@ private Boolean enabled;
     @OneToMany(mappedBy = "customer")
 private List<Address> addresses;
 
+// @OneToOne defaults to EAGER, so cart is always loaded alongside its
+// Customer - and Cart.customer (the other side of this same relationship)
+// has no reciprocal @JsonIgnore/@JsonBackReference either. Without this
+// annotation, serializing ANY Customer with a cart infinite-loops:
+// Customer -> cart -> Cart.customer -> Customer -> cart -> ... This is the
+// exact same bug class already caught and fixed for Cart.items/CartItem.cart
+// (see the comment there) and for Address.customer - this one side was
+// missed. Cart data has its own dedicated endpoint (GET /api/carts/mine,
+// see CartController) - nothing legitimately needs cart nested inside a
+// Customer/Profile JSON response, so ignoring it here costs nothing.
+@JsonIgnore
 @OneToOne(mappedBy = "customer", cascade = CascadeType.ALL)
 private Cart cart;
 
