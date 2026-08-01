@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'auth/presentation/auth_providers.dart';
 import 'delivery/presentation/delivery_dashboard_screen.dart';
 import 'home/presentation/home_screen.dart';
 import 'profile/presentation/profile_providers.dart';
@@ -25,7 +26,17 @@ class RootScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load your account - check your connection"),
+              // TEMPORARY, for active debugging - shows the REAL failure
+              // reason (extractErrorMessage unwraps the actual backend
+              // message or Dio error type) instead of one static string
+              // that looked identical whether the cause was a network
+              // problem, CORS, an expired token, or anything else. Revert
+              // to a generic "Couldn't load your account" once the app is
+              // stable - showing raw error text to end users long-term
+              // isn't good UX, but it's exactly what's needed to diagnose
+              // this specific failure right now.
+              Text("Couldn't load your account: ${extractErrorMessage(error)}"),
+              const SizedBox(height: 8),
               TextButton(onPressed: () => ref.invalidate(myProfileProvider), child: const Text('Retry')),
             ],
           ),
