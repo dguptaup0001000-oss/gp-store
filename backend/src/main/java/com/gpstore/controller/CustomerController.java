@@ -1,8 +1,10 @@
 package com.gpstore.controller;
 
+import com.gpstore.dto.request.FcmTokenRequest;
 import com.gpstore.entity.Customer;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.CustomerService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -68,6 +70,16 @@ public class CustomerController {
                 request.get("fullName"),
                 request.get("mobileNumber"),
                 request.get("email"));
+    }
+
+    // Registers/refreshes this account's push notification device token -
+    // called on every app start. Works for both customers and delivery
+    // partners (a partner logs in through the same Customer account, see
+    // DeliveryPartnerService's doc comment), which is why this lives here
+    // rather than duplicated under /api/delivery-partners too.
+    @PutMapping("/me/fcm-token")
+    public void updateMyFcmToken(@Valid @RequestBody FcmTokenRequest request) {
+        customerService.updateMyFcmToken(currentUser.customerId(), request.getFcmToken());
     }
 
     // Google Play Account Deletion Requirement - see the doc comment on

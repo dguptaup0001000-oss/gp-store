@@ -90,6 +90,19 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Real push notifications (order status updates to customers, new
+             assignment alerts to delivery partners) via Firebase Cloud
+             Messaging - the actual provider integration NotificationService
+             used to only stub out (see its doc comments). Requires a real
+             Firebase project + service account key, which can't be
+             fabricated here - see FirebaseConfig for the env var this reads. -->
+        <dependency>
+            <groupId>com.google.firebase</groupId>
+            <artifactId>firebase-admin</artifactId>
+            <version>9.4.1</version>
+        </dependency>
+
+
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-api</artifactId>

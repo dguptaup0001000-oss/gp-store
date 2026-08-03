@@ -1,8 +1,10 @@
 package com.gpstore.controller;
 
+import com.gpstore.dto.request.LocationUpdateRequest;
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.DeliveryPartnerService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -56,6 +58,15 @@ public class DeliveryPartnerController {
     @GetMapping("/me")
     public DeliveryPartner getMyProfile() {
         return service.getByAccountIdOrThrow(currentUser.customerId());
+    }
+
+    // A delivery partner's own app pushing its live GPS position (called
+    // every few seconds while on a run) - resolved from their own account,
+    // never a client-supplied id, so this can never spoof someone else's
+    // location.
+    @PutMapping("/me/location")
+    public DeliveryPartner updateMyLocation(@Valid @RequestBody LocationUpdateRequest request) {
+        return service.updateMyLocation(currentUser.customerId(), request.getLatitude(), request.getLongitude());
     }
 
 }

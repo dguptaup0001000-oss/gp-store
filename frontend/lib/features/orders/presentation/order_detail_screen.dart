@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
+import '../domain/live_tracking_model.dart';
 import '../domain/order_models.dart';
 import 'invoice_screen.dart';
 import 'orders_providers.dart';
@@ -142,7 +146,7 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
         ),
         const SizedBox(height: 16),
 
-        if (order.delivery != null) _DeliveryTrackingCard(delivery: order.delivery!),
+        if (order.delivery != null) _DeliveryTrackingCard(delivery: order.delivery!, orderId: order.orderId),
 
         const SizedBox(height: 16),
         Row(
@@ -241,13 +245,62 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
   }
 }
 
-class _DeliveryTrackingCard extends StatelessWidget {
-  const _DeliveryTrackingCard({required this.delivery});
+class _DeliveryTrackingCard extends ConsumerStatefulWidget {
+  const _DeliveryTrackingCard({required this.delivery, required this.orderId});
 
   final DeliveryTrackingInfo delivery;
+  final int orderId;
+
+  @override
+  ConsumerState<_DeliveryTrackingCard> createState() => _DeliveryTrackingCardState();
+}
+
+class _DeliveryTrackingCardState extends ConsumerState<_DeliveryTrackingCard> {
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Only worth polling while there's an actual partner en route - no
+    // point hitting the API every 15s for an order still being prepared,
+    // or one already delivered/cancelled.
+    if (widget.delivery.deliveryStatus == 'OUT_FOR_DELIVERY') {
+      _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+        ref.invalidate(liveTrackingProvider(widget.orderId));
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _navigateToPartner(double lat, double lng) async {
+    await launchUrl(
+      Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng'),
+      mode: LaunchMode.externalApplication,
+    );
+  }
+
+  String _timeAgo(String iso) {
+    try {
+      final updated = DateTime.parse(iso);
+      final seconds = DateTime.now().difference(updated).inSeconds;
+      if (seconds < 60) return 'updated ${seconds}s ago';
+      final minutes = seconds ~/ 60;
+      return 'updated ${minutes}m ago';
+    } catch (_) {
+      return '';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final delivery = widget.delivery;
+    final isOutForDelivery = delivery.deliveryStatus == 'OUT_FOR_DELIVERY';
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
@@ -275,6 +328,53 @@ class _DeliveryTrackingCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text('Delivery partner: ${delivery.deliveryPersonName}', style: Theme.of(context).textTheme.bodyMedium),
           ],
+
+          // Live GPS section - only shown once the order is actually out for
+          // delivery. Before that there's nothing to track yet.
+          if (isOutForDelivery) ...[
+            const SizedBox(height: 10),
+            Consumer(
+              builder: (context, ref, _) {
+                final liveAsync = ref.watch(liveTrackingProvider(widget.orderId));
+
+                return liveAsync.when(
+                  loading: () => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 4),
+                    child: SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                  ),
+                  // Silent on error - this is a background poll, not the
+                  // main content of the screen. The status/ETA above still
+                  // shows fine even if a single poll fails.
+                  error: (error, stackTrace) => const SizedBox.shrink(),
+                  data: (live) {
+                    if (!live.hasLocation) {
+                      return Text(
+                        "Waiting for your delivery partner's location...",
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                      );
+                    }
+
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            live.locationUpdatedAt != null ? _timeAgo(live.locationUpdatedAt!) : 'Live location available',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary, fontSize: 12),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => _navigateToPartner(live.partnerLatitude!, live.partnerLongitude!),
+                          icon: const Icon(Icons.map_outlined, size: 16),
+                          label: const Text('View on map'),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
+          ],
+
           if (delivery.guaranteeBreached == true) ...[
             const SizedBox(height: 10),
             Container(

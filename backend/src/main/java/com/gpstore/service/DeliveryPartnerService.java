@@ -10,6 +10,7 @@ import com.gpstore.repository.DeliveryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -108,6 +109,21 @@ public class DeliveryPartnerService {
     public DeliveryPartner setMyAvailability(Long customerId, boolean available) {
         DeliveryPartner partner = getByAccountIdOrThrow(customerId);
         partner.setAvailable(available);
+        return repository.save(partner);
+    }
+
+    /**
+     * Self-service - a delivery partner's own app pushing its live GPS
+     * position while on a run (called every few seconds). Same ownership
+     * pattern as setMyAvailability() above: resolved from the caller's own
+     * account, never a client-supplied partner id, so this can never be
+     * used to spoof someone else's location.
+     */
+    public DeliveryPartner updateMyLocation(Long customerId, Double latitude, Double longitude) {
+        DeliveryPartner partner = getByAccountIdOrThrow(customerId);
+        partner.setCurrentLatitude(latitude);
+        partner.setCurrentLongitude(longitude);
+        partner.setLocationUpdatedAt(LocalDateTime.now());
         return repository.save(partner);
     }
 

@@ -8,6 +8,13 @@ import '../../features/auth/presentation/otp_login_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
 import '../../features/root_screen.dart';
 
+/// Lets code without a local BuildContext (the FCM notification-tap handler
+/// in main.dart) still push a screen on top of whatever the user is
+/// currently looking at. Must be wired into GoRouter itself below - setting
+/// this on MaterialApp.router directly has no effect once a routerConfig
+/// is supplied.
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+
 /// Auth-gated routing: unauthenticated users are redirected to /login no
 /// matter what path they try to hit; authenticated users are redirected
 /// away from /login, /login/otp, and /register (no reason to see those once
@@ -15,6 +22,7 @@ import '../../features/root_screen.dart';
 /// actually navigate somewhere, instead of just quietly clearing state.
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
+    navigatorKey: rootNavigatorKey,
     initialLocation: '/',
     refreshListenable: _AuthStateNotifier(ref),
     redirect: (context, state) {

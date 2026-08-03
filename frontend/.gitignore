@@ -56,6 +56,12 @@ app.*.map.json
 *.keystore
 key.properties
 
+# Firebase - project-specific credentials, never commit (see
+# FIREBASE_SETUP.md). The backend's own Firebase service account key never
+# touches this repo at all - it only ever exists as the
+# FIREBASE_CREDENTIALS_BASE64 env var on Render.
+android/app/google-services.json
+
 # iOS/macOS related
 **/ios/**/*.mode1v3
 **/ios/**/*.mode2v3

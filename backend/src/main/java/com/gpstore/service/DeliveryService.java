@@ -166,7 +166,16 @@ public class DeliveryService {
         delivery.setEstimatedDeliveryTime(LocalDateTime.now().plusMinutes(estimateMinutes));
         delivery.setActive(true);
 
-        return deliveryRepository.save(delivery);
+        Delivery saved = deliveryRepository.save(delivery);
+
+        // Best-effort, same reasoning as autoAssignBestEffort() above - a
+        // notification hiccup must never fail an assignment that already
+        // succeeded. notifyPartnerNewAssignment() catches its own
+        // exceptions internally, so this call can't throw, but the intent
+        // is the same either way: assignment succeeds regardless.
+        notificationService.notifyPartnerNewAssignment(partner, saved);
+
+        return saved;
     }
 
     public List<Delivery> getAllDeliveries() {
@@ -191,6 +200,17 @@ public class DeliveryService {
         }
 
         return deliveryRepository.findByOrderId(orderId);
+    }
+
+    /**
+     * Live tracking view for a customer's own order - same ownership check
+     * as getOwnedDeliveryByOrderId() above, shaped down to just the
+     * assigned partner's current GPS position (see DeliveryTrackingResponse).
+     */
+    public com.gpstore.dto.response.DeliveryTrackingResponse getMyOrderTracking(Long orderId, Long callerCustomerId) {
+        Delivery delivery = getOwnedDeliveryByOrderId(orderId, callerCustomerId)
+                .orElseThrow(() -> new ResourceNotFoundException("No delivery found for this order yet"));
+        return com.gpstore.dto.response.DeliveryTrackingResponse.from(delivery);
     }
 
     @Transactional

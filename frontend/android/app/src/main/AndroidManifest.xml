@@ -9,6 +9,14 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
+    <!-- Android 13+ (API 33) requires this at runtime for any notification
+         to show at all, including push. PushNotificationService's
+         requestPermission() call (see push_notification_service.dart)
+         triggers the actual OS prompt for it - this manifest entry just
+         declares that the app is allowed to ask. Below API 33 this is a
+         no-op (no such runtime permission exists there). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="GP-Store"
         android:name="${applicationName}"

@@ -73,6 +73,14 @@ public class DeliveryController {
         return deliveryService.getOwnedDeliveryByOrderId(orderId, currentUser.customerId());
     }
 
+    // Live tracking screen data for a customer's own order - assigned
+    // partner's current GPS position + ETA. Ownership enforced the same
+    // way as getMyOrderDelivery() above.
+    @GetMapping("/my-order/{orderId}/tracking")
+    public com.gpstore.dto.response.DeliveryTrackingResponse getMyOrderTracking(@PathVariable Long orderId) {
+        return deliveryService.getMyOrderTracking(orderId, currentUser.customerId());
+    }
+
     @PutMapping("/{id}/status")
     public Delivery updateDeliveryStatus(
             @PathVariable Long id,

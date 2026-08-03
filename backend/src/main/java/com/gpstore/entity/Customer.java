@@ -69,6 +69,15 @@ private Cart cart;
 
 private Boolean active;
 
+// The device token this account's app instance registered for push
+// notifications (see CustomerController.updateMyFcmToken /
+// PushNotificationService). Single-token-per-account for now - if the same
+// person is logged in on two devices, only the most recently registered
+// one receives pushes. Hidden from JSON: this is an internal delivery
+// detail, never something a client needs to read back.
+@JsonIgnore
+private String fcmToken;
+
 public Cart getCart() {
     return cart;
 }

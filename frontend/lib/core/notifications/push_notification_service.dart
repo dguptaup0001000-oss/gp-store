@@ -1,0 +1,118 @@
+import 'dart:async';
+
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
+
+import '../api/api_client.dart';
+
+/// Runs when a push arrives while the app is fully backgrounded/terminated.
+/// Must be a top-level (or static) function - Firebase spins this up in its
+/// own isolate, so it can't be a class method or close over any app state.
+///
+/// Deliberately does almost nothing: the system tray notification itself is
+/// already shown automatically by the OS because the backend sends a
+/// `notification` payload (see PushNotificationService.java), not just a
+/// silent `data` payload - this handler exists mainly so data-only messages
+/// (none exist yet) would still have somewhere to be processed, and because
+/// FlutterFire requires it to be registered before runApp() regardless.
+@pragma('vm:entry-point')
+Future<void> firebaseBackgroundMessageHandler(RemoteMessage message) async {
+  debugPrint('Background push received: ${message.messageId}');
+}
+
+/// Wraps Firebase Cloud Messaging - requests permission, gets this device's
+/// token, keeps the backend's copy of it in sync (including when Firebase
+/// rotates it), and surfaces incoming messages while the app is open or
+/// just got opened from a tap.
+///
+/// Deliberately UI-free: `onForegroundMessage`/`onNotificationTap` are
+/// plain callbacks the caller supplies (see main.dart), so this class has
+/// no dependency on BuildContext/Navigator and stays easy to reason about
+/// independent of any particular screen.
+class PushNotificationService {
+  PushNotificationService({required this.apiClient});
+
+  final ApiClient apiClient;
+
+  StreamSubscription<String>? _tokenRefreshSub;
+  StreamSubscription<RemoteMessage>? _foregroundSub;
+  StreamSubscription<RemoteMessage>? _openedAppSub;
+
+  /// Call once, right after login/session-restore succeeds (see
+  /// main.dart's auth-state listener) - registers this device for push and
+  /// starts listening for messages. Safe to call again on every login (a
+  /// fresh permission prompt won't reappear if already granted/denied).
+  Future<void> start({
+    void Function(RemoteMessage message)? onForegroundMessage,
+    void Function(RemoteMessage message)? onNotificationTap,
+  }) async {
+    try {
+      final messaging = FirebaseMessaging.instance;
+
+      // iOS/web require this explicit prompt; Android 13+ (API 33) also
+      // needs it - FirebaseMessaging.requestPermission() triggers the
+      // POST_NOTIFICATIONS runtime prompt itself on recent plugin
+      // versions, no extra native code needed. Android 12 and below just
+      // returns "authorized" immediately since no such prompt exists there.
+      await messaging.requestPermission(alert: true, badge: true, sound: true);
+
+      final token = await messaging.getToken();
+      if (token != null) {
+        await _registerToken(token);
+      }
+
+      // Tokens rotate periodically (reinstall, Firebase-initiated
+      // rotation, etc.) - without this listener, a customer would silently
+      // stop receiving push after a rotation until something else happened
+      // to call getToken() again.
+      await _tokenRefreshSub?.cancel();
+      _tokenRefreshSub = messaging.onTokenRefresh.listen(_registerToken);
+
+      await _foregroundSub?.cancel();
+      if (onForegroundMessage != null) {
+        _foregroundSub = FirebaseMessaging.onMessage.listen(onForegroundMessage);
+      }
+
+      await _openedAppSub?.cancel();
+      if (onNotificationTap != null) {
+        // App was backgrounded (not terminated) and the user tapped the
+        // system notification to bring it back to the foreground.
+        _openedAppSub = FirebaseMessaging.onMessageOpenedApp.listen(onNotificationTap);
+
+        // App was fully terminated and got launched BY tapping the
+        // notification - onMessageOpenedApp above never fires for this
+        // case, only getInitialMessage() catches it.
+        final initialMessage = await messaging.getInitialMessage();
+        if (initialMessage != null) {
+          onNotificationTap(initialMessage);
+        }
+      }
+    } catch (e) {
+      // Never let a push-setup failure (permission denied, Firebase not
+      // configured on this build yet, etc.) block the app from being
+      // usable - push is an enhancement, not a requirement to shop/deliver.
+      debugPrint('Push notification setup failed (app continues normally): $e');
+    }
+  }
+
+  Future<void> _registerToken(String token) async {
+    try {
+      await apiClient.dio.put('/api/customers/me/fcm-token', data: {'fcmToken': token});
+    } catch (e) {
+      debugPrint('Failed to register FCM token with backend: $e');
+    }
+  }
+
+  /// Call on logout - stops listening, though the backend's stored token
+  /// for this account is deliberately left as-is (harmless: the next login
+  /// on this device re-registers it anyway, and a stale token just means a
+  /// silently-dropped send, not a leak to anyone else).
+  void stop() {
+    _tokenRefreshSub?.cancel();
+    _foregroundSub?.cancel();
+    _openedAppSub?.cancel();
+    _tokenRefreshSub = null;
+    _foregroundSub = null;
+    _openedAppSub = null;
+  }
+}

@@ -7,6 +7,8 @@ import lombok.Setter;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
+import java.time.LocalDateTime;
+
 @Entity
 @Table(name = "delivery_partners")
 @Getter
@@ -30,6 +32,16 @@ public class DeliveryPartner {
     private Boolean available;
 
     private Boolean active;
+
+    // Live GPS position, pushed by the partner's own app every few seconds
+    // while on a run. Null until their first location update - never assume
+    // these are populated, especially for a partner who has never gone on
+    // a run yet.
+    private Double currentLatitude;
+
+    private Double currentLongitude;
+
+    private LocalDateTime locationUpdatedAt;
 
     // Links this operational roster record to the real Customer account
     // (role=DELIVERY_BOY) that lets this person actually log in - a

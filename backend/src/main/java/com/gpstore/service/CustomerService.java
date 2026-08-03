@@ -161,6 +161,20 @@ public class CustomerService {
     }
 
     /**
+     * Self-service - registers/refreshes this account's push notification
+     * device token. Called on every app start and whenever Firebase issues
+     * a new token (tokens rotate periodically by design - see
+     * firebase_messaging_service.dart's onTokenRefresh listener). Resolved
+     * from the caller's own account, so this can never overwrite someone
+     * else's token.
+     */
+    public void updateMyFcmToken(Long customerId, String fcmToken) {
+        Customer customer = getOwnProfile(customerId);
+        customer.setFcmToken(fcmToken);
+        customerRepository.save(customer);
+    }
+
+    /**
      * Google Play's Account Deletion Requirement (user data policy) means
      * every app that supports account creation must offer a genuine
      * in-app self-service deletion path - see PLAY_STORE_CHECKLIST.md.

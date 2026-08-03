@@ -2,6 +2,8 @@ package com.gpstore.service;
 
 import com.gpstore.entity.Notification;
 import com.gpstore.entity.Customer;
+import com.gpstore.entity.Delivery;
+import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.entity.Order;
 import com.gpstore.enums.NotificationStatus;
 import com.gpstore.enums.NotificationType;
@@ -14,6 +16,7 @@ import com.gpstore.repository.OrderRepository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.stereotype.Service;
@@ -25,17 +28,20 @@ public class NotificationService {
     private final CustomerRepository customerRepository;
     private final OrderRepository orderRepository;
     private final AuditLogService auditLogService;
+    private final PushNotificationService pushNotificationService;
 
     public NotificationService(
             NotificationRepository notificationRepository,
             CustomerRepository customerRepository,
             OrderRepository orderRepository,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            PushNotificationService pushNotificationService) {
 
         this.notificationRepository = notificationRepository;
         this.customerRepository = customerRepository;
         this.orderRepository = orderRepository;
         this.auditLogService = auditLogService;
+        this.pushNotificationService = pushNotificationService;
     }
 
     public Notification sendNotification(Notification notification) {
@@ -105,6 +111,8 @@ public class NotificationService {
             notification.setSentAt(now);
             notification.setActive(true);
             notificationRepository.save(notification);
+
+            pushNotificationService.sendPush(customer.getFcmToken(), title, message, Map.of("type", "ANNOUNCEMENT"));
         }
 
         return activeCustomers.size();
@@ -113,10 +121,12 @@ public class NotificationService {
     /**
      * The actual "real-time order tracking" trigger - called automatically by
      * OrderService/DeliveryService whenever a status changes, instead of
-     * requiring someone to manually POST a notification every time. This only
-     * creates the in-app record (status PENDING); wiring an actual SMS/email/
-     * push provider (Twilio, FCM, etc.) is a separate integration step with
-     * real API keys, not something to fake here.
+     * requiring someone to manually POST a notification every time. Creates
+     * the in-app record AND sends a real FCM push (via
+     * PushNotificationService) if the customer has a registered device
+     * token and push is configured - see application.properties'
+     * firebase.push-enabled for why this can be a silent no-op until a real
+     * Firebase project is set up.
      */
     public void notifyOrderStatusChange(Order order, OrderStatus status) {
         // Defensive isolation - this is called from every critical order
@@ -186,6 +196,49 @@ public class NotificationService {
         notification.setActive(true);
 
         notificationRepository.save(notification);
+
+        String fcmToken = order.getCustomer() != null ? order.getCustomer().getFcmToken() : null;
+        pushNotificationService.sendPush(fcmToken, title, message,
+                Map.of("type", "ORDER_STATUS", "orderId", String.valueOf(order.getId())));
+    }
+
+    /**
+     * A delivery partner's own push - "you have a new delivery" - the
+     * natural counterpart to the customer-facing notifications above.
+     * Called from DeliveryService.assignDelivery(). Same defensive
+     * isolation as notifyOrderStatusChange: a notification failure must
+     * never roll back a real delivery assignment, so every exception is
+     * caught here, never rethrown.
+     */
+    public void notifyPartnerNewAssignment(DeliveryPartner partner, Delivery delivery) {
+        try {
+            if (partner == null || partner.getAccount() == null) {
+                return;
+            }
+
+            Order order = delivery.getOrder();
+            String title = "New Delivery Assigned";
+            String message = order != null && order.getOrderNumber() != null
+                    ? "You have a new delivery for order " + order.getOrderNumber() + "."
+                    : "You have a new delivery.";
+
+            Notification notification = new Notification();
+            notification.setCustomer(partner.getAccount());
+            notification.setOrder(order);
+            notification.setTitle(title);
+            notification.setMessage(message);
+            notification.setNotificationType(NotificationType.PUSH);
+            notification.setNotificationStatus(NotificationStatus.PENDING);
+            notification.setSentAt(LocalDateTime.now());
+            notification.setActive(true);
+            notificationRepository.save(notification);
+
+            pushNotificationService.sendPush(partner.getAccount().getFcmToken(), title, message,
+                    Map.of("type", "NEW_ASSIGNMENT", "deliveryId", String.valueOf(delivery.getId())));
+        } catch (Exception ex) {
+            auditLogService.log("NOTIFICATION_FAILED", "Delivery", delivery != null ? delivery.getId() : null,
+                    "Failed to create new-assignment notification: " + ex.getMessage());
+        }
     }
 
     public List<Notification> getAllNotifications() {

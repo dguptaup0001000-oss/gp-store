@@ -165,6 +165,7 @@ public class SecurityConfig {
                 // below, same ordering reason used throughout this file.
                 .requestMatchers(HttpMethod.PUT, "/api/delivery-partners/me/availability").hasAnyRole("ADMIN", "DELIVERY_BOY")
                 .requestMatchers(HttpMethod.GET, "/api/delivery-partners/me").hasAnyRole("ADMIN", "DELIVERY_BOY")
+                .requestMatchers(HttpMethod.PUT, "/api/delivery-partners/me/location").hasAnyRole("ADMIN", "DELIVERY_BOY")
                 // Roster management (create, view everyone, bulk-edit ANY
                 // partner's record) is admin-only - a delivery partner has
                 // no legitimate need to see or edit the whole roster, only

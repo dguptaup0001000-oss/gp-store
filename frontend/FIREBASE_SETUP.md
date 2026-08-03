@@ -1,0 +1,107 @@
+# Push notifications - one-time Firebase setup
+
+Both the backend and Flutter app now have all the CODE for real push
+notifications (order status updates, new delivery assignments). What's
+missing is a real Firebase project - that requires logging into a Google
+account and clicking through Firebase's console, which genuinely can't be
+done from here. This is that missing piece, step by step.
+
+Until you do this, the app and backend both run completely normally - push
+notifications just silently don't fire (see `firebase.push-enabled` in the
+backend and the try/catch around `Firebase.initializeApp()` in
+`main.dart`). Nothing breaks by skipping this for now.
+
+## 1. Create the Firebase project
+
+1. Go to https://console.firebase.google.com
+2. **Add project** → name it (e.g. "GP-Store") → you can skip Google
+   Analytics, not needed for push notifications.
+
+## 2. Register your Android app
+
+1. In the new project, click the Android icon ("Add app").
+2. **Android package name**: `com.gpstore.app` (must match exactly - see
+   `android/app/build.gradle`'s `applicationId`).
+3. Download the `google-services.json` file it offers you.
+4. Put that file at `android/app/google-services.json` in this project
+   (same folder as `android/app/build.gradle`). This file is
+   project-specific and already gitignored - never commit it, it's tied to
+   your Firebase project.
+5. Skip the rest of Firebase's setup wizard (SDK snippets, etc.) - the
+   `firebase_core`/`firebase_messaging` packages already handle that; you
+   only needed the JSON file.
+
+## 3. Get a service account key for the backend
+
+The backend needs its own credential (separate from the Android app's) to
+actually SEND pushes via the Firebase Admin SDK:
+
+1. Firebase Console → the gear icon → **Project settings** → **Service
+   accounts** tab.
+2. Click **Generate new private key** → confirm → downloads a JSON file
+   (something like `gp-store-firebase-adminsdk-xxxxx.json`).
+3. This file must become the `FIREBASE_CREDENTIALS_BASE64` env var on
+   Render - base64-encode the WHOLE file content:
+   - **Termux/Linux/Mac**: `base64 -w0 path/to/that-file.json`
+   - **Windows PowerShell**: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("path\to\that-file.json"))`
+4. Copy the long output string, paste it as the value of
+   `FIREBASE_CREDENTIALS_BASE64` in Render's Environment tab.
+5. Also add `FIREBASE_PUSH_ENABLED` = `true` in Render's Environment tab
+   (it defaults to `false` - see `application.properties`).
+6. Save → Render redeploys. Check the logs for `Firebase Admin SDK
+   initialized - push notifications are live.` to confirm it worked. If you
+   see a warning instead, the base64 value is probably malformed (extra
+   whitespace/newline from copy-paste is the usual cause).
+
+**Never commit either JSON file to git** - both are real credentials.
+
+## 4. Rebuild the app
+
+`google-services.json` is read at BUILD time by the Gradle plugin
+(`android/app/build.gradle`), so:
+
+```
+flutter clean
+flutter pub get
+flutter run --dart-define=API_BASE_URL=https://gp-store.onrender.com/v1
+```
+
+If `google-services.json` is missing, the build fails immediately with a
+clear "File google-services.json is missing" error - that's intentional,
+so a missing setup step shows up as a build failure, not a silently broken
+feature.
+
+## 5. Test it end to end
+
+1. Log in as a customer on a real device/emulator (push doesn't work on
+   Chrome/web builds without extra web-specific Firebase setup - test on
+   Android for now).
+2. Grant the notification permission prompt when it appears.
+3. As an admin, change that customer's order status (e.g. mark it
+   `OUT_FOR_DELIVERY`) via the admin order screen or API.
+4. A real system notification should appear on the device within a few
+   seconds. Tapping it should open the app directly to that order's detail
+   screen.
+5. For the delivery-partner side: assign an order to a partner (via
+   `/api/deliveries/auto-assign` or the admin screen) while logged in as
+   that partner on a device - they should get a "New Delivery Assigned"
+   push.
+
+## Known limitations of this first version
+
+- **One device token per account.** If the same person is logged into two
+  phones, only the most recently opened one receives push. Multi-device
+  support would need a separate token table - not built, since nobody
+  actually needs it yet at this scale.
+- **Foreground notifications show as an in-app banner (SnackBar), not a
+  system tray notification.** This is standard FCM/Android behavior - the
+  OS only auto-shows the system notification when the app is backgrounded
+  or closed. Showing a real heads-up notification while the app is open too
+  would need the `flutter_local_notifications` package on top of this -
+  a reasonable next addition, not included here to keep this round's scope
+  contained.
+- **iOS is not set up.** This app doesn't have an `ios/` folder generated
+  yet at all (per `PLAY_STORE_CHECKLIST.md`, iOS was never in scope for the
+  initial launch). Firebase's iOS setup (APNs certificates, a
+  `GoogleService-Info.plist`) is a separate step for whenever that becomes
+  relevant.
