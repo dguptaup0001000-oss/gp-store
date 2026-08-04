@@ -20,7 +20,7 @@ class ApiException implements Exception {
 
 /// The base URL is set at build/run time via --dart-define, NOT hardcoded -
 /// same principle as the backend's env-var-driven config. Point this at your
-/// real deployed API (Railway URL) or a local backend during dev.
+/// real deployed API (Render URL) or a local backend during dev.
 ///
 /// Example dev run:
 ///   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8081/v1

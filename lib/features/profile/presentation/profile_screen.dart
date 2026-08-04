@@ -160,6 +160,13 @@ class ProfileScreen extends ConsumerWidget {
               isDestructive: true,
               onTap: () => _confirmLogoutEverywhere(context, ref),
             ),
+            _menuTile(
+              context,
+              icon: Icons.delete_forever_outlined,
+              label: 'Delete Account',
+              isDestructive: true,
+              onTap: () => _confirmDeleteAccount(context, ref),
+            ),
           ],
         ),
       ),
@@ -205,6 +212,80 @@ class ProfileScreen extends ConsumerWidget {
     );
     if (confirmed == true) {
       await ref.read(authControllerProvider.notifier).logoutAllDevices();
+    }
+  }
+
+  /// Two-step, deliberately - this is the one action in this whole screen
+  /// that can't be undone by logging back in. First dialog explains exactly
+  /// what does and doesn't happen (matches CustomerService
+  /// .deleteOwnAccount's actual behavior on the backend, not a vague
+  /// "are you sure"). Second is a typed confirmation, the same friction
+  /// pattern used for genuinely irreversible actions elsewhere (e.g.
+  /// deleting a payment method on most banking apps) - a single tap is too
+  /// easy to hit by accident on a menu this long.
+  Future<void> _confirmDeleteAccount(BuildContext context, WidgetRef ref) async {
+    final understood = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete your account?'),
+        content: const Text(
+          'This permanently removes your name, phone number, email, saved '
+          'addresses, wishlist, and cart. You will be signed out on every '
+          'device immediately and cannot undo this.\n\n'
+          "Your past order and invoice history is kept (shown as \"Deleted "
+          'User\") since Indian tax law requires retaining invoice records '
+          "regardless of account deletion - it will no longer be linked to "
+          'your name, phone, or email.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Continue', style: TextStyle(color: AppColors.error)),
+          ),
+        ],
+      ),
+    );
+    if (understood != true || !context.mounted) return;
+
+    final typedController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Type DELETE to confirm'),
+        content: TextField(
+          controller: typedController,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(hintText: 'DELETE'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.of(context).pop(typedController.text.trim() == 'DELETE'),
+            child: const Text('Delete My Account'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await ref.read(profileRepositoryProvider).deleteAccount();
+      // The backend has already revoked every refresh token by this point -
+      // this just mirrors that locally (clear stored tokens, flip auth
+      // state) so the router's listener (see app_router.dart) redirects to
+      // login on its own, same as logoutAllDevices() above. logout() is
+      // safe to call even though the server-side token is already gone -
+      // see AuthRepository.logout()'s doc comment, it clears local storage
+      // unconditionally regardless of whether its own server call succeeds.
+      await ref.read(authControllerProvider.notifier).logout();
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(extractErrorMessage(e))),
+      );
     }
   }
 

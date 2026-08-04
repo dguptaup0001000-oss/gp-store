@@ -34,10 +34,19 @@ dependencies:
 
   cupertino_icons: ^1.0.6
 
-  # Real device GPS for "use my location" when adding an address - the
-  # backend's deliverability/distance calculation needs real coordinates,
-  # and a full interactive map picker is out of scope for now.
+  # Real device GPS for "use my location" when adding an address, and for
+  # delivery partners sharing their live position while on duty - the
+  # backend's deliverability/distance calculation and live tracking both
+  # need real coordinates.
   geolocator: ^13.0.1
+
+  # Push notifications (order status updates, new delivery assignments) -
+  # requires a real Firebase project; see FIREBASE_SETUP.md for the
+  # one-time setup this can't do for you (creating the project, downloading
+  # google-services.json). The app runs fine without it configured - push
+  # just silently doesn't fire until it is.
+  firebase_core: ^3.6.0
+  firebase_messaging: ^15.1.3
 
   # Opens the real UPI deep link (upi://pay?...) in whatever UPI app the
   # customer has installed (GPay, PhonePe, Paytm) - needed to actually act on
@@ -54,5 +63,25 @@ dev_dependencies:
   freezed: ^2.5.7
   json_serializable: ^6.8.0
 
+  # Generates every required Android/iOS launcher icon size from one source
+  # image - run `dart run flutter_launcher_icons` after replacing
+  # assets/icon/icon.png with a real logo. See PLAY_STORE_CHECKLIST.md item 3.
+  flutter_launcher_icons: ^0.14.1
+
 flutter:
   uses-material-design: true
+
+# Config for the flutter_launcher_icons package above. image_path must point
+# to a real square PNG (1024x1024 recommended) before running the generator -
+# the placeholder path below doesn't exist yet on purpose, so running the
+# generator before you've added a real icon fails loudly instead of silently
+# baking in nothing.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/icon.png"
+  min_sdk_android: 21
+  # Matches the placeholder vector's green - update if your real logo uses a
+  # different brand color, this only affects the adaptive icon background.
+  adaptive_icon_background: "#1DB954"
+  adaptive_icon_foreground: "assets/icon/icon.png"

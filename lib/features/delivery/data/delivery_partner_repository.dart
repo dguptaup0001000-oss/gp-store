@@ -38,4 +38,16 @@ class DeliveryPartnerRepository {
       queryParameters: {'available': available},
     );
   }
+
+  /// Pushes this partner's current GPS position - called every time the
+  /// device moves a meaningful distance while on duty (see
+  /// DeliveryDashboardScreen's location tracking). Resolved server-side
+  /// from the caller's own account, so this can never push a position for
+  /// someone else.
+  Future<void> updateMyLocation({required double latitude, required double longitude}) async {
+    await apiClient.dio.put(
+      '/api/delivery-partners/me/location',
+      data: {'latitude': latitude, 'longitude': longitude},
+    );
+  }
 }

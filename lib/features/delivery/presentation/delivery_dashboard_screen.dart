@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -7,15 +10,120 @@ import '../../auth/presentation/auth_providers.dart';
 import '../domain/delivery_assignment_model.dart';
 import 'delivery_partner_providers.dart';
 
-class DeliveryDashboardScreen extends ConsumerWidget {
+class DeliveryDashboardScreen extends ConsumerStatefulWidget {
   const DeliveryDashboardScreen({super.key});
 
-  Future<void> _toggleAvailability(WidgetRef ref, BuildContext context, bool newValue) async {
+  @override
+  ConsumerState<DeliveryDashboardScreen> createState() => _DeliveryDashboardScreenState();
+}
+
+class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScreen> {
+  StreamSubscription<Position>? _positionSub;
+  bool _isTracking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // If the partner is re-opening the app while still marked available
+    // from an earlier session (e.g. app was killed mid-shift), resume
+    // sharing location automatically instead of leaving them silently
+    // "on duty" with a stale/no location on record.
+    _resumeTrackingIfAlreadyOnDuty();
+  }
+
+  Future<void> _resumeTrackingIfAlreadyOnDuty() async {
+    try {
+      final profile = await ref.read(deliveryPartnerRepositoryProvider).getMyProfile();
+      if (profile.available && mounted) {
+        _startTracking();
+      }
+    } catch (_) {
+      // Profile fetch failing here isn't fatal - myDeliveryProfileProvider
+      // below will surface the real error in the UI; this is just the
+      // opportunistic auto-resume check.
+    }
+  }
+
+  @override
+  void dispose() {
+    _positionSub?.cancel();
+    super.dispose();
+  }
+
+  /// Starts pushing this device's GPS position to the backend every time it
+  /// moves a meaningful distance, for as long as the partner stays on duty.
+  /// Same permission-request pattern as AddAddressScreen's "use my
+  /// location" - see that file for why each check exists.
+  Future<void> _startTracking() async {
+    if (_isTracking) return;
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Please turn on location services to share your live location');
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permission denied - customers will not see your live position');
+        }
+      }
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permission permanently denied - enable it in app settings');
+      }
+
+      _positionSub?.cancel();
+      // distanceFilter: only pushes an update once the device has actually
+      // moved ~20m, not on a fixed timer - avoids hammering the API (and
+      // the partner's battery/data) while stopped at a light or a stop.
+      // NOTE: this only tracks while the app is open and in the
+      // foreground - if the partner backgrounds the app, updates stop.
+      // A true background service is a real feature on its own (needs
+      // ACCESS_BACKGROUND_LOCATION + a foreground service on Android) -
+      // deliberately out of scope for this first version.
+      _positionSub = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 20),
+      ).listen(
+        (position) {
+          ref.read(deliveryPartnerRepositoryProvider).updateMyLocation(
+                latitude: position.latitude,
+                longitude: position.longitude,
+              );
+        },
+        onError: (_) {
+          if (mounted) setState(() => _isTracking = false);
+        },
+      );
+
+      if (mounted) setState(() => _isTracking = true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
+  }
+
+  void _stopTracking() {
+    _positionSub?.cancel();
+    _positionSub = null;
+    if (mounted) setState(() => _isTracking = false);
+  }
+
+  Future<void> _toggleAvailability(bool newValue) async {
     try {
       await ref.read(deliveryPartnerRepositoryProvider).setMyAvailability(newValue);
       ref.invalidate(myDeliveryProfileProvider);
+
+      if (newValue) {
+        await _startTracking();
+      } else {
+        _stopTracking();
+      }
     } catch (e) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(extractErrorMessage(e))),
       );
@@ -23,7 +131,7 @@ class DeliveryDashboardScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final assignmentsAsync = ref.watch(myAssignmentsProvider);
     final profileAsync = ref.watch(myDeliveryProfileProvider);
 
@@ -31,6 +139,14 @@ class DeliveryDashboardScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('My Deliveries'),
         actions: [
+          if (_isTracking)
+            const Padding(
+              padding: EdgeInsets.only(right: 4),
+              child: Tooltip(
+                message: 'Sharing live location',
+                child: Icon(Icons.gps_fixed, size: 18, color: AppColors.primary),
+              ),
+            ),
           profileAsync.when(
             loading: () => const SizedBox.shrink(),
             error: (error, stackTrace) => const SizedBox.shrink(),
@@ -41,7 +157,7 @@ class DeliveryDashboardScreen extends ConsumerWidget {
                   Text(profile.available ? 'On duty' : 'Off duty', style: const TextStyle(fontSize: 12)),
                   Switch(
                     value: profile.available,
-                    onChanged: (value) => _toggleAvailability(ref, context, value),
+                    onChanged: _toggleAvailability,
                   ),
                 ],
               ),

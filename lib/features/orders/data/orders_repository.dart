@@ -1,5 +1,6 @@
 import '../../../core/api/api_client.dart';
 import '../domain/invoice_model.dart';
+import '../domain/live_tracking_model.dart';
 import '../domain/order_models.dart';
 
 class OrdersRepository {
@@ -26,5 +27,15 @@ class OrdersRepository {
   Future<Invoice> getInvoiceForOrder(int orderId) async {
     final response = await apiClient.dio.get('/api/invoices/my-order/$orderId');
     return Invoice.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Live GPS position of the assigned delivery partner - a separate,
+  /// lightweight endpoint from getOrderDetail() above, meant to be polled
+  /// frequently while the order is OUT_FOR_DELIVERY without re-fetching the
+  /// whole order every time. Ownership enforced server-side, same as
+  /// getOrderDetail().
+  Future<LiveDeliveryLocation> getLiveTracking(int orderId) async {
+    final response = await apiClient.dio.get('/api/deliveries/my-order/$orderId/tracking');
+    return LiveDeliveryLocation.fromJson(response.data as Map<String, dynamic>);
   }
 }

@@ -21,4 +21,16 @@ class ProfileRepository {
     );
     return Profile.fromJson(response.data as Map<String, dynamic>);
   }
+
+  /// Google Play Account Deletion Requirement - see CustomerService
+  /// .deleteOwnAccount's doc comment on the backend for exactly what this
+  /// does (anonymizes the account and ends every session immediately; does
+  /// NOT erase order/invoice history, which has real tax retention
+  /// requirements). The caller is responsible for clearing local token
+  /// storage and navigating to login right after this succeeds - the
+  /// backend has already revoked the tokens by the time this returns, so
+  /// any further authenticated call in this app session would fail anyway.
+  Future<void> deleteAccount() async {
+    await apiClient.dio.delete('/api/customers/me');
+  }
 }

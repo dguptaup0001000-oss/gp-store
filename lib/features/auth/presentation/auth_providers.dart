@@ -8,7 +8,7 @@ import '../domain/auth_models.dart';
 
 final tokenStorageProvider = Provider<TokenStorage>((ref) => TokenStorage());
 
-final apiClientProvider = Provider<ApiClient>((ref) {
+final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((ref) {
   final tokenStorage = ref.watch(tokenStorageProvider);
 
   return ApiClient(
@@ -23,7 +23,7 @@ final apiClientProvider = Provider<ApiClient>((ref) {
   );
 });
 
-final authRepositoryProvider = Provider<AuthRepository>((ref) {
+final Provider<AuthRepository> authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepository(
     apiClient: ref.watch(apiClientProvider),
     tokenStorage: ref.watch(tokenStorageProvider),
@@ -133,7 +133,8 @@ class AuthController extends StateNotifier<AuthState> {
   }
 }
 
-final authControllerProvider = StateNotifierProvider<AuthController, AuthState>((ref) {
+final StateNotifierProvider<AuthController, AuthState> authControllerProvider =
+    StateNotifierProvider<AuthController, AuthState>((ref) {
   return AuthController(ref.watch(authRepositoryProvider));
 });
 
