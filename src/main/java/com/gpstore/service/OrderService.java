@@ -31,9 +31,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class OrderService {
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     private final OrderRepository repository;
     private final OrderItemRepository orderItemRepository;
@@ -283,6 +286,7 @@ public class OrderService {
         String datePrefix = "GP" + java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
             int nextSeq = repository.getNextOrderSequence(datePrefix);
         order.setOrderNumber(datePrefix + String.format("%04d", nextSeq));
+        log.info("ORDER_NUMBER_DEBUG prefix={} nextSeq={} orderNumber={}", datePrefix, nextSeq, order.getOrderNumber());
         order.setCustomer(customer);
         order.setAddress(address);
         order.setOrderDate(LocalDateTime.now());
