@@ -145,5 +145,11 @@ String extractErrorMessage(Object error) {
   if (error is DioException && error.error is ApiException) {
     return (error.error as ApiException).message;
   }
-  return 'Something went wrong. Please try again.';
+  // TEMPORARY, for active debugging - any error that ISN'T a network-level
+  // DioException (e.g. a JSON parsing failure when a response body doesn't
+  // match what the frontend model expects) was being silently replaced with
+  // an unhelpful generic string here, discarding the actual reason. Once
+  // real bugs surfaced this way are found and fixed, revert to the plain
+  // generic fallback.
+  return 'Something went wrong: $error';
 }
