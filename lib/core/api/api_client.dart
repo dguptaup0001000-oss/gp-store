@@ -151,21 +151,41 @@ class ApiClient {
     final data = error.response?.data;
     String message = 'Something went wrong. Please try again.';
     Map<String, String>? fieldErrors;
+    bool gotMessageFromBody = false;
 
     if (data is Map<String, dynamic>) {
       if (data['message'] is String) {
         message = data['message'] as String;
+        gotMessageFromBody = true;
       }
       if (data['fieldErrors'] is Map) {
         fieldErrors = (data['fieldErrors'] as Map).map(
           (key, value) => MapEntry(key.toString(), value.toString()),
         );
       }
-    } else if (error.type == DioExceptionType.connectionTimeout ||
-        error.type == DioExceptionType.receiveTimeout) {
-      message = 'Connection timed out. Check your internet and try again.';
-    } else if (error.type == DioExceptionType.connectionError) {
-      message = 'Could not reach the server. Check your internet connection.';
+    }
+
+    // Only fall back to a generic/derived message when the response body
+    // itself didn't actually give us one - a JSON body that IS a Map but has
+    // no "message" key (e.g. Spring Boot's default unhandled-exception
+    // shape: {timestamp, status, error, path}) must NOT be treated as "got a
+    // real message", or it silently swallows the status-code detail below.
+    if (!gotMessageFromBody) {
+      if (error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.receiveTimeout) {
+        message = 'Connection timed out. Check your internet and try again.';
+      } else if (error.type == DioExceptionType.connectionError) {
+        message = 'Could not reach the server. Check your internet connection.';
+      } else {
+        // TEMPORARY, for active debugging - see the matching comment in
+        // root_screen.dart. Including the raw status code (when there is
+        // one) turns "Something went wrong" into an actual clue instead of
+        // a dead end - safe to remove once the underlying cause is found.
+        final statusCode = error.response?.statusCode;
+        if (statusCode != null) {
+          message = 'Something went wrong (HTTP $statusCode). Please try again.';
+        }
+      }
     }
 
     return error.copyWith(
