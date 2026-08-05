@@ -280,7 +280,13 @@ public class OrderService {
 
         Order order = new Order();
 
-        order.setOrderNumber(OrderNumberGenerator.generate());
+        String datePrefix = "GP" + java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String maxOrderNumber = repository.findMaxOrderNumberWithPrefix(datePrefix);
+        int nextSeq = 1;
+        if (maxOrderNumber != null && maxOrderNumber.length() >= datePrefix.length() + 4) {
+            nextSeq = Integer.parseInt(maxOrderNumber.substring(datePrefix.length())) + 1;
+        }
+        order.setOrderNumber(datePrefix + String.format("%04d", nextSeq));
         order.setCustomer(customer);
         order.setAddress(address);
         order.setOrderDate(LocalDateTime.now());
