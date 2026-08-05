@@ -33,7 +33,11 @@ class AdminProductsRepository {
       'category': {'id': categoryId},
       'active': true,
     });
-    return Product.fromJson(response.data as Map<String, dynamic>);
+    final data = Map<String, dynamic>.from(response.data as Map);
+    if (data['category'] is Map && (data['category'] as Map)['name'] == null) {
+      data['category'] = null;
+    }
+    return Product.fromJson(data);
   }
 
   Future<Product> updateProduct({
@@ -49,7 +53,11 @@ class AdminProductsRepository {
       'category': {'id': categoryId},
       'active': active,
     });
-    return Product.fromJson(response.data as Map<String, dynamic>);
+    final data = Map<String, dynamic>.from(response.data as Map);
+    if (data['category'] is Map && (data['category'] as Map)['name'] == null) {
+      data['category'] = null;
+    }
+    return Product.fromJson(data);
   }
 
   Future<void> deactivateProduct(int productId) async {
