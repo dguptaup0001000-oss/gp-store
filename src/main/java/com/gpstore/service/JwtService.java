@@ -5,6 +5,8 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +15,8 @@ import java.util.Date;
 
 @Service
 public class JwtService {
+
+    private static final Logger log = LoggerFactory.getLogger(JwtService.class);
 
     private final Key key;
     private final long expirationMs;
@@ -60,6 +64,13 @@ public class JwtService {
             extractClaims(token);
             return true;
         } catch (Exception e) {
+            // TEMPORARY, for active debugging - customers were intermittently
+            // getting rejected right after a fresh login (works fine on
+            // retry with the same token), and this catch block was silently
+            // discarding the real reason every single time. Once the actual
+            // exception type shows up in the logs (expired? bad signature?
+            // malformed?), fix the real cause and remove this.
+            log.warn("JWT validation failed: {} - {}", e.getClass().getSimpleName(), e.getMessage());
             return false;
         }
     }
