@@ -101,7 +101,7 @@ class _FilteredProductBrowserState extends ConsumerState<FilteredProductBrowser>
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorMessage = "Couldn't load products - check your connection";
+        _errorMessage = extractErrorMessage(e);
         _isLoading = false;
         _isLoadingMore = false;
       });

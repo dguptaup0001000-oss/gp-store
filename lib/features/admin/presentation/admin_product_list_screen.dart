@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart' show extractErrorMessage;
 import '../../products/domain/product_models.dart';
 import 'admin_product_form_screen.dart';
 import 'admin_providers.dart';
@@ -57,7 +58,7 @@ class _AdminProductListScreenState extends ConsumerState<AdminProductListScreen>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text("Couldn't load products - check your connection"),
+                    Text(extractErrorMessage(error), textAlign: TextAlign.center),
                     TextButton(onPressed: () => ref.invalidate(adminAllProductsProvider), child: const Text('Retry')),
                   ],
                 ),
