@@ -18,6 +18,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @org.springframework.data.jpa.repository.Query("SELECT MAX(o.orderNumber) FROM Order o WHERE o.orderNumber LIKE CONCAT(:prefix, '%')")
     String findMaxOrderNumberWithPrefix(@Param("prefix") String prefix);
 
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
     @org.springframework.data.jpa.repository.Query(value = "INSERT INTO order_sequence (date_prefix, seq) VALUES (:prefix, 1) ON CONFLICT (date_prefix) DO UPDATE SET seq = order_sequence.seq + 1 RETURNING seq", nativeQuery = true)
     Integer getNextOrderSequence(@org.springframework.data.repository.query.Param("prefix") String prefix);
 
