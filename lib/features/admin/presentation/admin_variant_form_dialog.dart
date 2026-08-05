@@ -1,9 +1,20 @@
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../auth/presentation/auth_providers.dart' show extractErrorMessage;
 import '../../products/domain/product_models.dart';
 import 'admin_providers.dart';
+
+// Cloudinary unsigned upload - safe to call directly from the app (no
+// backend secret involved, that's the whole point of an unsigned preset).
+// If you ever recreate the preset with a different name, or switch cloud
+// accounts, update these two constants.
+const String _cloudinaryCloudName = 'ulkadxmv';
+const String _cloudinaryUploadPreset = 'gpstore_products';
 
 class AdminVariantFormDialog extends ConsumerStatefulWidget {
   const AdminVariantFormDialog({super.key, required this.productId, this.variant});
@@ -27,6 +38,12 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
   late final TextEditingController _imageUrlController;
   late bool _available;
   bool _isSaving = false;
+
+  // In-memory bytes of a freshly picked (not yet or just uploaded) image.
+  // Read as bytes rather than a dart:io File so this works identically on
+  // web (which has no filesystem) and on Android/iOS.
+  Uint8List? _pickedImageBytes;
+  bool _isUploadingImage = false;
 
   bool get _isEditing => widget.variant != null;
 
@@ -56,6 +73,49 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
     _costPriceController.dispose();
     _imageUrlController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAndUploadImage() async {
+    final picker = ImagePicker();
+    final XFile? picked;
+    try {
+      picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't open the photo picker")),
+      );
+      return;
+    }
+    if (picked == null) return;
+
+    final bytes = await picked.readAsBytes();
+    setState(() {
+      _pickedImageBytes = bytes;
+      _isUploadingImage = true;
+    });
+
+    try {
+      final dio = Dio();
+      final formData = FormData.fromMap({
+        'file': MultipartFile.fromBytes(bytes, filename: picked.name),
+        'upload_preset': _cloudinaryUploadPreset,
+      });
+      final response = await dio.post(
+        'https://api.cloudinary.com/v1_1/$_cloudinaryCloudName/image/upload',
+        data: formData,
+      );
+      final url = response.data['secure_url'] as String;
+      if (!mounted) return;
+      setState(() => _imageUrlController.text = url);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't upload the photo - check your connection and try again")),
+      );
+    } finally {
+      if (mounted) setState(() => _isUploadingImage = false);
+    }
   }
 
   Future<void> _save({bool allowBelowCost = false}) async {
@@ -134,6 +194,41 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
     }
   }
 
+  Widget _buildImagePreview(BuildContext context) {
+    final placeholderColor = Theme.of(context).colorScheme.surfaceContainerHighest;
+
+    if (_pickedImageBytes != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(_pickedImageBytes!, width: 56, height: 56, fit: BoxFit.cover),
+      );
+    }
+    final currentUrl = _imageUrlController.text.trim();
+    if (currentUrl.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          currentUrl,
+          width: 56,
+          height: 56,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(color: placeholderColor, borderRadius: BorderRadius.circular(8)),
+            child: const Icon(Icons.broken_image_outlined, size: 28),
+          ),
+        ),
+      );
+    }
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(color: placeholderColor, borderRadius: BorderRadius.circular(8)),
+      child: const Icon(Icons.image_outlined, size: 28),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -199,9 +294,35 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
                 ),
               ),
               const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildImagePreview(context),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _isUploadingImage ? null : _pickAndUploadImage,
+                      icon: _isUploadingImage
+                          ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.photo_library_outlined, size: 18),
+                      label: Text(_isUploadingImage ? 'Uploading...' : 'Choose Photo'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
               TextFormField(
                 controller: _imageUrlController,
-                decoration: const InputDecoration(labelText: 'Image URL (optional)'),
+                decoration: const InputDecoration(
+                  labelText: 'Image URL',
+                  helperText: 'Auto-filled after choosing a photo, or paste one directly',
+                  helperMaxLines: 2,
+                ),
+                onChanged: (_) => setState(() {}),
               ),
               if (_isEditing) ...[
                 const SizedBox(height: 8),

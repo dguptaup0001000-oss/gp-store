@@ -54,6 +54,11 @@ dependencies:
   url_launcher: ^6.3.1
   package_info_plus: ^8.1.2
 
+  # Lets admins pick a variant photo from the device gallery, which then
+  # gets uploaded directly to Cloudinary (see admin_variant_form_dialog.dart).
+  # Works on Android and web without any platform-specific setup.
+  image_picker: ^1.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

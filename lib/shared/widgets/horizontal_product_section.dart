@@ -53,7 +53,7 @@ class HorizontalProductSection extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text("Couldn't load this - check your connection"),
+                Text(extractErrorMessage(error), textAlign: TextAlign.center),
                 TextButton(onPressed: onRetry, child: const Text('Retry')),
               ],
             ),
