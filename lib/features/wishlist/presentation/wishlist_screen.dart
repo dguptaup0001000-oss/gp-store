@@ -22,7 +22,7 @@ class WishlistScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load your wishlist - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(onPressed: () => ref.invalidate(wishlistControllerProvider), child: const Text('Retry')),
             ],
           ),

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart';
 import 'support_providers.dart';
 
 class ContactUsScreen extends ConsumerWidget {
@@ -34,7 +35,7 @@ class ContactUsScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load contact info - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(onPressed: () => ref.invalidate(storeInfoProvider), child: const Text('Retry')),
             ],
           ),

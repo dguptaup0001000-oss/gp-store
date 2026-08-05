@@ -20,7 +20,7 @@ class AdminReviewsScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load reviews - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(onPressed: () => ref.invalidate(adminAllReviewsProvider), child: const Text('Retry')),
             ],
           ),

@@ -67,7 +67,7 @@ class NotificationsScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load notifications - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(onPressed: () => ref.invalidate(myNotificationsProvider), child: const Text('Retry')),
             ],
           ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart';
 import '../domain/address_models.dart';
 import 'add_address_screen.dart';
 import 'address_providers.dart';
@@ -28,7 +29,7 @@ class AddressListScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load your addresses - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(onPressed: () => ref.invalidate(myAddressesProvider), child: const Text('Retry')),
             ],
           ),

@@ -9,6 +9,12 @@ final addressRepositoryProvider = Provider<AddressRepository>((ref) {
 });
 
 final myAddressesProvider = FutureProvider<List<AddressModel>>((ref) {
+  // See myProfileProvider's comment (profile_providers.dart) - without this
+  // watch, a different account logging in on the same device without a full
+  // app restart would keep seeing the PREVIOUS customer's saved addresses -
+  // a genuine privacy issue, not just a stale-display one, on a shared
+  // family device using one login after another.
+  ref.watch(authControllerProvider);
   return ref.watch(addressRepositoryProvider).getMyAddresses();
 });
 

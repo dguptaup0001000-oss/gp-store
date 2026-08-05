@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart';
 import '../domain/admin_coupon_models.dart';
 import 'admin_coupon_form_dialog.dart';
 import 'admin_providers.dart';
@@ -55,7 +56,7 @@ class _AdminCouponListScreenState extends ConsumerState<AdminCouponListScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text("Couldn't load coupons - check your connection"),
+                    Text(extractErrorMessage(error), textAlign: TextAlign.center),
                     TextButton(onPressed: () => ref.invalidate(adminAllCouponsProvider), child: const Text('Retry')),
                   ],
                 ),

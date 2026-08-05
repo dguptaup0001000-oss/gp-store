@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart';
 import 'reviews_providers.dart';
 import 'write_review_dialog.dart';
 
@@ -37,9 +38,9 @@ class ProductReviewsSection extends ConsumerWidget {
         ),
         reviewsAsync.when(
           loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          error: (error, stackTrace) => const Text(
-            "Couldn't load reviews",
-            style: TextStyle(color: AppColors.textSecondary),
+          error: (error, stackTrace) => Text(
+            extractErrorMessage(error),
+            style: const TextStyle(color: AppColors.textSecondary),
           ),
           data: (reviews) {
             if (reviews.isEmpty) {

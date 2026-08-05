@@ -111,7 +111,7 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Couldn't upload the photo - check your connection and try again")),
+        SnackBar(content: Text(extractErrorMessage(e))),
       );
     } finally {
       if (mounted) setState(() => _isUploadingImage = false);

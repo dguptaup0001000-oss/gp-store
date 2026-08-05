@@ -21,7 +21,7 @@ class AdminPaymentsScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load payments - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(onPressed: () => ref.invalidate(adminAllPaymentsProvider), child: const Text('Retry')),
             ],
           ),

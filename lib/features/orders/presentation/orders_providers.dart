@@ -11,6 +11,10 @@ final ordersRepositoryProvider = Provider<OrdersRepository>((ref) {
 });
 
 final myOrdersProvider = FutureProvider<List<OrderSummary>>((ref) {
+  // See myProfileProvider's comment (profile_providers.dart) - without this
+  // watch, a different account logging in on the same device without a full
+  // app restart would keep seeing the PREVIOUS customer's order history.
+  ref.watch(authControllerProvider);
   return ref.watch(ordersRepositoryProvider).getMyOrders();
 });
 

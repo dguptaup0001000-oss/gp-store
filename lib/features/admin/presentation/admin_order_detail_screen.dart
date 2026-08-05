@@ -69,7 +69,7 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load this order - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(
                 onPressed: () => ref.invalidate(orderDetailProvider(widget.orderId)),
                 child: const Text('Retry'),
@@ -223,7 +223,7 @@ class _DeliveryAssignmentCardState extends ConsumerState<_DeliveryAssignmentCard
           const SizedBox(height: 12),
           partnersAsync.when(
             loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-            error: (error, stackTrace) => const Text("Couldn't load delivery partners"),
+            error: (error, stackTrace) => Text(extractErrorMessage(error), textAlign: TextAlign.center),
             data: (allPartners) {
               // id is nullable on the model in general (a not-yet-saved
               // partner has none) but every entry from this specific

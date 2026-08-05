@@ -13,5 +13,9 @@ final productReviewsProvider = FutureProvider.family<List<Review>, int>((ref, pr
 });
 
 final myReviewsProvider = FutureProvider<List<Review>>((ref) {
+  // See myProfileProvider's comment (profile_providers.dart) - without this
+  // watch, a different account logging in on the same device without a full
+  // app restart would keep seeing the PREVIOUS customer's own reviews.
+  ref.watch(authControllerProvider);
   return ref.watch(reviewsRepositoryProvider).getMyReviews();
 });

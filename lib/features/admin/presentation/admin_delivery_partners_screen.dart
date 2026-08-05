@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../auth/presentation/auth_providers.dart';
+
 import '../../../core/theme/app_theme.dart';
 import '../domain/delivery_partner_models.dart';
 import 'admin_delivery_partner_form_dialog.dart';
@@ -21,7 +23,7 @@ class AdminDeliveryPartnersScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load delivery partners - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(onPressed: () => ref.invalidate(adminDeliveryPartnersProvider), child: const Text('Retry')),
             ],
           ),

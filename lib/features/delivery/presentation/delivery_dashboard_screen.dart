@@ -176,7 +176,7 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load your deliveries - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(onPressed: () => ref.invalidate(myAssignmentsProvider), child: const Text('Retry')),
             ],
           ),

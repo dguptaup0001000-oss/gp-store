@@ -9,6 +9,10 @@ final notificationsRepositoryProvider = Provider<NotificationsRepository>((ref) 
 });
 
 final myNotificationsProvider = FutureProvider<List<AppNotification>>((ref) {
+  // See myProfileProvider's comment (profile_providers.dart) - without this
+  // watch, a different account logging in on the same device without a full
+  // app restart would keep seeing the PREVIOUS customer's notifications.
+  ref.watch(authControllerProvider);
   return ref.watch(notificationsRepositoryProvider).getMyNotifications();
 });
 

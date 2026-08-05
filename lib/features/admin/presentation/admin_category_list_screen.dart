@@ -21,7 +21,7 @@ class AdminCategoryListScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load categories - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(onPressed: () => ref.invalidate(adminCategoriesProvider), child: const Text('Retry')),
             ],
           ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart';
 import 'admin_providers.dart';
 
 /// Purely a review/signal list - the backend deliberately attaches no
@@ -23,7 +24,7 @@ class AdminDeliveryBreachesScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load breach data - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(onPressed: () => ref.invalidate(adminDeliveryBreachesProvider), child: const Text('Retry')),
             ],
           ),

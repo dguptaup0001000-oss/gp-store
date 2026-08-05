@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart';
 import 'orders_providers.dart';
 
 class InvoiceScreen extends ConsumerWidget {
@@ -21,7 +22,7 @@ class InvoiceScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load your invoice - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(
                 onPressed: () => ref.invalidate(orderInvoiceProvider(orderId)),
                 child: const Text('Retry'),

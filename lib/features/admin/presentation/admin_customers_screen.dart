@@ -60,7 +60,7 @@ class _AdminCustomersScreenState extends ConsumerState<AdminCustomersScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text("Couldn't load customers - check your connection"),
+                    Text(extractErrorMessage(error), textAlign: TextAlign.center),
                     TextButton(onPressed: () => ref.invalidate(adminAllCustomersProvider), child: const Text('Retry')),
                   ],
                 ),

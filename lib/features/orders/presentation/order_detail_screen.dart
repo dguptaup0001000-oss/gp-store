@@ -29,7 +29,7 @@ class OrderDetailScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load this order - check your connection"),
+              Text(extractErrorMessage(error), textAlign: TextAlign.center),
               TextButton(
                 onPressed: () => ref.invalidate(orderDetailProvider(orderId)),
                 child: const Text('Retry'),

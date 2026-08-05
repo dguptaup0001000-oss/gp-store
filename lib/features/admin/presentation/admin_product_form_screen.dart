@@ -169,7 +169,7 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
                 const SizedBox(height: 12),
                 categoriesAsync.when(
                   loading: () => const LinearProgressIndicator(),
-                  error: (e, s) => const Text("Couldn't load categories"),
+                  error: (e, s) => Text(extractErrorMessage(e), textAlign: TextAlign.center),
                   data: (categories) => DropdownButtonFormField<int>(
                     initialValue: _selectedCategoryId,
                     decoration: const InputDecoration(labelText: 'Category'),

@@ -45,7 +45,7 @@ class _InventoryList extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text("Couldn't load inventory - check your connection"),
+            Text(extractErrorMessage(error), textAlign: TextAlign.center),
             TextButton(onPressed: () => ref.invalidate(provider), child: const Text('Retry')),
           ],
         ),

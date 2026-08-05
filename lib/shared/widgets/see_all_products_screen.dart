@@ -71,7 +71,7 @@ class _SeeAllProductsScreenState extends ConsumerState<SeeAllProductsScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("Couldn't load this - check your connection"),
+                  Text(extractErrorMessage(snapshot.error!), textAlign: TextAlign.center),
                   TextButton(onPressed: _retry, child: const Text('Retry')),
                 ],
               ),
