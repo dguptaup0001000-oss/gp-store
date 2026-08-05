@@ -272,14 +272,6 @@ class _PreviewSummary extends StatelessWidget {
             'Delivery Fee',
             preview.freeDeliveryApplied ? 'FREE' : '₹${preview.deliveryFee.toStringAsFixed(0)}',
           ),
-          if (preview.estimatedDeliveryMinutes != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                'Estimated delivery: ${preview.estimatedDeliveryMinutes} minutes',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
-              ),
-            ),
           const Divider(height: 20),
           _row('Total', '₹${preview.estimatedTotal.toStringAsFixed(0)}', bold: true),
         ],
