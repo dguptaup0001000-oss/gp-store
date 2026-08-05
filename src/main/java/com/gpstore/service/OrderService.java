@@ -461,6 +461,7 @@ public class OrderService {
                     "Invalid order status transition from " + currentStatus + " to " + status);
         }
         order.setOrderStatus(status);
+        if (status == OrderStatus.OUT_FOR_DELIVERY) { order.setDispatchedAt(LocalDateTime.now()); }
 
         if (status == OrderStatus.DELIVERED) {
 
@@ -489,6 +490,19 @@ public class OrderService {
      * own order, while staff can cancel any order.
      */
     @Transactional
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 15000)
+    public void autoConfirmStaleOrders() {
+        java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusSeconds(60);
+        java.util.List<Order> staleOrders = repository.findByOrderStatusAndOrderDateBefore(OrderStatus.PENDING_CONFIRMATION, cutoff);
+        for (Order order : staleOrders) {
+            try {
+                updateOrderStatus(order.getId(), OrderStatus.CONFIRMED);
+            } catch (Exception ex) {
+                // Skip this order and continue the sweep - one bad order should not block others.
+            }
+        }
+    }
+
     public Order cancelOrder(Long orderId, Long callerCustomerId, boolean isAdmin) {
 
         Order order = repository.findById(orderId)

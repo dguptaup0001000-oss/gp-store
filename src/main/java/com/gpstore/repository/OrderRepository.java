@@ -13,6 +13,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     List<Order> findByCustomerId(Long customerId);
 
+    List<Order> findByOrderStatusAndOrderDateBefore(com.gpstore.enums.OrderStatus status, java.time.LocalDateTime cutoff);
+
     List<Order> findByCustomerIdOrderByOrderDateDesc(Long customerId);
 
     /**

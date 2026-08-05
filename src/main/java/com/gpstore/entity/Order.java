@@ -61,6 +61,7 @@ private OrderStatus orderStatus;
 private PaymentStatus paymentStatus;
 
     private LocalDateTime orderDate;
+    private LocalDateTime dispatchedAt;
 
     private Boolean active;
 
@@ -165,6 +166,14 @@ public void setTotalAmount(BigDecimal totalAmount) {
 
     public void setOrderDate(LocalDateTime orderDate) {
         this.orderDate = orderDate;
+    }
+
+    public LocalDateTime getDispatchedAt() {
+        return dispatchedAt;
+    }
+
+    public void setDispatchedAt(LocalDateTime dispatchedAt) {
+        this.dispatchedAt = dispatchedAt;
     }
 
     public Boolean getActive() {
