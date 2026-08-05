@@ -81,7 +81,7 @@ class OrderConfirmationScreen extends StatelessWidget {
 
                 const SizedBox(height: 24),
                 TextButton(
-                  onPressed: () => context.go('/'),
+                  onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
                   child: const Text('Continue Shopping'),
                 ),
               ],
