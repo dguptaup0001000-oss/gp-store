@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'otp_providers.dart';
 
+import '../../../core/theme/app_theme.dart';
+
 class OtpLoginScreen extends ConsumerStatefulWidget {
   const OtpLoginScreen({super.key});
 
@@ -71,6 +73,18 @@ class _OtpLoginScreenState extends ConsumerState<OtpLoginScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                CircleAvatar(
+                  radius: 36,
+                  backgroundColor: AppColors.primary,
+                  child: const Text('GP', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800)),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'GP-Store',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(color: AppColors.primary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 28),
                 if (isPhoneStep || isSendingOtp) ...[
                   Text(
                     'Log in with mobile number',
