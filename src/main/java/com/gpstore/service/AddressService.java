@@ -17,6 +17,7 @@ public class AddressService {
     }
 
     public Address save(Address address) {
+        applyDeliveryZone(address);
         return repository.save(address);
     }
 
@@ -66,7 +67,8 @@ public class AddressService {
     address.setLongitude(updatedAddress.getLongitude());
     address.setDefaultAddress(updatedAddress.getDefaultAddress());
 
-    return repository.save(address);
+    applyDeliveryZone(address);
+        return repository.save(address);
 }
 public void deleteAddress(Long id) {
     if (!repository.existsById(id)) {
@@ -84,4 +86,18 @@ public void deleteAddress(Long id) {
                 "This address is used in a past order and can't be deleted");
     }
 }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.gpstore.util.DeliveryZoneCalculator zoneCalculator;
+
+    private void applyDeliveryZone(Address address) {
+        if (address.getLatitude() == null || address.getLongitude() == null) return;
+        double lat = address.getLatitude();
+        double lon = address.getLongitude();
+        address.setDeliveryZone(zoneCalculator.zone(lat, lon));
+        address.setDeliveryRing(zoneCalculator.ring(lat, lon));
+        address.setDeliverySubzone(zoneCalculator.subzone(lat, lon));
+        address.setDistanceFromStoreKm(zoneCalculator.distanceKm(lat, lon));
+        address.setBearingFromStore(zoneCalculator.bearing(lat, lon));
+    }
 }

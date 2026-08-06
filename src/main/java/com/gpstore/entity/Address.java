@@ -166,4 +166,30 @@ public class Address {
     public void setLongitude(Double longitude) {
         this.longitude = longitude;
     }
+
+    // Delivery routing — computed from coordinates, see DeliveryZoneCalculator
+    private Integer deliveryZone;
+
+    private String deliveryRing;
+
+    private String deliverySubzone;
+
+    private Double distanceFromStoreKm;
+
+    private Double bearingFromStore;
+
+    public Integer getDeliveryZone() { return deliveryZone; }
+    public void setDeliveryZone(Integer deliveryZone) { this.deliveryZone = deliveryZone; }
+
+    public String getDeliveryRing() { return deliveryRing; }
+    public void setDeliveryRing(String deliveryRing) { this.deliveryRing = deliveryRing; }
+
+    public String getDeliverySubzone() { return deliverySubzone; }
+    public void setDeliverySubzone(String deliverySubzone) { this.deliverySubzone = deliverySubzone; }
+
+    public Double getDistanceFromStoreKm() { return distanceFromStoreKm; }
+    public void setDistanceFromStoreKm(Double distanceFromStoreKm) { this.distanceFromStoreKm = distanceFromStoreKm; }
+
+    public Double getBearingFromStore() { return bearingFromStore; }
+    public void setBearingFromStore(Double bearingFromStore) { this.bearingFromStore = bearingFromStore; }
 }
