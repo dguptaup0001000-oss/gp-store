@@ -132,6 +132,18 @@ class _CartItemTile extends ConsumerWidget {
                   children: [
                     Text('₹${item.totalPrice.toStringAsFixed(0)}',
                         style: const TextStyle(fontWeight: FontWeight.w700)),
+                    if (item.mrp != null && item.mrp! > item.price)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Text(
+                          '₹${(item.mrp! * item.quantity).toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                            decoration: TextDecoration.lineThrough,
+                          ),
+                        ),
+                      ),
                     const Spacer(),
                     _QuantityStepper(item: item),
                   ],
@@ -204,6 +216,10 @@ class _CartSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final savings = cart.items.fold<double>(0, (sum, item) =>
+        item.mrp != null && item.mrp! > item.price
+            ? sum + (item.mrp! - item.price) * item.quantity
+            : sum);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -213,7 +229,17 @@ class _CartSummary extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('${cart.totalItems} items', style: Theme.of(context).textTheme.bodyMedium),
+                Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${cart.totalItems} items', style: Theme.of(context).textTheme.bodyMedium),
+                      if (savings > 0)
+                        Text(
+                          'You saved ₹${savings.toStringAsFixed(0)}',
+                          style: const TextStyle(color: AppColors.success, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                    ],
+                  ),
                 Text('₹${cart.totalAmount.toStringAsFixed(0)}',
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
               ],

@@ -7,6 +7,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../reviews/presentation/product_reviews_section.dart';
 import '../domain/product_models.dart';
+import '../../wishlist/presentation/wishlist_providers.dart';
 import 'products_providers.dart';
 
 class ProductDetailScreen extends ConsumerStatefulWidget {
@@ -61,7 +62,23 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     final isInStock = variant?.available ?? false;
 
     return Scaffold(
-      appBar: AppBar(),
+      appBar: AppBar(
+        actions: [
+          Consumer(
+            builder: (context, ref, _) {
+              final isWishlisted = ref.watch(wishlistControllerProvider.notifier).isWishlisted(product.id);
+              return IconButton(
+                icon: Icon(
+                  isWishlisted ? Icons.favorite : Icons.favorite_border,
+                  color: isWishlisted ? AppColors.error : null,
+                ),
+                tooltip: isWishlisted ? 'Remove from wishlist' : 'Add to wishlist',
+                onPressed: () => ref.read(wishlistControllerProvider.notifier).toggle(product.id),
+              );
+            },
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Column(
           children: [

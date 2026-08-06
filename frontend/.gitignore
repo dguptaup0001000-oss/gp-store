@@ -103,3 +103,9 @@ android/app/google-services.json
 
 # Environment secrets - never commit real backend URLs/keys if you add any
 .env
+
+# Generated code (freezed/json_serializable) - regenerate with:
+# dart run build_runner build --delete-conflicting-outputs
+*.freezed.dart
+*.g.dart
+**/android/**/GeneratedPluginRegistrant.java
