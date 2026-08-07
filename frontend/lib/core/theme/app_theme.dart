@@ -10,7 +10,7 @@ class AppColors {
 
   static const primary = Color(0xFF2563EB); // royal blue
   static const secondary = Color(0xFFF59E0B); // amber accent
-  static const background = Color(0xFFFFFFFF);
+  static const background = Color(0xFFEAF3FB);
   static const cardBackground = Color(0xFFF5F7FA); // soft cool grey
   static const error = Color(0xFFD32F2F);
   static const success = Color(0xFF16A34A); // status semantics only, not brand

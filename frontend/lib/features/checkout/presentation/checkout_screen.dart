@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../address/domain/address_models.dart';
 import '../../address/presentation/address_list_screen.dart';
+import '../../address/presentation/address_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../domain/checkout_models.dart';
@@ -26,6 +27,26 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   bool _isLoadingPreview = false;
   bool _isPlacingOrder = false;
   String? _previewError;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _autoSelectAddress());
+  }
+
+  /// Pre-fills the saved address so the user doesn't have to pick one every
+  /// time. They can still tap "Change address" to override it.
+  Future<void> _autoSelectAddress() async {
+    if (_selectedAddress != null) return;
+    try {
+      final addresses = await ref.read(myAddressesProvider.future);
+      if (!mounted || addresses.isEmpty) return;
+      setState(() => _selectedAddress = addresses.first);
+      _fetchPreview();
+    } catch (_) {
+      // Fall back to manual selection if the list can't be loaded.
+    }
+  }
 
   @override
   void dispose() {
