@@ -36,6 +36,9 @@ permissions:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -82,10 +85,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: frontend/build/app/outputs/flutter-apk/app-release.apk
 
   build-and-deploy-web:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     # Only deploy the LIVE site from main - a PR branch's preview build
     # still gets built and tested above, it just doesn't overwrite the
     # real public site.
@@ -141,7 +147,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: build/web
+          path: frontend/build/web
 
       - name: Deploy to GitHub Pages
         id: deployment
