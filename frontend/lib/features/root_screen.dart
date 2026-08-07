@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'auth/presentation/auth_providers.dart';
 import 'delivery/presentation/delivery_dashboard_screen.dart';
-import 'home/presentation/home_screen.dart';
+import 'customer_shell.dart';
 import 'profile/presentation/profile_providers.dart';
 
 /// Decides which "home" a logged-in user actually sees. Deliberately reads
@@ -49,7 +49,7 @@ class RootScreen extends ConsumerWidget {
         if (profile.role == 'DELIVERY_BOY') {
           return const DeliveryDashboardScreen();
         }
-        return const HomeScreen();
+        return const CustomerShell();
       },
     );
   }

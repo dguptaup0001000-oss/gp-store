@@ -83,5 +83,5 @@ flutter_launcher_icons:
   min_sdk_android: 21
   # Matches the placeholder vector's green - update if your real logo uses a
   # different brand color, this only affects the adaptive icon background.
-  adaptive_icon_background: "#1DB954"
+  adaptive_icon_background: "#1F4ED8"
   adaptive_icon_foreground: "assets/icon/icon.png"

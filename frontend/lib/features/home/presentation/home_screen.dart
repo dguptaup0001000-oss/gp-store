@@ -16,6 +16,9 @@ import '../../profile/presentation/profile_screen.dart';
 import '../../../shared/widgets/categories_row.dart';
 import '../../../shared/widgets/offers_banner.dart';
 import '../../../shared/widgets/brands_row.dart';
+import '../../../shared/widgets/category_tabs_bar.dart';
+import '../../../shared/widgets/bestsellers_section.dart';
+import '../../../shared/widgets/buy_by_brand_banner.dart';
 import '../../../shared/widgets/horizontal_product_section.dart';
 import '../../../shared/widgets/see_all_products_screen.dart';
 
@@ -128,6 +131,15 @@ class HomeScreen extends ConsumerWidget {
             ),
 
             categoriesAsync.when(
+              loading: () => const SizedBox.shrink(),
+              error: (e, s) => const SizedBox.shrink(),
+              data: (categories) => Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: CategoryTabsBar(categories: categories),
+              ),
+            ),
+
+            categoriesAsync.when(
               loading: () => const SizedBox(height: 96, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
               error: (e, s) => const SizedBox.shrink(),
               data: (categories) => Padding(
@@ -159,6 +171,18 @@ class HomeScreen extends ConsumerWidget {
                 padding: const EdgeInsets.only(top: 16),
                 child: OffersBanner(offers: offers),
               ),
+            ),
+
+            categoriesAsync.when(
+              loading: () => const SizedBox.shrink(),
+              error: (e, s) => const SizedBox.shrink(),
+              data: (categories) => BestsellersSection(categories: categories),
+            ),
+
+            brandsAsync.when(
+              loading: () => const SizedBox.shrink(),
+              error: (e, s) => const SizedBox.shrink(),
+              data: (brands) => BuyByBrandBanner(brands: brands),
             ),
 
             if (isLoggedIn)
