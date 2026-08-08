@@ -152,7 +152,7 @@ public class CouponService {
 
             if (coupon.getMaxDiscountAmount() != null
                     && discount.compareTo(coupon.getMaxDiscountAmount()) > 0) {
-                discount = coupon.getMaxDiscountAmount();
+                discount = coupon.getMaxDiscountAmount().setScale(2, RoundingMode.HALF_UP);
             }
         }
 
