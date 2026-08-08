@@ -61,6 +61,7 @@ jobs:
           DB_PASSWORD: gpstore_test_password
           JWT_SECRET: ci-test-secret-not-for-real-use-1234567890123456789012345
           DDL_AUTO: update
+          FLYWAY_ENABLED: 'false'
         run: ./mvnw -B clean verify
 
       - name: Upload test results
