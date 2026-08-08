@@ -35,7 +35,7 @@ public class ProductService {
 
     // Save Product - evicts the cached listing so a new/changed product shows
     // up immediately instead of customers seeing a stale catalog.
-    @CacheEvict(value = "products", allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts"}, allEntries = true)
     public Product saveProduct(Product product) {
         return productRepository.save(product);
     }
@@ -70,6 +70,7 @@ public class ProductService {
     }
 
     /** Category browsing - the other half of product discovery alongside search. */
+    @Cacheable("categoryProducts")
     public Page<Product> browseByCategory(Long categoryId, Pageable pageable) {
         return productRepository.findByCategoryIdAndActiveTrue(categoryId, pageable);
     }
@@ -89,11 +90,13 @@ public class ProductService {
     }
 
     /** Real "New Arrivals" - sorted by actual creation time, not fabricated. */
+    @Cacheable("newArrivals")
     public Page<Product> getNewArrivals(Pageable pageable) {
         return productRepository.findByActiveTrueOrderByCreatedAtDesc(pageable);
     }
 
     /** Only brands with at least one active product - guaranteed by the underlying GROUP BY query. */
+    @Cacheable("brands")
     public List<com.gpstore.dto.response.BrandSummary> getBrandsWithCounts() {
         return productRepository.findBrandsWithProductCounts().stream()
                 .map(row -> new com.gpstore.dto.response.BrandSummary((String) row[0], (Long) row[1]))
@@ -227,7 +230,7 @@ public class ProductService {
     }
 
     /** Didn't exist before - a product could be created but never edited afterward. */
-    @CacheEvict(value = "products", allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts"}, allEntries = true)
     public Product update(Long id, Product updated) {
         Product existing = getByIdOrThrow(id);
 
@@ -245,7 +248,7 @@ public class ProductService {
      * product, or fail on the FK constraint. Deactivating just stops it
      * showing up to customers.
      */
-    @CacheEvict(value = "products", allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts"}, allEntries = true)
     public void deactivate(Long id) {
         Product product = getByIdOrThrow(id);
         product.setActive(false);
