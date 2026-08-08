@@ -48,7 +48,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
         boolean isRateLimited = path.equals("/api/auth/login")
                 || path.equals("/api/auth/register")
                 || path.equals("/api/auth/otp/send")
-                || path.equals("/api/auth/otp/verify");
+                || path.equals("/api/auth/otp/verify")
+                // Order placement and payment initiation are the two write
+                // paths a spike hammers hardest - impatient double-taps and
+                // mobile client retry-on-timeout both replay the same
+                // request. This doesn't replace the DB-level correctness
+                // guards (row locks, unique constraints) already in place
+                // for those - it just stops one client from burning
+                // capacity that legitimate concurrent shoppers need.
+                || path.equals("/api/orders/place")
+                || path.equals("/api/payments");
 
         if (!isRateLimited) {
             filterChain.doFilter(request, response);
