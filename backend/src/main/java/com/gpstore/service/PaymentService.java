@@ -146,7 +146,18 @@ public class PaymentService {
                 ? PaymentStatus.COD_PENDING
                 : PaymentStatus.PENDING);
 
-        Payment saved = paymentRepository.save(payment);
+        // The findByOrderId check above has a race window under concurrent
+        // requests for the same order (double-tap, client retry-on-timeout).
+        // uq_payments_order_id (V4 migration) is the real backstop - if two
+        // requests both pass the check above, only one save() here succeeds;
+        // the other hits this constraint violation and gets a clean 409
+        // instead of a raw 500.
+        Payment saved;
+        try {
+            saved = paymentRepository.save(payment);
+        } catch (DataIntegrityViolationException ex) {
+            throw new ConflictException("A payment already exists for this order");
+        }
 
         String upiLink = method == PaymentMethod.UPI
                 ? upiPaymentService.generatePaymentLink(order.getOrderNumber(), order.getTotalAmount())
