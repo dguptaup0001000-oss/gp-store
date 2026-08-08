@@ -14,6 +14,9 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
 
     # A REAL Postgres, provided by GitHub Actions - this is exactly what
     # Termux couldn't give us, and it's why BackendApplicationTests.contextLoads
@@ -97,7 +100,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./backend
+          file: ./backend/Dockerfile
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:latest
