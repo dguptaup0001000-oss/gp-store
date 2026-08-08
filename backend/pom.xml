@@ -90,6 +90,28 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Coordinates @Scheduled jobs across multiple app instances - without
+             this, running more than one backend instance means every instance
+             fires every scheduled job (payment expiry, batching, etc.)
+             redundantly and simultaneously. See config.SchedulerLockConfig and
+             db/migration/V3__add_shedlock_table.sql.
+             NOTE: version pinned from general knowledge, not verified live
+             against Maven Central (no network access when this was written) -
+             if `mvn compile` can't resolve it, check
+             https://mvnrepository.com/artifact/net.javacrumbs.shedlock/shedlock-spring
+             for the current release compatible with Spring Boot 3.5.x and
+             adjust both version numbers below to match. -->
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-spring</artifactId>
+            <version>5.13.0</version>
+        </dependency>
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-provider-jdbc-template</artifactId>
+            <version>5.13.0</version>
+        </dependency>
+
         <!-- Real push notifications (order status updates to customers, new
              assignment alerts to delivery partners) via Firebase Cloud
              Messaging - the actual provider integration NotificationService

@@ -63,4 +63,24 @@ public class JwtService {
             return false;
         }
     }
+
+    /**
+     * Verifies the signature and parses claims exactly ONCE, returning them
+     * (or null if invalid/expired/malformed) for the caller to read email/
+     * customerId/role from directly. JwtFilter previously called
+     * isTokenValid() + extractEmail() + extractCustomerId() + extractRole()
+     * on every authenticated request - each one independently re-running the
+     * full HMAC signature verification via parseClaimsJws, i.e. 4x the actual
+     * cryptographic work needed per request for no benefit. This is the
+     * preferred entry point for anything that needs more than one claim from
+     * the same token; the individual extract-star/isTokenValid methods above are
+     * left as-is for any single-claim caller that doesn't need this.
+     */
+    public Claims parseClaimsIfValid(String token) {
+        try {
+            return extractClaims(token);
+        } catch (Exception e) {
+            return null;
+        }
+    }
 }

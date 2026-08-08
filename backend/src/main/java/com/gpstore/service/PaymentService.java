@@ -51,8 +51,19 @@ public class PaymentService {
      * window - otherwise an abandoned checkout leaves a payment sitting
      * PENDING forever with no resolution. Runs every 5 minutes; doesn't touch
      * the order itself (a customer can still retry payment separately).
+     *
+     * @SchedulerLock ensures only one app instance actually runs this on any
+     * given tick, once more than one instance exists - see
+     * config.SchedulerLockConfig. lockAtMostFor is a safety ceiling (releases
+     * the lock even if this instance crashed mid-run); lockAtLeastFor stops a
+     * second instance from re-running it moments later on a fast, mostly-empty
+     * pass.
      */
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 5 * 60 * 1000)
+    @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(
+            name = "expireStalePendingUpiPayments",
+            lockAtMostFor = "10m",
+            lockAtLeastFor = "1m")
     @Transactional
     public void expireStalePendingUpiPayments() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(upiTimeoutMinutes);
@@ -64,8 +75,20 @@ public class PaymentService {
         for (Payment payment : stale) {
             payment.setPaymentStatus(PaymentStatus.FAILED);
             paymentRepository.save(payment);
+
+            // Give back the stock reserved for this order at checkout time.
+            // Previously missing - an abandoned/never-confirmed UPI payment
+            // permanently cost the store that stock, since only the Payment
+            // record was ever touched here, never the Order's inventory.
+            // Reuses the exact same locked restore path cancelOrder() uses,
+            // so a concurrent fresh checkout on the same variant can't race
+            // this into an inconsistent count.
+            if (payment.getOrder() != null) {
+                orderService.restoreInventoryForOrder(payment.getOrder().getId());
+            }
+
             auditLogService.log("UPI_PAYMENT_EXPIRED", "Payment", payment.getId(),
-                    "no confirmation within " + upiTimeoutMinutes + " minutes");
+                    "no confirmation within " + upiTimeoutMinutes + " minutes; inventory restored");
         }
     }
 

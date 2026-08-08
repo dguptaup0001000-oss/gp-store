@@ -31,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class OrderService {
@@ -51,6 +52,7 @@ public class OrderService {
     private final TaxService taxService;
     private final com.gpstore.repository.DeliveryRepository deliveryRepository;
     private final DeliveryService deliveryService;
+    private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
 
     public OrderService(
             OrderRepository repository,
@@ -73,7 +75,8 @@ public class OrderService {
             // and PaymentService already depended on OrderService - without
             // @Lazy here, Spring would fail to start the whole application
             // at boot, not just this feature.
-            @org.springframework.context.annotation.Lazy DeliveryService deliveryService) {
+            @org.springframework.context.annotation.Lazy DeliveryService deliveryService,
+            com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository) {
 
         this.repository = repository;
         this.orderItemRepository = orderItemRepository;
@@ -91,6 +94,7 @@ public class OrderService {
         this.taxService = taxService;
         this.deliveryRepository = deliveryRepository;
         this.deliveryService = deliveryService;
+        this.idempotencyRecordRepository = idempotencyRecordRepository;
     }
 
     public Order save(Order order) {
@@ -198,12 +202,65 @@ public class OrderService {
      * customerId always comes from the authenticated JWT (see OrderController),
      * never from the request body - this is what closes the IDOR that let any
      * caller place orders as any customer.
+     *
+     * idempotencyKey is optional (null/blank if the client didn't send one -
+     * older clients simply get the old behavior, no breaking change). When
+     * present, a repeat call with the same (customerId, idempotencyKey) pair
+     * returns the original order instead of creating a second one - this is
+     * what stops a double-tap on Place Order, or a client retry after a
+     * network timeout, from creating two real orders for one purchase.
      */
     @Transactional
-    public PlaceOrderResponse placeOrder(PlaceOrderRequest request, Long customerId) {
+    public PlaceOrderResponse placeOrder(PlaceOrderRequest request, Long customerId, String idempotencyKey) {
 
         if (request == null) {
             throw new BadRequestException("Request cannot be null");
+        }
+
+        // Idempotency check. The unique DB constraint on
+        // (customer_id, idempotency_key) - not this lookup alone - is what
+        // actually makes this race-safe: if two requests carrying the same key
+        // arrive at the same instant, both may pass this findBy... check before
+        // either inserts, but only one of the two inserts below can succeed.
+        // The loser reports "already processing" rather than silently creating
+        // a duplicate order.
+        boolean hasIdempotencyKey = idempotencyKey != null && !idempotencyKey.isBlank();
+        com.gpstore.entity.IdempotencyRecord idempotencyRecord = null;
+
+        if (hasIdempotencyKey) {
+            Optional<com.gpstore.entity.IdempotencyRecord> existing =
+                    idempotencyRecordRepository.findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey);
+
+            if (existing.isPresent()) {
+                com.gpstore.entity.IdempotencyRecord record = existing.get();
+                if (record.getOrderId() != null) {
+                    // Genuine replay: same checkout attempt, already completed.
+                    // Return the original result rather than processing again.
+                    return buildReplayResponse(record.getOrderId());
+                }
+                // A record exists with no order yet - a duplicate is either
+                // still being processed right now, or a prior attempt crashed
+                // before completing (which should have rolled this row back
+                // too, since it's inserted inside the same transaction as the
+                // rest of checkout - fail safe rather than risk a double order
+                // if that assumption is ever wrong).
+                throw new ConflictException(
+                        "This order is already being processed. Please wait a moment and check your order history before trying again.");
+            }
+
+            idempotencyRecord = new com.gpstore.entity.IdempotencyRecord();
+            idempotencyRecord.setCustomerId(customerId);
+            idempotencyRecord.setIdempotencyKey(idempotencyKey);
+            idempotencyRecord.setCreatedAt(LocalDateTime.now());
+            try {
+                idempotencyRecord = idempotencyRecordRepository.saveAndFlush(idempotencyRecord);
+            } catch (org.springframework.dao.DataIntegrityViolationException raceLost) {
+                // Another request with the same key won the race and inserted
+                // first. Report the same "already processing" message rather
+                // than proceeding - we must not create a second order here.
+                throw new ConflictException(
+                        "This order is already being processed. Please wait a moment and check your order history before trying again.");
+            }
         }
 
         Customer customer = customerService.getById(customerId);
@@ -235,6 +292,20 @@ public class OrderService {
         if (cartItems == null || cartItems.isEmpty()) {
             throw new BadRequestException("Cart is empty");
         }
+
+        // Deadlock prevention: always acquire inventory locks in the same
+        // global order (ascending variant ID), regardless of the order items
+        // happened to be added to this particular cart. Without this, two
+        // customers checking out overlapping products in opposite cart order
+        // (A: product1 then product2; B: product2 then product1) can each hold
+        // one lock while waiting on the other's - a classic deadlock. Sorting
+        // here means every checkout requests locks in the same order, so that
+        // situation can't occur. Reassigning cartItems (rather than a copy) is
+        // safe - every later use in this method is positional/aggregate, none
+        // depend on original cart insertion order.
+        cartItems = cartItems.stream()
+                .sorted(java.util.Comparator.comparing(ci -> ci.getProductVariant().getId()))
+                .collect(java.util.stream.Collectors.toList());
 
         // Inventory validation + row lock. Locking here (and holding the lock for
         // the rest of this transaction) is what prevents two concurrent checkouts
@@ -333,6 +404,16 @@ public class OrderService {
 
         order = repository.save(order);
 
+        if (idempotencyRecord != null) {
+            // Marks this key as completed, pointing at the real order - any
+            // repeat request with the same key from here on replays this
+            // result instead of running checkout again.
+            idempotencyRecord.setOrderId(order.getId());
+            idempotencyRecordRepository.save(idempotencyRecord);
+        }
+
+        List<OrderItem> newOrderItems = new ArrayList<>();
+
         for (CartItem item : cartItems) {
 
             OrderItem orderItem = new OrderItem();
@@ -346,8 +427,13 @@ public class OrderService {
             orderItem.setGstRate(taxService.resolveGstRate(item.getProductVariant()));
             orderItem.setActive(true);
 
-            orderItemRepository.save(orderItem);
+            newOrderItems.add(orderItem);
         }
+        // One batched round-trip instead of one INSERT per cart item (see
+        // hibernate.jdbc.batch_size / order_inserts in application.properties -
+        // without those, saveAll alone doesn't actually batch anything, it
+        // just still issues N individual statements in a loop under the hood).
+        orderItemRepository.saveAll(newOrderItems);
 
         // Reduce inventory using the rows we already locked above.
         for (int i = 0; i < cartItems.size(); i++) {
@@ -372,7 +458,28 @@ public class OrderService {
         // (see DeliveryService.autoAssignBestEffort's doc comment) - if no
         // delivery partner happens to be available right now, the order
         // still succeeds; it just needs manual assignment afterward.
-        deliveryService.autoAssignBestEffort(order.getId());
+        //
+        // Deferred to run AFTER this transaction commits, not inline here.
+        // autoAssignBestEffort runs in its own REQUIRES_NEW transaction, which
+        // starts a fresh DB connection - if called synchronously mid-checkout
+        // (as before), that fresh transaction could run BEFORE this order's
+        // INSERT has committed, meaning it might not see the very order it's
+        // trying to assign. Registering it as an after-commit callback
+        // guarantees the order is durably saved and visible first.
+        final Long placedOrderId = order.getId();
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            deliveryService.autoAssignBestEffort(placedOrderId);
+                        }
+                    });
+        } else {
+            // Defensive fallback only - shouldn't happen inside an @Transactional
+            // method, but never silently drop the assignment attempt if it does.
+            deliveryService.autoAssignBestEffort(placedOrderId);
+        }
 
         PlaceOrderResponse response = new PlaceOrderResponse();
 
@@ -525,6 +632,13 @@ public class OrderService {
             paymentRepository.save(payment);
         }
 
+        // Give back the stock that was reserved for this order at checkout time.
+        // Previously missing entirely - a cancelled order permanently lost its
+        // stock from the count, understating real available inventory forever.
+        // Row-locked the same way placeOrder() locks it, so a cancellation
+        // racing a fresh checkout on the same variant can't corrupt the count.
+        restoreInventoryForOrder(orderId);
+
         Order savedOrder = repository.save(order);
         notificationService.notifyOrderStatusChange(savedOrder, savedOrder.getOrderStatus());
 
@@ -537,5 +651,50 @@ public class OrderService {
         auditLogService.log("ORDER_CANCELLED", "Order", savedOrder.getId(),
                 "cancelled by " + (isAdmin ? "admin/staff" : "customer"));
         return savedOrder;
+    }
+
+    /**
+     * Rebuilds the same PlaceOrderResponse a completed checkout would have
+     * returned, for a repeat request carrying an Idempotency-Key that's
+     * already been fulfilled. Deliberately does not touch inventory, coupons,
+     * or the cart again - none of that should run a second time for the same
+     * checkout attempt.
+     */
+    private PlaceOrderResponse buildReplayResponse(Long orderId) {
+        Order order = repository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Order not found for a completed idempotency record - data inconsistency, contact support"));
+
+        PlaceOrderResponse response = new PlaceOrderResponse();
+        response.setSuccess(true);
+        response.setOrderId(order.getId());
+        response.setOrderNumber(order.getOrderNumber());
+        response.setMessage("Order already placed successfully.");
+        return response;
+    }
+
+    /**
+     * Adds back every line item's quantity to its variant's stock count -
+     * the exact inverse of the decrement placeOrder() does at checkout.
+     * Public and reused by PaymentService.expireStalePendingUpiPayments():
+     * an order whose payment never confirmed has exactly the same "give the
+     * stock back" need as an explicitly cancelled one. Locks each inventory
+     * row the same way placeOrder() does, so this can't race a concurrent
+     * checkout on the same variant into an inconsistent count.
+     */
+    @Transactional
+    public void restoreInventoryForOrder(Long orderId) {
+        List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
+        for (OrderItem item : items) {
+            if (item.getProductVariant() == null) {
+                continue;
+            }
+            Inventory inventory = inventoryService.getByProductVariantForUpdate(item.getProductVariant().getId());
+            if (inventory == null || item.getQuantity() == null) {
+                continue;
+            }
+            inventory.setStock(inventory.getStock() + item.getQuantity());
+            inventoryService.save(inventory);
+        }
     }
 }

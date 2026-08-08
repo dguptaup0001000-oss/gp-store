@@ -46,4 +46,13 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     @Query("select oi.productVariant.product.id as productId, sum(oi.quantity) as totalSold " +
             "from OrderItem oi group by oi.productVariant.product.id")
     List<Object[]> findTotalUnitsSoldByProduct();
+
+    /**
+     * Every line item on one order - used to restore inventory when an order
+     * is cancelled or its payment expires unconfirmed (see OrderService.cancelOrder
+     * and PaymentService.expireStalePendingUpiPayments). Without this, stock
+     * decremented at checkout time was never given back, permanently
+     * understating real available inventory.
+     */
+    List<OrderItem> findByOrderId(Long orderId);
 }

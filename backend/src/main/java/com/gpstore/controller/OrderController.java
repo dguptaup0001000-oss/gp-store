@@ -27,9 +27,18 @@ public class OrderController {
     }
 
     // Place a new order for the logged-in customer.
+    //
+    // Idempotency-Key is optional (older/not-yet-updated clients simply don't
+    // send it, and behave exactly as before) but strongly recommended: the
+    // client should generate one UUID per checkout attempt and re-send that
+    // same value on any retry of that attempt (e.g. after a network timeout,
+    // or a double-tap on Place Order). With the key, a retried request
+    // returns the original order instead of creating a second, separate one.
     @PostMapping("/place")
-    public PlaceOrderResponse placeOrder(@Valid @RequestBody PlaceOrderRequest request) {
-        return orderService.placeOrder(request, currentUser.customerId());
+    public PlaceOrderResponse placeOrder(
+            @Valid @RequestBody PlaceOrderRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        return orderService.placeOrder(request, currentUser.customerId(), idempotencyKey);
     }
 
     // Read-only preview of what this order would cost - shows delivery fee

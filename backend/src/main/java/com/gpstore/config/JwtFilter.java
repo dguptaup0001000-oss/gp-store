@@ -38,11 +38,19 @@ public class JwtFilter extends OncePerRequestFilter {
 
             String token = header.substring(7);
 
-            if (jwtService.isTokenValid(token)) {
+            // Parses and signature-verifies the token exactly once (see
+            // JwtService.parseClaimsIfValid's doc comment) - previously this
+            // called isTokenValid() + extractEmail() + extractCustomerId() +
+            // extractRole(), each independently re-verifying the same
+            // signature, 4x the real cryptographic work per request for
+            // nothing.
+            io.jsonwebtoken.Claims claims = jwtService.parseClaimsIfValid(token);
 
-                String email = jwtService.extractEmail(token);
-                Long customerId = jwtService.extractCustomerId(token);
-                String role = jwtService.extractRole(token);
+            if (claims != null) {
+
+                String email = claims.getSubject();
+                Long customerId = claims.get("customerId", Long.class);
+                String role = claims.get("role", String.class);
 
                 AuthenticatedUser principal =
                         new AuthenticatedUser(customerId, email, role);
