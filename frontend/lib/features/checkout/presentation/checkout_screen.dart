@@ -9,6 +9,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../domain/checkout_models.dart';
 import 'checkout_providers.dart';
+import 'order_cancellation_countdown_screen.dart';
 import 'order_confirmation_screen.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
@@ -86,6 +87,28 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     } finally {
       if (mounted) setState(() => _isLoadingPreview = false);
     }
+  }
+
+  /// Shows the 30-second cancellation window (full order summary + product
+  /// list, countdown bar) before any order or payment is actually created.
+  /// Nothing is sent to the backend until this resolves true - cancelling
+  /// here is just closing a screen, no order ever existed to clean up.
+  Future<void> _confirmAndPlaceOrder() async {
+    final preview = _preview;
+    if (preview == null) return;
+    final cartItems = ref.read(cartControllerProvider).valueOrNull?.items ?? const [];
+
+    final confirmed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => OrderCancellationCountdownScreen(
+          preview: preview,
+          items: cartItems,
+        ),
+      ),
+    );
+
+    if (!mounted || confirmed != true) return;
+    _placeOrder();
   }
 
   Future<void> _placeOrder() async {
@@ -242,7 +265,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: FilledButton(
-                  onPressed: (_preview != null && _preview!.deliverable && !_isPlacingOrder) ? _placeOrder : null,
+                  onPressed: (_preview != null && _preview!.deliverable && !_isPlacingOrder) ? _confirmAndPlaceOrder : null,
                   child: _isPlacingOrder
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : Text(_preview != null ? 'Place Order - ₹${_preview!.estimatedTotal.toStringAsFixed(0)}' : 'Place Order'),

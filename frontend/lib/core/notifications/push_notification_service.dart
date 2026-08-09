@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../api/api_client.dart';
 
@@ -38,6 +39,10 @@ class PushNotificationService {
   StreamSubscription<RemoteMessage>? _foregroundSub;
   StreamSubscription<RemoteMessage>? _openedAppSub;
 
+  final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
+  bool _localNotificationsReady = false;
+
   /// Call once, right after login/session-restore succeeds (see
   /// main.dart's auth-state listener) - registers this device for push and
   /// starts listening for messages. Safe to call again on every login (a
@@ -69,9 +74,10 @@ class PushNotificationService {
       _tokenRefreshSub = messaging.onTokenRefresh.listen(_registerToken);
 
       await _foregroundSub?.cancel();
-      if (onForegroundMessage != null) {
-        _foregroundSub = FirebaseMessaging.onMessage.listen(onForegroundMessage);
-      }
+      _foregroundSub = FirebaseMessaging.onMessage.listen((message) {
+        _showLocalNotification(message);
+        onForegroundMessage?.call(message);
+      });
 
       await _openedAppSub?.cancel();
       if (onNotificationTap != null) {
@@ -92,6 +98,62 @@ class PushNotificationService {
       // configured on this build yet, etc.) block the app from being
       // usable - push is an enhancement, not a requirement to shop/deliver.
       debugPrint('Push notification setup failed (app continues normally): $e');
+    }
+  }
+
+  /// One-time setup: creates the Android notification channel (with sound)
+  /// and initializes the plugin. Must run before _showLocalNotification, or
+  /// the channel won't exist yet and the banner/sound won't fire.
+  Future<void> _initLocalNotifications() async {
+    if (_localNotificationsReady) return;
+
+    const androidSettings =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const initSettings = InitializationSettings(android: androidSettings);
+    await _localNotifications.initialize(initSettings);
+
+    const channel = AndroidNotificationChannel(
+      'gp_store_orders',
+      'Order updates',
+      description: 'Order status changes and delivery assignments',
+      importance: Importance.high,
+      playSound: true,
+    );
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
+
+    _localNotificationsReady = true;
+  }
+
+  /// FCM stays silent in the foreground on Android by design - this is what
+  /// makes it actually show a banner + play sound while the app is open.
+  Future<void> _showLocalNotification(RemoteMessage message) async {
+    final notification = message.notification;
+    if (notification == null) return;
+
+    try {
+      await _initLocalNotifications();
+
+      const androidDetails = AndroidNotificationDetails(
+        'gp_store_orders',
+        'Order updates',
+        channelDescription: 'Order status changes and delivery assignments',
+        importance: Importance.high,
+        priority: Priority.high,
+        playSound: true,
+      );
+      const details = NotificationDetails(android: androidDetails);
+
+      await _localNotifications.show(
+        message.hashCode,
+        notification.title,
+        notification.body,
+        details,
+      );
+    } catch (e) {
+      debugPrint('Failed to show local notification: $e');
     }
   }
 
