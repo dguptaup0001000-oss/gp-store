@@ -40,38 +40,38 @@ public class PaymentController {
 
     // Admin only (enforced in SecurityConfig).
     @GetMapping("/{id}")
-    public Optional<Payment> getPaymentById(@PathVariable Long id) {
+    public Optional<com.gpstore.dto.response.PaymentResponse> getPaymentById(@PathVariable Long id) {
         return paymentService.getPaymentById(id);
     }
 
     // Admin only (enforced in SecurityConfig).
     @GetMapping("/order/{orderId}")
-    public Optional<Payment> getPaymentByOrderId(@PathVariable Long orderId) {
+    public Optional<com.gpstore.dto.response.PaymentResponse> getPaymentByOrderId(@PathVariable Long orderId) {
         return paymentService.getPaymentByOrderId(orderId);
     }
 
     // Admin only (enforced in SecurityConfig).
     @GetMapping("/transaction/{transactionId}")
-    public Optional<Payment> getPaymentByTransactionId(@PathVariable String transactionId) {
+    public Optional<com.gpstore.dto.response.PaymentResponse> getPaymentByTransactionId(@PathVariable String transactionId) {
         return paymentService.getPaymentByTransactionId(transactionId);
     }
 
     // Admin only (enforced in SecurityConfig).
     @PutMapping("/order/{orderId}/refund")
     public com.gpstore.dto.response.PaymentResponse refundPayment(@PathVariable Long orderId) {
-        return com.gpstore.dto.response.PaymentResponse.from(paymentService.refundPayment(orderId));
+        return paymentService.refundPayment(orderId);
     }
 
     // Admin only (enforced in SecurityConfig).
     @PutMapping("/order/{orderId}/refund/complete")
     public com.gpstore.dto.response.PaymentResponse completeRefund(@PathVariable Long orderId) {
-        return com.gpstore.dto.response.PaymentResponse.from(paymentService.completeRefund(orderId));
+        return paymentService.completeRefund(orderId);
     }
 
     // Admin or delivery partner (enforced in SecurityConfig).
     @PutMapping("/order/{orderId}/cod/complete")
     public com.gpstore.dto.response.PaymentResponse completeCodPayment(@PathVariable Long orderId) {
-        return com.gpstore.dto.response.PaymentResponse.from(paymentService.completeCodPayment(orderId));
+        return paymentService.completeCodPayment(orderId);
     }
 
     // Admin only (enforced in SecurityConfig) - confirms a UPI payment
@@ -81,6 +81,6 @@ public class PaymentController {
     public com.gpstore.dto.response.PaymentResponse confirmUpiPayment(
             @PathVariable Long orderId,
             @RequestParam(required = false) String transactionId) {
-        return com.gpstore.dto.response.PaymentResponse.from(paymentService.confirmUpiPayment(orderId, transactionId));
+        return paymentService.confirmUpiPayment(orderId, transactionId);
     }
 }

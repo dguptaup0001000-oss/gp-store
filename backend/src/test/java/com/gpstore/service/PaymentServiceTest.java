@@ -3,6 +3,7 @@ package com.gpstore.service;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.Order;
 import com.gpstore.entity.Payment;
+import com.gpstore.dto.response.PaymentResponse;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.enums.PaymentMethod;
 import com.gpstore.enums.PaymentStatus;
@@ -47,9 +48,9 @@ class PaymentServiceTest {
         when(paymentRepository.findByOrderId(1L)).thenReturn(Optional.of(payment));
         when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        Payment result = paymentService.confirmUpiPayment(1L, "TXN123");
+        PaymentResponse result = paymentService.confirmUpiPayment(1L, "TXN123");
 
-        assertEquals(PaymentStatus.SUCCESS, result.getPaymentStatus());
+        assertEquals(PaymentStatus.SUCCESS.name(), result.getPaymentStatus());
         assertEquals("TXN123", result.getTransactionId());
     }
 
@@ -88,9 +89,9 @@ class PaymentServiceTest {
         when(paymentRepository.findByOrderId(2L)).thenReturn(Optional.of(payment));
         when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        Payment result = paymentService.completeCodPayment(2L);
+        PaymentResponse result = paymentService.completeCodPayment(2L);
 
-        assertEquals(PaymentStatus.COD_RECEIVED, result.getPaymentStatus());
+        assertEquals(PaymentStatus.COD_RECEIVED.name(), result.getPaymentStatus());
     }
 
     @Test
@@ -131,9 +132,9 @@ class PaymentServiceTest {
         when(paymentRepository.findByOrderId(5L)).thenReturn(Optional.of(payment));
         when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        Payment result = paymentService.refundPayment(5L);
+        PaymentResponse result = paymentService.refundPayment(5L);
 
-        assertEquals(PaymentStatus.REFUND_PENDING, result.getPaymentStatus());
+        assertEquals(PaymentStatus.REFUND_PENDING.name(), result.getPaymentStatus());
     }
 
     private Order orderWithStatus(Long id, OrderStatus status) {

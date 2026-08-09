@@ -166,22 +166,25 @@ public class PaymentService {
         return new PaymentInitiationResponse(saved, upiLink);
     }
 
-    public List<com.gpstore.dto.response.PaymentResponse> getAllPayments() {
+    @Transactional(readOnly = true)
+        public List<com.gpstore.dto.response.PaymentResponse> getAllPayments() {
         return paymentRepository.findAll().stream()
                 .map(com.gpstore.dto.response.PaymentResponse::from)
                 .toList();
     }
 
-    public Optional<Payment> getPaymentByOrderId(Long orderId) {
-        return paymentRepository.findByOrderId(orderId);
-    }
+    @Transactional(readOnly = true)
+        public Optional<com.gpstore.dto.response.PaymentResponse> getPaymentByOrderId(Long orderId) {
+            return paymentRepository.findByOrderId(orderId).map(com.gpstore.dto.response.PaymentResponse::from);
+        }
 
-    public Optional<Payment> getPaymentByTransactionId(String transactionId) {
-        return paymentRepository.findByTransactionId(transactionId);
-    }
+    @Transactional(readOnly = true)
+        public Optional<com.gpstore.dto.response.PaymentResponse> getPaymentByTransactionId(String transactionId) {
+            return paymentRepository.findByTransactionId(transactionId).map(com.gpstore.dto.response.PaymentResponse::from);
+        }
 
     @Transactional
-    public Payment refundPayment(Long orderId) {
+    public com.gpstore.dto.response.PaymentResponse refundPayment(Long orderId) {
 
         Payment payment = paymentRepository.findByOrderId(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
@@ -200,11 +203,11 @@ public class PaymentService {
         Payment saved = paymentRepository.save(payment);
         auditLogService.log("REFUND_INITIATED", "Payment", saved.getId(),
                 "orderId=" + orderId + ", amount=" + saved.getAmount());
-        return saved;
+        return com.gpstore.dto.response.PaymentResponse.from(saved);
     }
 
     @Transactional
-    public Payment completeRefund(Long orderId) {
+    public com.gpstore.dto.response.PaymentResponse completeRefund(Long orderId) {
 
         Payment payment = paymentRepository.findByOrderId(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
@@ -218,11 +221,11 @@ public class PaymentService {
         Payment saved = paymentRepository.save(payment);
         auditLogService.log("REFUND_COMPLETED", "Payment", saved.getId(),
                 "orderId=" + orderId + ", amount=" + saved.getAmount());
-        return saved;
+        return com.gpstore.dto.response.PaymentResponse.from(saved);
     }
 
     @Transactional
-    public Payment completeCodPayment(Long orderId) {
+    public com.gpstore.dto.response.PaymentResponse completeCodPayment(Long orderId) {
 
         Payment payment = paymentRepository.findByOrderId(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
@@ -242,7 +245,7 @@ public class PaymentService {
         advanceOrderIfStillPending(saved.getOrder());
         auditLogService.log("COD_PAYMENT_COLLECTED", "Payment", saved.getId(),
                 "orderId=" + orderId + ", amount=" + saved.getAmount());
-        return saved;
+        return com.gpstore.dto.response.PaymentResponse.from(saved);
     }
 
     /**
@@ -252,7 +255,7 @@ public class PaymentService {
      * Whoever checks the shop's UPI app/bank notification confirms it here.
      */
     @Transactional
-    public Payment confirmUpiPayment(Long orderId, String transactionId) {
+    public com.gpstore.dto.response.PaymentResponse confirmUpiPayment(Long orderId, String transactionId) {
 
         Payment payment = paymentRepository.findByOrderId(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
@@ -286,10 +289,11 @@ public class PaymentService {
         auditLogService.log("UPI_PAYMENT_CONFIRMED", "Payment", saved.getId(),
                 "orderId=" + orderId + ", amount=" + saved.getAmount()
                         + (transactionId != null ? ", txnId=" + transactionId : ""));
-        return saved;
+        return com.gpstore.dto.response.PaymentResponse.from(saved);
     }
 
-    public Optional<Payment> getPaymentById(Long id) {
-        return paymentRepository.findById(id);
+    @Transactional(readOnly = true)
+    public Optional<com.gpstore.dto.response.PaymentResponse> getPaymentById(Long id) {
+        return paymentRepository.findById(id).map(com.gpstore.dto.response.PaymentResponse::from);
     }
 }

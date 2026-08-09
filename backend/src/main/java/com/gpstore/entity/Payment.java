@@ -22,8 +22,8 @@ public class Payment {
     // LazyInitializationException on those three endpoints. Revisit alongside
     // a DTO refactor of those lookups (getAllPayments/refundPayment already
     // map to PaymentResponse and would be safe to convert independently).
-    @OneToOne
-    private Order order;
+    @OneToOne(fetch = FetchType.LAZY)
+        private Order order;
 
     private BigDecimal amount;
 

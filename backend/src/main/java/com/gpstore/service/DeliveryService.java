@@ -275,8 +275,8 @@ public class DeliveryService {
                 // acts if it's actually a still-pending COD payment - a UPI
                 // order's delivery completion must not be affected by this.
                 paymentService.getPaymentByOrderId(order.getId()).ifPresent(payment -> {
-                    if (payment.getPaymentMethod() == com.gpstore.enums.PaymentMethod.COD
-                            && payment.getPaymentStatus() == com.gpstore.enums.PaymentStatus.COD_PENDING) {
+                    if (com.gpstore.enums.PaymentMethod.COD.name().equals(payment.getPaymentMethod())
+                                    && com.gpstore.enums.PaymentStatus.COD_PENDING.name().equals(payment.getPaymentStatus())) {
                         paymentService.completeCodPayment(order.getId());
                     }
                 });
