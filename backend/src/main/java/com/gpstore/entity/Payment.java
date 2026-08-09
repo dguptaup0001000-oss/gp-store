@@ -15,6 +15,13 @@ public class Payment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // Deliberately left EAGER: PaymentController.getPaymentById()/
+    // getPaymentByOrderId()/getPaymentByTransactionId() all return raw
+    // Optional<Payment> with no @Transactional on the service methods, so
+    // Jackson serializes after the session closes - LAZY here throws
+    // LazyInitializationException on those three endpoints. Revisit alongside
+    // a DTO refactor of those lookups (getAllPayments/refundPayment already
+    // map to PaymentResponse and would be safe to convert independently).
     @OneToOne
     private Order order;
 

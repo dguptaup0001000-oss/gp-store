@@ -27,10 +27,17 @@ public class Order {
     // every order response. Controllers use an explicit DTO instead (see
     // OrderDetailResponse) for whatever customer info an order response
     // actually needs.
+    // Deliberately left EAGER: @JsonIgnore protects this from JSON serialization, but
+    // OrderService calls order.getCustomer() from non-@Transactional methods
+    // (getOwnedOrderDetail, getCustomerOrdersForAdmin), so LAZY would throw
+    // LazyInitializationException on business logic, not just JSON. Revisit if those
+    // service methods gain @Transactional.
     @ManyToOne
     @JsonIgnore
     private Customer customer;
 
+    // Deliberately left EAGER: OrderController exposes raw Order/List<Order> with no
+    // @Transactional (getAllOrders, updateOrderStatus). Revisit alongside a DTO refactor.
     @ManyToOne
     private Address address;
 

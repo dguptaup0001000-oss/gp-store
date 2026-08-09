@@ -17,7 +17,7 @@ public class Notification {
 
     // Hidden - this is always "me" (the caller viewing their own
     // notifications), no reason to renest their full profile here.
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JsonIgnore
     private Customer customer;
 
@@ -25,7 +25,7 @@ public class Notification {
 
     private String message;
 
-   @ManyToOne
+   @ManyToOne(fetch = FetchType.LAZY)
 @JoinColumn(name = "order_id")
 // Trimmed to essentials (id/orderNumber/status) rather than the full order
 // with all its items - a notification just needs enough to link back to

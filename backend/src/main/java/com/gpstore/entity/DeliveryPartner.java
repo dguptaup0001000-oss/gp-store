@@ -48,7 +48,7 @@ public class DeliveryPartner {
     // DeliveryPartner row alone was never a login identity, just a name on
     // a list. Hidden from JSON: this is an internal link, not something the
     // Flutter admin screens need to render.
-    @OneToOne
+    @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "account_customer_id")
     @JsonIgnore
     private Customer account;

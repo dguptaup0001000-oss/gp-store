@@ -26,6 +26,11 @@ public class DeliveryBatch {
 
     private String area;
 
+    // Deliberately left EAGER: DeliveryBatchController.getAll()/getByStatus()/
+    // save()/update() all return raw DeliveryBatch entities with no @Transactional
+    // on the service methods, so Jackson serializes after the session closes -
+    // LAZY here throws LazyInitializationException on those endpoints. Revisit
+    // alongside a DTO refactor of DeliveryBatchController, not in isolation.
     @ManyToOne
     private DeliveryPartner deliveryPartner;
 

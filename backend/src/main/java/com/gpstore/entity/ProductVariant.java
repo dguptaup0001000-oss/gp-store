@@ -23,6 +23,10 @@ public class ProductVariant {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // Deliberately left EAGER: @JsonBackReference protects this from JSON serialization,
+    // but OrderService.previewCheckout() calls variant.getProduct() without @Transactional,
+    // so LAZY would throw LazyInitializationException there. Revisit if that method gains
+    // @Transactional.
     @ManyToOne
 @JsonBackReference
 private Product product;

@@ -27,6 +27,9 @@ public class Product {
 
     private String brand;
 
+    // Deliberately left EAGER: ProductController exposes raw Product/List<Product>
+    // (getAllProducts, getAllForAdmin, searchProducts, updateProduct) with no @Transactional.
+    // Revisit alongside a DTO refactor of ProductController.
     @ManyToOne
     private Category category;
 

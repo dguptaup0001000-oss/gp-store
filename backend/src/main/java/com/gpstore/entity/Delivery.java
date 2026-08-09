@@ -12,6 +12,11 @@ public class Delivery {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // Deliberately left EAGER: DeliveryController exposes raw Delivery/List<Delivery>
+    // entities with no @Transactional on most endpoints (assignDelivery, getAllDeliveries,
+    // getDeliveryById, updateDeliveryStatus, getBreachedDeliveries, etc.). LAZY here would
+    // throw LazyInitializationException on those. Revisit alongside a DTO refactor of
+    // DeliveryController, not in isolation.
     @OneToOne
     private Order order;
 

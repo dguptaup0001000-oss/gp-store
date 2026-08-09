@@ -22,7 +22,7 @@ public class RefreshToken {
     @Column(unique = true, nullable = false)
     private String tokenHash;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private Customer customer;
 
     private LocalDateTime expiresAt;

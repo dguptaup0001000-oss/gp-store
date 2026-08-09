@@ -17,10 +17,13 @@ public class Invoice {
     @Column(unique = true, nullable =false)
     private String invoiceNumber;
 
+    // Deliberately left EAGER: InvoiceController.getAllInvoices returns raw List<Invoice>
+    // with no @Transactional. Revisit alongside a DTO refactor.
     @OneToOne
     @JoinColumn(name = "order_id", nullable = false, unique = true)
     private Order order;
 
+    // Deliberately left EAGER: same reason as Invoice.order above.
     @ManyToOne
     @JoinColumn(name = "customer_id", nullable = false)
     private Customer customer;
