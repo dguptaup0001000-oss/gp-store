@@ -23,12 +23,11 @@ public class ProductVariant {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // @JsonBackReference protects this from JSON serialization. Verified every
-        // call site that touches variant.getProduct() (placeOrder, addToCart,
-        // previewCheckout, InvoiceService, the UPI-expiry scheduled job via
-        // restoreInventoryForOrder) is either @Transactional or does not touch
-        // getProduct() at all - safe to convert to LAZY.
-    @ManyToOne(fetch = FetchType.LAZY)
+    // Deliberately left EAGER: @JsonBackReference protects this from JSON serialization,
+    // but OrderService.previewCheckout() calls variant.getProduct() without @Transactional,
+    // so LAZY would throw LazyInitializationException there. Revisit if that method gains
+    // @Transactional.
+    @ManyToOne
 @JsonBackReference
 private Product product;
 

@@ -131,7 +131,6 @@ public class OrderService {
      * delivery fee, estimated total) before the customer commits to placing
      * the order, instead of only finding out the final cost afterward.
      */
-    @Transactional(readOnly = true)
     public com.gpstore.dto.response.CheckoutPreviewResponse previewCheckout(
             Long customerId, Long addressId, String couponCode) {
 
