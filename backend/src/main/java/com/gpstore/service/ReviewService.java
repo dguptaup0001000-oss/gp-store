@@ -4,6 +4,8 @@ import com.gpstore.dto.request.ReviewRequest;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.Product;
 import com.gpstore.entity.Review;
+import com.gpstore.dto.response.AdminReviewResponse;
+import com.gpstore.dto.response.ReviewResponse;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.OrderItemRepository;
@@ -12,6 +14,7 @@ import com.gpstore.repository.ReviewRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -40,7 +43,7 @@ public class ReviewService {
      * existing one instead of creating a duplicate (same as most real
      * storefronts - one review per customer per product).
      */
-    public Review submitReview(Long customerId, ReviewRequest request) {
+    public ReviewResponse submitReview(Long customerId, ReviewRequest request) {
 
         boolean hasPurchased = orderItemRepository
                 .existsByOrder_Customer_IdAndProductVariant_Product_Id(customerId, request.getProductId());
@@ -64,20 +67,24 @@ public class ReviewService {
         review.setReviewDate(LocalDateTime.now());
         review.setActive(true);
 
-        return reviewRepository.save(review);
+        return ReviewResponse.from(reviewRepository.save(review));
     }
 
-    public List<Review> getAllReviews() {
-        return reviewRepository.findAll();
-    }
+    @Transactional(readOnly = true)
+        public List<AdminReviewResponse> getAllReviews() {
+            return reviewRepository.findAll().stream().map(AdminReviewResponse::from).toList();
+        }
 
-    public Page<Review> getForProduct(Long productId, Pageable pageable) {
-        return reviewRepository.findByProductIdAndActiveTrueOrderByReviewDateDesc(productId, pageable);
-    }
+    @Transactional(readOnly = true)
+        public Page<ReviewResponse> getForProduct(Long productId, Pageable pageable) {
+            return reviewRepository.findByProductIdAndActiveTrueOrderByReviewDateDesc(productId, pageable)
+                    .map(ReviewResponse::from);
+        }
 
-    public List<Review> getMyReviews(Long customerId) {
-        return reviewRepository.findByCustomerId(customerId);
-    }
+    @Transactional(readOnly = true)
+        public List<ReviewResponse> getMyReviews(Long customerId) {
+            return reviewRepository.findByCustomerId(customerId).stream().map(ReviewResponse::from).toList();
+        }
 
     public void deleteOwnReview(Long id, Long customerId) {
         Review review = reviewRepository.findByIdAndCustomerId(id, customerId)

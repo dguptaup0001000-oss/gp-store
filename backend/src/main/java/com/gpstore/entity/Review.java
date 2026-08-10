@@ -25,7 +25,7 @@ public class Review {
     // so Jackson serializes after the session closes - LAZY here throws
     // LazyInitializationException on those endpoints. Revisit alongside a DTO
     // refactor of ReviewController, not in isolation.
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private Product product;
 
     private Integer rating;

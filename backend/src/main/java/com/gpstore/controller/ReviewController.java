@@ -27,7 +27,7 @@ public class ReviewController {
     // Verified-purchase-only - customer is always the logged-in caller, never
     // trusted from the request body. Posting again updates your existing review.
     @PostMapping
-    public Review submitReview(@Valid @RequestBody ReviewRequest request) {
+    public com.gpstore.dto.response.ReviewResponse submitReview(@Valid @RequestBody ReviewRequest request) {
         return reviewService.submitReview(currentUser.customerId(), request);
     }
 
@@ -36,8 +36,8 @@ public class ReviewController {
     // AdminReviewResponse's doc comment for why that needed its own DTO).
     @GetMapping
     public List<com.gpstore.dto.response.AdminReviewResponse> getAllReviews() {
-        return reviewService.getAllReviews().stream().map(com.gpstore.dto.response.AdminReviewResponse::from).toList();
-    }
+            return reviewService.getAllReviews();
+        }
 
     // Admin only - moderation: remove any review, not just your own.
     @DeleteMapping("/{id}/moderate")
@@ -48,7 +48,7 @@ public class ReviewController {
 
     // Public - what a product page actually shows.
     @GetMapping("/product/{productId}")
-    public Page<Review> getForProduct(
+    public Page<com.gpstore.dto.response.ReviewResponse> getForProduct(
             @PathVariable Long productId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
@@ -58,7 +58,7 @@ public class ReviewController {
 
     // The logged-in customer's own reviews.
     @GetMapping("/mine")
-    public List<Review> getMyReviews() {
+    public List<com.gpstore.dto.response.ReviewResponse> getMyReviews() {
         return reviewService.getMyReviews(currentUser.customerId());
     }
 
