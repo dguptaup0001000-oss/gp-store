@@ -24,7 +24,7 @@ public class Wishlist {
     // Jackson serializes after the session closes - LAZY here throws
     // LazyInitializationException on that exact endpoint. Revisit alongside
     // a DTO refactor of WishlistController, not in isolation.
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private Product product;
 
     private Boolean active;

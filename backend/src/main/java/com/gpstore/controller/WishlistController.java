@@ -1,6 +1,7 @@
 package com.gpstore.controller;
 
-import com.gpstore.entity.Wishlist;
+import com.gpstore.dto.request.WishlistRequest;
+import com.gpstore.dto.response.WishlistResponse;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.CustomerService;
 import com.gpstore.service.WishlistService;
@@ -25,20 +26,19 @@ public class WishlistController {
 
     // Adds to the logged-in customer's wishlist - ownership is never taken from the client.
     @PostMapping
-    public Wishlist createWishlist(@RequestBody Wishlist wishlist) {
-        wishlist.setCustomer(customerService.getById(currentUser.customerId()));
-        return wishlistService.saveWishlist(wishlist);
-    }
+    public WishlistResponse createWishlist(@org.springframework.web.bind.annotation.RequestBody @jakarta.validation.Valid WishlistRequest request) {
+            return wishlistService.saveWishlist(currentUser.customerId(), request);
+        }
 
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
-    public List<Wishlist> getAllWishlists() {
-        return wishlistService.getAllWishlists();
-    }
+    public List<WishlistResponse> getAllWishlists() {
+            return wishlistService.getAllWishlists();
+        }
 
     // Returns only the logged-in customer's wishlist.
     @GetMapping("/mine")
-    public List<Wishlist> getMyWishlist() {
+    public List<WishlistResponse> getMyWishlist() {
         return wishlistService.getMyWishlist(currentUser.customerId());
     }
 
