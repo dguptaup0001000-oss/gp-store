@@ -49,7 +49,7 @@ public class InvoiceService {
      * customer paid - it only reports how much of that amount was tax.
      */
     @Transactional
-    public com.gpstore.dto.response.InvoiceResponse generateForOrder(Long orderId) {
+    public Invoice generateForOrder(Long orderId) {
 
         if (invoiceRepository.findByOrderId(orderId).isPresent()) {
             throw new ConflictException("An invoice already exists for this order");
@@ -86,32 +86,19 @@ public class InvoiceService {
         invoice.setStatus(InvoiceStatus.GENERATED);
         invoice.setActive(true);
 
-        return com.gpstore.dto.response.InvoiceResponse.from(invoiceRepository.save(invoice));
+        return invoiceRepository.save(invoice);
     }
 
-    @Transactional(readOnly = true)
-    public List<com.gpstore.dto.response.InvoiceResponse> getAllInvoices() {
-        return invoiceRepository.findAll().stream()
-                .map(com.gpstore.dto.response.InvoiceResponse::from)
-                .collect(java.util.stream.Collectors.toList());
+    public List<Invoice> getAllInvoices() {
+        return invoiceRepository.findAll();
     }
 
-    @Transactional(readOnly = true)
-
-
-    public Optional<com.gpstore.dto.response.InvoiceResponse> getInvoiceById(Long id) {
-
-
-        return invoiceRepository.findById(id).map(com.gpstore.dto.response.InvoiceResponse::from);
+    public Optional<Invoice> getInvoiceById(Long id) {
+        return invoiceRepository.findById(id);
     }
 
-    @Transactional(readOnly = true)
-
-
-    public Optional<com.gpstore.dto.response.InvoiceResponse> getInvoiceByOrderId(Long orderId) {
-
-
-        return invoiceRepository.findByOrderId(orderId).map(com.gpstore.dto.response.InvoiceResponse::from);
+    public Optional<Invoice> getInvoiceByOrderId(Long orderId) {
+        return invoiceRepository.findByOrderId(orderId);
     }
 
     /**
@@ -121,7 +108,6 @@ public class InvoiceService {
      * a real gap for an Indian business where customers legitimately need
      * this for tax/expense records.
      */
-    @Transactional(readOnly = true)
     public com.gpstore.dto.response.InvoiceResponse getOwnedInvoiceForOrder(Long orderId, Long customerId) {
         Invoice invoice = invoiceRepository.findByOrderId(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("No invoice found for this order"));
@@ -135,24 +121,16 @@ public class InvoiceService {
         return com.gpstore.dto.response.InvoiceResponse.from(invoice);
     }
 
-    @Transactional(readOnly = true)
-
-
-    public Optional<com.gpstore.dto.response.InvoiceResponse> getInvoiceByInvoiceNumber(String invoiceNumber) {
-
-
-        return invoiceRepository.findByInvoiceNumber(invoiceNumber).map(com.gpstore.dto.response.InvoiceResponse::from);
+    public Optional<Invoice> getInvoiceByInvoiceNumber(String invoiceNumber) {
+        return invoiceRepository.findByInvoiceNumber(invoiceNumber);
     }
 
-    @Transactional
-
-
-    public com.gpstore.dto.response.InvoiceResponse cancelInvoice(Long id) {
+    public Invoice cancelInvoice(Long id) {
         Invoice invoice = invoiceRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Invoice not found"));
 
         invoice.setStatus(InvoiceStatus.CANCELLED);
 
-        return com.gpstore.dto.response.InvoiceResponse.from(invoiceRepository.save(invoice));
+        return invoiceRepository.save(invoice);
     }
 }

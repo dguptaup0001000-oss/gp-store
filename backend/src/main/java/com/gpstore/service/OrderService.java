@@ -647,7 +647,7 @@ public class OrderService {
         // invoice would stay in whatever state it was, still implying a
         // valid sale for GST/accounting purposes even though the order
         // itself no longer represents one.
-        invoiceService.getInvoiceByOrderId(orderId).ifPresent(invoice -> invoiceService.cancelInvoice(invoice.getId()));
+        invoiceService.getInvoiceByOrderId(orderId).ifPresent(invoice -> invoiceService.cancelInvoice(invoice.getInvoiceId()));
 
         auditLogService.log("ORDER_CANCELLED", "Order", savedOrder.getId(),
                 "cancelled by " + (isAdmin ? "admin/staff" : "customer"));

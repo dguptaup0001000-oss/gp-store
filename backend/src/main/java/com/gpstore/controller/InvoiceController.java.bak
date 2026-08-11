@@ -31,32 +31,32 @@ public class InvoiceController {
     // No request body - every amount is computed from the order itself, never
     // accepted from the client (see InvoiceService for why).
     @PostMapping
-    public com.gpstore.dto.response.InvoiceResponse generateInvoice(@RequestParam Long orderId) {
+    public Invoice generateInvoice(@RequestParam Long orderId) {
         return invoiceService.generateForOrder(orderId);
     }
 
     @GetMapping
-    public List<com.gpstore.dto.response.InvoiceResponse> getAllInvoices() {
+    public List<Invoice> getAllInvoices() {
         return invoiceService.getAllInvoices();
     }
 
     @GetMapping("/{id}")
-    public Optional<com.gpstore.dto.response.InvoiceResponse> getInvoiceById(@PathVariable Long id) {
+    public Optional<Invoice> getInvoiceById(@PathVariable Long id) {
         return invoiceService.getInvoiceById(id);
     }
 
     @GetMapping("/order/{orderId}")
-    public Optional<com.gpstore.dto.response.InvoiceResponse> getInvoiceByOrderId(@PathVariable Long orderId) {
+    public Optional<Invoice> getInvoiceByOrderId(@PathVariable Long orderId) {
         return invoiceService.getInvoiceByOrderId(orderId);
     }
 
     @GetMapping("/number/{invoiceNumber}")
-    public Optional<com.gpstore.dto.response.InvoiceResponse> getInvoiceByInvoiceNumber(@PathVariable String invoiceNumber) {
+    public Optional<Invoice> getInvoiceByInvoiceNumber(@PathVariable String invoiceNumber) {
         return invoiceService.getInvoiceByInvoiceNumber(invoiceNumber);
     }
 
     @PutMapping("/{id}/cancel")
-    public com.gpstore.dto.response.InvoiceResponse cancelInvoice(@PathVariable Long id) {
+    public Invoice cancelInvoice(@PathVariable Long id) {
         return invoiceService.cancelInvoice(id);
     }
 }
