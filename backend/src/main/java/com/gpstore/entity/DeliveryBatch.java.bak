@@ -26,9 +26,12 @@ public class DeliveryBatch {
 
     private String area;
 
-    // DTO refactor complete: DeliveryBatchService/Controller now return
-    // DeliveryBatchResponse from @Transactional(readOnly = true) service methods.
-    @ManyToOne(fetch = FetchType.LAZY)
+    // Deliberately left EAGER: DeliveryBatchController.getAll()/getByStatus()/
+    // save()/update() all return raw DeliveryBatch entities with no @Transactional
+    // on the service methods, so Jackson serializes after the session closes -
+    // LAZY here throws LazyInitializationException on those endpoints. Revisit
+    // alongside a DTO refactor of DeliveryBatchController, not in isolation.
+    @ManyToOne
     private DeliveryPartner deliveryPartner;
 
     // OPEN (still accepting orders, < 20), FULL (20 orders, ready to dispatch), DISPATCHED, COMPLETED

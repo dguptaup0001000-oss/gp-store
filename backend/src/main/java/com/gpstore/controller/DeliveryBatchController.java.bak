@@ -17,25 +17,22 @@ public class DeliveryBatchController {
     }
 
     @PostMapping
-    public com.gpstore.dto.response.DeliveryBatchResponse save(@RequestBody com.gpstore.dto.request.DeliveryBatchRequest request) {
-
-        return service.save(request);
+    public DeliveryBatch save(@RequestBody DeliveryBatch batch) {
+        return service.save(batch);
     }
 
     @GetMapping
-    public List<com.gpstore.dto.response.DeliveryBatchResponse> getAll() {
-
+    public List<DeliveryBatch> getAll() {
         return service.getAll();
     }
 
     @GetMapping("/status/{status}")
-    public List<com.gpstore.dto.response.DeliveryBatchResponse> getByStatus(@PathVariable String status) {
-
+    public List<DeliveryBatch> getByStatus(@PathVariable String status) {
         return service.getByStatus(status);
     }
 
-    @PutMapping("/{id}")
-    public com.gpstore.dto.response.DeliveryBatchResponse update(@PathVariable Long id, @RequestBody com.gpstore.dto.request.DeliveryBatchRequest request) {
-        return service.update(id, request);
+    @PutMapping
+    public DeliveryBatch update(@RequestBody DeliveryBatch batch) {
+        return service.update(batch);
     }
 }

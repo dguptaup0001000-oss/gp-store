@@ -29,92 +29,20 @@ public class DeliveryBatchService {
         this.deliveryRepository = deliveryRepository;
     }
 
-    @Transactional
-
-
-    public com.gpstore.dto.response.DeliveryBatchResponse save(com.gpstore.dto.request.DeliveryBatchRequest request) {
-
-
-        DeliveryPartner partner = deliveryPartnerRepository.findById(request.getDeliveryPartnerId())
-
-
-                .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
-
-
-
-        DeliveryBatch batch = new DeliveryBatch();
-
-
-        batch.setBatchNumber("BATCH-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
-
-
-        batch.setArea(request.getArea());
-
-
-        batch.setDeliveryPartner(partner);
-
-
-        batch.setStatus("OPEN");
-
-
-        batch.setCreatedAt(LocalDateTime.now());
-
-
-        batch.setActive(true);
-
-
-
-        return com.gpstore.dto.response.DeliveryBatchResponse.from(repository.save(batch));
+    public DeliveryBatch save(DeliveryBatch batch) {
+        return repository.save(batch);
     }
 
-    @Transactional(readOnly = true)
-
-
-    public List<com.gpstore.dto.response.DeliveryBatchResponse> getAll() {
-
-
-        return repository.findAll().stream()
-
-
-                .map(com.gpstore.dto.response.DeliveryBatchResponse::from)
-
-
-                .collect(java.util.stream.Collectors.toList());
+    public List<DeliveryBatch> getAll() {
+        return repository.findAll();
     }
 
-    @Transactional(readOnly = true)
-
-
-    public List<com.gpstore.dto.response.DeliveryBatchResponse> getByStatus(String status) {
-
-
-        return repository.findByStatus(status).stream()
-
-
-                .map(com.gpstore.dto.response.DeliveryBatchResponse::from)
-
-
-                .collect(java.util.stream.Collectors.toList());
+    public List<DeliveryBatch> getByStatus(String status) {
+        return repository.findByStatus(status);
     }
 
-    @Transactional
-
-
-    public com.gpstore.dto.response.DeliveryBatchResponse update(Long id, com.gpstore.dto.request.DeliveryBatchRequest request) {
-
-
-        DeliveryBatch batch = repository.findById(id)
-
-
-                .orElseThrow(() -> new ResourceNotFoundException("Delivery batch not found"));
-
-
-
-        batch.setStatus(request.getStatus());
-
-
-
-        return com.gpstore.dto.response.DeliveryBatchResponse.from(repository.save(batch));
+    public DeliveryBatch update(DeliveryBatch batch) {
+        return repository.save(batch);
     }
 
     /**
