@@ -63,7 +63,7 @@ public class DeliveryService {
      * overriding the vehicle decision, not doing partner assignment by hand.
      */
     @Transactional
-    public com.gpstore.dto.response.DeliveryResponse assignWithVehicleType(Long orderId, String vehicleType) {
+    public Delivery assignWithVehicleType(Long orderId, String vehicleType) {
         DeliveryPartner partner = deliveryPartnerService.getLeastLoadedAvailablePartner(vehicleType);
         return assignDelivery(orderId, partner.getId());
     }
@@ -79,7 +79,7 @@ public class DeliveryService {
      * vehicle type, both stay available for manual overrides.
      */
     @Transactional
-    public com.gpstore.dto.response.DeliveryResponse autoAssignDelivery(Long orderId) {
+    public Delivery autoAssignDelivery(Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
@@ -131,7 +131,7 @@ public class DeliveryService {
      * "10 min to 2 hour delivery" rule, not a flat promise.
      */
     @Transactional
-    public com.gpstore.dto.response.DeliveryResponse assignDelivery(Long orderId, Long deliveryPartnerId) {
+    public Delivery assignDelivery(Long orderId, Long deliveryPartnerId) {
 
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
@@ -175,33 +175,22 @@ public class DeliveryService {
         // is the same either way: assignment succeeds regardless.
         notificationService.notifyPartnerNewAssignment(partner, saved);
 
-        return com.gpstore.dto.response.DeliveryResponse.from(saved);
+        return saved;
     }
-
-    @Transactional(readOnly = true)
-
 
     public List<Delivery> getAllDeliveries() {
         return deliveryRepository.findAll();
     }
 
-    @Transactional(readOnly = true)
-
-
     public Optional<Delivery> getDeliveryById(Long id) {
         return deliveryRepository.findById(id);
     }
-
-    @Transactional(readOnly = true)
-
 
     public Optional<Delivery> getDeliveryByOrderId(Long orderId) {
         return deliveryRepository.findByOrderId(orderId);
     }
 
     /** Returns the delivery only if the order belongs to this customer - closes the IDOR. */
-    @Transactional(readOnly = true)
-
     public Optional<Delivery> getOwnedDeliveryByOrderId(Long orderId, Long callerCustomerId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
@@ -218,8 +207,6 @@ public class DeliveryService {
      * as getOwnedDeliveryByOrderId() above, shaped down to just the
      * assigned partner's current GPS position (see DeliveryTrackingResponse).
      */
-    @Transactional(readOnly = true)
-
     public com.gpstore.dto.response.DeliveryTrackingResponse getMyOrderTracking(Long orderId, Long callerCustomerId) {
         Delivery delivery = getOwnedDeliveryByOrderId(orderId, callerCustomerId)
                 .orElseThrow(() -> new ResourceNotFoundException("No delivery found for this order yet"));
@@ -227,7 +214,7 @@ public class DeliveryService {
     }
 
     @Transactional
-    public com.gpstore.dto.response.DeliveryResponse updateDeliveryStatus(Long deliveryId, String status, Long callerCustomerId, boolean isAdmin) {
+    public Delivery updateDeliveryStatus(Long deliveryId, String status, Long callerCustomerId, boolean isAdmin) {
 
         Delivery delivery = deliveryRepository.findById(deliveryId)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery not found"));
@@ -296,12 +283,10 @@ public class DeliveryService {
             }
         }
 
-        return com.gpstore.dto.response.DeliveryResponse.from(deliveryRepository.save(delivery));
+        return deliveryRepository.save(delivery);
     }
 
     /** A delivery partner's own active assignments - resolved via their linked Customer account, never a client-supplied partner id. */
-    @Transactional(readOnly = true)
-
     public List<com.gpstore.dto.response.MyDeliveryResponse> getMyAssignments(Long callerCustomerId) {
         DeliveryPartner partner = deliveryPartnerService.getByAccountIdOrThrow(callerCustomerId);
         return deliveryRepository.findActiveByPartnerId(partner.getId()).stream()
@@ -331,14 +316,7 @@ public class DeliveryService {
     }
 
     /** The manual-review list - every delivery that has ever missed its promised ETA. */
-    @Transactional(readOnly = true)
-
-    public List<com.gpstore.dto.response.DeliveryResponse> getBreachedDeliveries() {
-
-        return deliveryRepository.findByGuaranteeBreachedTrueOrderByEstimatedDeliveryTimeDesc().stream()
-
-                .map(com.gpstore.dto.response.DeliveryResponse::from)
-
-                .collect(java.util.stream.Collectors.toList());
+    public List<Delivery> getBreachedDeliveries() {
+        return deliveryRepository.findByGuaranteeBreachedTrueOrderByEstimatedDeliveryTimeDesc();
     }
 }

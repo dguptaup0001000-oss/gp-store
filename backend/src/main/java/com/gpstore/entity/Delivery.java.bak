@@ -17,10 +17,10 @@ public class Delivery {
     // getDeliveryById, updateDeliveryStatus, getBreachedDeliveries, etc.). LAZY here would
     // throw LazyInitializationException on those. Revisit alongside a DTO refactor of
     // DeliveryController, not in isolation.
-    @OneToOne(fetch = FetchType.LAZY)
+    @OneToOne
     private Order order;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne
     private DeliveryBatch batch;
 
     private Double distanceKm;

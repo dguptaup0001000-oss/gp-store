@@ -1,10 +1,6 @@
-/// Deliberately NOT a freezed/json_serializable model - the backend's
-/// GET /api/deliveries/breached returns the raw Delivery entity, whose
-/// nested "order" field is the RAW Order entity shape (orderItems, address,
-/// etc.) - completely different from our OrderDetail/OrderSummary DTOs used
-/// elsewhere in the app. Rather than force-fit a mismatched model, this
-/// just reaches into the JSON for the handful of fields an admin actually
-/// needs to review a breach.
+/// GET /api/deliveries/breached now returns DeliveryResponse - a flat DTO
+/// with orderId/orderNumber promoted to top-level fields instead of a
+/// nested raw Order entity. This mirrors that shape directly.
 class DeliveryBreach {
   const DeliveryBreach({
     required this.id,
@@ -27,12 +23,10 @@ class DeliveryBreach {
   final String? assignedAt;
 
   factory DeliveryBreach.fromJson(Map<String, dynamic> json) {
-    final order = json['order'] as Map<String, dynamic>?;
-
     return DeliveryBreach(
-      id: json['id'] as int,
-      orderId: order?['id'] as int?,
-      orderNumber: order?['orderNumber'] as String?,
+      id: json['deliveryId'] as int,
+      orderId: json['orderId'] as int?,
+      orderNumber: json['orderNumber'] as String?,
       deliveryStatus: json['deliveryStatus'] as String?,
       estimatedDeliveryTime: json['estimatedDeliveryTime'] as String?,
       deliveredAt: json['deliveredAt'] as String?,

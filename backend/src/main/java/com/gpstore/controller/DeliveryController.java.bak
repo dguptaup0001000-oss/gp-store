@@ -25,7 +25,7 @@ public class DeliveryController {
     // theirs already has 20 orders) and computes a distance-based ETA.
     // Admin/delivery-role only (enforced in SecurityConfig).
     @PostMapping("/assign")
-    public com.gpstore.dto.response.DeliveryResponse assignDelivery(
+    public Delivery assignDelivery(
             @RequestParam Long orderId,
             @RequestParam Long deliveryPartnerId) {
 
@@ -36,7 +36,7 @@ public class DeliveryController {
     // available partner currently has the lightest load - no admin needs to
     // manually choose one of 10 people for every single order.
     @PostMapping("/auto-assign")
-    public com.gpstore.dto.response.DeliveryResponse autoAssignDelivery(@RequestParam Long orderId) {
+    public Delivery autoAssignDelivery(@RequestParam Long orderId) {
         return deliveryService.autoAssignDelivery(orderId);
     }
 
@@ -45,7 +45,7 @@ public class DeliveryController {
     // the system still auto-picks whichever available partner of that vehicle
     // type has the lightest load, so you're not manually choosing a person.
     @PostMapping("/assign-vehicle")
-    public com.gpstore.dto.response.DeliveryResponse assignWithVehicleType(
+    public Delivery assignWithVehicleType(
             @RequestParam Long orderId,
             @RequestParam String vehicleType) {
         return deliveryService.assignWithVehicleType(orderId, vehicleType);
@@ -82,7 +82,7 @@ public class DeliveryController {
     }
 
     @PutMapping("/{id}/status")
-    public com.gpstore.dto.response.DeliveryResponse updateDeliveryStatus(
+    public Delivery updateDeliveryStatus(
             @PathVariable Long id,
             @RequestParam String status) {
 
@@ -101,7 +101,7 @@ public class DeliveryController {
     // that has ever missed its promised ETA. No auto-refund is attached to
     // this by design; it's purely a signal for you to act on.
     @GetMapping("/breached")
-    public List<com.gpstore.dto.response.DeliveryResponse> getBreachedDeliveries() {
+    public List<Delivery> getBreachedDeliveries() {
         return deliveryService.getBreachedDeliveries();
     }
 }
