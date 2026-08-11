@@ -6,13 +6,11 @@ import com.gpstore.exception.BadRequestException;
 import com.gpstore.repository.OrderItemRepository;
 import com.gpstore.repository.ProductRepository;
 import com.gpstore.repository.ReviewRepository;
-import com.gpstore.dto.response.ProductResponse;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Comparator;
 import java.util.HashMap;
@@ -38,55 +36,43 @@ public class ProductService {
     // Save Product - evicts the cached listing so a new/changed product shows
     // up immediately instead of customers seeing a stale catalog.
     @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts"}, allEntries = true)
-    @Transactional
-    public ProductResponse saveProduct(Product product) {
-        return ProductResponse.from(productRepository.save(product));
+    public Product saveProduct(Product product) {
+        return productRepository.save(product);
     }
 
     // Get All Products - CUSTOMER-FACING, active only. This was returning
     // deactivated products too before - deactivating a product did nothing
     // to actually hide it from the public browsing endpoint.
-    @Transactional(readOnly = true)
     @Cacheable("products")
-    public List<ProductResponse> getAllProducts() {
+    public List<Product> getAllProducts() {
         return productRepository.findAll().stream()
                 .filter(p -> Boolean.TRUE.equals(p.getActive()))
-                .map(ProductResponse::from)
                 .toList();
     }
 
     /** Admin management view - includes inactive/deactivated products too, unlike the customer-facing list above. */
-    @Transactional(readOnly = true)
-    public List<ProductResponse> getAllForAdmin() {
-        return productRepository.findAll().stream()
-                .map(ProductResponse::from)
-                .toList();
+    public List<Product> getAllForAdmin() {
+        return productRepository.findAll();
     }
 
     // Kept for backward compatibility with any existing caller of the old,
     // unranked, unpaginated search.
-    @Transactional(readOnly = true)
-    public List<ProductResponse> search(String keyword) {
-        return productRepository.findByNameContainingIgnoreCase(keyword).stream()
-                .map(ProductResponse::from)
-                .toList();
+    public List<Product> search(String keyword) {
+        return productRepository.findByNameContainingIgnoreCase(keyword);
     }
 
     /** Instant, typo-tolerant, relevance-ranked search - see ProductRepository.searchInstant(). */
-    @Transactional(readOnly = true)
-    public Page<ProductResponse> searchInstant(String keyword, Pageable pageable) {
+    public Page<Product> searchInstant(String keyword, Pageable pageable) {
         if (keyword == null || keyword.isBlank()) {
             throw new BadRequestException("Search keyword is required");
         }
-        return productRepository.searchInstant(keyword.trim(), pageable).map(ProductResponse::from);
+        return productRepository.searchInstant(keyword.trim(), pageable);
     }
 
     /** Category browsing - the other half of product discovery alongside search. */
-    @Transactional(readOnly = true)
     @Cacheable("categoryProducts")
-    public Page<ProductResponse> browseByCategory(Long categoryId, Pageable pageable) {
-        return productRepository.findByCategoryIdAndActiveTrue(categoryId, pageable)
-                .map(ProductResponse::from);
+    public Page<Product> browseByCategory(Long categoryId, Pageable pageable) {
+        return productRepository.findByCategoryIdAndActiveTrue(categoryId, pageable);
     }
 
     /**
@@ -96,7 +82,6 @@ public class ProductService {
      * same filterSortAndPaginate logic so the two features can never
      * silently drift apart in behavior.
      */
-    @Transactional(readOnly = true)
     public Map<String, Object> browseByCategoryFiltered(
             Long categoryId, String sort, boolean inStockOnly, String keyword, int page, int size) {
 
@@ -105,11 +90,9 @@ public class ProductService {
     }
 
     /** Real "New Arrivals" - sorted by actual creation time, not fabricated. */
-    @Transactional(readOnly = true)
     @Cacheable("newArrivals")
-    public Page<ProductResponse> getNewArrivals(Pageable pageable) {
-        return productRepository.findByActiveTrueOrderByCreatedAtDesc(pageable)
-                .map(ProductResponse::from);
+    public Page<Product> getNewArrivals(Pageable pageable) {
+        return productRepository.findByActiveTrueOrderByCreatedAtDesc(pageable);
     }
 
     /** Only brands with at least one active product - guaranteed by the underlying GROUP BY query. */
@@ -129,7 +112,6 @@ public class ProductService {
      * values computed from entirely separate tables (OrderItem, Review) -
      * there's no single SQL ORDER BY that covers all eight options cleanly.
      */
-    @Transactional(readOnly = true)
     public Map<String, Object> browseByBrand(
             String brand, String sort, boolean inStockOnly, String keyword, int page, int size) {
 
@@ -167,12 +149,9 @@ public class ProductService {
         int fromIndex = Math.min(page * size, totalElements);
         int toIndex = Math.min(fromIndex + size, totalElements);
         List<Product> pageContent = products.subList(fromIndex, toIndex);
-            List<ProductResponse> responseContent = pageContent.stream()
-                    .map(ProductResponse::from)
-                    .toList();
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("content", responseContent);
+        Map<String, Object> response = new HashMap<>();
+        response.put("content", pageContent);
         response.put("totalElements", totalElements);
         response.put("totalPages", totalPages);
         response.put("number", page);
@@ -241,9 +220,8 @@ public class ProductService {
                 .orElse(java.math.BigDecimal.ZERO);
     }
 
-    @Transactional(readOnly = true)
-    public ProductResponse getProductById(Long id) {
-        return ProductResponse.from(productRepository.findById(id).orElse(null));
+    public Product getProductById(Long id) {
+        return productRepository.findById(id).orElse(null);
     }
 
     public Product getByIdOrThrow(Long id) {
@@ -253,8 +231,7 @@ public class ProductService {
 
     /** Didn't exist before - a product could be created but never edited afterward. */
     @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts"}, allEntries = true)
-    @Transactional
-    public ProductResponse update(Long id, Product updated) {
+    public Product update(Long id, Product updated) {
         Product existing = getByIdOrThrow(id);
 
         existing.setName(updated.getName());
@@ -262,7 +239,7 @@ public class ProductService {
         existing.setCategory(updated.getCategory());
         existing.setActive(updated.getActive());
 
-        return ProductResponse.from(productRepository.save(existing));
+        return productRepository.save(existing);
     }
 
     /**

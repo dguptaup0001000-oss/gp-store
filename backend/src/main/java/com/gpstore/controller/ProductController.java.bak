@@ -2,7 +2,6 @@ package com.gpstore.controller;
 
 import com.gpstore.entity.Product;
 import com.gpstore.service.ProductService;
-import com.gpstore.dto.response.ProductResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -23,13 +22,13 @@ public class ProductController {
 
     // Create Product
     @PostMapping
-    public ProductResponse createProduct(@RequestBody Product product) {
+    public Product createProduct(@RequestBody Product product) {
         return productService.saveProduct(product);
     }
 
     // Get All Products
     @GetMapping
-    public List<ProductResponse> getAllProducts() {
+    public List<Product> getAllProducts() {
         return productService.getAllProducts();
     }
 
@@ -37,21 +36,21 @@ public class ProductController {
     // public GET rule) - includes deactivated products too, unlike the
     // customer-facing list above.
     @GetMapping("/admin/all")
-    public List<ProductResponse> getAllForAdmin() {
+    public List<Product> getAllForAdmin() {
         return productService.getAllForAdmin();
     }
 
     // Kept for backward compatibility with any existing client already
     // wired to this exact shape (unranked, unpaginated).
     @GetMapping("/search")
-    public List<ProductResponse> searchProducts(@RequestParam String keyword) {
+    public List<Product> searchProducts(@RequestParam String keyword) {
         return productService.search(keyword);
     }
 
     // Instant search: typo-tolerant, ranked by relevance, paginated.
     // This is the one a real search-as-you-type UI should call.
     @GetMapping("/search/instant")
-    public Page<ProductResponse> searchInstant(
+    public Page<Product> searchInstant(
             @RequestParam String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
@@ -62,7 +61,7 @@ public class ProductController {
 
     // Category browsing - paginated, only active products.
     @GetMapping("/category/{categoryId}")
-    public Page<ProductResponse> browseByCategory(
+    public Page<Product> browseByCategory(
             @PathVariable Long categoryId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
@@ -90,7 +89,7 @@ public class ProductController {
 
     // Real "New Arrivals" - sorted by actual product creation time.
     @GetMapping("/new-arrivals")
-    public Page<ProductResponse> getNewArrivals(
+    public Page<Product> getNewArrivals(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
@@ -119,14 +118,14 @@ public class ProductController {
     }
 
     @GetMapping("/{id}")
-    public ProductResponse getProduct(@PathVariable Long id) {
+    public Product getProduct(@PathVariable Long id) {
         return productService.getProductById(id);
     }
 
     // Admin only (enforced in SecurityConfig) - didn't exist before, a
     // product could be created but never edited.
     @PutMapping("/{id}")
-    public ProductResponse updateProduct(@PathVariable Long id, @RequestBody Product product) {
+    public Product updateProduct(@PathVariable Long id, @RequestBody Product product) {
         return productService.update(id, product);
     }
 
