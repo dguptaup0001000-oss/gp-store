@@ -35,3 +35,4 @@ build/
 ### Environment secrets ###
 .env
 supabase-env.sh
+*.bak
