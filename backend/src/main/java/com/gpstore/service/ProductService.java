@@ -8,10 +8,12 @@ import com.gpstore.dto.response.ProductResponse;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,8 +81,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable("categoryProducts")
     public Page<ProductResponse> browseByCategory(Long categoryId, Pageable pageable) {
-        return productRepository.findByCategoryIdAndActiveTrue(categoryId, pageable)
-                .map(ProductResponse::from);
+        return batchFetchWithVariants(productRepository.findByCategoryIdAndActiveTrue(categoryId, pageable));
     }
 
     /**
@@ -100,8 +101,58 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable("newArrivals")
     public Page<ProductResponse> getNewArrivals(Pageable pageable) {
-        return productRepository.findByActiveTrueOrderByCreatedAtDesc(pageable)
-                .map(ProductResponse::from);
+        return batchFetchWithVariants(productRepository.findByActiveTrueOrderByCreatedAtDesc(pageable));
+    }
+
+    /**
+     * Turns a Page<Product> (eager-fetched category only, per
+     * ProductRepository's @EntityGraph comments - NOT variants, to avoid
+     * Hibernate's collection-fetch+pagination trap) into a Page<ProductResponse>
+     * with variants populated too, without the N+1 that ProductResponse.from()
+     * would otherwise trigger by lazy-loading each product's variants one at
+     * a time. Same batching trick as RecommendationService.fetchInRankedOrder:
+     * one extra query for every product ID on this page at once (via
+     * findByIdIn's @EntityGraph({"category","variants"})), instead of one
+     * lazy-load query per product - for a 20-item page, 20 sequential round
+     * trips instead of 1, which was slow enough to blow past the app's
+     * request timeout on every attempt (so this endpoint's own @Cacheable
+     * never even got a chance to populate the cache).
+     *
+     * findByIdIn doesn't preserve input order, so results are re-sorted back
+     * into the original page's order (whatever sort the caller asked for)
+     * before re-wrapping as a Page, preserving the original totalElements/
+     * totalPages metadata that came from the real paginated query.
+     */
+    private Page<ProductResponse> batchFetchWithVariants(Page<Product> page) {
+        List<Long> orderedIds = page.getContent().stream().map(Product::getId).toList();
+        return new PageImpl<>(batchToResponseList(orderedIds), page.getPageable(), page.getTotalElements());
+    }
+
+    /**
+     * Same batching trick, keyed by ID so it works for both a Page<Product>'s
+     * content (see batchFetchWithVariants) and ProductBrowseRepository's
+     * plain sorted List<Product> - its native query returns bare entities
+     * with no relations eager-fetched at all, so every product's category
+     * AND variants would otherwise lazy-load one at a time.
+     */
+    private List<ProductResponse> batchToResponseList(List<Long> orderedIds) {
+        if (orderedIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, Product> byId = new HashMap<>();
+        for (Product product : productRepository.findByIdIn(orderedIds)) {
+            byId.put(product.getId(), product);
+        }
+
+        List<ProductResponse> content = new ArrayList<>(orderedIds.size());
+        for (Long id : orderedIds) {
+            Product product = byId.get(id);
+            if (product != null) {
+                content.add(ProductResponse.from(product));
+            }
+        }
+        return content;
     }
 
     /** Only brands with at least one active product - guaranteed by the underlying GROUP BY query. */
@@ -130,7 +181,7 @@ public class ProductService {
 
     /** Shared response shape for both browseByBrand and browseByCategoryFiltered. */
     private Map<String, Object> toBrowseResponse(ProductBrowseRepository.BrowseResult result, int page, int size) {
-        List<ProductResponse> content = result.products().stream().map(ProductResponse::from).toList();
+        List<ProductResponse> content = batchToResponseList(result.products().stream().map(Product::getId).toList());
         int totalPages = (int) Math.ceil(result.totalElements() / (double) size);
 
         Map<String, Object> response = new HashMap<>();
