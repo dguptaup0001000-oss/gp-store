@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
@@ -49,6 +50,9 @@ class WishlistController extends AsyncNotifier<List<WishlistItem>> {
       }
       return repository.getMyWishlist();
     });
+    if (state.hasValue) {
+      HapticFeedback.selectionClick();
+    }
   }
 }
 

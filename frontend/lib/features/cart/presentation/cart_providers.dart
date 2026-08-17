@@ -43,12 +43,18 @@ class CartController extends AsyncNotifier<CartModel> {
     state = await AsyncValue.guard(
       () => repository.updateItemQuantity(cartItemId: cartItemId, quantity: quantity),
     );
+    if (state.hasValue) {
+      HapticFeedback.selectionClick();
+    }
   }
 
   Future<void> removeItem({required int cartItemId}) async {
     final repository = ref.read(cartRepositoryProvider);
     state = const AsyncLoading<CartModel>().copyWithPrevious(state);
     state = await AsyncValue.guard(() => repository.removeItem(cartItemId: cartItemId));
+    if (state.hasValue) {
+      HapticFeedback.lightImpact();
+    }
   }
 }
 
