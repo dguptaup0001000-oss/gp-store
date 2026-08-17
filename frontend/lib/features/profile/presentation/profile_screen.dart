@@ -64,14 +64,15 @@ class ProfileScreen extends ConsumerWidget {
                             'No email added yet',
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontStyle: FontStyle.italic),
                           ),
-                        Text(profile.mobileNumber, style: Theme.of(context).textTheme.bodyMedium),
+                        Text(profile.mobileNumber ?? 'No mobile number', style: Theme.of(context).textTheme.bodyMedium),
                       ],
                     ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.edit_outlined),
                     tooltip: 'Edit profile',
-                    onPressed: () => _showEditDialog(context, ref, profile.fullName, profile.mobileNumber, profile.email),
+                    onPressed: () =>
+                        _showEditDialog(context, ref, profile.fullName, profile.mobileNumber ?? '', profile.email),
                   ),
                 ],
               ),

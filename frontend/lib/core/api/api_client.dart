@@ -34,8 +34,15 @@ class ApiClient {
     _dio = Dio(
       BaseOptions(
         baseUrl: const String.fromEnvironment('API_BASE_URL', defaultValue: _defaultBaseUrl),
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 15),
+        // 45s, not 15s - Render's free tier spins the backend down after
+        // ~15 min idle and takes 30-60s to cold-start on the next request
+        // (see backend/DEPLOYMENT.md). 15s was shorter than a full
+        // cold-start cycle, so the very first request after any idle period
+        // - often the app's own launch-time profile fetch - would time out
+        // and show a generic error even though the backend was simply still
+        // booting, not actually down.
+        connectTimeout: const Duration(seconds: 45),
+        receiveTimeout: const Duration(seconds: 45),
       ),
     );
 

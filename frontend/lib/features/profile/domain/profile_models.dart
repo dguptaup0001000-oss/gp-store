@@ -22,7 +22,14 @@ class Profile with _$Profile {
     // `required String`, EVERY delivery partner and OTP-only customer would
     // fail to parse their own profile and crash immediately on login.
     String? email,
-    required String mobileNumber,
+    // Nullable for the same reason as email above: deleteOwnAccount()
+    // (Google Play account-deletion) nulls this out server-side but only
+    // revokes refresh tokens, not the already-issued access token (JWTs are
+    // stateless - see jwt.expiration-ms). For up to that token's remaining
+    // lifetime, GET /me can legitimately return a null mobileNumber - if
+    // this were still `required String`, that window would crash profile
+    // parsing instead of just showing an account that's mid-deletion.
+    String? mobileNumber,
     // Needed to gate the admin entry point - deliberately NOT sourced from
     // AuthState.user.role, which is only populated right after a fresh
     // login/OTP-verify and stays null after an app restart (session restore
