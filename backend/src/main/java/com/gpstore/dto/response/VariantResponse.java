@@ -2,6 +2,7 @@ package com.gpstore.dto.response;
 
 import com.gpstore.entity.ProductVariant;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 
 /**
@@ -10,8 +11,10 @@ import java.math.BigDecimal;
  * these are read by the Flutter app, and costPrice is wholesale-margin data
  * that should never reach a customer-facing response regardless of the
  * entity's own @JsonProperty(WRITE_ONLY) protection.
+ *
+ * Serializable - see ProductResponse's doc comment (this is nested inside it).
  */
-public class VariantResponse {
+public class VariantResponse implements Serializable {
 
     private final Long id;
     private final Double quantity;

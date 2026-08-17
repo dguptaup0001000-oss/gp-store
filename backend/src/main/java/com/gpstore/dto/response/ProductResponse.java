@@ -2,6 +2,7 @@ package com.gpstore.dto.response;
 
 import com.gpstore.entity.Product;
 
+import java.io.Serializable;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -15,8 +16,18 @@ import java.util.stream.Collectors;
  * flattened (unlike CartItemResponse/OrderItemResponse) because the Flutter
  * Product model expects a full nested Category object, not a name/brand
  * string.
+ *
+ * Serializable (along with VariantResponse/CategoryResponse below) because
+ * getAllProducts/browseByCategory/getNewArrivals are all @Cacheable, and
+ * Spring's default RedisCacheManager uses plain JDK serialization for cached
+ * values - which requires the entire object graph being cached to support
+ * it. Without this, caching one of these lists successfully (as opposed to
+ * failing/timing out first, which was the case for getNewArrivals before its
+ * N+1 fix - see ProductService.batchFetchWithVariants) throws
+ * NotSerializableException from inside the cache write, turning a
+ * successful DB result into a failed request.
  */
-public class ProductResponse {
+public class ProductResponse implements Serializable {
 
     private final Long id;
     private final String name;

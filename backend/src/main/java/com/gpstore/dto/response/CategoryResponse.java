@@ -2,12 +2,16 @@ package com.gpstore.dto.response;
 
 import com.gpstore.entity.Category;
 
+import java.io.Serializable;
+
 /**
  * Explicit response shape instead of returning the raw Category entity.
  * Nested inside ProductResponse - see ProductResponse for why Product itself
  * needs this.
+ *
+ * Serializable - see ProductResponse's doc comment (this is nested inside it).
  */
-public class CategoryResponse {
+public class CategoryResponse implements Serializable {
 
     private final Long id;
     private final String name;
