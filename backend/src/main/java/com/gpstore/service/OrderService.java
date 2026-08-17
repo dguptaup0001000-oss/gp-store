@@ -25,6 +25,8 @@ import com.gpstore.repository.OrderItemRepository;
 import com.gpstore.repository.OrderRepository;
 import com.gpstore.util.OrderNumberGenerator;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +37,8 @@ import java.util.Optional;
 
 @Service
 public class OrderService {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     private final OrderRepository repository;
     private final OrderItemRepository orderItemRepository;
@@ -495,18 +499,40 @@ public class OrderService {
             deliveryService.autoAssignBestEffort(placedOrderId);
         };
 
-        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
-            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
-                    new org.springframework.transaction.support.TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            afterCommitWork.run();
-                        }
-                    });
-        } else {
-            // Defensive fallback only - shouldn't happen inside an @Transactional
-            // method, but never silently drop these side effects if it does.
-            afterCommitWork.run();
+        // Belt-and-suspenders on top of the comment above: every individual
+        // call inside afterCommitWork is SUPPOSED to catch its own
+        // exceptions, but that guarantee lives in four different methods
+        // across three services, maintained separately over time - one
+        // regression, or one exception type narrower than what a future
+        // change can throw (an Error subtype slipping past a `catch
+        // (Exception ...)`, for instance), and this whole safety net breaks
+        // silently. Catching Throwable here directly enforces the actual
+        // invariant this code depends on - nothing from this point on may
+        // turn an already-committed, already-successful order into an error
+        // response - rather than just hoping every callee upholds it
+        // forever. If something still gets here, at least it's on record
+        // instead of surfacing to the customer as "An unexpected error
+        // occurred" for an order that, in reality, already went through.
+        try {
+            if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                        new org.springframework.transaction.support.TransactionSynchronization() {
+                            @Override
+                            public void afterCommit() {
+                                try {
+                                    afterCommitWork.run();
+                                } catch (Throwable t) {
+                                    log.error("Post-order side effects failed for order {} - order itself is unaffected", placedOrderId, t);
+                                }
+                            }
+                        });
+            } else {
+                // Defensive fallback only - shouldn't happen inside an @Transactional
+                // method, but never silently drop these side effects if it does.
+                afterCommitWork.run();
+            }
+        } catch (Throwable t) {
+            log.error("Failed to register/run post-order side effects for order {} - order itself is unaffected", placedOrderId, t);
         }
 
         PlaceOrderResponse response = new PlaceOrderResponse();
