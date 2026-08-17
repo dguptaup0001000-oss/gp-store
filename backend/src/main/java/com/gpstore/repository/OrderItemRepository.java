@@ -39,6 +39,20 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     /** Full purchase history for a customer, most recent order first - used for reorder suggestions. */
     List<OrderItem> findByOrder_Customer_IdOrderByOrder_OrderDateDesc(Long customerId);
 
+    /**
+     * Same as above, but eager-fetches productVariant and its product in the
+     * same query - RecommendationService.forCustomer() needs every item's
+     * product ID just to walk the list and dedupe, which previously meant
+     * two extra lazy-load queries (productVariant, then productVariant's
+     * own product) PER ORDER ITEM in that customer's entire history.
+     */
+    @Query("SELECT oi FROM OrderItem oi " +
+            "JOIN FETCH oi.productVariant pv " +
+            "JOIN FETCH pv.product " +
+            "WHERE oi.order.customer.id = :customerId " +
+            "ORDER BY oi.order.orderDate DESC")
+    List<OrderItem> findByCustomerIdWithProductFetched(@Param("customerId") Long customerId);
+
     /** Used to enforce "verified purchase only" reviews - has this customer ever actually ordered this product? */
     boolean existsByOrder_Customer_IdAndProductVariant_Product_Id(Long customerId, Long productId);
 

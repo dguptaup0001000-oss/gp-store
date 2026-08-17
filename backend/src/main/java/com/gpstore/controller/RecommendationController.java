@@ -1,6 +1,6 @@
 package com.gpstore.controller;
 
-import com.gpstore.entity.Product;
+import com.gpstore.dto.response.ProductResponse;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.RecommendationService;
 import org.springframework.web.bind.annotation.*;
@@ -21,7 +21,7 @@ public class RecommendationController {
 
     // Public - shown on a product page: "customers who bought this also bought...".
     @GetMapping("/frequently-bought-together/{productId}")
-    public List<Product> frequentlyBoughtTogether(
+    public List<ProductResponse> frequentlyBoughtTogether(
             @PathVariable Long productId,
             @RequestParam(defaultValue = "5") int limit) {
         return recommendationService.frequentlyBoughtWith(productId, Math.min(limit, 20));
@@ -29,7 +29,7 @@ public class RecommendationController {
 
     // Public - a homepage "trending near you" style section.
     @GetMapping("/trending")
-    public List<Product> trending(
+    public List<ProductResponse> trending(
             @RequestParam(defaultValue = "7") int days,
             @RequestParam(defaultValue = "10") int limit) {
         return recommendationService.trending(days, Math.min(limit, 50));
@@ -37,7 +37,7 @@ public class RecommendationController {
 
     // Requires login - reorder suggestions from THIS customer's own history.
     @GetMapping("/for-me")
-    public List<Product> forMe(@RequestParam(defaultValue = "10") int limit) {
+    public List<ProductResponse> forMe(@RequestParam(defaultValue = "10") int limit) {
         return recommendationService.forCustomer(currentUser.customerId(), Math.min(limit, 50));
     }
 }
