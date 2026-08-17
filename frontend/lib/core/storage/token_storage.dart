@@ -25,6 +25,7 @@ class TokenStorage {
 
   static const _accessTokenKey = 'access_token';
   static const _refreshTokenKey = 'refresh_token';
+  static const _rememberMeKey = 'remember_me';
 
   Future<void> saveTokens({
     required String accessToken,
@@ -38,8 +39,20 @@ class TokenStorage {
 
   Future<String?> getRefreshToken() => _storage.read(key: _refreshTokenKey);
 
+  /// Whether the current session should survive an app restart. Tokens are
+  /// always written on login so in-progress API calls keep working either
+  /// way - this flag is only consulted by AuthController on cold start to
+  /// decide whether to restore that session or clear it. Absent (e.g. a
+  /// session from before this flag existed, or the OTP/register flows which
+  /// don't expose the toggle) defaults to true, matching the app's prior
+  /// always-remember behavior.
+  Future<void> setRememberMe(bool remember) => _storage.write(key: _rememberMeKey, value: remember.toString());
+
+  Future<bool> getRememberMe() async => (await _storage.read(key: _rememberMeKey)) != 'false';
+
   Future<void> clear() async {
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);
+    await _storage.delete(key: _rememberMeKey);
   }
 }

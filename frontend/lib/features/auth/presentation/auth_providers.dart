@@ -64,13 +64,21 @@ class AuthController extends StateNotifier<AuthState> {
     // turns out to be invalid/expired. Avoids an extra network round-trip
     // just to check on every app launch.
     final hasSession = await _repository.hasStoredSession();
+    if (hasSession && !await _repository.shouldRestoreSession()) {
+      // Logged in with "Remember me" off - this session was only ever meant
+      // to last until the app closed, so a cold start clears it instead of
+      // restoring it.
+      await _repository.logout();
+      state = const AuthState(status: AuthStatus.unauthenticated);
+      return;
+    }
     state = AuthState(status: hasSession ? AuthStatus.authenticated : AuthStatus.unauthenticated);
   }
 
-  Future<bool> login({required String email, required String password}) async {
+  Future<bool> login({required String email, required String password, bool rememberMe = true}) async {
     state = state.copyWith(status: AuthStatus.unknown, errorMessage: null);
     try {
-      final auth = await _repository.login(email: email, password: password);
+      final auth = await _repository.login(email: email, password: password, rememberMe: rememberMe);
       state = AuthState(status: AuthStatus.authenticated, user: auth);
       return true;
     } catch (e) {
