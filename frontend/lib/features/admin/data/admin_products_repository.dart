@@ -1,3 +1,6 @@
+import 'package:dio/dio.dart';
+import 'package:image_picker/image_picker.dart';
+
 import '../../../core/api/api_client.dart';
 import '../../products/domain/product_models.dart';
 import '../domain/admin_coupon_models.dart';
@@ -6,6 +9,7 @@ import '../domain/admin_payment_model.dart';
 import '../domain/admin_review_model.dart';
 import '../domain/analytics_models.dart';
 import '../domain/audit_log_model.dart';
+import '../domain/cloudinary_signature.dart';
 import '../domain/delivery_breach_model.dart';
 import '../domain/delivery_partner_models.dart';
 import '../../orders/domain/order_models.dart';
@@ -113,6 +117,44 @@ class AdminProductsRepository {
         'active': true,
       },
     );
+  }
+
+  /// Short-lived signature for one direct-to-Cloudinary upload - the API
+  /// secret used to produce it never leaves the backend (see
+  /// CloudinaryUploadService's doc comment). Throws (surfacing the
+  /// backend's own message via extractErrorMessage) if Cloudinary hasn't
+  /// been configured yet.
+  Future<CloudinarySignature> getCloudinarySignature() async {
+    final response = await apiClient.dio.get('/api/uploads/cloudinary-signature');
+    return CloudinarySignature.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Lets the admin pick a photo from their gallery and upload it straight
+  /// to Cloudinary for a variant's image - this app's own backend never
+  /// receives the image bytes, only the short-lived signature above. Uses a
+  /// fresh, unconfigured Dio instance (not apiClient.dio) so this app's JWT
+  /// auth header and error-mapping interceptor - both meant for OUR
+  /// backend's responses - never touch this third-party request. Returns
+  /// null if the admin cancelled the picker instead of choosing a photo.
+  Future<String?> pickAndUploadVariantImage() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (picked == null) return null;
+
+    final signature = await getCloudinarySignature();
+    final bytes = await picked.readAsBytes();
+
+    final response = await Dio().post(
+      'https://api.cloudinary.com/v1_1/${signature.cloudName}/image/upload',
+      data: FormData.fromMap({
+        'file': MultipartFile.fromBytes(bytes, filename: picked.name),
+        'api_key': signature.apiKey,
+        'timestamp': signature.timestamp,
+        'signature': signature.signature,
+        'folder': signature.folder,
+      }),
+    );
+
+    return response.data['secure_url'] as String;
   }
 
   Future<List<Category>> getCategories() async {

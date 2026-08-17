@@ -52,6 +52,18 @@ variables and *how* you get a public URL - not the application itself.
    REDIS_PORT=<port from step 6, usually 6379>
    REDIS_PASSWORD=<password from step 6, if any - leave unset if none>
    ```
+   Optional - only if admins should be able to upload product/variant
+   photos directly instead of pasting an already-hosted image URL: create a
+   free Cloudinary account (https://cloudinary.com), then set
+   ```
+   CLOUDINARY_CLOUD_NAME=<from Cloudinary Dashboard -> Product Environment Credentials>
+   CLOUDINARY_API_KEY=<same page>
+   CLOUDINARY_API_SECRET=<same page - keep this one secret, same as JWT_SECRET/DB_PASSWORD>
+   ```
+   Left unset, the admin app's image field still works fine as a
+   manually-pasted URL - the upload button just shows a clear "not
+   configured" error instead of crashing anything.
+
    Do **not** set `DDL_AUTO=validate` yet - there's no Flyway baseline
    migration file in this project yet (see
    `src/main/resources/db/migration/README.md`), so `validate` mode would

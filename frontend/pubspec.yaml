@@ -58,6 +58,13 @@ dependencies:
   url_launcher: ^6.3.1
   package_info_plus: ^8.1.2
 
+  # Lets an admin pick a real photo from their gallery for a product
+  # variant's image, instead of having to paste an already-hosted image URL
+  # by hand. Paired with a direct upload to Cloudinary (see
+  # admin_products_repository.dart's uploadVariantImage) - this app never
+  # sends the image bytes through the backend.
+  image_picker: ^1.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
