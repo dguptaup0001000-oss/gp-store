@@ -27,6 +27,7 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
   late final TextEditingController _imageUrlController;
   late bool _available;
   bool _isSaving = false;
+  bool _isUploadingImage = false;
 
   bool get _isEditing => widget.variant != null;
 
@@ -134,6 +135,23 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
     }
   }
 
+  Future<void> _uploadImage() async {
+    setState(() => _isUploadingImage = true);
+    try {
+      final url = await ref.read(adminProductsRepositoryProvider).pickAndUploadVariantImage();
+      if (url != null && mounted) {
+        setState(() => _imageUrlController.text = url);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(extractErrorMessage(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _isUploadingImage = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -201,8 +219,39 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
               const SizedBox(height: 12),
               TextFormField(
                 controller: _imageUrlController,
-                decoration: const InputDecoration(labelText: 'Image URL (optional)'),
+                decoration: InputDecoration(
+                  labelText: 'Image URL (optional)',
+                  helperText: 'Paste a URL, or upload a photo below',
+                  suffixIcon: _imageUrlController.text.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          tooltip: 'Clear image',
+                          onPressed: () => setState(_imageUrlController.clear),
+                        ),
+                ),
+                onChanged: (_) => setState(() {}),
               ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _isUploadingImage ? null : _uploadImage,
+                icon: _isUploadingImage
+                    ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.photo_library_outlined, size: 18),
+                label: Text(_isUploadingImage ? 'Uploading...' : 'Upload photo'),
+              ),
+              if (_imageUrlController.text.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    _imageUrlController.text,
+                    height: 100,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const SizedBox(height: 100, child: Center(child: Text('Could not load image preview'))),
+                  ),
+                ),
+              ],
               if (_isEditing) ...[
                 const SizedBox(height: 8),
                 SwitchListTile(

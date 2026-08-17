@@ -65,8 +65,18 @@ class _AdminCustomersScreenState extends ConsumerState<AdminCustomersScreen> {
                   ],
                 ),
               ),
-              data: (allCustomers) {
+              data: (page) {
+                final allCustomers = page.customers;
                 final customers = _filter(allCustomers);
+                final controller = ref.read(adminAllCustomersProvider.notifier);
+
+                // While actively searching, keep pulling in more pages so
+                // the search covers the whole customer base, not just
+                // whatever page happened to load first - matches the old
+                // behavior from before this list was paginated.
+                if (_query.isNotEmpty && controller.hasMore) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) => controller.loadMore());
+                }
 
                 if (customers.isEmpty) {
                   return Center(
@@ -77,11 +87,19 @@ class _AdminCustomersScreenState extends ConsumerState<AdminCustomersScreen> {
                   );
                 }
 
+                final hasMore = _query.isEmpty && controller.hasMore;
+
                 return ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  itemCount: customers.length,
+                  itemCount: customers.length + (hasMore ? 1 : 0),
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) => _CustomerTile(customer: customers[index]),
+                  itemBuilder: (context, index) {
+                    if (index == customers.length) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) => controller.loadMore());
+                      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                    }
+                    return _CustomerTile(customer: customers[index]);
+                  },
                 );
               },
             ),

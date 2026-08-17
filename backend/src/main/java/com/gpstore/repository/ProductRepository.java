@@ -42,9 +42,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     Page<Product> findByCategoryIdAndActiveTrue(Long categoryId, Pageable pageable);
 
-    /** Non-paginated variant for the sort/filter/search version of category browsing - same reasoning as the brand equivalent. */
-    List<Product> findByCategoryIdAndActiveTrue(Long categoryId);
-
     Page<Product> findByActiveTrueOrderByCreatedAtDesc(Pageable pageable);
 
     /**
@@ -56,15 +53,4 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             "where p.active = true and p.brand is not null and p.brand <> '' " +
             "group by p.brand order by p.brand asc")
     List<Object[]> findBrandsWithProductCounts();
-
-    /**
-     * All active products for one brand - fetched in full (not paginated at
-     * the DB level) because sorting by Best Selling/Highest Rated requires
-     * computing those in Java from separate queries first, then sorting the
-     * whole set - pagination is applied afterward, in the service layer.
-     * Genuinely fine at a single kirana store's realistic catalog size per
-     * brand (dozens, not millions) - this would need rethinking at a much
-     * larger scale, which isn't this store's reality.
-     */
-    List<Product> findByBrandIgnoreCaseAndActiveTrue(String brand);
 }

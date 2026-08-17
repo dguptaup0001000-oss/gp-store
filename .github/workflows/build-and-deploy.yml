@@ -46,11 +46,21 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          # 'stable' rather than a pinned version number - this always
-          # builds with whatever the current stable Flutter release is,
-          # the same "delegate to what's actually current" reasoning used
-          # for the Android SDK versions in android/app/build.gradle.
-          channel: stable
+          # Pinned, NOT 'stable' - this project's freezed/json_serializable
+          # pins (see pubspec.yaml) transitively cap the `analyzer` package
+          # below what current Flutter stable's Dart SDK needs (newer Dart
+          # syntax the pinned analyzer's AST visitor has no implementation
+          # for - "Missing implementation of visitDotShorthandPropertyAccess"
+          # was the actual build_runner failure this caused once Flutter
+          # stable moved to Dart 3.13). freezed's 2.x line hard-caps analyzer
+          # at <8.0.0 and is unmaintained past 2.5.8, so there is no version
+          # of freezed 2.x compatible with a newer Dart SDK - only upgrading
+          # to freezed 3.x (a breaking rewrite of every @freezed model in
+          # this app) would allow un-pinning this. 3.35.7 is the newest
+          # stable release still on Dart 3.9.x, matching what this pinned
+          # analyzer chain actually supports. Bump this deliberately, together
+          # with a freezed 3.x migration, not by itself.
+          flutter-version: '3.35.7'
           cache: true
 
       - name: Install dependencies
@@ -106,7 +116,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          # Pinned - see the build-apk job's Set up Flutter step above for
+          # why (analyzer/freezed 2.x version incompatibility with newer
+          # Dart SDKs). Keep these two jobs' Flutter versions in sync.
+          flutter-version: '3.35.7'
           cache: true
 
       - name: Install dependencies

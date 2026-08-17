@@ -7,6 +7,9 @@ import com.gpstore.security.CurrentUser;
 import com.gpstore.service.PaymentService;
 
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -34,8 +37,11 @@ public class PaymentController {
 
     // Admin only (enforced in SecurityConfig).
     @GetMapping
-    public List<com.gpstore.dto.response.PaymentResponse> getAllPayments() {
-        return paymentService.getAllPayments();
+    public Page<com.gpstore.dto.response.PaymentResponse> getAllPayments(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return paymentService.getAllPayments(pageable);
     }
 
     // Admin only (enforced in SecurityConfig).

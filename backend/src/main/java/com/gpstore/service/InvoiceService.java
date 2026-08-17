@@ -90,10 +90,10 @@ public class InvoiceService {
     }
 
     @Transactional(readOnly = true)
-    public List<com.gpstore.dto.response.InvoiceResponse> getAllInvoices() {
-        return invoiceRepository.findAll().stream()
-                .map(com.gpstore.dto.response.InvoiceResponse::from)
-                .collect(java.util.stream.Collectors.toList());
+    public org.springframework.data.domain.Page<com.gpstore.dto.response.InvoiceResponse> getAllInvoices(
+            org.springframework.data.domain.Pageable pageable) {
+        return invoiceRepository.findAll(pageable)
+                .map(com.gpstore.dto.response.InvoiceResponse::from);
     }
 
     @Transactional(readOnly = true)

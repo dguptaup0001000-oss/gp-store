@@ -241,16 +241,29 @@ public class NotificationService {
         }
     }
 
-    public List<Notification> getAllNotifications() {
-        return notificationRepository.findAll();
+    public org.springframework.data.domain.Page<Notification> getAllNotifications(
+            org.springframework.data.domain.Pageable pageable) {
+        return notificationRepository.findAll(pageable);
     }
 
     public Optional<Notification> getNotificationById(Long id) {
         return notificationRepository.findById(id);
     }
 
-    public List<Notification> getNotificationsByCustomerId(Long customerId) {
-        return notificationRepository.findByCustomerIdOrderBySentAtDesc(customerId);
+    /** Paginated - every order status change writes a notification, so this grows without bound over a customer's lifetime. */
+    public org.springframework.data.domain.Page<Notification> getNotificationsByCustomerId(
+            Long customerId, org.springframework.data.domain.Pageable pageable) {
+        return notificationRepository.findByCustomerIdOrderBySentAtDesc(customerId, pageable);
+    }
+
+    /**
+     * A dedicated count query instead of paging through every notification -
+     * needed now that getNotificationsByCustomerId only returns one page at a
+     * time, so the unread badge can no longer be derived client-side from a
+     * full in-memory list.
+     */
+    public long getUnreadCount(Long customerId) {
+        return notificationRepository.countByCustomerIdAndIsReadFalse(customerId);
     }
 
     public List<Notification> getNotificationsByOrderId(Long orderId) {

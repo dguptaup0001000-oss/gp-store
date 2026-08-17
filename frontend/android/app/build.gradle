@@ -49,6 +49,14 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
+        // flutter_local_notifications' Android implementation uses java.time
+        // APIs for scheduled notifications that don't exist natively below
+        // API 26 - desugaring backports them. Without this, the release
+        // build fails outright at Gradle's AAR metadata check
+        // (":app:checkReleaseAarMetadata" - "Dependency
+        // ':flutter_local_notifications' requires core library desugaring
+        // to be enabled for :app"), not just a runtime warning.
+        coreLibraryDesugaringEnabled true
     }
 
     kotlinOptions {
@@ -89,6 +97,13 @@ android {
             signingConfig hasRealSigningConfig ? signingConfigs.release : signingConfigs.debug
         }
     }
+}
+
+dependencies {
+    // Required by compileOptions.coreLibraryDesugaringEnabled above -
+    // provides the actual backported java.time/java.util implementations,
+    // the enable flag alone isn't enough on its own.
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
 }
 
 flutter {

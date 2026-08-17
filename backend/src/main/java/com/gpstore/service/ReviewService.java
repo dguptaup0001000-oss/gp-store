@@ -71,9 +71,9 @@ public class ReviewService {
     }
 
     @Transactional(readOnly = true)
-        public List<AdminReviewResponse> getAllReviews() {
-            return reviewRepository.findAll().stream().map(AdminReviewResponse::from).toList();
-        }
+    public Page<AdminReviewResponse> getAllReviews(Pageable pageable) {
+        return reviewRepository.findAll(pageable).map(AdminReviewResponse::from);
+    }
 
     @Transactional(readOnly = true)
         public Page<ReviewResponse> getForProduct(Long productId, Pageable pageable) {

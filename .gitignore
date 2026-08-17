@@ -34,3 +34,6 @@ build/
 
 ### Environment secrets ###
 .env
+
+### Claude Code tooling scratch space (agent worktrees, etc.) ###
+.claude/

@@ -43,8 +43,9 @@ public class WishlistService {
     }
 
     @Transactional(readOnly = true)
-    public List<WishlistResponse> getAllWishlists() {
-        return wishlistRepository.findAll().stream().map(WishlistResponse::from).toList();
+    public org.springframework.data.domain.Page<WishlistResponse> getAllWishlists(
+            org.springframework.data.domain.Pageable pageable) {
+        return wishlistRepository.findAll(pageable).map(WishlistResponse::from);
     }
 
     @Transactional(readOnly = true)

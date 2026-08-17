@@ -26,8 +26,19 @@ variables and *how* you get a public URL - not the application itself.
    `Dockerfile` in that directory automatically - no build command needed.
 5. **Instance type**: Render's free tier works for initial testing, but see
    "Free tier behavior" below before you rely on it for anything real.
-6. Set these environment variables (Render → your service → **Environment**
-   tab), using your real Supabase values:
+6. **Provision Redis** - required now (`spring.cache.type=redis` in
+   `application.properties`, see its doc comment): the app's caching and its
+   login/checkout rate limiter both need a real Redis instance to connect
+   to, and won't start correctly without one. Either:
+   - Render → **New → Key Value** (Render's own managed Redis-compatible
+     store) in the same project, or
+   - a free-tier external provider (e.g. Upstash) if you'd rather not add
+     another paid Render resource.
+
+   Either way, note the host/port (and password, if one is set) - you'll
+   need them in the next step.
+7. Set these environment variables (Render → your service → **Environment**
+   tab), using your real Supabase and Redis values:
    ```
    DB_URL=jdbc:postgresql://db.ckkksweijbdccvvmamid.supabase.co:5432/postgres?sslmode=require
    DB_USERNAME=postgres
@@ -37,7 +48,22 @@ variables and *how* you get a public URL - not the application itself.
    CORS_ALLOWED_ORIGINS=<your real frontend domain, once you have one>
    STORE_LATITUDE=<your actual shop's latitude>
    STORE_LONGITUDE=<your actual shop's longitude>
+   REDIS_HOST=<host from step 6>
+   REDIS_PORT=<port from step 6, usually 6379>
+   REDIS_PASSWORD=<password from step 6, if any - leave unset if none>
    ```
+   Optional - only if admins should be able to upload product/variant
+   photos directly instead of pasting an already-hosted image URL: create a
+   free Cloudinary account (https://cloudinary.com), then set
+   ```
+   CLOUDINARY_CLOUD_NAME=<from Cloudinary Dashboard -> Product Environment Credentials>
+   CLOUDINARY_API_KEY=<same page>
+   CLOUDINARY_API_SECRET=<same page - keep this one secret, same as JWT_SECRET/DB_PASSWORD>
+   ```
+   Left unset, the admin app's image field still works fine as a
+   manually-pasted URL - the upload button just shows a clear "not
+   configured" error instead of crashing anything.
+
    Do **not** set `DDL_AUTO=validate` yet - there's no Flyway baseline
    migration file in this project yet (see
    `src/main/resources/db/migration/README.md`), so `validate` mode would
@@ -48,15 +74,15 @@ variables and *how* you get a public URL - not the application itself.
    expects an encrypted connection. Never commit the real `DB_PASSWORD` to
    git; set it only here, as a Render environment variable.
 
-7. Render assigns a public URL automatically once the first deploy
+8. Render assigns a public URL automatically once the first deploy
    succeeds - something like `https://gp-store-backend.onrender.com`. Find
    it at the top of your service's dashboard page.
 
-8. **One-time step after your first successful deploy** (the `products`
+9. **One-time step after your first successful deploy** (the `products`
    table doesn't exist until the app has started at least once and Hibernate
    has created the schema): open Supabase's **SQL Editor** in your Supabase
    project dashboard, or connect via `psql` using the connection details
-   from step 6, and run:
+   from step 7, and run:
    ```sql
    CREATE EXTENSION IF NOT EXISTS pg_trgm;
    CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING GIN (name gin_trgm_ops);
@@ -97,6 +123,8 @@ Render ever sees the code - no separate deploy job needed there.
 - A custom domain (e.g. `api.yourstore.com`) - Render supports this under
   **Settings → Custom Domains**, but it's a DNS decision only you can make
   once you own a domain.
-- Scaling to multiple instances - not needed at your current single-store
-  scale, and multiple instances would need the Redis-backed rate limiting /
-  caching upgrade noted elsewhere before it'd work correctly.
+- Scaling to multiple instances - caching, rate limiting, and scheduled-job
+  locking (ShedLock, see `config.SchedulerLockConfig`) are all
+  correctness-safe across multiple instances now, but actually running more
+  than one (load balancer setup, health-check-aware rollout, etc.) is still
+  outside this doc's scope.

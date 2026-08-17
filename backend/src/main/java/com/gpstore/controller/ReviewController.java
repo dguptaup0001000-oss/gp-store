@@ -35,9 +35,12 @@ public class ReviewController {
     // for moderation, which the raw entity deliberately hides (see
     // AdminReviewResponse's doc comment for why that needed its own DTO).
     @GetMapping
-    public List<com.gpstore.dto.response.AdminReviewResponse> getAllReviews() {
-            return reviewService.getAllReviews();
-        }
+    public Page<com.gpstore.dto.response.AdminReviewResponse> getAllReviews(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return reviewService.getAllReviews(pageable);
+    }
 
     // Admin only - moderation: remove any review, not just your own.
     @DeleteMapping("/{id}/moderate")

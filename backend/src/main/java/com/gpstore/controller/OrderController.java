@@ -10,6 +10,9 @@ import com.gpstore.security.CurrentUser;
 import com.gpstore.service.OrderService;
 
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -65,14 +68,20 @@ public class OrderController {
 
     // Order history for the logged-in customer only.
     @GetMapping("/my-orders")
-    public List<OrderResponse> getMyOrders() {
-        return orderService.getMyOrders(currentUser.customerId());
+    public Page<OrderResponse> getMyOrders(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return orderService.getMyOrders(currentUser.customerId(), pageable);
     }
 
     // Admin only (enforced in SecurityConfig): every order in the system, WITH customer name.
     @GetMapping("/admin/all")
-    public List<OrderResponse> getAllOrdersForAdmin() {
-        return orderService.getAllOrdersForAdmin();
+    public Page<OrderResponse> getAllOrdersForAdmin(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return orderService.getAllOrdersForAdmin(pageable);
     }
 
     // Full detail for one of the caller's own orders - real items, address,

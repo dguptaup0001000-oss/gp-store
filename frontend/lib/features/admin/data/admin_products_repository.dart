@@ -1,3 +1,6 @@
+import 'package:dio/dio.dart';
+import 'package:image_picker/image_picker.dart';
+
 import '../../../core/api/api_client.dart';
 import '../../products/domain/product_models.dart';
 import '../domain/admin_coupon_models.dart';
@@ -6,6 +9,7 @@ import '../domain/admin_payment_model.dart';
 import '../domain/admin_review_model.dart';
 import '../domain/analytics_models.dart';
 import '../domain/audit_log_model.dart';
+import '../domain/cloudinary_signature.dart';
 import '../domain/delivery_breach_model.dart';
 import '../domain/delivery_partner_models.dart';
 import '../../orders/domain/order_models.dart';
@@ -113,6 +117,44 @@ class AdminProductsRepository {
         'active': true,
       },
     );
+  }
+
+  /// Short-lived signature for one direct-to-Cloudinary upload - the API
+  /// secret used to produce it never leaves the backend (see
+  /// CloudinaryUploadService's doc comment). Throws (surfacing the
+  /// backend's own message via extractErrorMessage) if Cloudinary hasn't
+  /// been configured yet.
+  Future<CloudinarySignature> getCloudinarySignature() async {
+    final response = await apiClient.dio.get('/api/uploads/cloudinary-signature');
+    return CloudinarySignature.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Lets the admin pick a photo from their gallery and upload it straight
+  /// to Cloudinary for a variant's image - this app's own backend never
+  /// receives the image bytes, only the short-lived signature above. Uses a
+  /// fresh, unconfigured Dio instance (not apiClient.dio) so this app's JWT
+  /// auth header and error-mapping interceptor - both meant for OUR
+  /// backend's responses - never touch this third-party request. Returns
+  /// null if the admin cancelled the picker instead of choosing a photo.
+  Future<String?> pickAndUploadVariantImage() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (picked == null) return null;
+
+    final signature = await getCloudinarySignature();
+    final bytes = await picked.readAsBytes();
+
+    final response = await Dio().post(
+      'https://api.cloudinary.com/v1_1/${signature.cloudName}/image/upload',
+      data: FormData.fromMap({
+        'file': MultipartFile.fromBytes(bytes, filename: picked.name),
+        'api_key': signature.apiKey,
+        'timestamp': signature.timestamp,
+        'signature': signature.signature,
+        'folder': signature.folder,
+      }),
+    );
+
+    return response.data['secure_url'] as String;
   }
 
   Future<List<Category>> getCategories() async {
@@ -329,9 +371,18 @@ class AdminProductsRepository {
   /// detail viewing reuses the existing customer-facing orderDetailProvider
   /// directly - the backend now allows admin to bypass the ownership check
   /// on that same endpoint, so no separate admin detail call is needed.
-  Future<List<OrderSummary>> getAllOrders() async {
-    final response = await apiClient.dio.get('/api/orders/admin/all');
-    return (response.data as List).map((e) => OrderSummary.fromJson(e as Map<String, dynamic>)).toList();
+  /// Paginated - every order ever placed, system-wide, has no natural upper bound.
+  Future<({List<OrderSummary> orders, int totalPages})> getAllOrders({int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/orders/admin/all',
+      queryParameters: {'page': page, 'size': size},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+    return (
+      orders: content.map((e) => OrderSummary.fromJson(e as Map<String, dynamic>)).toList(),
+      totalPages: data['totalPages'] as int,
+    );
   }
 
   /// A specific customer's order history - for support/dispute lookups
@@ -350,9 +401,18 @@ class AdminProductsRepository {
 
   // --- Review moderation ---
 
-  Future<List<AdminReview>> getAllReviews() async {
-    final response = await apiClient.dio.get('/api/reviews');
-    return (response.data as List).map((e) => AdminReview.fromJson(e as Map<String, dynamic>)).toList();
+  /// Paginated - system-wide review count has no natural upper bound.
+  Future<({List<AdminReview> reviews, int totalPages})> getAllReviews({int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/reviews',
+      queryParameters: {'page': page, 'size': size},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+    return (
+      reviews: content.map((e) => AdminReview.fromJson(e as Map<String, dynamic>)).toList(),
+      totalPages: data['totalPages'] as int,
+    );
   }
 
   /// Moderation delete - removes ANY review, not just the admin's own.
@@ -362,9 +422,18 @@ class AdminProductsRepository {
 
   // --- Customer management ---
 
-  Future<List<AdminCustomer>> getAllCustomers() async {
-    final response = await apiClient.dio.get('/api/customers');
-    return (response.data as List).map((e) => AdminCustomer.fromJson(e as Map<String, dynamic>)).toList();
+  /// Paginated - the customer base has no natural upper bound.
+  Future<({List<AdminCustomer> customers, int totalPages})> getAllCustomers({int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/customers',
+      queryParameters: {'page': page, 'size': size},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+    return (
+      customers: content.map((e) => AdminCustomer.fromJson(e as Map<String, dynamic>)).toList(),
+      totalPages: data['totalPages'] as int,
+    );
   }
 
   /// password is genuinely optional - e.g. a phone-order customer who'll
@@ -395,9 +464,18 @@ class AdminProductsRepository {
 
   // --- Payments ---
 
-  Future<List<AdminPayment>> getAllPayments() async {
-    final response = await apiClient.dio.get('/api/payments');
-    return (response.data as List).map((e) => AdminPayment.fromJson(e as Map<String, dynamic>)).toList();
+  /// Paginated - system-wide payment count has no natural upper bound.
+  Future<({List<AdminPayment> payments, int totalPages})> getAllPayments({int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/payments',
+      queryParameters: {'page': page, 'size': size},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+    return (
+      payments: content.map((e) => AdminPayment.fromJson(e as Map<String, dynamic>)).toList(),
+      totalPages: data['totalPages'] as int,
+    );
   }
 
   /// Starts a refund for a cancelled/returned order's payment.
