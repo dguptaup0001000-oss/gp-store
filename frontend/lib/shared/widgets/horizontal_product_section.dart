@@ -53,7 +53,12 @@ class HorizontalProductSection extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text("Couldn't load this - check your connection"),
+                // TEMPORARY, for active debugging - see RootScreen's
+                // identical comment for why this shows the real failure
+                // reason instead of one static string. This one widget
+                // backs New Arrivals, Trending, AND Recommended for you -
+                // one fix covers all three sections' error states.
+                Text("Couldn't load this: ${extractErrorMessage(error)}", textAlign: TextAlign.center),
                 TextButton(onPressed: onRetry, child: const Text('Retry')),
               ],
             ),
