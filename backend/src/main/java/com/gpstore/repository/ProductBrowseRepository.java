@@ -56,6 +56,14 @@ public class ProductBrowseRepository {
             conditions.add("COALESCE(v.in_stock, false) = true");
         }
 
+        // NOTE: this text block deliberately ends right after the last JOIN,
+        // with no trailing WHERE - Java text blocks strip trailing
+        // whitespace from every line, so a "WHERE " written at the end of
+        // the block here previously lost its space at runtime and produced
+        // "...p.id WHEREp.active = true" (Postgres syntax error 42601).
+        // The WHERE clause is built and joined separately below instead,
+        // as a plain string literal (not a text block), where trailing
+        // spaces are preserved exactly as written.
         String fromAndJoins = """
                 FROM products p
                 LEFT JOIN (
@@ -79,7 +87,7 @@ public class ProductBrowseRepository {
                     WHERE active = true
                     GROUP BY product_id
                 ) rt ON rt.product_id = p.id
-                WHERE """ + String.join(" AND ", conditions);
+                """ + "WHERE " + String.join(" AND ", conditions);
 
         String orderBy = switch (sort == null ? "" : sort.toUpperCase()) {
             case "PRICE_LOW_HIGH" -> "COALESCE(v.min_price, 0) ASC";
