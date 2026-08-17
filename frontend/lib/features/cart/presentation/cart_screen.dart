@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart';
 import '../../checkout/presentation/checkout_screen.dart';
 import '../domain/cart_models.dart';
 import 'cart_providers.dart';
@@ -21,7 +22,14 @@ class CartScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load your cart - check your connection"),
+              // TEMPORARY, for active debugging - see RootScreen's identical
+              // comment for why this shows the real failure reason instead
+              // of one static string. The last few failures here logged NO
+              // backend query at all, same pattern as the New Arrivals bug
+              // before its real cause was found - this had never been
+              // upgraded to show the real error like the order screens were.
+              Text("Couldn't load your cart: ${extractErrorMessage(error)}"),
+              const SizedBox(height: 8),
               TextButton(
                 onPressed: () => ref.invalidate(cartControllerProvider),
                 child: const Text('Retry'),
