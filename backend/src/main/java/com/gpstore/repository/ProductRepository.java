@@ -3,13 +3,29 @@ package com.gpstore.repository;
 import com.gpstore.entity.Product;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 
 public interface ProductRepository extends JpaRepository<Product, Long> {
+
+    /**
+     * Batched, eager-fetched lookup for recommendation-style endpoints
+     * (RecommendationService) that need to resolve a ranked list of product
+     * IDs into full Product objects for JSON serialization - one round trip
+     * with category/variants joined in, instead of the previous pattern of
+     * calling findById() once per product (an extra query each) and then
+     * relying on lazy-loading to fetch each product's category and variants
+     * individually during serialization (another 1-2 queries per product).
+     * For a 10-50 item recommendation list, that was 20-150+ sequential
+     * round trips instead of 1.
+     */
+    @EntityGraph(attributePaths = {"category", "variants"})
+    List<Product> findByIdIn(Collection<Long> ids);
 
     // Kept for backward compatibility - existing callers still work unchanged.
     List<Product> findByNameContainingIgnoreCase(String keyword);
@@ -40,8 +56,20 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
         nativeQuery = true)
     Page<Product> searchInstant(@Param("keyword") String keyword, Pageable pageable);
 
+    // Eager-fetch category only (not variants, unlike findByIdIn above) -
+    // ProductService maps every result through ProductResponse.from(), which
+    // needs both, and without this each page of results was N+1: one extra
+    // lazy-load query per product just for its category. variants is
+    // deliberately left lazy here specifically because it's a @OneToMany
+    // collection combined with Pageable (LIMIT/OFFSET) - eager-fetching a
+    // collection alongside DB-level pagination is a well-known Hibernate
+    // trap (the JOIN multiplies rows before the LIMIT applies), so this
+    // takes the safe half of the fix rather than risk paginated results
+    // silently coming back wrong.
+    @EntityGraph(attributePaths = {"category"})
     Page<Product> findByCategoryIdAndActiveTrue(Long categoryId, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"category"})
     Page<Product> findByActiveTrueOrderByCreatedAtDesc(Pageable pageable);
 
     /**
