@@ -78,6 +78,16 @@
             <artifactId>spring-boot-starter-cache</artifactId>
         </dependency>
 
+        <!-- Shared cache + distributed rate-limit store across instances -
+             see application.properties' spring.cache.type and
+             config.RateLimitFilter's doc comments for why an in-memory
+             cache/rate-limiter breaks correctness the moment you run more
+             than one backend instance. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>

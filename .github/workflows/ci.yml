@@ -36,6 +36,21 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      # spring.cache.type=redis and the rate limiter (config.RateLimitFilter)
+      # both need a real Redis to connect to - the Spring context itself
+      # would likely still boot without one (Lettuce connects lazily), but a
+      # real instance here means the same test run actually exercises the
+      # real Redis-backed code path instead of relying on that assumption.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -62,6 +77,8 @@ jobs:
           JWT_SECRET: ci-test-secret-not-for-real-use-1234567890123456789012345
           DDL_AUTO: update
           FLYWAY_ENABLED: 'false'
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
         run: ./mvnw -B clean verify
 
       - name: Upload test results

@@ -4,39 +4,59 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.time.Instant;
-import java.util.Deque;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.List;
 
 /**
- * Basic brute-force protection on login/register - the most obvious target
- * for a credential-stuffing or account-spam script, and currently had zero
- * protection at all. Limits each IP to MAX_REQUESTS per WINDOW_SECONDS on
- * these specific endpoints only - everything else is untouched.
+ * Basic brute-force protection on login/register/checkout - the most
+ * obvious targets for a credential-stuffing, account-spam, or checkout-spam
+ * script. Limits each IP to MAX_REQUESTS per WINDOW_SECONDS on these
+ * specific endpoints only - everything else is untouched.
  *
- * HONEST LIMITATION: this is in-memory, per-instance. It's the right choice
- * for a single-instance deployment (your current setup), but if you ever run
- * multiple backend instances behind a load balancer, each instance tracks its
- * own counts independently, so the real effective limit becomes
- * (MAX_REQUESTS x number of instances). Real multi-instance rate limiting
- * needs a shared store (Redis) - same "swap later" pattern as caching.
+ * Redis-backed (a fixed-window counter via one atomic INCR+EXPIRE, not the
+ * sliding-window deque the previous in-memory version used - a fixed window
+ * is the standard distributed-rate-limit pattern and close enough here;
+ * exact sliding-window precision was never the point) so every backend
+ * instance shares the same count. The previous ConcurrentHashMap-based
+ * version tracked counts per-instance, meaning the real effective limit
+ * became (MAX_REQUESTS x number of instances) the moment more than one
+ * instance ran.
+ *
+ * Fails OPEN (lets the request through) if Redis itself is unreachable -
+ * a Redis outage should degrade rate-limiting, not take down login/checkout
+ * entirely.
  */
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
 
+    private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
+
     private static final int MAX_REQUESTS = 10;
     private static final long WINDOW_SECONDS = 60;
 
-    private final ConcurrentHashMap<String, Deque<Instant>> requestLog = new ConcurrentHashMap<>();
+    private static final DefaultRedisScript<Long> INCREMENT_AND_EXPIRE = new DefaultRedisScript<>("""
+            local current = redis.call('INCR', KEYS[1])
+            if current == 1 then
+                redis.call('EXPIRE', KEYS[1], ARGV[1])
+            end
+            return current
+            """, Long.class);
 
+    private final StringRedisTemplate redisTemplate;
     private final boolean trustForwardedFor;
 
-    public RateLimitFilter(@org.springframework.beans.factory.annotation.Value("${rate-limit.trust-forwarded-for:false}") boolean trustForwardedFor) {
+    public RateLimitFilter(
+            StringRedisTemplate redisTemplate,
+            @Value("${rate-limit.trust-forwarded-for:false}") boolean trustForwardedFor) {
+        this.redisTemplate = redisTemplate;
         this.trustForwardedFor = trustForwardedFor;
     }
 
@@ -64,26 +84,24 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        String clientKey = clientIp(request) + ":" + path;
-        Instant now = Instant.now();
-        Instant windowStart = now.minusSeconds(WINDOW_SECONDS);
+        String clientKey = "ratelimit:" + clientIp(request) + ":" + path;
 
-        Deque<Instant> timestamps = requestLog.computeIfAbsent(clientKey, k -> new ConcurrentLinkedDeque<>());
+        Long count;
+        try {
+            count = redisTemplate.execute(
+                    INCREMENT_AND_EXPIRE, List.of(clientKey), String.valueOf(WINDOW_SECONDS));
+        } catch (Exception ex) {
+            log.warn("Rate limiter unavailable (Redis unreachable?) - allowing request through: {}", ex.getMessage());
+            filterChain.doFilter(request, response);
+            return;
+        }
 
-        synchronized (timestamps) {
-            while (!timestamps.isEmpty() && timestamps.peekFirst().isBefore(windowStart)) {
-                timestamps.pollFirst();
-            }
-
-            if (timestamps.size() >= MAX_REQUESTS) {
-                response.setStatus(429); // 429 Too Many Requests
-                response.setContentType("application/json");
-                response.getWriter().write(
-                        "{\"error\":\"Too Many Requests\",\"message\":\"Too many attempts - please wait a minute and try again.\"}");
-                return;
-            }
-
-            timestamps.addLast(now);
+        if (count != null && count > MAX_REQUESTS) {
+            response.setStatus(429); // 429 Too Many Requests
+            response.setContentType("application/json");
+            response.getWriter().write(
+                    "{\"error\":\"Too Many Requests\",\"message\":\"Too many attempts - please wait a minute and try again.\"}");
+            return;
         }
 
         filterChain.doFilter(request, response);
