@@ -29,7 +29,7 @@ class AuthRepository {
     return auth;
   }
 
-  Future<AuthResponse> login({required String email, required String password}) async {
+  Future<AuthResponse> login({required String email, required String password, bool rememberMe = true}) async {
     final response = await apiClient.dio.post(
       '/api/auth/login',
       data: {'email': email, 'password': password},
@@ -37,6 +37,7 @@ class AuthRepository {
 
     final auth = AuthResponse.fromJson(response.data as Map<String, dynamic>);
     await tokenStorage.saveTokens(accessToken: auth.token, refreshToken: auth.refreshToken);
+    await tokenStorage.setRememberMe(rememberMe);
     return auth;
   }
 
@@ -92,6 +93,10 @@ class AuthRepository {
     final refreshToken = await tokenStorage.getRefreshToken();
     return refreshToken != null;
   }
+
+  /// Whether a stored session (see hasStoredSession) should actually survive
+  /// an app cold start, per the "Remember me" choice made at login time.
+  Future<bool> shouldRestoreSession() => tokenStorage.getRememberMe();
 
   /// currentPassword is genuinely optional - null/blank for an OTP-only
   /// account setting up password login for the first time, matching the
