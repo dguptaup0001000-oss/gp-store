@@ -48,7 +48,7 @@ public class CartService {
     }
 
     public Cart getCustomerCart(Long customerId) {
-        return cartRepository.findByCustomerId(customerId).orElse(null);
+        return cartRepository.findByCustomerIdWithItemsFetched(customerId).orElse(null);
     }
 
     @Transactional
@@ -102,7 +102,8 @@ public class CartService {
             cart.getItems().add(cartItem);
         }
 
-        return recalculateAndSave(cart);
+        recalculateAndSave(cart);
+        return fetchWithItems(customerId);
     }
 
     /**
@@ -128,7 +129,8 @@ public class CartService {
             cartItemRepository.save(item);
         }
 
-        return recalculateAndSave(cart);
+        recalculateAndSave(cart);
+        return fetchWithItems(customerId);
     }
 
     @Transactional
@@ -139,7 +141,14 @@ public class CartService {
         cart.getItems().remove(item);
         cartItemRepository.delete(item);
 
-        return recalculateAndSave(cart);
+        recalculateAndSave(cart);
+        return fetchWithItems(customerId);
+    }
+
+    /** See CartRepository.findByCustomerIdWithItemsFetched's doc comment - avoids N+1 on the response conversion. */
+    private Cart fetchWithItems(Long customerId) {
+        return cartRepository.findByCustomerIdWithItemsFetched(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cart not found"));
     }
 
     /** Throws if the item doesn't exist or belongs to a different customer's cart - closes the IDOR. */

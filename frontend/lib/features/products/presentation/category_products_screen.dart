@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/filtered_product_browser.dart';
 import '../domain/product_models.dart';
 import 'products_providers.dart';
@@ -26,6 +27,7 @@ class CategoryProductsScreen extends ConsumerWidget {
               );
         },
       ),
+      bottomNavigationBar: const CartSummaryBar(),
     );
   }
 }

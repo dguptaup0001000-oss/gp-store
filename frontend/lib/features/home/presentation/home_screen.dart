@@ -21,6 +21,7 @@ import '../../../shared/widgets/bestsellers_section.dart';
 import '../../../shared/widgets/buy_by_brand_banner.dart';
 import '../../../shared/widgets/horizontal_product_section.dart';
 import '../../../shared/widgets/see_all_products_screen.dart';
+import '../../../shared/widgets/cart_summary_bar.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -35,7 +36,6 @@ class HomeScreen extends ConsumerWidget {
     final recommendedAsync = ref.watch(recommendedForMeProvider);
     final isLoggedIn = ref.watch(authControllerProvider).status == AuthStatus.authenticated;
     final cartItemCount = ref.watch(cartControllerProvider).valueOrNull?.totalItems ?? 0;
-    final cartTotal = ref.watch(cartControllerProvider).valueOrNull?.totalAmount ?? 0.0;
 
     void openProduct(Product product) => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
@@ -88,15 +88,7 @@ class HomeScreen extends ConsumerWidget {
           ),
         ],
       ),
-      bottomNavigationBar: cartItemCount > 0
-          ? _HomeCartBar(
-              itemCount: cartItemCount,
-              total: cartTotal,
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const CartScreen()),
-              ),
-            )
-          : null,
+      bottomNavigationBar: const CartSummaryBar(),
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(categoriesProvider);
@@ -233,64 +225,6 @@ class HomeScreen extends ConsumerWidget {
 
             const SizedBox(height: 24),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-
-class _HomeCartBar extends StatelessWidget {
-  const _HomeCartBar({required this.itemCount, required this.total, required this.onTap});
-
-  final int itemCount;
-  final double total;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: Material(
-          color: AppColors.primary,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          elevation: 4,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                    ),
-                    child: Text(
-                      '$itemCount',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '\u20b9${total.toStringAsFixed(0)}',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
-                    ),
-                  ),
-                  const Text(
-                    'View Cart',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
-                  ),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.arrow_forward, color: Colors.white, size: 18),
-                ],
-              ),
-            ),
-          ),
         ),
       ),
     );

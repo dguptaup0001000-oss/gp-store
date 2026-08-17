@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
@@ -28,6 +29,12 @@ class CartController extends AsyncNotifier<CartModel> {
     final repository = ref.read(cartRepositoryProvider);
     state = const AsyncLoading<CartModel>().copyWithPrevious(state);
     state = await AsyncValue.guard(() => repository.addToCart(variantId: variantId, quantity: quantity));
+    // Instant physical confirmation the tap registered, independent of how
+    // long the network call took - only fires once the add actually
+    // succeeded, so a failed add doesn't falsely feel like it worked.
+    if (state.hasValue) {
+      HapticFeedback.lightImpact();
+    }
   }
 
   Future<void> updateQuantity({required int cartItemId, required int quantity}) async {
