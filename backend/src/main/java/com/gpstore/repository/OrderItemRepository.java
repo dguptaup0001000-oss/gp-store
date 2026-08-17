@@ -42,11 +42,6 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     /** Used to enforce "verified purchase only" reviews - has this customer ever actually ordered this product? */
     boolean existsByOrder_Customer_IdAndProductVariant_Product_Id(Long customerId, Long productId);
 
-    /** All-time units sold per product - used by "Shop by Brand"'s Best Selling sort, one query rather than N+1. */
-    @Query("select oi.productVariant.product.id as productId, sum(oi.quantity) as totalSold " +
-            "from OrderItem oi group by oi.productVariant.product.id")
-    List<Object[]> findTotalUnitsSoldByProduct();
-
     /**
      * Every line item on one order - used to restore inventory when an order
      * is cancelled or its payment expires unconfirmed (see OrderService.cancelOrder

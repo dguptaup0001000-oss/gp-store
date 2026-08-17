@@ -1,11 +1,9 @@
 package com.gpstore.service;
 
 import com.gpstore.entity.Product;
-import com.gpstore.entity.ProductVariant;
 import com.gpstore.exception.BadRequestException;
-import com.gpstore.repository.OrderItemRepository;
+import com.gpstore.repository.ProductBrowseRepository;
 import com.gpstore.repository.ProductRepository;
-import com.gpstore.repository.ReviewRepository;
 import com.gpstore.dto.response.ProductResponse;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -14,7 +12,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,16 +20,13 @@ import java.util.Map;
 public class ProductService {
 
     private final ProductRepository productRepository;
-    private final ReviewRepository reviewRepository;
-    private final OrderItemRepository orderItemRepository;
+    private final ProductBrowseRepository productBrowseRepository;
 
     public ProductService(
             ProductRepository productRepository,
-            ReviewRepository reviewRepository,
-            OrderItemRepository orderItemRepository) {
+            ProductBrowseRepository productBrowseRepository) {
         this.productRepository = productRepository;
-        this.reviewRepository = reviewRepository;
-        this.orderItemRepository = orderItemRepository;
+        this.productBrowseRepository = productBrowseRepository;
     }
 
     // Save Product - evicts the cached listing so a new/changed product shows
@@ -91,17 +85,15 @@ public class ProductService {
 
     /**
      * Sort/filter/search version of category browsing - same options and
-     * same reasoning as "Shop by Brand" (see browseByBrand's doc comment
-     * for why sorting happens in Java rather than SQL). Reuses the exact
-     * same filterSortAndPaginate logic so the two features can never
-     * silently drift apart in behavior.
+     * same reasoning as "Shop by Brand" (see browseByBrand's doc comment).
      */
     @Transactional(readOnly = true)
     public Map<String, Object> browseByCategoryFiltered(
             Long categoryId, String sort, boolean inStockOnly, String keyword, int page, int size) {
 
-        List<Product> products = productRepository.findByCategoryIdAndActiveTrue(categoryId);
-        return filterSortAndPaginate(products, sort, inStockOnly, keyword, page, size);
+        ProductBrowseRepository.BrowseResult result =
+                productBrowseRepository.browse(null, categoryId, sort, inStockOnly, keyword, page, size);
+        return toBrowseResponse(result, page, size);
     }
 
     /** Real "New Arrivals" - sorted by actual creation time, not fabricated. */
@@ -122,123 +114,32 @@ public class ProductService {
 
     /**
      * "Shop by Brand" product browsing - sorted, filtered, searched, and
-     * paginated. Sorting is done in Java after fetching the whole brand's
-     * active product set (see ProductRepository.findByBrandIgnoreCaseAndActiveTrue's
-     * doc comment for why that's a reasonable choice at this store's scale),
-     * because two of the sort options (Best Selling, Highest Rated) need
-     * values computed from entirely separate tables (OrderItem, Review) -
-     * there's no single SQL ORDER BY that covers all eight options cleanly.
+     * paginated entirely in SQL (see ProductBrowseRepository's doc comment)
+     * instead of loading the whole brand's product set into Java to sort -
+     * including, for Best Selling/Highest Rated, no longer pulling the
+     * entire order_items/reviews tables into a HashMap on every request.
      */
     @Transactional(readOnly = true)
     public Map<String, Object> browseByBrand(
             String brand, String sort, boolean inStockOnly, String keyword, int page, int size) {
 
-        List<Product> products = productRepository.findByBrandIgnoreCaseAndActiveTrue(brand);
-        return filterSortAndPaginate(products, sort, inStockOnly, keyword, page, size);
+        ProductBrowseRepository.BrowseResult result =
+                productBrowseRepository.browse(brand, null, sort, inStockOnly, keyword, page, size);
+        return toBrowseResponse(result, page, size);
     }
 
-    /**
-     * Shared by "Shop by Brand" and the filtered category browsing - same
-     * eight sort options, same in-stock/search filtering, same in-memory
-     * pagination. Kept as one method specifically so the two features
-     * can't silently diverge in behavior over time.
-     */
-    private Map<String, Object> filterSortAndPaginate(
-            List<Product> products, String sort, boolean inStockOnly, String keyword, int page, int size) {
+    /** Shared response shape for both browseByBrand and browseByCategoryFiltered. */
+    private Map<String, Object> toBrowseResponse(ProductBrowseRepository.BrowseResult result, int page, int size) {
+        List<ProductResponse> content = result.products().stream().map(ProductResponse::from).toList();
+        int totalPages = (int) Math.ceil(result.totalElements() / (double) size);
 
-        if (keyword != null && !keyword.isBlank()) {
-            String lowerKeyword = keyword.toLowerCase();
-            products = products.stream()
-                    .filter(p -> p.getName() != null && p.getName().toLowerCase().contains(lowerKeyword))
-                    .toList();
-        }
-
-        if (inStockOnly) {
-            products = products.stream()
-                    .filter(p -> p.getVariants() != null && p.getVariants().stream()
-                            .anyMatch(v -> Boolean.TRUE.equals(v.getAvailable())))
-                    .toList();
-        }
-
-        products = sortProducts(products, sort);
-
-        int totalElements = products.size();
-        int totalPages = (int) Math.ceil(totalElements / (double) size);
-        int fromIndex = Math.min(page * size, totalElements);
-        int toIndex = Math.min(fromIndex + size, totalElements);
-        List<Product> pageContent = products.subList(fromIndex, toIndex);
-            List<ProductResponse> responseContent = pageContent.stream()
-                    .map(ProductResponse::from)
-                    .toList();
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("content", responseContent);
-        response.put("totalElements", totalElements);
+        Map<String, Object> response = new HashMap<>();
+        response.put("content", content);
+        response.put("totalElements", result.totalElements());
         response.put("totalPages", totalPages);
         response.put("number", page);
         response.put("size", size);
         return response;
-    }
-
-    private List<Product> sortProducts(List<Product> products, String sort) {
-        if (sort == null) return products;
-
-        Comparator<Product> comparator = switch (sort.toUpperCase()) {
-            case "PRICE_LOW_HIGH" -> Comparator.comparing(this::cheapestPrice);
-            case "PRICE_HIGH_LOW" -> Comparator.comparing(this::cheapestPrice, Comparator.reverseOrder());
-            case "NAME_ASC" -> Comparator.comparing(p -> p.getName() == null ? "" : p.getName().toLowerCase());
-            case "NAME_DESC" -> Comparator.comparing(
-                    (Product p) -> p.getName() == null ? "" : p.getName().toLowerCase()).reversed();
-            case "NEWEST" -> Comparator.comparing(
-                    (Product p) -> p.getCreatedAt() == null ? java.time.LocalDateTime.MIN : p.getCreatedAt())
-                    .reversed();
-            case "DISCOUNT" -> Comparator.comparing(this::discountPercent, Comparator.reverseOrder());
-            case "BEST_SELLING" -> {
-                Map<Long, Long> unitsSold = new HashMap<>();
-                for (Object[] row : orderItemRepository.findTotalUnitsSoldByProduct()) {
-                    unitsSold.put((Long) row[0], (Long) row[1]);
-                }
-                yield Comparator.comparing(
-                        (Product p) -> unitsSold.getOrDefault(p.getId(), 0L), Comparator.reverseOrder());
-            }
-            case "HIGHEST_RATED" -> {
-                Map<Long, Double> ratings = new HashMap<>();
-                for (Object[] row : reviewRepository.findAverageRatingsByProduct()) {
-                    ratings.put((Long) row[0], (Double) row[1]);
-                }
-                yield Comparator.comparing(
-                        (Product p) -> ratings.getOrDefault(p.getId(), 0.0), Comparator.reverseOrder());
-            }
-            default -> null;
-        };
-
-        if (comparator == null) return products;
-        return products.stream().sorted(comparator).toList();
-    }
-
-    private java.math.BigDecimal cheapestPrice(Product product) {
-        if (product.getVariants() == null || product.getVariants().isEmpty()) {
-            return java.math.BigDecimal.ZERO;
-        }
-        return product.getVariants().stream()
-                .map(ProductVariant::getSellingPrice)
-                .filter(java.util.Objects::nonNull)
-                .min(Comparator.naturalOrder())
-                .orElse(java.math.BigDecimal.ZERO);
-    }
-
-    private java.math.BigDecimal discountPercent(Product product) {
-        if (product.getVariants() == null || product.getVariants().isEmpty()) {
-            return java.math.BigDecimal.ZERO;
-        }
-        return product.getVariants().stream()
-                .filter(v -> v.getMrp() != null && v.getSellingPrice() != null
-                        && v.getMrp().compareTo(java.math.BigDecimal.ZERO) > 0
-                        && v.getMrp().compareTo(v.getSellingPrice()) > 0)
-                .map(v -> v.getMrp().subtract(v.getSellingPrice())
-                        .divide(v.getMrp(), 4, java.math.RoundingMode.HALF_UP))
-                .max(Comparator.naturalOrder())
-                .orElse(java.math.BigDecimal.ZERO);
     }
 
     @Transactional(readOnly = true)
