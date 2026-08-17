@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -96,6 +97,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   Future<void> _confirmAndPlaceOrder() async {
     final preview = _preview;
     if (preview == null) return;
+    HapticFeedback.mediumImpact();
     final cartItems = ref.read(cartControllerProvider).valueOrNull?.items ?? const [];
 
     final confirmed = await Navigator.of(context).push<bool>(

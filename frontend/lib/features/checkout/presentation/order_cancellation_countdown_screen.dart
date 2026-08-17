@@ -1,18 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../cart/domain/cart_models.dart';
 import '../domain/checkout_models.dart';
 
-/// The 30-second pause between tapping "Place Order" and the order/payment
+/// The 10-second pause between tapping "Place Order" and the order/payment
 /// actually being created. Shows the full price breakdown and product list
 /// so there's no ambiguity about what's about to be charged, plus a visibly
 /// draining countdown bar and an explicit Cancel button.
 ///
 /// Deliberately stateless w.r.t. the backend - nothing here calls the API.
-/// Popping true means "the 30s elapsed, go ahead and place the order";
+/// Popping true means "the 10s elapsed, go ahead and place the order";
 /// popping false (via Cancel or system back) means "abort, nothing happened
 /// and nothing needs to be undone."
 class OrderCancellationCountdownScreen extends StatefulWidget {
@@ -32,7 +33,7 @@ class OrderCancellationCountdownScreen extends StatefulWidget {
 
 class _OrderCancellationCountdownScreenState
     extends State<OrderCancellationCountdownScreen> {
-  static const _totalSeconds = 30;
+  static const _totalSeconds = 10;
   int _secondsRemaining = _totalSeconds;
   Timer? _timer;
 
@@ -58,6 +59,7 @@ class _OrderCancellationCountdownScreenState
   }
 
   void _cancel() {
+    HapticFeedback.lightImpact();
     _timer?.cancel();
     Navigator.of(context).pop(false);
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/horizontal_product_section.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
@@ -177,6 +178,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 ),
               ),
             ),
+            // Sits above the Add to Cart bar below, not instead of it - a
+            // customer adding a 2nd/3rd item while still browsing this
+            // product needs the same "you have items waiting, go check out"
+            // shortcut every other browsing screen shows.
+            const CartSummaryBar(),
             SafeArea(
               top: false,
               child: Padding(
