@@ -3,6 +3,9 @@ package com.gpstore.controller;
 import com.gpstore.entity.Notification;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.NotificationService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -36,15 +39,28 @@ public class NotificationController {
 
     // Admin only (enforced in SecurityConfig).
     @GetMapping
-    public List<Notification> getAllNotifications() {
-        return notificationService.getAllNotifications();
+    public Page<Notification> getAllNotifications(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 200));
+        return notificationService.getAllNotifications(pageable);
     }
 
     // The actual "order tracking" feed a customer's app screen should call -
     // their own notifications, newest first.
     @GetMapping("/mine")
-    public List<Notification> getMyNotifications() {
-        return notificationService.getNotificationsByCustomerId(currentUser.customerId());
+    public Page<Notification> getMyNotifications(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return notificationService.getNotificationsByCustomerId(currentUser.customerId(), pageable);
+    }
+
+    // Lightweight badge-count query - doesn't require paging through the
+    // customer's full notification history just to count unread ones.
+    @GetMapping("/unread-count")
+    public long getUnreadCount() {
+        return notificationService.getUnreadCount(currentUser.customerId());
     }
 
     // Ownership verified server-side - can only mark the caller's own notification.

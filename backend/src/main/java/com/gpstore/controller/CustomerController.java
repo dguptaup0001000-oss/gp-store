@@ -5,6 +5,9 @@ import com.gpstore.entity.Customer;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.CustomerService;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -30,8 +33,11 @@ public class CustomerController {
 
     // Admin only (enforced in SecurityConfig).
     @GetMapping
-    public List<Customer> getAllCustomers() {
-        return customerService.getAllCustomers();
+    public Page<Customer> getAllCustomers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return customerService.getAllCustomers(pageable);
     }
 
     // Admin only (enforced in SecurityConfig).

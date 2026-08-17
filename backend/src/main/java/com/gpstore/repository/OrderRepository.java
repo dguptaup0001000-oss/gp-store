@@ -1,6 +1,8 @@
 package com.gpstore.repository;
 
 import com.gpstore.entity.Order;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -14,6 +16,10 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findByCustomerId(Long customerId);
 
     List<Order> findByCustomerIdOrderByOrderDateDesc(Long customerId);
+
+    Page<Order> findByCustomerIdOrderByOrderDateDesc(Long customerId, Pageable pageable);
+
+    Page<Order> findAllByOrderByOrderDateDesc(Pageable pageable);
 
     /**
      * Real revenue only - excludes CANCELLED orders so a cancelled order

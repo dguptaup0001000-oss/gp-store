@@ -78,8 +78,9 @@ public class CustomerService {
         return customerRepository.save(customer);
     }
 
-    public List<Customer> getAllCustomers() {
-        return customerRepository.findAll();
+    public org.springframework.data.domain.Page<Customer> getAllCustomers(
+            org.springframework.data.domain.Pageable pageable) {
+        return customerRepository.findAll(pageable);
     }
 
     public Customer getByEmail(String email) {

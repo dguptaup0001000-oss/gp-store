@@ -15,6 +15,7 @@ class NotificationsScreen extends ConsumerWidget {
       try {
         await ref.read(notificationsRepositoryProvider).markAsRead(notification.id);
         ref.invalidate(myNotificationsProvider);
+        ref.invalidate(unreadNotificationCountProvider);
       } catch (_) {
         // Non-critical - opening the notification still works even if
         // marking it read fails silently in the background.
@@ -32,6 +33,7 @@ class NotificationsScreen extends ConsumerWidget {
     try {
       await ref.read(notificationsRepositoryProvider).deleteNotification(notification.id);
       ref.invalidate(myNotificationsProvider);
+      ref.invalidate(unreadNotificationCountProvider);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -53,6 +55,7 @@ class NotificationsScreen extends ConsumerWidget {
               try {
                 await ref.read(notificationsRepositoryProvider).markAllAsRead();
                 ref.invalidate(myNotificationsProvider);
+                ref.invalidate(unreadNotificationCountProvider);
               } catch (_) {
                 // Best-effort - the list just won't reflect it until next successful retry.
               }
@@ -72,20 +75,30 @@ class NotificationsScreen extends ConsumerWidget {
             ],
           ),
         ),
-        data: (notifications) {
+        data: (page) {
+          final notifications = page.notifications;
           if (notifications.isEmpty) {
             return const Center(
               child: Text('No notifications yet', style: TextStyle(color: AppColors.textSecondary)),
             );
           }
 
+          final hasMore = ref.read(myNotificationsProvider.notifier).hasMore;
+
           return RefreshIndicator(
             onRefresh: () async => ref.invalidate(myNotificationsProvider),
             child: ListView.separated(
               padding: const EdgeInsets.all(16),
-              itemCount: notifications.length,
+              itemCount: notifications.length + (hasMore ? 1 : 0),
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
+                if (index == notifications.length) {
+                  WidgetsBinding.instance.addPostFrameCallback(
+                    (_) => ref.read(myNotificationsProvider.notifier).loadMore(),
+                  );
+                  return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                }
+
                 final notification = notifications[index];
                 return Dismissible(
                   key: ValueKey(notification.id),

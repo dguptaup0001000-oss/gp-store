@@ -26,18 +26,29 @@ class AdminPaymentsScreen extends ConsumerWidget {
             ],
           ),
         ),
-        data: (payments) {
+        data: (page) {
+          final payments = page.payments;
           if (payments.isEmpty) {
             return const Center(
               child: Text('No payments yet', style: TextStyle(color: AppColors.textSecondary)),
             );
           }
 
+          final hasMore = ref.read(adminAllPaymentsProvider.notifier).hasMore;
+
           return ListView.separated(
             padding: const EdgeInsets.all(16),
-            itemCount: payments.length,
+            itemCount: payments.length + (hasMore ? 1 : 0),
             separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, index) => _PaymentTile(payment: payments[index]),
+            itemBuilder: (context, index) {
+              if (index == payments.length) {
+                WidgetsBinding.instance.addPostFrameCallback(
+                  (_) => ref.read(adminAllPaymentsProvider.notifier).loadMore(),
+                );
+                return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+              }
+              return _PaymentTile(payment: payments[index]);
+            },
           );
         },
       ),

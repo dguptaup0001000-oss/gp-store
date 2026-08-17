@@ -5,6 +5,9 @@ import com.gpstore.dto.response.WishlistResponse;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.CustomerService;
 import com.gpstore.service.WishlistService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -32,9 +35,12 @@ public class WishlistController {
 
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
-    public List<WishlistResponse> getAllWishlists() {
-            return wishlistService.getAllWishlists();
-        }
+    public Page<WishlistResponse> getAllWishlists(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return wishlistService.getAllWishlists(pageable);
+    }
 
     // Returns only the logged-in customer's wishlist.
     @GetMapping("/mine")

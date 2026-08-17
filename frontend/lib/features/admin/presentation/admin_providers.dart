@@ -72,25 +72,146 @@ final adminAuditLogProvider = FutureProvider<List<AuditLogEntry>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getAuditLog();
 });
 
-final adminAllOrdersProvider = FutureProvider<List<OrderSummary>>((ref) {
-  return ref.watch(adminProductsRepositoryProvider).getAllOrders();
-});
+typedef AdminOrdersPage = ({List<OrderSummary> orders, int page, int totalPages});
+
+/// Paginated - every order ever placed, system-wide, has no natural upper
+/// bound. AsyncNotifier (not a plain FutureProvider) so loadMore() can
+/// append to the existing state.
+class AdminAllOrdersController extends AsyncNotifier<AdminOrdersPage> {
+  @override
+  Future<AdminOrdersPage> build() async {
+    final result = await ref.read(adminProductsRepositoryProvider).getAllOrders(page: 0);
+    return (orders: result.orders, page: 0, totalPages: result.totalPages);
+  }
+
+  bool get hasMore {
+    final current = state.valueOrNull;
+    return current != null && current.page + 1 < current.totalPages;
+  }
+
+  Future<void> loadMore() async {
+    final current = state.valueOrNull;
+    if (current == null || current.page + 1 >= current.totalPages) return;
+
+    final nextPage = current.page + 1;
+    final result = await ref.read(adminProductsRepositoryProvider).getAllOrders(page: nextPage);
+    state = AsyncData((
+      orders: [...current.orders, ...result.orders],
+      page: nextPage,
+      totalPages: result.totalPages,
+    ));
+  }
+}
+
+final adminAllOrdersProvider = AsyncNotifierProvider<AdminAllOrdersController, AdminOrdersPage>(
+  AdminAllOrdersController.new,
+);
 
 final adminCustomerOrdersProvider = FutureProvider.family<List<OrderSummary>, int>((ref, customerId) {
   return ref.watch(adminProductsRepositoryProvider).getCustomerOrders(customerId);
 });
 
-final adminAllReviewsProvider = FutureProvider<List<AdminReview>>((ref) {
-  return ref.watch(adminProductsRepositoryProvider).getAllReviews();
-});
+typedef AdminReviewsPage = ({List<AdminReview> reviews, int page, int totalPages});
 
-final adminAllCustomersProvider = FutureProvider<List<AdminCustomer>>((ref) {
-  return ref.watch(adminProductsRepositoryProvider).getAllCustomers();
-});
+/// Paginated - see AdminAllOrdersController's doc comment for why this is an
+/// AsyncNotifier rather than a plain FutureProvider.
+class AdminAllReviewsController extends AsyncNotifier<AdminReviewsPage> {
+  @override
+  Future<AdminReviewsPage> build() async {
+    final result = await ref.read(adminProductsRepositoryProvider).getAllReviews(page: 0);
+    return (reviews: result.reviews, page: 0, totalPages: result.totalPages);
+  }
 
-final adminAllPaymentsProvider = FutureProvider<List<AdminPayment>>((ref) {
-  return ref.watch(adminProductsRepositoryProvider).getAllPayments();
-});
+  bool get hasMore {
+    final current = state.valueOrNull;
+    return current != null && current.page + 1 < current.totalPages;
+  }
+
+  Future<void> loadMore() async {
+    final current = state.valueOrNull;
+    if (current == null || current.page + 1 >= current.totalPages) return;
+
+    final nextPage = current.page + 1;
+    final result = await ref.read(adminProductsRepositoryProvider).getAllReviews(page: nextPage);
+    state = AsyncData((
+      reviews: [...current.reviews, ...result.reviews],
+      page: nextPage,
+      totalPages: result.totalPages,
+    ));
+  }
+}
+
+final adminAllReviewsProvider = AsyncNotifierProvider<AdminAllReviewsController, AdminReviewsPage>(
+  AdminAllReviewsController.new,
+);
+
+typedef AdminCustomersPage = ({List<AdminCustomer> customers, int page, int totalPages});
+
+/// Paginated - see AdminAllOrdersController's doc comment for why this is an
+/// AsyncNotifier rather than a plain FutureProvider.
+class AdminAllCustomersController extends AsyncNotifier<AdminCustomersPage> {
+  @override
+  Future<AdminCustomersPage> build() async {
+    final result = await ref.read(adminProductsRepositoryProvider).getAllCustomers(page: 0);
+    return (customers: result.customers, page: 0, totalPages: result.totalPages);
+  }
+
+  bool get hasMore {
+    final current = state.valueOrNull;
+    return current != null && current.page + 1 < current.totalPages;
+  }
+
+  Future<void> loadMore() async {
+    final current = state.valueOrNull;
+    if (current == null || current.page + 1 >= current.totalPages) return;
+
+    final nextPage = current.page + 1;
+    final result = await ref.read(adminProductsRepositoryProvider).getAllCustomers(page: nextPage);
+    state = AsyncData((
+      customers: [...current.customers, ...result.customers],
+      page: nextPage,
+      totalPages: result.totalPages,
+    ));
+  }
+}
+
+final adminAllCustomersProvider = AsyncNotifierProvider<AdminAllCustomersController, AdminCustomersPage>(
+  AdminAllCustomersController.new,
+);
+
+typedef AdminPaymentsPage = ({List<AdminPayment> payments, int page, int totalPages});
+
+/// Paginated - see AdminAllOrdersController's doc comment for why this is an
+/// AsyncNotifier rather than a plain FutureProvider.
+class AdminAllPaymentsController extends AsyncNotifier<AdminPaymentsPage> {
+  @override
+  Future<AdminPaymentsPage> build() async {
+    final result = await ref.read(adminProductsRepositoryProvider).getAllPayments(page: 0);
+    return (payments: result.payments, page: 0, totalPages: result.totalPages);
+  }
+
+  bool get hasMore {
+    final current = state.valueOrNull;
+    return current != null && current.page + 1 < current.totalPages;
+  }
+
+  Future<void> loadMore() async {
+    final current = state.valueOrNull;
+    if (current == null || current.page + 1 >= current.totalPages) return;
+
+    final nextPage = current.page + 1;
+    final result = await ref.read(adminProductsRepositoryProvider).getAllPayments(page: nextPage);
+    state = AsyncData((
+      payments: [...current.payments, ...result.payments],
+      page: nextPage,
+      totalPages: result.totalPages,
+    ));
+  }
+}
+
+final adminAllPaymentsProvider = AsyncNotifierProvider<AdminAllPaymentsController, AdminPaymentsPage>(
+  AdminAllPaymentsController.new,
+);
 
 final adminAvailablePartnersProvider = FutureProvider<List<DeliveryPartnerModel>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getAvailablePartners();

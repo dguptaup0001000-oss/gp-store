@@ -118,7 +118,7 @@ class ProfileScreen extends ConsumerWidget {
               context,
               icon: Icons.notifications_outlined,
               label: 'Notifications',
-              badgeCount: ref.watch(unreadNotificationCountProvider),
+              badgeCount: ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0,
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen())),
             ),
             const SizedBox(height: 16),

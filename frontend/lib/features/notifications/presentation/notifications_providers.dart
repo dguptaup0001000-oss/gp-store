@@ -8,15 +8,43 @@ final notificationsRepositoryProvider = Provider<NotificationsRepository>((ref) 
   return NotificationsRepository(apiClient: ref.watch(apiClientProvider));
 });
 
-final myNotificationsProvider = FutureProvider<List<AppNotification>>((ref) {
-  return ref.watch(notificationsRepositoryProvider).getMyNotifications();
-});
+typedef MyNotificationsPage = ({List<AppNotification> notifications, int page, int totalPages});
 
-/// Derived from myNotificationsProvider rather than a separate API call -
-/// no reason to fetch the same list twice just to count it.
-final unreadNotificationCountProvider = Provider<int>((ref) {
-  return ref.watch(myNotificationsProvider).maybeWhen(
-        data: (notifications) => notifications.where((n) => !n.isRead).length,
-        orElse: () => 0,
-      );
+/// Paginated - see NotificationsRepository.getMyNotifications's doc comment.
+/// AsyncNotifier (not a plain FutureProvider) so loadMore() can append to
+/// the existing state.
+class MyNotificationsController extends AsyncNotifier<MyNotificationsPage> {
+  @override
+  Future<MyNotificationsPage> build() async {
+    final result = await ref.read(notificationsRepositoryProvider).getMyNotifications(page: 0);
+    return (notifications: result.notifications, page: 0, totalPages: result.totalPages);
+  }
+
+  bool get hasMore {
+    final current = state.valueOrNull;
+    return current != null && current.page + 1 < current.totalPages;
+  }
+
+  Future<void> loadMore() async {
+    final current = state.valueOrNull;
+    if (current == null || current.page + 1 >= current.totalPages) return;
+
+    final nextPage = current.page + 1;
+    final result = await ref.read(notificationsRepositoryProvider).getMyNotifications(page: nextPage);
+    state = AsyncData((
+      notifications: [...current.notifications, ...result.notifications],
+      page: nextPage,
+      totalPages: result.totalPages,
+    ));
+  }
+}
+
+final myNotificationsProvider = AsyncNotifierProvider<MyNotificationsController, MyNotificationsPage>(
+  MyNotificationsController.new,
+);
+
+/// A dedicated count query, not derived from myNotificationsProvider - that
+/// only ever holds one page of notifications now, not the full history.
+final unreadNotificationCountProvider = FutureProvider<int>((ref) {
+  return ref.watch(notificationsRepositoryProvider).getUnreadCount();
 });

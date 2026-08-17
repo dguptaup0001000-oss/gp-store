@@ -329,9 +329,18 @@ class AdminProductsRepository {
   /// detail viewing reuses the existing customer-facing orderDetailProvider
   /// directly - the backend now allows admin to bypass the ownership check
   /// on that same endpoint, so no separate admin detail call is needed.
-  Future<List<OrderSummary>> getAllOrders() async {
-    final response = await apiClient.dio.get('/api/orders/admin/all');
-    return (response.data as List).map((e) => OrderSummary.fromJson(e as Map<String, dynamic>)).toList();
+  /// Paginated - every order ever placed, system-wide, has no natural upper bound.
+  Future<({List<OrderSummary> orders, int totalPages})> getAllOrders({int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/orders/admin/all',
+      queryParameters: {'page': page, 'size': size},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+    return (
+      orders: content.map((e) => OrderSummary.fromJson(e as Map<String, dynamic>)).toList(),
+      totalPages: data['totalPages'] as int,
+    );
   }
 
   /// A specific customer's order history - for support/dispute lookups
@@ -350,9 +359,18 @@ class AdminProductsRepository {
 
   // --- Review moderation ---
 
-  Future<List<AdminReview>> getAllReviews() async {
-    final response = await apiClient.dio.get('/api/reviews');
-    return (response.data as List).map((e) => AdminReview.fromJson(e as Map<String, dynamic>)).toList();
+  /// Paginated - system-wide review count has no natural upper bound.
+  Future<({List<AdminReview> reviews, int totalPages})> getAllReviews({int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/reviews',
+      queryParameters: {'page': page, 'size': size},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+    return (
+      reviews: content.map((e) => AdminReview.fromJson(e as Map<String, dynamic>)).toList(),
+      totalPages: data['totalPages'] as int,
+    );
   }
 
   /// Moderation delete - removes ANY review, not just the admin's own.
@@ -362,9 +380,18 @@ class AdminProductsRepository {
 
   // --- Customer management ---
 
-  Future<List<AdminCustomer>> getAllCustomers() async {
-    final response = await apiClient.dio.get('/api/customers');
-    return (response.data as List).map((e) => AdminCustomer.fromJson(e as Map<String, dynamic>)).toList();
+  /// Paginated - the customer base has no natural upper bound.
+  Future<({List<AdminCustomer> customers, int totalPages})> getAllCustomers({int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/customers',
+      queryParameters: {'page': page, 'size': size},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+    return (
+      customers: content.map((e) => AdminCustomer.fromJson(e as Map<String, dynamic>)).toList(),
+      totalPages: data['totalPages'] as int,
+    );
   }
 
   /// password is genuinely optional - e.g. a phone-order customer who'll
@@ -395,9 +422,18 @@ class AdminProductsRepository {
 
   // --- Payments ---
 
-  Future<List<AdminPayment>> getAllPayments() async {
-    final response = await apiClient.dio.get('/api/payments');
-    return (response.data as List).map((e) => AdminPayment.fromJson(e as Map<String, dynamic>)).toList();
+  /// Paginated - system-wide payment count has no natural upper bound.
+  Future<({List<AdminPayment> payments, int totalPages})> getAllPayments({int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/payments',
+      queryParameters: {'page': page, 'size': size},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+    return (
+      payments: content.map((e) => AdminPayment.fromJson(e as Map<String, dynamic>)).toList(),
+      totalPages: data['totalPages'] as int,
+    );
   }
 
   /// Starts a refund for a cancelled/returned order's payment.

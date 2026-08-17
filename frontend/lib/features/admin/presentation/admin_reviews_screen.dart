@@ -25,18 +25,28 @@ class AdminReviewsScreen extends ConsumerWidget {
             ],
           ),
         ),
-        data: (reviews) {
+        data: (page) {
+          final reviews = page.reviews;
           if (reviews.isEmpty) {
             return const Center(
               child: Text('No reviews yet', style: TextStyle(color: AppColors.textSecondary)),
             );
           }
 
+          final hasMore = ref.read(adminAllReviewsProvider.notifier).hasMore;
+
           return ListView.separated(
             padding: const EdgeInsets.all(16),
-            itemCount: reviews.length,
+            itemCount: reviews.length + (hasMore ? 1 : 0),
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
+              if (index == reviews.length) {
+                WidgetsBinding.instance.addPostFrameCallback(
+                  (_) => ref.read(adminAllReviewsProvider.notifier).loadMore(),
+                );
+                return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+              }
+
               final review = reviews[index];
               return Container(
                 padding: const EdgeInsets.all(14),

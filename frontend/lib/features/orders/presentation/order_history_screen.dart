@@ -25,20 +25,30 @@ class OrderHistoryScreen extends ConsumerWidget {
             ],
           ),
         ),
-        data: (orders) {
+        data: (page) {
+          final orders = page.orders;
           if (orders.isEmpty) {
             return const Center(
               child: Text('No orders yet', style: TextStyle(color: AppColors.textSecondary)),
             );
           }
 
+          final hasMore = ref.read(myOrdersProvider.notifier).hasMore;
+
           return RefreshIndicator(
             onRefresh: () async => ref.invalidate(myOrdersProvider),
             child: ListView.separated(
               padding: const EdgeInsets.all(16),
-              itemCount: orders.length,
+              itemCount: orders.length + (hasMore ? 1 : 0),
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
+                if (index == orders.length) {
+                  WidgetsBinding.instance.addPostFrameCallback(
+                    (_) => ref.read(myOrdersProvider.notifier).loadMore(),
+                  );
+                  return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                }
+
                 final order = orders[index];
                 return InkWell(
                   borderRadius: BorderRadius.circular(12),

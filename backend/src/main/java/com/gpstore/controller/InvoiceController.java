@@ -3,6 +3,9 @@ package com.gpstore.controller;
 import com.gpstore.entity.Invoice;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.InvoiceService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -36,8 +39,11 @@ public class InvoiceController {
     }
 
     @GetMapping
-    public List<com.gpstore.dto.response.InvoiceResponse> getAllInvoices() {
-        return invoiceService.getAllInvoices();
+    public Page<com.gpstore.dto.response.InvoiceResponse> getAllInvoices(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return invoiceService.getAllInvoices(pageable);
     }
 
     @GetMapping("/{id}")

@@ -167,10 +167,10 @@ public class PaymentService {
     }
 
     @Transactional(readOnly = true)
-        public List<com.gpstore.dto.response.PaymentResponse> getAllPayments() {
-        return paymentRepository.findAll().stream()
-                .map(com.gpstore.dto.response.PaymentResponse::from)
-                .toList();
+    public org.springframework.data.domain.Page<com.gpstore.dto.response.PaymentResponse> getAllPayments(
+            org.springframework.data.domain.Pageable pageable) {
+        return paymentRepository.findAll(pageable)
+                .map(com.gpstore.dto.response.PaymentResponse::from);
     }
 
     @Transactional(readOnly = true)

@@ -447,39 +447,66 @@ public class OrderService {
         // Clear cart
         cartItemService.clearCart(cartId);
 
-        notificationService.notifyOrderStatusChange(order, order.getOrderStatus());
-        auditLogService.log("ORDER_PLACED", "Order", order.getId(),
-                "total=" + order.getTotalAmount() + ", paymentMethod=" + request.getPaymentMethod());
-        invoiceService.generateForOrder(order.getId());
-
-        // This was never triggered anywhere in the entire application before
-        // this - meaning NO order, ever, would actually get assigned to a
-        // delivery partner unless someone manually called the assign
-        // endpoint directly via the API. Best-effort and fully isolated
-        // (see DeliveryService.autoAssignBestEffort's doc comment) - if no
-        // delivery partner happens to be available right now, the order
-        // still succeeds; it just needs manual assignment afterward.
+        // None of notification creation, the audit log entry, invoice
+        // generation, or delivery auto-assignment need to block the
+        // customer's "order placed" response, or run inside the same
+        // transaction as the order/inventory writes above - keeping them in
+        // this transaction only meant a slow invoice/notification write held
+        // the inventory row locks taken earlier in this method for longer
+        // than necessary. Deferred as one after-commit callback instead.
         //
-        // Deferred to run AFTER this transaction commits, not inline here.
-        // autoAssignBestEffort runs in its own REQUIRES_NEW transaction, which
-        // starts a fresh DB connection - if called synchronously mid-checkout
-        // (as before), that fresh transaction could run BEFORE this order's
-        // INSERT has committed, meaning it might not see the very order it's
-        // trying to assign. Registering it as an after-commit callback
-        // guarantees the order is durably saved and visible first.
+        // Also fixes the same visibility problem documented on
+        // DeliveryService.autoAssignBestEffort (REQUIRES_NEW/its own
+        // transactions could otherwise run before this order's INSERT
+        // commits): invoiceService.generateForOrder re-reads the order by ID
+        // in its own transaction, so it must not run until that INSERT is
+        // durably committed and visible either.
+        //
+        // order.getCustomer() is safe to read here despite running after
+        // this transaction/session closes - it was assigned above from
+        // customerService.getById(customerId), a fully-loaded Customer, not
+        // a lazy proxy, so no further DB access is needed to read it.
         final Long placedOrderId = order.getId();
+        final Order placedOrder = order;
+        Runnable afterCommitWork = () -> {
+            // notifyOrderStatusChange and autoAssignBestEffort already catch
+            // every exception internally (see their own doc comments) - the
+            // order is already committed by this point, so nothing here may
+            // throw out of this callback. An uncaught exception from a
+            // TransactionSynchronization.afterCommit() propagates straight
+            // out of the transactional placeOrder() call, which would turn
+            // an already-successful order into an error response to the
+            // customer. generateForOrder has no such internal guard, so it
+            // gets one here, same pattern as the other three.
+            notificationService.notifyOrderStatusChange(placedOrder, placedOrder.getOrderStatus());
+            auditLogService.log("ORDER_PLACED", "Order", placedOrderId,
+                    "total=" + placedOrder.getTotalAmount() + ", paymentMethod=" + request.getPaymentMethod());
+            try {
+                invoiceService.generateForOrder(placedOrderId);
+            } catch (Exception ex) {
+                auditLogService.log("INVOICE_GENERATION_FAILED", "Order", placedOrderId,
+                        "Order placed but invoice could not be generated: " + ex.getMessage()
+                                + " - needs manual generation.");
+            }
+            // Best-effort and fully isolated (see DeliveryService.autoAssignBestEffort's
+            // doc comment) - if no delivery partner happens to be available
+            // right now, the order still succeeds; it just needs manual
+            // assignment afterward.
+            deliveryService.autoAssignBestEffort(placedOrderId);
+        };
+
         if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
             org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
                     new org.springframework.transaction.support.TransactionSynchronization() {
                         @Override
                         public void afterCommit() {
-                            deliveryService.autoAssignBestEffort(placedOrderId);
+                            afterCommitWork.run();
                         }
                     });
         } else {
             // Defensive fallback only - shouldn't happen inside an @Transactional
-            // method, but never silently drop the assignment attempt if it does.
-            deliveryService.autoAssignBestEffort(placedOrderId);
+            // method, but never silently drop these side effects if it does.
+            afterCommitWork.run();
         }
 
         PlaceOrderResponse response = new PlaceOrderResponse();
@@ -492,16 +519,23 @@ public class OrderService {
         return response;
     }
 
-    public List<OrderResponse> getMyOrders(Long customerId) {
-        List<Order> orders = repository.findByCustomerIdOrderByOrderDateDesc(customerId);
-        return toOrderResponseList(orders, false);
+    /** Paginated - a repeat customer's order history has no natural upper bound over the years. */
+    public org.springframework.data.domain.Page<OrderResponse> getMyOrders(
+            Long customerId, org.springframework.data.domain.Pageable pageable) {
+        return repository.findByCustomerIdOrderByOrderDateDesc(customerId, pageable)
+                .map(order -> toOrderResponse(order, false));
     }
 
-    /** Every order in the system, newest first, WITH customer name - the raw entity alone can't show this (Order.customer is hidden from JSON). */
-    public List<OrderResponse> getAllOrdersForAdmin() {
-        List<Order> orders = repository.findAll();
-        orders.sort((a, b) -> b.getOrderDate().compareTo(a.getOrderDate()));
-        return toOrderResponseList(orders, true);
+    /**
+     * Every order in the system, newest first, WITH customer name (the raw
+     * entity alone can't show this - Order.customer is hidden from JSON).
+     * Paginated at the DB level (ORDER BY + LIMIT/OFFSET in SQL) instead of
+     * loading every order row into Java just to sort a handful into view.
+     */
+    public org.springframework.data.domain.Page<OrderResponse> getAllOrdersForAdmin(
+            org.springframework.data.domain.Pageable pageable) {
+        return repository.findAllByOrderByOrderDateDesc(pageable)
+                .map(order -> toOrderResponse(order, true));
     }
 
     /**
@@ -517,28 +551,32 @@ public class OrderService {
         return toOrderResponseList(orders, false);
     }
 
-    /** Shared by all three list methods above - kept as one method so they can never silently drift apart in shape. */
+    /** Shared by every order list method - kept as one method so they can never silently drift apart in shape. */
     private List<OrderResponse> toOrderResponseList(List<Order> orders, boolean includeCustomerName) {
         List<OrderResponse> responseList = new ArrayList<>();
 
         for (Order order : orders) {
-            OrderResponse response = new OrderResponse();
-
-            response.setOrderId(order.getId());
-            response.setOrderNumber(order.getOrderNumber());
-            response.setTotalAmount(order.getTotalAmount());
-            response.setOrderStatus(order.getOrderStatus().name());
-            response.setPaymentStatus(order.getPaymentStatus().name());
-            response.setOrderDate(order.getOrderDate());
-
-            if (includeCustomerName) {
-                response.setCustomerName(order.getCustomer() != null ? order.getCustomer().getFullName() : null);
-            }
-
-            responseList.add(response);
+            responseList.add(toOrderResponse(order, includeCustomerName));
         }
 
         return responseList;
+    }
+
+    private OrderResponse toOrderResponse(Order order, boolean includeCustomerName) {
+        OrderResponse response = new OrderResponse();
+
+        response.setOrderId(order.getId());
+        response.setOrderNumber(order.getOrderNumber());
+        response.setTotalAmount(order.getTotalAmount());
+        response.setOrderStatus(order.getOrderStatus().name());
+        response.setPaymentStatus(order.getPaymentStatus().name());
+        response.setOrderDate(order.getOrderDate());
+
+        if (includeCustomerName) {
+            response.setCustomerName(order.getCustomer() != null ? order.getCustomer().getFullName() : null);
+        }
+
+        return response;
     }
 
     @Transactional
