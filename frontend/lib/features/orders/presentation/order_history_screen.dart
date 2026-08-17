@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart';
 import 'order_detail_screen.dart';
 import 'orders_providers.dart';
 
@@ -20,7 +21,12 @@ class OrderHistoryScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load your orders - check your connection"),
+              // TEMPORARY, for active debugging - see RootScreen's identical
+              // comment for why this shows the real failure reason instead
+              // of one static string that looks the same whether the cause
+              // is a network problem, an auth issue, or something else.
+              Text("Couldn't load your orders: ${extractErrorMessage(error)}"),
+              const SizedBox(height: 8),
               TextButton(onPressed: () => ref.invalidate(myOrdersProvider), child: const Text('Retry')),
             ],
           ),
