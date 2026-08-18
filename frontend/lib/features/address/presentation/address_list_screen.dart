@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart';
 import '../domain/address_models.dart';
 import 'add_address_screen.dart';
 import 'address_providers.dart';
@@ -28,7 +29,10 @@ class AddressListScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load your addresses - check your connection"),
+              // TEMPORARY, for active debugging - see RootScreen's identical
+              // comment for why this shows the real failure reason instead
+              // of one static string.
+              Text("Couldn't load your addresses: ${extractErrorMessage(error)}"),
               TextButton(onPressed: () => ref.invalidate(myAddressesProvider), child: const Text('Retry')),
             ],
           ),
@@ -139,7 +143,7 @@ class _AddressTile extends ConsumerWidget {
       // Surfaces the real backend reason (e.g. "used in a past order and
       // can't be deleted") rather than a generic failure message.
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Couldn't delete this address - it may be used in a past order")),
+        SnackBar(content: Text(extractErrorMessage(e))),
       );
     }
   }

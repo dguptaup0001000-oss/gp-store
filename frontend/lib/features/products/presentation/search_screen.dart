@@ -71,7 +71,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorMessage = "Couldn't search right now - check your connection";
+        _errorMessage = extractErrorMessage(e);
         _isLoading = false;
       });
     }

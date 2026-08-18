@@ -69,7 +69,10 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load this order - check your connection"),
+              // TEMPORARY, for active debugging - see RootScreen's identical
+              // comment for why this shows the real failure reason instead
+              // of one static string.
+              Text("Couldn't load this order: ${extractErrorMessage(error)}"),
               TextButton(
                 onPressed: () => ref.invalidate(orderDetailProvider(widget.orderId)),
                 child: const Text('Retry'),
@@ -223,7 +226,7 @@ class _DeliveryAssignmentCardState extends ConsumerState<_DeliveryAssignmentCard
           const SizedBox(height: 12),
           partnersAsync.when(
             loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-            error: (error, stackTrace) => const Text("Couldn't load delivery partners"),
+            error: (error, stackTrace) => Text("Couldn't load delivery partners: ${extractErrorMessage(error)}"),
             data: (allPartners) {
               // id is nullable on the model in general (a not-yet-saved
               // partner has none) but every entry from this specific

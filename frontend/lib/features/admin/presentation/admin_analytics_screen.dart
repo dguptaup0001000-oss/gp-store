@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/presentation/auth_providers.dart';
 import 'admin_inventory_screen.dart';
 import 'admin_providers.dart';
 
@@ -79,7 +80,10 @@ class _SalesSummarySection extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       error: (error, stackTrace) => Column(
         children: [
-          const Text("Couldn't load sales data - check your connection"),
+          // TEMPORARY, for active debugging - see RootScreen's identical
+          // comment for why this shows the real failure reason instead
+          // of one static string.
+          Text("Couldn't load sales data: ${extractErrorMessage(error)}"),
           TextButton(onPressed: () => ref.invalidate(adminSalesSummaryProvider), child: const Text('Retry')),
         ],
       ),
@@ -172,7 +176,10 @@ class _OrderStatusBreakdown extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       error: (error, stackTrace) => Column(
         children: [
-          const Text("Couldn't load order status data"),
+          // TEMPORARY, for active debugging - see RootScreen's identical
+          // comment for why this shows the real failure reason instead
+          // of one static string.
+          Text("Couldn't load order status data: ${extractErrorMessage(error)}"),
           TextButton(onPressed: () => ref.invalidate(adminOrderStatusBreakdownProvider), child: const Text('Retry')),
         ],
       ),
@@ -233,7 +240,10 @@ class _TopProductsList extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       error: (error, stackTrace) => Column(
         children: [
-          const Text("Couldn't load top products"),
+          // TEMPORARY, for active debugging - see RootScreen's identical
+          // comment for why this shows the real failure reason instead
+          // of one static string.
+          Text("Couldn't load top products: ${extractErrorMessage(error)}"),
           TextButton(onPressed: () => ref.invalidate(adminTopProductsProvider), child: const Text('Retry')),
         ],
       ),
