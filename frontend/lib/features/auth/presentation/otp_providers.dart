@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'auth_providers.dart';
@@ -39,6 +40,7 @@ class OtpFlowController extends StateNotifier<OtpFlowState> {
     try {
       await _ref.read(authRepositoryProvider).sendOtp(mobileNumber: mobileNumber);
       state = state.copyWith(step: OtpFlowStep.otpSent);
+      HapticFeedback.lightImpact();
       return true;
     } catch (e) {
       state = state.copyWith(step: OtpFlowStep.enteringPhone, errorMessage: extractErrorMessage(e));
@@ -57,6 +59,7 @@ class OtpFlowController extends StateNotifier<OtpFlowState> {
           .verifyOtp(mobileNumber: state.mobileNumber!, otp: otp);
 
       _ref.read(authControllerProvider.notifier).setAuthenticated(auth);
+      HapticFeedback.mediumImpact();
       return true;
     } catch (e) {
       state = state.copyWith(step: OtpFlowStep.otpSent, errorMessage: extractErrorMessage(e));
