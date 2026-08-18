@@ -33,7 +33,7 @@ public class ProductService {
 
     // Save Product - evicts the cached listing so a new/changed product shows
     // up immediately instead of customers seeing a stale catalog.
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch"}, allEntries = true)
     @Transactional
     public ProductResponse saveProduct(Product product) {
         return ProductResponse.from(productRepository.save(product));
@@ -80,7 +80,13 @@ public class ProductService {
      * Batching the re-fetch the same way browseByCategory/getNewArrivals
      * already do fixes it in one extra round trip instead.
      */
+    // Cached (keyed on keyword+page, Spring's default composite key) because
+    // grocery search terms repeat heavily across different customers (many
+    // different people search "rice", "milk", "oil" on any given day) - a
+    // cache hit skips the database round trips entirely, not just the N+1
+    // this method already avoids.
     @Transactional(readOnly = true)
+    @Cacheable("productSearch")
     public Page<ProductResponse> searchInstant(String keyword, Pageable pageable) {
         if (keyword == null || keyword.isBlank()) {
             throw new BadRequestException("Search keyword is required");
@@ -204,9 +210,21 @@ public class ProductService {
         return response;
     }
 
+    // Product detail is the single most-tapped customer-facing endpoint (every
+    // "view product" hits it) - plain findById() left category/variants lazy,
+    // so ProductResponse.from() cost 2 extra round trips beyond the initial
+    // fetch (3 total for what should be 1), on every single view, uncached.
+    // findByIdIn already eager-fetches both via @EntityGraph, so reusing it
+    // with a single-element list gets the same result in one query, and
+    // caching this (product data barely changes) means most views don't hit
+    // the database at all.
     @Transactional(readOnly = true)
+    @Cacheable("productDetail")
     public ProductResponse getProductById(Long id) {
-        return ProductResponse.from(productRepository.findById(id).orElse(null));
+        return productRepository.findByIdIn(List.of(id)).stream()
+                .findFirst()
+                .map(ProductResponse::from)
+                .orElse(null);
     }
 
     public Product getByIdOrThrow(Long id) {
@@ -215,7 +233,7 @@ public class ProductService {
     }
 
     /** Didn't exist before - a product could be created but never edited afterward. */
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch"}, allEntries = true)
     @Transactional
     public ProductResponse update(Long id, Product updated) {
         Product existing = getByIdOrThrow(id);
@@ -234,7 +252,7 @@ public class ProductService {
      * product, or fail on the FK constraint. Deactivating just stops it
      * showing up to customers.
      */
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch"}, allEntries = true)
     public void deactivate(Long id) {
         Product product = getByIdOrThrow(id);
         product.setActive(false);
