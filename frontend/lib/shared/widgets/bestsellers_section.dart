@@ -86,7 +86,11 @@ class _BestsellerTile extends ConsumerWidget {
                           child: imageUrl != null
                               ? CachedNetworkImage(
                                   imageUrl: imageUrl,
-                                  fit: BoxFit.cover,
+                                  // contain (not cover) - matches every other
+                                  // product image in the app. cover crops to
+                                  // fill the tile, which was cutting off parts
+                                  // of product photos in this 2x2 collage.
+                                  fit: BoxFit.contain,
                                   errorWidget: (c, url, e) => const Icon(
                                     Icons.image_outlined,
                                     size: 16,
