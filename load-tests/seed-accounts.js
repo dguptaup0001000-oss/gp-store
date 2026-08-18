@@ -45,7 +45,12 @@ function sleep(ms) {
 async function registerOne(index) {
   const suffix = `${Date.now()}_${index}`;
   const email = `loadtest_${suffix}@example.com`;
-  const phone = '9' + String(100000000 + index).padStart(9, '0').slice(-9);
+  // Was deterministic (index-only), so every re-run tried to register the
+  // exact same 10 digits as the last run and got a legitimate duplicate
+  // rejection from the DB - this was never a backend outage, just this
+  // script colliding with its own previous run. Date.now() makes each run
+  // distinct; index keeps accounts distinct within a single run.
+  const phone = '9' + String(Date.now()).slice(-6) + String(index).padStart(3, '0');
   const password = 'LoadTest123!';
 
   const registerRes = await fetch(`${BASE_URL}/api/auth/register`, {

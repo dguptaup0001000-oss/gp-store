@@ -43,6 +43,13 @@ public class AuthService {
         customerRepository.findByEmail(request.getEmail()).ifPresent(existing -> {
             throw new ConflictException("An account with this email already exists");
         });
+        // customers.mobile_number has the same unique constraint as email but
+        // was missing the equivalent pre-check - a duplicate phone number
+        // fell straight through to the DB constraint and surfaced as a raw,
+        // unhandled 500 instead of a clear "already registered" message.
+        customerRepository.findByMobileNumber(request.getPhone()).ifPresent(existing -> {
+            throw new ConflictException("An account with this phone number already exists");
+        });
 
         Customer customer = new Customer();
         customer.setFullName(request.getName());
