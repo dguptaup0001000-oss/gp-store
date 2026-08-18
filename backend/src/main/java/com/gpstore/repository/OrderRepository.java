@@ -41,4 +41,15 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("select o.orderStatus as status, count(o) as cnt from Order o group by o.orderStatus")
     List<Object[]> countByStatus();
 
+    /**
+     * Backs order number generation (see OrderService.placeOrder) with a
+     * real Postgres sequence (V6 migration) instead of JVM memory - a
+     * database sequence survives process restarts, unlike the in-memory
+     * AtomicInteger this replaced, which reset to 1 on every deploy and
+     * could then collide with an order number already used earlier that
+     * day, crashing checkout with an unhandled 500.
+     */
+    @Query(value = "SELECT nextval('order_number_seq')", nativeQuery = true)
+    long nextOrderNumberSequenceValue();
+
 }

@@ -356,7 +356,7 @@ public class OrderService {
 
         Order order = new Order();
 
-        order.setOrderNumber(OrderNumberGenerator.generate());
+        order.setOrderNumber(OrderNumberGenerator.generate(repository.nextOrderNumberSequenceValue()));
         order.setCustomer(customer);
         order.setAddress(address);
         order.setOrderDate(LocalDateTime.now());

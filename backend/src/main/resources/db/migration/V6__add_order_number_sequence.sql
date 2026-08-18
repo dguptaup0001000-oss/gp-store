@@ -1,0 +1,12 @@
+-- Real root cause of the checkout "An unexpected error occurred" crash that
+-- has been intermittently reported since the very start of this project's
+-- testing: OrderNumberGenerator generated order numbers from a plain
+-- in-memory AtomicInteger starting at 1 - which resets to 1 every time the
+-- backend process restarts (i.e. on every single deploy). The next order
+-- placed after any restart could generate the exact same order number as
+-- one already created earlier that day, before the restart, and crash with
+-- an unhandled 500 on the unique constraint on orders.order_number.
+--
+-- A real Postgres sequence has none of that problem - it's stored in the
+-- database itself, not JVM memory, so it survives restarts and deploys.
+CREATE SEQUENCE IF NOT EXISTS order_number_seq START WITH 1 INCREMENT BY 1;
