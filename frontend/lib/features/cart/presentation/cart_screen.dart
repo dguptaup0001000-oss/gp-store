@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -188,6 +189,7 @@ class _QuantityStepper extends ConsumerWidget {
             padding: EdgeInsets.zero,
             tooltip: item.quantity <= 1 ? 'Remove from cart' : 'Decrease quantity',
             onPressed: () {
+              HapticFeedback.selectionClick();
               final newQuantity = item.quantity - 1;
               if (newQuantity <= 0) {
                 ref.read(cartControllerProvider.notifier).removeItem(cartItemId: item.cartItemId);
@@ -208,9 +210,12 @@ class _QuantityStepper extends ConsumerWidget {
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             padding: EdgeInsets.zero,
             tooltip: 'Increase quantity',
-            onPressed: () => ref
-                .read(cartControllerProvider.notifier)
-                .updateQuantity(cartItemId: item.cartItemId, quantity: item.quantity + 1),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              ref
+                  .read(cartControllerProvider.notifier)
+                  .updateQuantity(cartItemId: item.cartItemId, quantity: item.quantity + 1);
+            },
           ),
         ],
       ),

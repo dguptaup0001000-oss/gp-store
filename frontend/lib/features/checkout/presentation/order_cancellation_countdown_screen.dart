@@ -202,7 +202,9 @@ class _ItemRow extends StatelessWidget {
                     imageUrl: item.imageUrl!,
                     width: 44,
                     height: 44,
-                    fit: BoxFit.cover,
+                    // contain (not cover) - matches every other product
+                    // image in the app, doesn't crop.
+                    fit: BoxFit.contain,
                     errorWidget: (_, __, ___) => _placeholderIcon(),
                   )
                 : _placeholderIcon(),

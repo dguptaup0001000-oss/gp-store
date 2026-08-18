@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -34,9 +35,10 @@ class CartSummaryBar extends ConsumerWidget {
           elevation: 4,
           child: InkWell(
             borderRadius: BorderRadius.circular(AppRadius.lg),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const CartScreen()),
-            ),
+            onTap: () {
+              HapticFeedback.selectionClick();
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CartScreen()));
+            },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(

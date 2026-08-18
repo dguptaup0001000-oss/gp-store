@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
@@ -35,7 +36,16 @@ class ProductCard extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-          onTap: onTap,
+          // Fires the instant the tap registers, not after whatever screen
+          // this opens finishes loading - a physical response tied to the
+          // finger leaving the glass, same as every reference app (Blinkit
+          // etc.) does on every tap, not just ones that end in a network call.
+          onTap: onTap == null
+              ? null
+              : () {
+                  HapticFeedback.selectionClick();
+                  onTap!();
+                },
           child: Padding(
             padding: const EdgeInsets.all(8),
             child: Column(
@@ -96,7 +106,12 @@ class ProductCard extends StatelessWidget {
                         top: 2,
                         right: 2,
                         child: GestureDetector(
-                          onTap: onWishlistToggle,
+                          onTap: onWishlistToggle == null
+                              ? null
+                              : () {
+                                  HapticFeedback.lightImpact();
+                                  onWishlistToggle!();
+                                },
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
@@ -173,7 +188,15 @@ class ProductCard extends StatelessWidget {
                   width: double.infinity,
                   height: 32,
                   child: OutlinedButton(
-                    onPressed: isInStock ? onAddPressed : null,
+                    // Stronger than the card/wishlist taps - this is the
+                    // primary "yes, add this" action, so it gets a more
+                    // deliberate thud instead of a light click.
+                    onPressed: !isInStock || onAddPressed == null
+                        ? null
+                        : () {
+                            HapticFeedback.mediumImpact();
+                            onAddPressed!();
+                          },
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.primary,
                       side: const BorderSide(color: AppColors.primary),
