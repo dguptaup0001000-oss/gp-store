@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -32,6 +33,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
+    // Fires the moment the tap registers as a valid attempt, not after the
+    // network round-trip resolves - AuthController.login() still fires its
+    // own haptic on confirmed success, this one is the immediate "the app
+    // felt that" response every tap should have.
+    HapticFeedback.mediumImpact();
     setState(() => _isSubmitting = true);
 
     final success = await ref.read(authControllerProvider.notifier).login(
