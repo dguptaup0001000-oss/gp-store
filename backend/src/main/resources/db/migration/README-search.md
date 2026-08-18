@@ -1,13 +1,16 @@
-# One-time setup for instant search
+# Search setup (now automatic - see V5__add_search_trigram_indexes.sql)
 
-The new search endpoint uses PostgreSQL's `pg_trgm` extension for fast,
+The search endpoint uses PostgreSQL's `pg_trgm` extension for fast,
 typo-tolerant, ranked search (the same category of technique real search
-features use - not a full LIKE '%x%' table scan). This needs to be enabled
-**once** on your database - it is NOT something Hibernate/JPA can do for you
-automatically, and I'm not running it for you since I don't have DB access.
+features use - not a full LIKE '%x%' table scan).
 
-Run this once against your Postgres database (via psql, a GUI tool, or your
-hosting provider's SQL console):
+This used to require a manual one-time SQL step, which is exactly the kind
+of thing that's easy to skip or forget - and turned out to be the real cause
+of a multi-second search latency found via load testing (search still
+returns correct results without the indexes below, it just does a full
+table scan to compute them, twice per request). `V5__add_search_trigram_indexes.sql`
+now runs this automatically as a real Flyway migration - nothing manual left
+to do. The SQL is kept below only as a reference for what that migration does.
 
 ```sql
 -- Enables fuzzy/similarity matching (handles typos like "shampu" -> "shampoo")
