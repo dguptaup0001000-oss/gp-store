@@ -37,3 +37,6 @@ build/
 
 ### Claude Code tooling scratch space (agent worktrees, etc.) ###
 .claude/
+
+### Load test output - holds real access tokens for seeded test accounts ###
+load-tests/accounts.json
