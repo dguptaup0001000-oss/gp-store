@@ -10,6 +10,8 @@ import com.gpstore.security.CurrentUser;
 import com.gpstore.service.OrderService;
 
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -20,6 +22,8 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/orders")
 public class OrderController {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderController.class);
 
     private final OrderService orderService;
     private final CurrentUser currentUser;
@@ -37,11 +41,17 @@ public class OrderController {
     // same value on any retry of that attempt (e.g. after a network timeout,
     // or a double-tap on Place Order). With the key, a retried request
     // returns the original order instead of creating a second, separate one.
+    // Timed at INFO - this is the first of two sequential calls checkout
+    // makes right after the "Place Order" countdown, and how long it takes
+    // is exactly what determines how long the customer stares at a spinner.
     @PostMapping("/place")
     public PlaceOrderResponse placeOrder(
             @Valid @RequestBody PlaceOrderRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        return orderService.placeOrder(request, currentUser.customerId(), idempotencyKey);
+        long start = System.currentTimeMillis();
+        PlaceOrderResponse response = orderService.placeOrder(request, currentUser.customerId(), idempotencyKey);
+        log.info("POST /api/orders/place took {} ms (orderNumber={})", System.currentTimeMillis() - start, response.getOrderNumber());
+        return response;
     }
 
     // Read-only preview of what this order would cost - shows delivery fee

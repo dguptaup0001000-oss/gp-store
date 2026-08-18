@@ -156,15 +156,13 @@ class ApiClient {
 
   DioException _mapToApiException(DioException error) {
     final data = error.response?.data;
-    // TEMPORARY, for active debugging - the profile fetch right after login
-    // has been intermittently failing with the generic fallback message
-    // below, which means it's none of the three specific cases handled
-    // here (no response body, not a connect/receive timeout, not a
-    // connection error) - including the real DioExceptionType in the
-    // fallback itself is the fastest way to find out what it actually is
-    // next time it happens, instead of guessing. Revert to a plain generic
-    // message once that's identified and fixed.
-    String message = 'Something went wrong. Please try again. (${error.type.name}: ${error.message})';
+    // The intermittent "couldn't load account" failure this used to surface
+    // raw DioExceptionType detail for is fixed (see SecurityConfig's
+    // AuthenticationEntryPoint) - a bare 403 with no body from Spring
+    // Security's default entry point, which this branch never matched, so
+    // it always fell through to this fallback. Back to a plain message now
+    // that the real cause is known and fixed at the source.
+    String message = 'Something went wrong. Please try again.';
     Map<String, String>? fieldErrors;
 
     if (data is Map<String, dynamic>) {

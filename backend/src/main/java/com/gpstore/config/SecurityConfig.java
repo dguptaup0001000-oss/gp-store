@@ -91,6 +91,27 @@ public class SecurityConfig {
             )
             .sessionManagement(session ->
                     session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            // Without this, Spring Security's default for "no/expired/invalid
+            // token on a protected endpoint" is Http403ForbiddenEntryPoint -
+            // a 403, not a 401. JwtFilter never throws an AuthenticationException
+            // itself (it just leaves the SecurityContext empty on a bad token),
+            // so that default is what actually answers every such request. The
+            // frontend's ApiClient only auto-refreshes-and-retries on a 401
+            // (see _handleError in api_client.dart) - it correctly leaves 403
+            // alone since 403 is supposed to mean "authenticated but not
+            // allowed", which should never trigger a token refresh. With the
+            // real failure mode reported as 403, that refresh path never ran,
+            // so an expired access token on app open (a valid refresh token
+            // still exists at that point every time) surfaced as a dead-end
+            // "couldn't load your account" error instead of transparently
+            // refreshing. Returning a real 401 here restores that path.
+            .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, authException) -> {
+                response.setStatus(jakarta.servlet.http.HttpServletResponse.SC_UNAUTHORIZED);
+                response.setContentType("application/json");
+                response.getWriter().write(
+                        "{\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Authentication required\",\"path\":\""
+                                + request.getRequestURI() + "\"}");
+            }))
             .authorizeHttpRequests(auth -> auth
                 // Public: auth endpoints and read-only catalog browsing
                 .requestMatchers(HttpMethod.POST, "/api/auth/logout-all").authenticated()

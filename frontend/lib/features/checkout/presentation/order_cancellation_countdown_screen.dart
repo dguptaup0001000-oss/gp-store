@@ -34,7 +34,7 @@ class OrderCancellationCountdownScreen extends StatefulWidget {
 
 class _OrderCancellationCountdownScreenState
     extends State<OrderCancellationCountdownScreen> {
-  static const _totalSeconds = 10;
+  static const _totalSeconds = 5;
   int _secondsRemaining = _totalSeconds;
   Timer? _timer;
 

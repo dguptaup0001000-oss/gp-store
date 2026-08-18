@@ -50,17 +50,20 @@ class HorizontalProductSection extends ConsumerWidget {
         child: SizedBox(
           height: 100,
           child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // TEMPORARY, for active debugging - see RootScreen's
-                // identical comment for why this shows the real failure
-                // reason instead of one static string. This one widget
-                // backs New Arrivals, Trending, AND Recommended for you -
-                // one fix covers all three sections' error states.
-                Text("Couldn't load this: ${extractErrorMessage(error)}", textAlign: TextAlign.center),
-                TextButton(onPressed: onRetry, child: const Text('Retry')),
-              ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "Couldn't load this: ${extractErrorMessage(error)}",
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  TextButton(onPressed: onRetry, child: const Text('Retry')),
+                ],
+              ),
             ),
           ),
         ),
