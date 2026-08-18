@@ -156,7 +156,15 @@ class ApiClient {
 
   DioException _mapToApiException(DioException error) {
     final data = error.response?.data;
-    String message = 'Something went wrong. Please try again.';
+    // TEMPORARY, for active debugging - the profile fetch right after login
+    // has been intermittently failing with the generic fallback message
+    // below, which means it's none of the three specific cases handled
+    // here (no response body, not a connect/receive timeout, not a
+    // connection error) - including the real DioExceptionType in the
+    // fallback itself is the fastest way to find out what it actually is
+    // next time it happens, instead of guessing. Revert to a plain generic
+    // message once that's identified and fixed.
+    String message = 'Something went wrong. Please try again. (${error.type.name}: ${error.message})';
     Map<String, String>? fieldErrors;
 
     if (data is Map<String, dynamic>) {

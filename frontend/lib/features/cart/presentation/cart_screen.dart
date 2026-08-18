@@ -260,9 +260,12 @@ class _CartSummary extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const CheckoutScreen()),
-              ),
+              onPressed: () {
+                HapticFeedback.mediumImpact();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const CheckoutScreen()),
+                );
+              },
               child: const Text('Proceed to Checkout'),
             ),
           ],
