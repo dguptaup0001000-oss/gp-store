@@ -3,6 +3,7 @@ package com.gpstore.controller;
 import com.gpstore.dto.response.CartResponse;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.CartService;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -39,7 +40,20 @@ public class CartController {
             @RequestParam Long variantId,
             @RequestParam Integer quantity) {
 
-        return CartResponse.from(cartService.addToCart(currentUser.customerId(), variantId, quantity));
+        try {
+            return CartResponse.from(cartService.addToCart(currentUser.customerId(), variantId, quantity));
+        } catch (DataIntegrityViolationException e) {
+            // Lost a race with a concurrent add-to-cart for the same variant
+            // (a double-tap, two devices at once, or just concurrent load) -
+            // CartService.addToCart checks for an existing CartItem row before
+            // inserting a new one, so two near-simultaneous calls can both see
+            // "doesn't exist yet" and both try to insert, and the loser hits
+            // the (cart_id, product_variant_id) unique constraint. By the time
+            // that happens the winner has already committed, so retrying once
+            // now finds that row and merges the quantity into it instead of
+            // surfacing a raw 500 to the customer.
+            return CartResponse.from(cartService.addToCart(currentUser.customerId(), variantId, quantity));
+        }
     }
 
     // Sets the exact quantity (not additive) - what a +/- stepper needs.
