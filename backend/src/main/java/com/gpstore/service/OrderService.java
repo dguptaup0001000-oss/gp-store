@@ -361,12 +361,20 @@ public class OrderService {
         order.setAddress(address);
         order.setOrderDate(LocalDateTime.now());
 
-        order.setOrderStatus(OrderStatus.PENDING_CONFIRMATION);
-
         if (request.getPaymentMethod().equalsIgnoreCase("COD")) {
             order.setPaymentStatus(PaymentStatus.COD_PENDING);
+            // COD has no separate payment-confirmation step to wait for -
+            // cash isn't collected until delivery, so gating packing on
+            // PENDING_CONFIRMATION here would just mean every COD order
+            // (the majority of them) sits idle until an admin manually
+            // clicks "Confirmed" for no real reason. UPI orders still start
+            // PENDING_CONFIRMATION and only advance once payment actually
+            // succeeds - see PaymentService.advanceOrderIfStillPending -
+            // so an unpaid/abandoned UPI order never gets packed.
+            order.setOrderStatus(OrderStatus.CONFIRMED);
         } else {
             order.setPaymentStatus(PaymentStatus.PENDING);
+            order.setOrderStatus(OrderStatus.PENDING_CONFIRMATION);
         }
 
         order.setActive(true);
