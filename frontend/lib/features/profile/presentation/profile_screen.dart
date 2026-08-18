@@ -20,6 +20,14 @@ import 'profile_providers.dart';
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
+  // Set at build time by .github/workflows/build-and-deploy.yml via
+  // --dart-define=BUILD_SHA=<short commit sha> - 'dev' for a local run with
+  // no dart-define passed. Shown below so it's checkable at a glance
+  // whether an installed APK is actually the latest build, rather than
+  // guessed at from screenshots - repeatedly the real cause behind bugs
+  // reported as still-broken that had already been fixed.
+  static const _buildSha = String.fromEnvironment('BUILD_SHA', defaultValue: 'dev');
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profileAsync = ref.watch(myProfileProvider);
@@ -170,6 +178,13 @@ class ProfileScreen extends ConsumerWidget {
               label: 'Delete Account',
               isDestructive: true,
               onTap: () => _confirmDeleteAccount(context, ref),
+            ),
+            const SizedBox(height: 24),
+            Center(
+              child: Text(
+                'Build $_buildSha',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+              ),
             ),
           ],
         ),

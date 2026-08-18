@@ -138,10 +138,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         paymentMethod: _paymentMethod,
       );
 
-      // The cart is cleared server-side once the order is placed - refresh
-      // local state so the badge/cart screen reflect that immediately.
-      ref.invalidate(cartControllerProvider);
-
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -158,6 +154,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         SnackBar(content: Text(extractErrorMessage(e))),
       );
     } finally {
+      // The order-placement call above has been seen to succeed - and
+      // actually clear the cart server-side - even when this screen goes on
+      // to show an error (see the "An unexpected error occurred" issue:
+      // placeOrder() can create the order fine and something AFTER that
+      // point still throws). Refreshing here unconditionally, not just on
+      // the success path, means the cart badge/bar can never be left
+      // showing stale "you still have items" state after an attempt that
+      // actually went through on the backend.
+      ref.invalidate(cartControllerProvider);
       if (mounted) setState(() => _isPlacingOrder = false);
     }
   }

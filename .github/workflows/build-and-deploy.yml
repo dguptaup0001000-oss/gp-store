@@ -84,11 +84,17 @@ jobs:
         # name: API_BASE_URL) to your deployed backend's URL once it
         # exists, or this APK will install and open fine but fail on
         # every login/browse attempt.
+        #
+        # BUILD_SHA (the commit this APK was built from, shown on the
+        # Profile screen) exists because "did you actually install the
+        # latest APK, or an old one" has repeatedly been the real cause
+        # behind reported bugs that were already fixed - this makes it
+        # checkable at a glance instead of guessed at from screenshots.
         run: |
           if [ -n "${{ vars.API_BASE_URL }}" ]; then
-            flutter build apk --release --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}"
+            flutter build apk --release --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           else
-            flutter build apk --release
+            flutter build apk --release --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           fi
 
       - name: Upload APK
