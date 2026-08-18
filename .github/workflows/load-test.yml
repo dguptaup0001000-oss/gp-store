@@ -1,0 +1,72 @@
+name: Load Test (manual)
+
+# Manually-triggered only (workflow_dispatch, gated by repo write access) -
+# this fires real, potentially heavy traffic at a real backend, so it should
+# never run on a push/PR trigger.
+#
+# WHY THIS EXISTS INSTEAD OF JUST RUNNING k6 FROM A PHONE: load-tests/
+# started out phone-only (via Termux + phone-loadtest.js) because that's all
+# that was available. That works fine up to a point, but at ~200 concurrent
+# virtual users the phone's own CPU/mobile network started becoming a
+# confound - some of what looked like backend errors were plausibly the
+# phone's connections timing out under its own strain, not the server
+# actually failing. A GitHub-hosted runner is a real (if modest) cloud
+# machine with none of those phone-side limits, so it isolates the
+# question this is actually trying to answer: where does the BACKEND
+# break, not the test device.
+#
+# Uses the "real" k6 script (browse-cart-checkout.js), not the phone
+# fallback - k6 runs natively here, no Termux/proot workarounds needed.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Backend base URL (include /v1)'
+        required: true
+        default: 'https://gp-store.onrender.com/v1'
+      accounts:
+        description: 'Number of test accounts to seed (takes ~6.5s each, paced to respect the login rate limit)'
+        required: true
+        default: '40'
+      browse_vus:
+        description: 'Peak concurrent browse virtual users'
+        required: true
+        default: '300'
+      cart_vus:
+        description: 'Peak concurrent cart virtual users'
+        required: true
+        default: '60'
+      duration:
+        description: 'Load phase hold duration (k6 time string, e.g. 2m)'
+        required: true
+        default: '2m'
+      ramp_time:
+        description: 'Ramp up/down duration (k6 time string)'
+        required: true
+        default: '30s'
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Seed test accounts
+        working-directory: load-tests
+        run: BASE_URL="${{ inputs.base_url }}" COUNT="${{ inputs.accounts }}" node seed-accounts.js
+
+      - uses: grafana/setup-k6-action@v1
+
+      - name: Run k6 load test
+        working-directory: load-tests
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          BROWSE_VUS: ${{ inputs.browse_vus }}
+          CART_VUS: ${{ inputs.cart_vus }}
+          RAMP_TIME: ${{ inputs.ramp_time }}
+          HOLD_TIME: ${{ inputs.duration }}
+        run: k6 run browse-cart-checkout.js
