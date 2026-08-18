@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_client.dart';
@@ -80,6 +81,7 @@ class AuthController extends StateNotifier<AuthState> {
     try {
       final auth = await _repository.login(email: email, password: password, rememberMe: rememberMe);
       state = AuthState(status: AuthStatus.authenticated, user: auth);
+      HapticFeedback.mediumImpact();
       return true;
     } catch (e) {
       state = AuthState(
@@ -105,6 +107,7 @@ class AuthController extends StateNotifier<AuthState> {
         password: password,
       );
       state = AuthState(status: AuthStatus.authenticated, user: auth);
+      HapticFeedback.mediumImpact();
       return true;
     } catch (e) {
       state = AuthState(
