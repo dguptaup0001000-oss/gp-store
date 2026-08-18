@@ -7,6 +7,8 @@ import com.gpstore.security.CurrentUser;
 import com.gpstore.service.PaymentService;
 
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -19,6 +21,8 @@ import java.util.Optional;
 @RequestMapping("/api/payments")
 public class PaymentController {
 
+    private static final Logger log = LoggerFactory.getLogger(PaymentController.class);
+
     private final PaymentService paymentService;
     private final CurrentUser currentUser;
 
@@ -30,9 +34,18 @@ public class PaymentController {
     // Starts a payment for an order the caller owns. Amount/status are always
     // computed server-side - the client can no longer set them (see PaymentService).
     // For UPI, the response includes a payment link/QR-source the app can render.
+    //
+    // Timed at INFO - this is the second of two sequential calls checkout
+    // makes right after the "Place Order" countdown, and how long it takes
+    // is exactly what determines how long the customer stares at a spinner.
     @PostMapping
     public PaymentInitiationResponse createPayment(@Valid @RequestBody InitiatePaymentRequest request) {
-        return paymentService.initiatePayment(request, currentUser.customerId());
+        long start = System.currentTimeMillis();
+        try {
+            return paymentService.initiatePayment(request, currentUser.customerId());
+        } finally {
+            log.info("POST /api/payments took {} ms (orderId={})", System.currentTimeMillis() - start, request.getOrderId());
+        }
     }
 
     // Admin only (enforced in SecurityConfig).
