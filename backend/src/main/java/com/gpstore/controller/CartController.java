@@ -40,20 +40,28 @@ public class CartController {
             @RequestParam Long variantId,
             @RequestParam Integer quantity) {
 
-        try {
-            return CartResponse.from(cartService.addToCart(currentUser.customerId(), variantId, quantity));
-        } catch (DataIntegrityViolationException e) {
-            // Lost a race with a concurrent add-to-cart for the same variant
-            // (a double-tap, two devices at once, or just concurrent load) -
-            // CartService.addToCart checks for an existing CartItem row before
-            // inserting a new one, so two near-simultaneous calls can both see
-            // "doesn't exist yet" and both try to insert, and the loser hits
-            // the (cart_id, product_variant_id) unique constraint. By the time
-            // that happens the winner has already committed, so retrying once
-            // now finds that row and merges the quantity into it instead of
-            // surfacing a raw 500 to the customer.
-            return CartResponse.from(cartService.addToCart(currentUser.customerId(), variantId, quantity));
+        // Lost a race with a concurrent add-to-cart for the same variant on
+        // this SAME account (a double-tap, two devices at once) -
+        // CartService.addToCart checks for an existing CartItem row before
+        // inserting a new one, so near-simultaneous calls can all see
+        // "doesn't exist yet" and all try to insert, and every loser hits
+        // the (cart_id, product_variant_id) unique constraint. Each retry
+        // only needs to beat ONE prior winner's insert, which has already
+        // committed by the time the exception fires - so a bounded loop
+        // (not just one retry) stays correct even if more than two calls
+        // pile up on the exact same cart+variant at once, at negligible
+        // cost since that's already a rare edge case in real traffic (a
+        // cart belongs to one customer, so this can only happen within one
+        // person's own double-tap, not across different customers).
+        DataIntegrityViolationException lastFailure = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                return CartResponse.from(cartService.addToCart(currentUser.customerId(), variantId, quantity));
+            } catch (DataIntegrityViolationException e) {
+                lastFailure = e;
+            }
         }
+        throw lastFailure;
     }
 
     // Sets the exact quantity (not additive) - what a +/- stepper needs.
