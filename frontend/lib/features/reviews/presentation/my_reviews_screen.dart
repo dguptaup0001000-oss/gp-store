@@ -20,7 +20,10 @@ class MyReviewsScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Couldn't load your reviews - check your connection"),
+              // TEMPORARY, for active debugging - see RootScreen's identical
+              // comment for why this shows the real failure reason instead
+              // of one static string.
+              Text("Couldn't load your reviews: ${extractErrorMessage(error)}"),
               TextButton(onPressed: () => ref.invalidate(myReviewsProvider), child: const Text('Retry')),
             ],
           ),

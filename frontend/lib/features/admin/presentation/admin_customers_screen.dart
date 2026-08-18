@@ -60,7 +60,10 @@ class _AdminCustomersScreenState extends ConsumerState<AdminCustomersScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text("Couldn't load customers - check your connection"),
+                    // TEMPORARY, for active debugging - see RootScreen's identical
+                    // comment for why this shows the real failure reason instead
+                    // of one static string.
+                    Text("Couldn't load customers: ${extractErrorMessage(error)}"),
                     TextButton(onPressed: () => ref.invalidate(adminAllCustomersProvider), child: const Text('Retry')),
                   ],
                 ),
@@ -161,7 +164,7 @@ class _CreateCustomerDialogState extends ConsumerState<_CreateCustomerDialog> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Couldn't create customer - check the details and try again")),
+        SnackBar(content: Text("Couldn't create customer: ${extractErrorMessage(e)}")),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);

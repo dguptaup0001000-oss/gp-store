@@ -71,7 +71,10 @@ class _SeeAllProductsScreenState extends ConsumerState<SeeAllProductsScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("Couldn't load this - check your connection"),
+                  // TEMPORARY, for active debugging - see RootScreen's identical
+                  // comment for why this shows the real failure reason instead
+                  // of one static string.
+                  Text("Couldn't load this: ${extractErrorMessage(snapshot.error!)}"),
                   TextButton(onPressed: _retry, child: const Text('Retry')),
                 ],
               ),
