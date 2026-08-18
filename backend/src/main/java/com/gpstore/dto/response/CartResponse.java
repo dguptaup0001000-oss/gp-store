@@ -37,7 +37,21 @@ public class CartResponse {
                 .map(CartItemResponse::from)
                 .toList();
 
-        return new CartResponse(cart.getId(), items, cart.getTotalAmount(), cart.getTotalItems());
+        // Derived live from the actual items list rather than trusting
+        // cart.getTotalItems()/getTotalAmount() - those denormalized columns
+        // are only as correct as whatever write path last touched them, and
+        // any cart row left over from before a write-path bug was fixed
+        // (e.g. the old clearCart() that deleted items without zeroing these
+        // columns) would otherwise keep showing stale totals forever, since
+        // nothing re-derives them until the next add/update/remove. Computing
+        // straight from `items` here makes the response self-correcting on
+        // every read, independent of how the row got out of sync.
+        int totalItems = cart.getItems().stream().mapToInt(CartItem::getQuantity).sum();
+        BigDecimal totalAmount = cart.getItems().stream()
+                .map(CartItem::getTotalPrice)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return new CartResponse(cart.getId(), items, totalAmount, totalItems);
     }
 
     public Long getCartId() { return cartId; }
