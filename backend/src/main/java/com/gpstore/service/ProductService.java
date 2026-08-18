@@ -68,13 +68,24 @@ public class ProductService {
                 .toList();
     }
 
-    /** Instant, typo-tolerant, relevance-ranked search - see ProductRepository.searchInstant(). */
+    /**
+     * Instant, typo-tolerant, relevance-ranked search - see
+     * ProductRepository.searchInstant(). That native query returns bare
+     * Product entities with nothing eager-fetched (same situation
+     * batchFetchWithVariants exists for), so this used to lazy-load each
+     * result's category and variants one product at a time while mapping to
+     * ProductResponse - confirmed via isolated timing as the actual cause of
+     * a multi-second response that was identical regardless of keyword
+     * (same page size, same ~40 extra sequential round trips either way).
+     * Batching the re-fetch the same way browseByCategory/getNewArrivals
+     * already do fixes it in one extra round trip instead.
+     */
     @Transactional(readOnly = true)
     public Page<ProductResponse> searchInstant(String keyword, Pageable pageable) {
         if (keyword == null || keyword.isBlank()) {
             throw new BadRequestException("Search keyword is required");
         }
-        return productRepository.searchInstant(keyword.trim(), pageable).map(ProductResponse::from);
+        return batchFetchWithVariants(productRepository.searchInstant(keyword.trim(), pageable));
     }
 
     /** Category browsing - the other half of product discovery alongside search. */
