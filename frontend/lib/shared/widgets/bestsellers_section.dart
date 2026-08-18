@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -83,10 +84,10 @@ class _BestsellerTile extends ConsumerWidget {
                         child: Container(
                           color: Colors.grey.shade200,
                           child: imageUrl != null
-                              ? Image.network(
-                                  imageUrl,
+                              ? CachedNetworkImage(
+                                  imageUrl: imageUrl,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (c, e, s) => const Icon(
+                                  errorWidget: (c, url, e) => const Icon(
                                     Icons.image_outlined,
                                     size: 16,
                                     color: AppColors.textSecondary,

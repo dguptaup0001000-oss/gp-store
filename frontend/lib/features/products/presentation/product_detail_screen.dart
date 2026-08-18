@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -99,10 +100,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         child: variant?.imageUrl != null
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
-                                child: Image.network(
-                                  variant!.imageUrl!,
+                                child: CachedNetworkImage(
+                                  imageUrl: variant!.imageUrl!,
                                   fit: BoxFit.contain,
-                                  errorBuilder: (context, error, stackTrace) => const Icon(
+                                  errorWidget: (context, url, error) => const Icon(
                                     Icons.image_not_supported_outlined,
                                     size: 48,
                                     color: AppColors.textSecondary,

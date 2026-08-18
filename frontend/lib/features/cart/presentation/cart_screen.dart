@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -104,10 +105,10 @@ class _CartItemTile extends ConsumerWidget {
             child: item.imageUrl != null
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      item.imageUrl!,
+                    child: CachedNetworkImage(
+                      imageUrl: item.imageUrl!,
                       fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) =>
+                      errorWidget: (context, url, error) =>
                           const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary),
                     ),
                   )
