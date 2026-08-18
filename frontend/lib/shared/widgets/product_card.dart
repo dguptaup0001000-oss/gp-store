@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -52,26 +53,23 @@ class ProductCard extends StatelessWidget {
                         child: variant?.imageUrl != null
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: Image.network(
-                                  variant!.imageUrl!,
+                                child: CachedNetworkImage(
+                                  imageUrl: variant!.imageUrl!,
                                   fit: BoxFit.contain,
                                   // Explicit error/loading handling per spec
                                   // ("Images: support lazy loading, caching,
                                   // placeholder, error widget") - a broken
                                   // image URL should never show a Flutter
                                   // red-screen crash icon to a customer.
-                                  errorBuilder: (context, error, stackTrace) =>
+                                  errorWidget: (context, url, error) =>
                                       const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary),
-                                  loadingBuilder: (context, child, progress) {
-                                    if (progress == null) return child;
-                                    return const Center(
-                                      child: SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(strokeWidth: 2),
-                                      ),
-                                    );
-                                  },
+                                  placeholder: (context, url) => const Center(
+                                    child: SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    ),
+                                  ),
                                 ),
                               )
                             : const Icon(Icons.shopping_basket_outlined, color: AppColors.textSecondary),

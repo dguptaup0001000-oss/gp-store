@@ -65,6 +65,13 @@ dependencies:
   # sends the image bytes through the backend.
   image_picker: ^1.1.2
 
+  # Caches product/category images to disk instead of Image.network's
+  # in-memory-only cache, which re-downloads on every screen revisit (cold
+  # start, navigating back, pull-to-refresh). At this app's scale that's a
+  # direct hit to perceived speed and mobile data usage for the exact images
+  # customers see over and over: bestsellers, cart, product detail.
+  cached_network_image: ^3.4.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

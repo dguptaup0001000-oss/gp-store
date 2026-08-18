@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -197,12 +198,12 @@ class _ItemRow extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: item.imageUrl != null
-                ? Image.network(
-                    item.imageUrl!,
+                ? CachedNetworkImage(
+                    imageUrl: item.imageUrl!,
                     width: 44,
                     height: 44,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _placeholderIcon(),
+                    errorWidget: (_, __, ___) => _placeholderIcon(),
                   )
                 : _placeholderIcon(),
           ),

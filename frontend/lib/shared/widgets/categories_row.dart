@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -37,10 +38,10 @@ class CategoriesRow extends StatelessWidget {
                     ),
                     child: category.imageUrl != null
                         ? ClipOval(
-                            child: Image.network(
-                              category.imageUrl!,
+                            child: CachedNetworkImage(
+                              imageUrl: category.imageUrl!,
                               fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) =>
+                              errorWidget: (context, url, error) =>
                                   const Icon(Icons.category_outlined, color: AppColors.textSecondary),
                             ),
                           )
