@@ -83,7 +83,11 @@ async function seedAccounts(count) {
   for (let i = 0; i < count; i++) {
     const suffix = `${Date.now()}_${i}`;
     const email = `phonetest_${suffix}@example.com`;
-    const phone = '9' + String(200000000 + i).padStart(9, '0').slice(-9);
+    // Was deterministic (index-only), so re-running this script tried to
+    // register the exact same 10 digits every time and got a legitimate
+    // duplicate rejection from the DB on every account - never a backend
+    // outage, just this script colliding with its own previous run.
+    const phone = '9' + String(Date.now()).slice(-6) + String(i).padStart(3, '0');
     const password = 'LoadTest123!';
     try {
       const registerRes = await fetch(`${BASE_URL}/api/auth/register`, {
