@@ -3,6 +3,9 @@ package com.gpstore.controller;
 import com.gpstore.dto.response.InventoryResponse;
 import com.gpstore.entity.Inventory;
 import com.gpstore.service.InventoryService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,8 +27,11 @@ public class InventoryController {
     }
 
     @GetMapping
-    public List<InventoryResponse> getAll() {
-        return inventoryService.getAll().stream().map(InventoryResponse::from).toList();
+    public Page<InventoryResponse> getAll(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return inventoryService.getAll(pageable).map(InventoryResponse::from);
     }
 
     @GetMapping("/{id}")

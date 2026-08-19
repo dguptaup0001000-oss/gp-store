@@ -32,9 +32,40 @@ final adminCategoriesProvider = FutureProvider.autoDispose<List<Category>>((ref)
   return ref.watch(adminProductsRepositoryProvider).getCategories();
 });
 
-final adminAllInventoryProvider = FutureProvider.autoDispose<List<InventoryItem>>((ref) {
-  return ref.watch(adminProductsRepositoryProvider).getAllInventory();
-});
+typedef AdminInventoryPage = ({List<InventoryItem> items, int page, int totalPages});
+
+/// Paginated - see AdminAllOrdersController's doc comment for why this is an
+/// AsyncNotifier rather than a plain FutureProvider.
+class AdminAllInventoryController extends AutoDisposeAsyncNotifier<AdminInventoryPage> {
+  @override
+  Future<AdminInventoryPage> build() async {
+    final result = await ref.read(adminProductsRepositoryProvider).getAllInventory(page: 0);
+    return (items: result.items, page: 0, totalPages: result.totalPages);
+  }
+
+  bool get hasMore {
+    final current = state.valueOrNull;
+    return current != null && current.page + 1 < current.totalPages;
+  }
+
+  Future<void> loadMore() async {
+    final current = state.valueOrNull;
+    if (current == null || current.page + 1 >= current.totalPages) return;
+
+    final nextPage = current.page + 1;
+    final result = await ref.read(adminProductsRepositoryProvider).getAllInventory(page: nextPage);
+    state = AsyncData((
+      items: [...current.items, ...result.items],
+      page: nextPage,
+      totalPages: result.totalPages,
+    ));
+  }
+}
+
+final adminAllInventoryProvider =
+    AsyncNotifierProvider.autoDispose<AdminAllInventoryController, AdminInventoryPage>(
+  AdminAllInventoryController.new,
+);
 
 final adminLowStockProvider = FutureProvider.autoDispose<List<InventoryItem>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getLowStock();

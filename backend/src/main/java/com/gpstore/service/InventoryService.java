@@ -26,14 +26,11 @@ public class InventoryService {
     }
 
     // Was an unbounded findAll() - every inventory row ever created, loaded
-    // into memory on every call to the admin inventory screen. Capped at a
-    // generous size rather than truly paginated since the current frontend
-    // fetches this as one flat list with no page/size control yet - revisit
-    // with real pagination if the catalog ever grows past this.
-    private static final int ADMIN_LIST_CAP = 500;
-
-    public List<Inventory> getAll() {
-        return repository.findAllByOrderByIdAsc(org.springframework.data.domain.PageRequest.of(0, ADMIN_LIST_CAP));
+    // into memory on every call to the admin inventory screen. Now genuinely
+    // paginated (see admin_inventory_screen.dart's infinite scroll), not
+    // just capped.
+    public org.springframework.data.domain.Page<Inventory> getAll(org.springframework.data.domain.Pageable pageable) {
+        return repository.findAllByOrderByIdAsc(pageable);
     }
 
     public Inventory getById(Long id) {

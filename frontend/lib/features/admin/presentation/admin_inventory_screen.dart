@@ -20,8 +20,8 @@ class AdminInventoryScreen extends StatelessWidget {
         ),
         body: const TabBarView(
           children: [
-            _InventoryList(lowStockOnly: true),
-            _InventoryList(lowStockOnly: false),
+            _LowStockList(),
+            _AllInventoryList(),
           ],
         ),
       ),
@@ -29,15 +29,16 @@ class AdminInventoryScreen extends StatelessWidget {
   }
 }
 
-class _InventoryList extends ConsumerWidget {
-  const _InventoryList({required this.lowStockOnly});
-
-  final bool lowStockOnly;
+/// Low stock is naturally self-bounded (only items at or below their
+/// reorder point - a real business-bounded list, not "every item ever
+/// stocked"), so this stays a plain single-shot fetch, unlike the paginated
+/// list below.
+class _LowStockList extends ConsumerWidget {
+  const _LowStockList();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final provider = lowStockOnly ? adminLowStockProvider : adminAllInventoryProvider;
-    final itemsAsync = ref.watch(provider);
+    final itemsAsync = ref.watch(adminLowStockProvider);
 
     return itemsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -45,31 +46,77 @@ class _InventoryList extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // TEMPORARY, for active debugging - see RootScreen's identical
-            // comment for why this shows the real failure reason instead
-            // of one static string.
             Text("Couldn't load inventory: ${extractErrorMessage(error)}"),
-            TextButton(onPressed: () => ref.invalidate(provider), child: const Text('Retry')),
+            TextButton(onPressed: () => ref.invalidate(adminLowStockProvider), child: const Text('Retry')),
           ],
         ),
       ),
       data: (items) {
         if (items.isEmpty) {
-          return Center(
-            child: Text(
-              lowStockOnly ? 'Nothing is low on stock right now' : 'No inventory records yet',
-              style: const TextStyle(color: AppColors.textSecondary),
-            ),
+          return const Center(
+            child: Text('Nothing is low on stock right now', style: TextStyle(color: AppColors.textSecondary)),
           );
         }
 
         return RefreshIndicator(
-          onRefresh: () async => ref.invalidate(provider),
+          onRefresh: () async => ref.invalidate(adminLowStockProvider),
           child: ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: items.length,
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, index) => _InventoryTile(item: items[index]),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Real pagination - every inventory row ever created has no natural upper
+/// bound, unlike the low-stock list above. Loads more as the admin scrolls
+/// to the bottom, same pattern as AdminOrderListScreen.
+class _AllInventoryList extends ConsumerWidget {
+  const _AllInventoryList();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pageAsync = ref.watch(adminAllInventoryProvider);
+    final controller = ref.read(adminAllInventoryProvider.notifier);
+
+    return pageAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      error: (error, stackTrace) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("Couldn't load inventory: ${extractErrorMessage(error)}"),
+            TextButton(onPressed: () => ref.invalidate(adminAllInventoryProvider), child: const Text('Retry')),
+          ],
+        ),
+      ),
+      data: (result) {
+        final items = result.items;
+        if (items.isEmpty) {
+          return const Center(
+            child: Text('No inventory records yet', style: TextStyle(color: AppColors.textSecondary)),
+          );
+        }
+
+        final hasMore = controller.hasMore;
+
+        return RefreshIndicator(
+          onRefresh: () async => ref.invalidate(adminAllInventoryProvider),
+          child: ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: items.length + (hasMore ? 1 : 0),
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              if (index == items.length) {
+                WidgetsBinding.instance.addPostFrameCallback((_) => controller.loadMore());
+                return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+              }
+              return _InventoryTile(item: items[index]);
+            },
           ),
         );
       },
