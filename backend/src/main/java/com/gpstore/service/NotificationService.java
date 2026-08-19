@@ -203,6 +203,40 @@ public class NotificationService {
     }
 
     /**
+     * The store-owner-facing counterpart to notifyOrderStatusChange above -
+     * every ADMIN account gets pushed the instant a new order is placed,
+     * not just the customer who placed it. type=NEW_ORDER (distinct from
+     * ORDER_STATUS) is what the admin app's PushNotificationService uses to
+     * trigger an auto-print of the order receipt on a connected thermal
+     * printer - see printer_service.dart. Called once, from placeOrder's
+     * afterCommitWork, never on later status changes (an admin doesn't need
+     * a fresh print for every status update, only when the order first
+     * arrives). Same defensive isolation as every other method here: never
+     * lets a notification failure affect the order itself.
+     */
+    public void notifyAdminsOfNewOrder(Order order) {
+        try {
+            if (order == null) return;
+
+            List<Customer> admins = customerRepository.findByRole(com.gpstore.entity.Role.ADMIN);
+            if (admins.isEmpty()) return;
+
+            String title = "New Order Received";
+            String message = "Order " + order.getOrderNumber() + " - ₹"
+                    + order.getTotalAmount() + " (" + order.getOrderStatus() + ")";
+
+            for (Customer admin : admins) {
+                if (admin.getFcmToken() == null || admin.getFcmToken().isBlank()) continue;
+                pushNotificationService.sendPush(admin.getFcmToken(), title, message,
+                        Map.of("type", "NEW_ORDER", "orderId", String.valueOf(order.getId())));
+            }
+        } catch (Exception ex) {
+            auditLogService.log("ADMIN_NEW_ORDER_PUSH_FAILED", "Order", order != null ? order.getId() : null,
+                    "Failed to notify admins of new order: " + ex.getMessage());
+        }
+    }
+
+    /**
      * A delivery partner's own push - "you have a new delivery" - the
      * natural counterpart to the customer-facing notifications above.
      * Called from DeliveryService.assignDelivery(). Same defensive

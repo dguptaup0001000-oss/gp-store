@@ -12,6 +12,7 @@ import 'admin_delivery_partners_screen.dart';
 import 'admin_inventory_screen.dart';
 import 'admin_order_list_screen.dart';
 import 'admin_payments_screen.dart';
+import 'admin_printer_settings_screen.dart';
 import 'admin_product_list_screen.dart';
 import 'admin_reviews_screen.dart';
 
@@ -142,6 +143,15 @@ class AdminHomeScreen extends StatelessWidget {
             subtitle: 'Remove inappropriate reviews',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminReviewsScreen()),
+            ),
+          ),
+          _tile(
+            context,
+            icon: Icons.print_outlined,
+            title: 'Receipt Printer',
+            subtitle: 'Connect a printer to auto-print new orders',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AdminPrinterSettingsScreen()),
             ),
           ),
         ],

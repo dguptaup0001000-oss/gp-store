@@ -57,6 +57,7 @@ public class OrderService {
     private final com.gpstore.repository.DeliveryRepository deliveryRepository;
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
+    private final java.util.concurrent.ExecutorService orderSideEffectsExecutor;
 
     public OrderService(
             OrderRepository repository,
@@ -80,7 +81,8 @@ public class OrderService {
             // @Lazy here, Spring would fail to start the whole application
             // at boot, not just this feature.
             @org.springframework.context.annotation.Lazy DeliveryService deliveryService,
-            com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository) {
+            com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository,
+            java.util.concurrent.ExecutorService orderSideEffectsExecutor) {
 
         this.repository = repository;
         this.orderItemRepository = orderItemRepository;
@@ -99,6 +101,7 @@ public class OrderService {
         this.deliveryRepository = deliveryRepository;
         this.deliveryService = deliveryService;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
+        this.orderSideEffectsExecutor = orderSideEffectsExecutor;
     }
 
     public Order save(Order order) {
@@ -491,6 +494,7 @@ public class OrderService {
             // customer. generateForOrder has no such internal guard, so it
             // gets one here, same pattern as the other three.
             notificationService.notifyOrderStatusChange(placedOrder, placedOrder.getOrderStatus());
+            notificationService.notifyAdminsOfNewOrder(placedOrder);
             auditLogService.log("ORDER_PLACED", "Order", placedOrderId,
                     "total=" + placedOrder.getTotalAmount() + ", paymentMethod=" + request.getPaymentMethod());
             try {
@@ -521,23 +525,36 @@ public class OrderService {
         // forever. If something still gets here, at least it's on record
         // instead of surfacing to the customer as "An unexpected error
         // occurred" for an order that, in reality, already went through.
+        //
+        // Submitted to orderSideEffectsExecutor, not run inline:
+        // TransactionSynchronization.afterCommit() still executes
+        // synchronously on the SAME request thread, just after the DB
+        // commit rather than before it - registering it here alone did NOT
+        // make the FCM push call, invoice generation, and delivery-partner
+        // query stop blocking the customer's response (measured at several
+        // real seconds of placeOrder()'s latency in production). Handing
+        // the Runnable to the executor is what actually gets it off the
+        // request thread.
+        Runnable guardedAfterCommitWork = () -> {
+            try {
+                afterCommitWork.run();
+            } catch (Throwable t) {
+                log.error("Post-order side effects failed for order {} - order itself is unaffected", placedOrderId, t);
+            }
+        };
         try {
             if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
                 org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
                         new org.springframework.transaction.support.TransactionSynchronization() {
                             @Override
                             public void afterCommit() {
-                                try {
-                                    afterCommitWork.run();
-                                } catch (Throwable t) {
-                                    log.error("Post-order side effects failed for order {} - order itself is unaffected", placedOrderId, t);
-                                }
+                                orderSideEffectsExecutor.submit(guardedAfterCommitWork);
                             }
                         });
             } else {
                 // Defensive fallback only - shouldn't happen inside an @Transactional
                 // method, but never silently drop these side effects if it does.
-                afterCommitWork.run();
+                orderSideEffectsExecutor.submit(guardedAfterCommitWork);
             }
         } catch (Throwable t) {
             log.error("Failed to register/run post-order side effects for order {} - order itself is unaffected", placedOrderId, t);

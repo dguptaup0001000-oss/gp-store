@@ -6,10 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/notifications/push_notification_providers.dart';
 import 'core/notifications/push_notification_service.dart';
+import 'core/printing/printer_providers.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/auth_providers.dart';
 import 'features/orders/presentation/order_detail_screen.dart';
+import 'features/orders/presentation/orders_providers.dart';
 
 /// Lets code without a local BuildContext (the FCM tap handler below) still
 /// show a SnackBar on top of whatever the user is currently looking at.
@@ -59,6 +61,30 @@ class GpStoreApp extends ConsumerWidget {
     }
   }
 
+  /// The store-owner side of a new order arriving - see
+  /// NotificationService.notifyAdminsOfNewOrder on the backend, which is
+  /// the only thing that ever sends a NEW_ORDER push (customer accounts
+  /// never receive this type). Fetches the order's full detail, then hands
+  /// it to PrinterService - a no-op if no printer has been set up yet (see
+  /// AdminPrinterSettingsScreen), and never throws into this handler either
+  /// way. Only fires while the app is in the foreground; a killed/fully
+  /// backgrounded app can't run Dart code to print, so this only covers the
+  /// "app open on the counter" case, not true background printing.
+  Future<void> _autoPrintIfNewOrder(WidgetRef ref, RemoteMessage message) async {
+    if (message.data['type'] != 'NEW_ORDER') return;
+
+    final orderIdRaw = message.data['orderId'];
+    final orderId = orderIdRaw != null ? int.tryParse(orderIdRaw) : null;
+    if (orderId == null) return;
+
+    try {
+      final order = await ref.read(ordersRepositoryProvider).getOrderDetail(orderId);
+      await ref.read(printerServiceProvider).printOrderReceipt(order);
+    } catch (e) {
+      debugPrint('Auto-print for order $orderId failed (order itself is unaffected): $e');
+    }
+  }
+
   void _showForegroundBanner(RemoteMessage message) {
     final title = message.notification?.title;
     final body = message.notification?.body;
@@ -88,7 +114,10 @@ class GpStoreApp extends ConsumerWidget {
 
       if (isAuthenticated && !wasAuthenticated) {
         ref.read(pushNotificationServiceProvider).start(
-              onForegroundMessage: _showForegroundBanner,
+              onForegroundMessage: (message) {
+                _showForegroundBanner(message);
+                _autoPrintIfNewOrder(ref, message);
+              },
               onNotificationTap: (message) => _handleNotificationTap(ref, message),
             );
       } else if (!isAuthenticated && wasAuthenticated) {

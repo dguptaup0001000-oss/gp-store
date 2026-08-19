@@ -17,6 +17,22 @@
          no-op (no such runtime permission exists there). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
+    <!-- Needed to connect to a paired Bluetooth thermal printer for
+         auto-printing new-order receipts (see core/printing/printer_service.dart).
+         BLUETOOTH_CONNECT is the Android 12+ (API 31+) runtime permission
+         for talking to an already-paired device - no location permission
+         needed since this app only ever connects to a device the store
+         owner already paired themselves in Android's Bluetooth settings, it
+         never scans for new ones. android:usesPermissionFlags="neverForLocation"
+         on BLUETOOTH_SCAN documents that same fact to the Play Store, in
+         case a future version of this feature does add scanning. Below API
+         31, the legacy BLUETOOTH/BLUETOOTH_ADMIN permissions apply instead -
+         granted at install time, no runtime prompt. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"/>
+
     <application
         android:label="GP-Store"
         android:name="${applicationName}"

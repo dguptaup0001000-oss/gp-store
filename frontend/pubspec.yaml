@@ -72,6 +72,33 @@ dependencies:
   # customers see over and over: bestsellers, cart, product detail.
   cached_network_image: ^3.4.1
 
+  # Bluetooth (Classic/SPP) connection to a cheap ESC/POS thermal receipt
+  # printer, for auto-printing new-order receipts on the admin's device.
+  # Chosen specifically because it does NOT require location permission on
+  # Android (only BLUETOOTH_CONNECT on API 31+) - it only ever talks to a
+  # device already paired in Android's own Bluetooth settings, it doesn't
+  # scan for new ones itself.
+  # Pinned to 1.2.1, not the newer 1.2.2 - 1.2.2 moved to a pure-Swift iOS
+  # implementation that requires Flutter >=3.44.0, newer than the 3.35.7 CI
+  # (and this project) currently builds against. The Android API this app
+  # actually uses is unchanged between the two versions.
+  print_bluetooth_thermal: ^1.2.1
+
+  # Builds the raw ESC/POS command bytes (text, bold, alignment, cut) that
+  # print_bluetooth_thermal sends over the connection above.
+  esc_pos_utils_plus: ^2.0.4
+
+  # print_bluetooth_thermal only CHECKS Bluetooth permission
+  # (isPermissionBluetoothGranted) - it doesn't trigger the OS prompt
+  # itself. This is what actually asks, once (see printer_service.dart).
+  # Pinned to 12.0.3, not 13.x/14.x - permission_handler_android 14.0.0's
+  # own build.gradle.kts assumes a newer Flutter Gradle template (Kotlin
+  # version-catalog wiring) than this project has, and fails to even
+  # resolve its own `kotlin { compilerOptions { ... } }` block
+  # ("Unresolved reference: compilerOptions") - a real CI failure, not a
+  # guess. 12.0.3 predates that Android module restructuring.
+  permission_handler: ^12.0.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
