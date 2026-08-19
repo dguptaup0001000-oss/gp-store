@@ -13,6 +13,13 @@ final wishlistRepositoryProvider = Provider<WishlistRepository>((ref) {
 /// CartController: a toggle from a product card, search results, or the
 /// detail screen all need to reflect the same state everywhere instantly.
 class WishlistController extends AsyncNotifier<List<WishlistItem>> {
+  // Same reasoning as CartController._mutationInFlight: the heart icon on a
+  // product card doesn't track its own loading state, so a rapid double-tap
+  // before the first toggle's network call resolves would compute
+  // "existing" from the same stale pre-toggle state twice and fire two
+  // add (or two remove) requests instead of one add + one remove.
+  bool _mutationInFlight = false;
+
   @override
   Future<List<WishlistItem>> build() async {
     final authState = ref.watch(authControllerProvider);
@@ -30,28 +37,34 @@ class WishlistController extends AsyncNotifier<List<WishlistItem>> {
   /// heart-icon button actually needs, hiding the add-vs-remove-by-id
   /// distinction from every call site.
   Future<void> toggle(int productId) async {
-    final current = state.valueOrNull ?? [];
-    WishlistItem? existing;
-    for (final item in current) {
-      if (item.product?.id == productId) {
-        existing = item;
-        break;
+    if (_mutationInFlight) return;
+    _mutationInFlight = true;
+    try {
+      final current = state.valueOrNull ?? [];
+      WishlistItem? existing;
+      for (final item in current) {
+        if (item.product?.id == productId) {
+          existing = item;
+          break;
+        }
       }
-    }
 
-    final repository = ref.read(wishlistRepositoryProvider);
-    state = const AsyncLoading<List<WishlistItem>>().copyWithPrevious(state);
+      final repository = ref.read(wishlistRepositoryProvider);
+      state = const AsyncLoading<List<WishlistItem>>().copyWithPrevious(state);
 
-    state = await AsyncValue.guard(() async {
-      if (existing != null) {
-        await repository.removeFromWishlist(existing.id);
-      } else {
-        await repository.addToWishlist(productId);
+      state = await AsyncValue.guard(() async {
+        if (existing != null) {
+          await repository.removeFromWishlist(existing.id);
+        } else {
+          await repository.addToWishlist(productId);
+        }
+        return repository.getMyWishlist();
+      });
+      if (state.hasValue) {
+        HapticFeedback.selectionClick();
       }
-      return repository.getMyWishlist();
-    });
-    if (state.hasValue) {
-      HapticFeedback.selectionClick();
+    } finally {
+      _mutationInFlight = false;
     }
   }
 }
