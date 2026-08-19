@@ -1,5 +1,6 @@
 package com.gpstore.controller;
 
+import com.gpstore.dto.response.NotificationResponse;
 import com.gpstore.entity.Notification;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.NotificationService;
@@ -48,8 +49,14 @@ public class NotificationController {
 
     // The actual "order tracking" feed a customer's app screen should call -
     // their own notifications, newest first.
+    //
+    // Returns NotificationResponse, not the Notification entity: serializing
+    // the entity meant Jackson resolving lazy Hibernate proxies mid-response
+    // (Notification.order, and Order.address behind it), which surfaces as an
+    // opaque 500 the moment one of them fails to initialize. See
+    // NotificationResponse for the full reasoning.
     @GetMapping("/mine")
-    public Page<Notification> getMyNotifications(
+    public Page<NotificationResponse> getMyNotifications(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));

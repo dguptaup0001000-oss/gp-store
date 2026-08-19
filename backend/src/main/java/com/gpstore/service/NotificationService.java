@@ -330,10 +330,21 @@ public class NotificationService {
         return notificationRepository.findById(id);
     }
 
-    /** Paginated - every order status change writes a notification, so this grows without bound over a customer's lifetime. */
-    public org.springframework.data.domain.Page<Notification> getNotificationsByCustomerId(
+    /**
+     * Paginated - every order status change writes a notification, so this
+     * grows without bound over a customer's lifetime.
+     *
+     * Returns DTOs, not entities: each row's lazy Order proxy is resolved
+     * here, inside the transaction, instead of being left for Jackson to
+     * touch while writing the response (see NotificationResponse's class
+     * comment for why that was failing). readOnly because this only reads -
+     * it also keeps the whole page mapping inside one open session.
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public Page<com.gpstore.dto.response.NotificationResponse> getNotificationsByCustomerId(
             Long customerId, org.springframework.data.domain.Pageable pageable) {
-        return notificationRepository.findByCustomerIdOrderBySentAtDesc(customerId, pageable);
+        return notificationRepository.findByCustomerIdOrderBySentAtDesc(customerId, pageable)
+                .map(com.gpstore.dto.response.NotificationResponse::from);
     }
 
     /**
