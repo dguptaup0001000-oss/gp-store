@@ -152,7 +152,7 @@ public class OrderService {
             throw new BadRequestException("Cart is empty");
         }
 
-        List<CartItem> cartItems = cartItemService.getCartItems(customer.getCart().getId());
+        List<CartItem> cartItems = cartItemService.getCartItemsForCheckout(customer.getCart().getId());
         if (cartItems == null || cartItems.isEmpty()) {
             throw new BadRequestException("Cart is empty");
         }
@@ -344,7 +344,7 @@ public class OrderService {
 
         Long cartId = customer.getCart().getId();
 
-        List<CartItem> cartItems = cartItemService.getCartItems(cartId);
+        List<CartItem> cartItems = cartItemService.getCartItemsForCheckout(cartId);
 
         if (cartItems == null || cartItems.isEmpty()) {
             throw new BadRequestException("Cart is empty");
@@ -501,11 +501,30 @@ public class OrderService {
         orderItemRepository.saveAll(newOrderItems);
 
         // Reduce inventory using the rows we already locked above.
+        //
+        // No save() call: these Inventory instances were loaded by
+        // findByProductVariantIdForUpdate inside THIS transaction, so they
+        // are managed entities and Hibernate's dirty checking writes the new
+        // stock at flush. Calling save() on an already-managed entity adds a
+        // merge and a validation pass per item without changing what reaches
+        // the database, and it obscures that the row is already locked and
+        // owned by this transaction.
+        //
+        // The lock is untouched and must stay: the row was selected FOR
+        // UPDATE above, which is what makes read-modify-write safe here.
+        // Dropping save() changes when the UPDATE is issued, never whether
+        // the row is protected.
         for (int i = 0; i < cartItems.size(); i++) {
             Inventory inventory = lockedInventories.get(i);
             CartItem item = cartItems.get(i);
-            inventory.setStock(inventory.getStock() - item.getQuantity());
-            inventoryService.save(inventory);
+            int newStock = inventory.getStock() - item.getQuantity();
+            if (newStock < 0) {
+                // Defensive: the availability check above should already have
+                // rejected this. Kept because silently persisting negative
+                // stock is far worse than an explicit failure.
+                throw new ConflictException("Insufficient stock while placing the order - please try again.");
+            }
+            inventory.setStock(newStock);
         }
 
         // Clear cart
@@ -865,7 +884,7 @@ public class OrderService {
 
         Customer customer = customerService.getById(customerId);
         if (customer != null && customer.getCart() != null) {
-            List<CartItem> items = cartItemService.getCartItems(customer.getCart().getId());
+            List<CartItem> items = cartItemService.getCartItemsForCheckout(customer.getCart().getId());
             if (items != null) {
                 items.stream()
                         .filter(item -> item.getProductVariant() != null)
@@ -904,7 +923,7 @@ public class OrderService {
         if (customer == null || customer.getCart() == null) {
             return true;
         }
-        List<CartItem> items = cartItemService.getCartItems(customer.getCart().getId());
+        List<CartItem> items = cartItemService.getCartItemsForCheckout(customer.getCart().getId());
         return items == null || items.isEmpty();
     }
 

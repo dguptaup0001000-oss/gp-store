@@ -331,7 +331,7 @@ public class DeliveryService {
      * this is deliberately just a review signal (see AuditLog + the
      * /api/deliveries/breached endpoint).
      */
-    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 15 * 60 * 1000)
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelayString = "${delivery.late-flag-interval-ms:900000}", initialDelayString = "${delivery.late-flag-initial-delay-ms:60000}")
     @Transactional
     public void flagLateDeliveries() {
         // Bounded per run. This is a sweep over "everything that went late

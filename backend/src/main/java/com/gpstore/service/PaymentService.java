@@ -81,7 +81,7 @@ public class PaymentService {
      * second instance from re-running it moments later on a fast, mostly-empty
      * pass.
      */
-    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 5 * 60 * 1000)
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelayString = "${payment.expiry-interval-ms:300000}", initialDelayString = "${payment.expiry-initial-delay-ms:30000}")
     @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(
             name = "expireStalePendingUpiPayments",
             lockAtMostFor = "10m",

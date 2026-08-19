@@ -47,9 +47,23 @@ public class CartItemService {
      */
     @Transactional
     public void clearCart(Long cartId) {
-        List<CartItem> items = repository.findByCartId(cartId);
-        repository.deleteAll(items);
+        // One DELETE, not a SELECT followed by one DELETE per row. The
+        // previous version loaded every CartItem into the persistence
+        // context purely to hand it to deleteAll() - nothing read those
+        // entities. On the checkout path that happened while inventory row
+        // locks were held, so every one of those round trips extended the
+        // window other customers' checkouts could be blocked for.
+        repository.deleteByCartId(cartId);
 
+        // The Cart's own totals are denormalized (recalculated and saved by
+        // CartService.recalculateAndSave on every add/update/remove) rather
+        // than derived live from the items list. Zeroing them here is what
+        // stops a cleared cart still reporting "2 items, Rs 60" on the cart
+        // badge while its items array is empty.
+        //
+        // Left as a managed-entity update rather than a bulk UPDATE: it is a
+        // single row, and going through the entity keeps it consistent with
+        // how every other cart mutation writes these fields.
         Cart cart = cartRepository.findById(cartId).orElse(null);
         if (cart != null) {
             cart.setTotalItems(0);
@@ -69,6 +83,16 @@ public class CartItemService {
 
     public List<CartItem> getCartItems(Long cartId) {
         return repository.findByCartId(cartId);
+    }
+
+    /**
+     * Cart items with variant, product and category already fetched - for
+     * the two callers that read all three per line (checkout preview and
+     * place order). See CartItemRepository.findByCartIdForCheckout for the
+     * measured cost of not doing this.
+     */
+    public List<CartItem> getCartItemsForCheckout(Long cartId) {
+        return repository.findByCartIdForCheckout(cartId);
     }
 
     public boolean isCartEmpty(Long cartId) {

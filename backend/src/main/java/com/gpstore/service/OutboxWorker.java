@@ -85,7 +85,7 @@ public class OutboxWorker {
      * after checkout, infrequent enough to be negligible load when the
      * outbox is empty (one indexed query returning nothing).
      */
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelayString = "${outbox.drain-interval-ms:30000}", initialDelayString = "${outbox.initial-delay-ms:5000}")
     @SchedulerLock(name = "outboxWorker", lockAtMostFor = "10m", lockAtLeastFor = "5s")
     public void drain() {
         int processed = 0;
@@ -267,7 +267,7 @@ public class OutboxWorker {
      * Housekeeping: PROCESSED rows have served their purpose after a while.
      * FAILED rows are never touched here - see deleteProcessedBatch.
      */
-    @Scheduled(fixedDelay = 6 * 60 * 60 * 1000)
+    @Scheduled(fixedDelayString = "${outbox.purge-interval-ms:21600000}", initialDelayString = "${outbox.initial-delay-ms:5000}")
     @SchedulerLock(name = "outboxCleanup", lockAtMostFor = "30m", lockAtLeastFor = "1m")
     public void purgeOldProcessedEvents() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(processedRetentionDays);
