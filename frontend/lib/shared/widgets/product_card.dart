@@ -66,6 +66,13 @@ class ProductCard extends StatelessWidget {
                                 child: CachedNetworkImage(
                                   imageUrl: variant!.imageUrl!,
                                   fit: BoxFit.contain,
+                                  // Grid tiles render at ~150 logical px - without this,
+                                  // cached_network_image decodes the full original
+                                  // (often several thousand px) into memory for every
+                                  // single card on screen, which is real memory/CPU
+                                  // pressure across a long scroll. 400 covers up to ~2.5x
+                                  // device pixel ratio at this tile size with headroom.
+                                  memCacheWidth: 400,
                                   // Explicit error/loading handling per spec
                                   // ("Images: support lazy loading, caching,
                                   // placeholder, error widget") - a broken

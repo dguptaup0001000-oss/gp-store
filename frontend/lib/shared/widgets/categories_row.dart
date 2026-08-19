@@ -47,6 +47,8 @@ class CategoriesRow extends StatelessWidget {
                             child: CachedNetworkImage(
                               imageUrl: category.imageUrl!,
                               fit: BoxFit.cover,
+                              // 56x56 tile - avoid decoding the full original.
+                              memCacheWidth: 160,
                               errorWidget: (context, url, error) =>
                                   const Icon(Icons.category_outlined, color: AppColors.textSecondary),
                             ),

@@ -205,6 +205,8 @@ class _ItemRow extends StatelessWidget {
                     // contain (not cover) - matches every other product
                     // image in the app, doesn't crop.
                     fit: BoxFit.contain,
+                    // 44x44 tile - avoid decoding the full original.
+                    memCacheWidth: 130,
                     errorWidget: (_, __, ___) => _placeholderIcon(),
                   )
                 : _placeholderIcon(),

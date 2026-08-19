@@ -437,6 +437,8 @@ class _OrderItemTile extends StatelessWidget {
                     child: CachedNetworkImage(
                       imageUrl: item.imageUrl!,
                       fit: BoxFit.contain,
+                      // 44x44 tile - avoid decoding the full original.
+                      memCacheWidth: 130,
                       errorWidget: (context, url, error) =>
                           const Icon(Icons.image_not_supported_outlined, size: 18, color: AppColors.textSecondary),
                     ),
