@@ -36,6 +36,31 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("select o from Order o where o.id = :id")
     Optional<Order> findByIdForUpdate(@Param("id") Long id);
 
+    /**
+     * One order with everything OrderDetailResponse renders, in a single
+     * query: its line items, each item's variant and product, and the
+     * delivery address.
+     *
+     * Without this, building the detail DTO lazily loaded the items
+     * collection, then the variant and product PER ITEM, then the address -
+     * an N+1 paid by three separate endpoints (order detail, status update
+     * and cancellation), on top of whatever those operations had already
+     * done. Measured on a 3-item cancellation it was a meaningful share of
+     * the total query count.
+     *
+     * Fetch-joining a collection is safe HERE specifically because this
+     * returns a single order by id - there is no Pageable, so the
+     * in-memory-pagination problem that rule normally warns about cannot
+     * arise.
+     */
+    @Query("select distinct o from Order o "
+            + "left join fetch o.orderItems oi "
+            + "left join fetch oi.productVariant pv "
+            + "left join fetch pv.product "
+            + "left join fetch o.address "
+            + "where o.id = :id")
+    Optional<Order> findByIdWithDetails(@Param("id") Long id);
+
     List<Order> findByCustomerIdOrderByOrderDateDesc(Long customerId);
 
     Page<Order> findByCustomerIdOrderByOrderDateDesc(Long customerId, Pageable pageable);

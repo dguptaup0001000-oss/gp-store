@@ -191,6 +191,74 @@ class CheckoutPerformanceTest {
                 "Adding one item should not cost a query per existing cart item. Was: " + result);
     }
 
+
+    /**
+     * Order status update.
+     *
+     * The defect this guards: notifyOrderStatusChange writes a notification
+     * row and then calls FirebaseMessaging.send() - a blocking network round
+     * trip to Google - and it did so INSIDE the transaction, while this
+     * order's row lock was held. That put an external service's latency in
+     * both the customer's response time and the critical section every other
+     * request for this order queues behind.
+     *
+     * A query count cannot see a network call, so this asserts the thing a
+     * count CAN see: the notification INSERT no longer happens in the
+     * measured (transactional) window, because the whole notification step
+     * moved after commit and off the request thread.
+     */
+    @Test
+    void orderStatusUpdateDoesNotDoNotificationWorkInline() {
+        Fixture fixture = newCustomerWithCart(1);
+        PlaceOrderRequest request = new PlaceOrderRequest();
+        request.setAddressId(fixture.addressId);
+        request.setPaymentMethod("COD");
+        Long orderId = orderService.placeOrder(request, fixture.customerId, UUID.randomUUID().toString()).getOrderId();
+
+        QueryCounter.Result result = QueryCounter.measure(entityManagerFactory,
+                () -> orderService.updateOrderStatus(orderId, com.gpstore.enums.OrderStatus.PACKING));
+
+        System.out.println("[PERF] order-status-update: " + result);
+
+        assertTrue(result.queryCount() <= 10,
+                "Status update should be order + payment state and little else - notification "
+                        + "work (and its FCM network call) belongs after commit. Was: " + result);
+    }
+
+    /**
+     * Cancellation.
+     *
+     * Must still do its correctness work synchronously: lock the order, move
+     * the payment, restore inventory exactly once, write the audit row, and
+     * record the durable outbox event for invoice cancellation. Only the FCM
+     * push moved off the request path.
+     *
+     * The budget therefore allows the real work while still catching a
+     * regression that puts notification or invoice work back inline.
+     */
+    @Test
+    void cancellationDoesNotDoNotificationWorkInline() {
+        Fixture fixture = newCustomerWithCart(3);
+        PlaceOrderRequest request = new PlaceOrderRequest();
+        request.setAddressId(fixture.addressId);
+        request.setPaymentMethod("COD");
+        Long orderId = orderService.placeOrder(request, fixture.customerId, UUID.randomUUID().toString()).getOrderId();
+
+        QueryCounter.Result result = QueryCounter.measure(entityManagerFactory,
+                () -> orderService.cancelOrder(orderId, fixture.customerId, false));
+
+        System.out.println("[PERF] order-cancel (3 items): " + result);
+
+        // Measured: 25 queries before the detail fetch-join, lower after.
+        // The floor here is real work that must stay synchronous - order
+        // lock, payment lock + transition, one lock and one update per item
+        // for inventory restore, the order update, the audit row, the
+        // durable outbox row, and the response read.
+        assertTrue(result.queryCount() <= 22,
+                "Cancellation should be lock + payment + inventory restore + audit + outbox row. "
+                        + "Was: " + result);
+    }
+
     // ---------- fixtures ----------
 
     private record Fixture(Long customerId, Long addressId, Long cartId) {

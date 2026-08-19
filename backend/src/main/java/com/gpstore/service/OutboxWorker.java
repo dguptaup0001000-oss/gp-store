@@ -43,6 +43,7 @@ public class OutboxWorker {
 
     public static final String AGGREGATE_ORDER = "Order";
     public static final String EVENT_ORDER_PLACED = "ORDER_PLACED";
+    public static final String EVENT_ORDER_CANCELLED = "ORDER_CANCELLED";
 
     private final OutboxEventRepository outboxEventRepository;
     private final InvoiceService invoiceService;
@@ -236,6 +237,10 @@ public class OutboxWorker {
             handleOrderPlaced(aggregateId);
             return;
         }
+        if (EVENT_ORDER_CANCELLED.equals(eventType)) {
+            handleOrderCancelled(aggregateId);
+            return;
+        }
         // An unknown type is a code/data mismatch, not a transient fault -
         // let it fail and be retried/dead-lettered rather than silently
         // marking work done that nothing actually performed.
@@ -261,6 +266,28 @@ public class OutboxWorker {
     private void handleOrderPlaced(Long orderId) {
         invoiceService.generateForOrderIfAbsent(orderId);
         deliveryService.autoAssignBestEffort(orderId);
+    }
+
+    /**
+     * Cancels the order's invoice, if it has one.
+     *
+     * Durable rather than best-effort because this is accounting: a
+     * cancelled order whose invoice is still active reads as a valid sale
+     * for GST purposes, and nothing would report the discrepancy.
+     *
+     * IDEMPOTENT, as at-least-once delivery requires. cancelInvoice only
+     * sets a status field, so re-running it is harmless - but the status is
+     * checked first anyway to avoid a pointless UPDATE on every redelivery.
+     * An order with no invoice is a no-op: it may never have had one, or its
+     * ORDER_PLACED event may not have been processed yet, and neither is an
+     * error.
+     */
+    private void handleOrderCancelled(Long orderId) {
+        invoiceService.getInvoiceByOrderId(orderId).ifPresent(invoice -> {
+            if (!"CANCELLED".equals(invoice.getStatus())) {
+                invoiceService.cancelInvoice(invoice.getInvoiceId());
+            }
+        });
     }
 
     /**
