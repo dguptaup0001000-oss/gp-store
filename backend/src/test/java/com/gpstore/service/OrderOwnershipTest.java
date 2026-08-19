@@ -53,6 +53,7 @@ class OrderOwnershipTest {
     @Mock private DeliveryRepository deliveryRepository;
     @Mock private DeliveryService deliveryServiceUnused;
     @Mock private com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepositoryUnused;
+    @Mock private com.gpstore.repository.OutboxEventRepository outboxEventRepositoryUnused;
     @Mock private java.util.concurrent.ExecutorService orderSideEffectsExecutorUnused;
 
     private OrderService orderService;
@@ -69,6 +70,7 @@ class OrderOwnershipTest {
                 deliveryEstimateServiceUnused, deliveryFeeServiceUnused, notificationServiceUnused,
                 auditLogServiceUnused, invoiceServiceUnused, taxServiceUnused, deliveryRepository,
                 deliveryServiceUnused, idempotencyRecordRepositoryUnused, orderSideEffectsExecutorUnused,
+                outboxEventRepositoryUnused,
                 // requireIdempotencyKey: these tests cover cancellation and
                 // ownership, never the checkout entry point that reads it.
                 false);

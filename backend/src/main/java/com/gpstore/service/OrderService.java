@@ -58,6 +58,7 @@ public class OrderService {
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
     private final java.util.concurrent.ExecutorService orderSideEffectsExecutor;
+    private final com.gpstore.repository.OutboxEventRepository outboxEventRepository;
     private final boolean requireIdempotencyKey;
 
     public OrderService(
@@ -84,6 +85,7 @@ public class OrderService {
             @org.springframework.context.annotation.Lazy DeliveryService deliveryService,
             com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository,
             java.util.concurrent.ExecutorService orderSideEffectsExecutor,
+            com.gpstore.repository.OutboxEventRepository outboxEventRepository,
             @org.springframework.beans.factory.annotation.Value("${orders.require-idempotency-key:true}")
             boolean requireIdempotencyKey) {
 
@@ -105,6 +107,7 @@ public class OrderService {
         this.deliveryService = deliveryService;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.orderSideEffectsExecutor = orderSideEffectsExecutor;
+        this.outboxEventRepository = outboxEventRepository;
         this.requireIdempotencyKey = requireIdempotencyKey;
     }
 
@@ -508,6 +511,15 @@ public class OrderService {
         // Clear cart
         cartItemService.clearCart(cartId);
 
+        // Durable record of the post-order work that must not be lost.
+        // INSERTed inside THIS transaction on purpose: it commits with the
+        // order or not at all, so there is no window in which an order
+        // exists but its invoice work was never recorded. Contrast the
+        // executor below, which is in-memory and does not survive the
+        // redeploys this service gets on every push.
+        outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
+                OutboxWorker.AGGREGATE_ORDER, order.getId(), OutboxWorker.EVENT_ORDER_PLACED));
+
         // None of notification creation, the audit log entry, invoice
         // generation, or delivery auto-assignment need to block the
         // customer's "order placed" response, or run inside the same
@@ -543,18 +555,15 @@ public class OrderService {
             notificationService.notifyAdminsOfNewOrder(placedOrder);
             auditLogService.log("ORDER_PLACED", "Order", placedOrderId,
                     "total=" + placedOrder.getTotalAmount() + ", paymentMethod=" + request.getPaymentMethod());
-            try {
-                invoiceService.generateForOrder(placedOrderId);
-            } catch (Exception ex) {
-                auditLogService.log("INVOICE_GENERATION_FAILED", "Order", placedOrderId,
-                        "Order placed but invoice could not be generated: " + ex.getMessage()
-                                + " - needs manual generation.");
-            }
-            // Best-effort and fully isolated (see DeliveryService.autoAssignBestEffort's
-            // doc comment) - if no delivery partner happens to be available
-            // right now, the order still succeeds; it just needs manual
-            // assignment afterward.
-            deliveryService.autoAssignBestEffort(placedOrderId);
+            // Invoice generation and delivery assignment deliberately do
+            // NOT run here any more. They are durable outbox work now (see
+            // the outbox insert above and OutboxWorker): losing an invoice
+            // because the process was redeployed mid-flight is a real
+            // accounting problem, and this executor - correctly bounded as
+            // it is - cannot survive a restart. What stays here is the
+            // genuinely best-effort, time-sensitive part: a push
+            // notification is worth little if delivered minutes late by a
+            // background worker, and losing one is acceptable.
         };
 
         // Belt-and-suspenders on top of the comment above: every individual
