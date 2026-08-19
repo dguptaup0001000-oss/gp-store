@@ -27,15 +27,53 @@ class TokenStorage {
   static const _refreshTokenKey = 'refresh_token';
   static const _rememberMeKey = 'remember_me';
 
+  /// In-memory copy of the access token.
+  ///
+  /// Secure storage remains the persistent source of truth - this only
+  /// avoids paying for it on every single request. Every authenticated API
+  /// call went through _storage.read(), and on Android that is a platform
+  /// channel round trip plus a decrypt, on the critical path of literally
+  /// every request the app makes. It is small per call and completely
+  /// invisible in isolation, which is exactly why it went unnoticed while
+  /// adding up across a screen that fires several requests.
+  ///
+  /// Correctness rules this must never break:
+  ///  - written through on save, so the cache can never be staler than
+  ///    storage;
+  ///  - cleared on logout/session-expiry, so a signed-out app cannot keep
+  ///    using a token that is no longer on disk;
+  ///  - only ever holds the SHORT-LIVED access token. The refresh token is
+  ///    deliberately still read from secure storage each time: it is the
+  ///    long-lived credential, it is needed rarely (once per access-token
+  ///    expiry), and keeping it out of a long-lived field limits how long it
+  ///    sits in process memory for no measurable benefit.
+  String? _cachedAccessToken;
+
+  /// Distinguishes "not read yet" from "read, and there genuinely is none".
+  /// Without this, a logged-out app would re-hit secure storage on every
+  /// request looking for a token that is not there.
+  bool _accessTokenLoaded = false;
+
   Future<void> saveTokens({
     required String accessToken,
     required String refreshToken,
   }) async {
+    // Storage first, cache second: if the write throws, the cache must not
+    // be left claiming a token that was never persisted.
     await _storage.write(key: _accessTokenKey, value: accessToken);
     await _storage.write(key: _refreshTokenKey, value: refreshToken);
+    _cachedAccessToken = accessToken;
+    _accessTokenLoaded = true;
   }
 
-  Future<String?> getAccessToken() => _storage.read(key: _accessTokenKey);
+  Future<String?> getAccessToken() async {
+    if (_accessTokenLoaded) {
+      return _cachedAccessToken;
+    }
+    _cachedAccessToken = await _storage.read(key: _accessTokenKey);
+    _accessTokenLoaded = true;
+    return _cachedAccessToken;
+  }
 
   Future<String?> getRefreshToken() => _storage.read(key: _refreshTokenKey);
 
@@ -51,6 +89,14 @@ class TokenStorage {
   Future<bool> getRememberMe() async => (await _storage.read(key: _rememberMeKey)) != 'false';
 
   Future<void> clear() async {
+    // Cache first here, deliberately the opposite order to saveTokens: if a
+    // delete throws partway, the in-memory token must already be gone.
+    // Leaving it set would let a signed-out app keep authenticating with a
+    // credential the user believes they revoked - a security failure, where
+    // the reverse is only a redundant storage read.
+    _cachedAccessToken = null;
+    _accessTokenLoaded = true;
+
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);
     await _storage.delete(key: _rememberMeKey);

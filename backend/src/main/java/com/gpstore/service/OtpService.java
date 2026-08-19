@@ -134,7 +134,7 @@ public class OtpService {
      * it all at once behaves worst. Each batch is its own statement, so a
      * large backlog drains steadily instead of in one long transaction.
      */
-    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60 * 60 * 1000)
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelayString = "${otp.cleanup-interval-ms:3600000}", initialDelayString = "${otp.cleanup-initial-delay-ms:60000}")
     @Transactional
     public void cleanUpExpiredOtps() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(1);

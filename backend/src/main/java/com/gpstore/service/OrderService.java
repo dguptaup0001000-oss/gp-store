@@ -111,6 +111,61 @@ public class OrderService {
         this.requireIdempotencyKey = requireIdempotencyKey;
     }
 
+
+    /**
+     * Runs non-critical work AFTER the current transaction commits, on a
+     * pool thread rather than the request thread.
+     *
+     * Why both halves matter:
+     *
+     * - AFTER COMMIT, because the work must not be able to roll back the
+     *   business operation that triggered it, and because anything reading
+     *   the order needs it to actually exist first.
+     * - OFF THE REQUEST THREAD, because
+     *   TransactionSynchronization.afterCommit() still runs synchronously on
+     *   the SAME thread - just after the commit instead of before it. On its
+     *   own it does NOT stop the caller waiting. Push notification delivery
+     *   goes through FirebaseMessaging.send(), a blocking network call to
+     *   Google; leaving that in the request path made every order status
+     *   change and cancellation wait on an external service before the
+     *   customer's screen could update.
+     *
+     * Nothing here may throw into the caller: by this point the order is
+     * already committed, and an exception escaping afterCommit() would turn
+     * a successful operation into an error response. Throwable, not
+     * Exception, deliberately - the guarantee this enforces is "an
+     * already-successful order never becomes an error", and narrowing it to
+     * Exception would leave Errors able to break exactly that.
+     *
+     * Use this only for work that is safe to LOSE on a crash. Anything
+     * business-critical belongs in the outbox instead, which survives
+     * restarts - see OutboxWorker.
+     */
+    private void runAfterCommitOffRequestThread(String description, Long orderId, Runnable work) {
+        Runnable guarded = () -> {
+            try {
+                work.run();
+            } catch (Throwable t) {
+                log.error("{} failed for order {} - the order itself is unaffected", description, orderId, t);
+            }
+        };
+
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            orderSideEffectsExecutor.submit(guarded);
+                        }
+                    });
+        } else {
+            // No transaction in progress (a direct call from a test or a
+            // non-transactional caller) - there is nothing to wait for, so
+            // submit straight away rather than silently dropping the work.
+            orderSideEffectsExecutor.submit(guarded);
+        }
+    }
+
     public Order save(Order order) {
         return repository.save(order);
     }
@@ -123,7 +178,10 @@ public class OrderService {
      * actually fulfill/manage it.
      */
     public com.gpstore.dto.response.OrderDetailResponse getOwnedOrderDetail(Long orderId, Long customerId, boolean isAdmin) {
-        Order order = repository.findById(orderId)
+        // Fetch-joined: OrderDetailResponse renders the items, each item's
+        // variant and product, and the address - all lazy, so a plain
+        // findById paid an N+1 to build one response.
+        Order order = repository.findByIdWithDetails(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
         if (!isAdmin && (order.getCustomer() == null || !order.getCustomer().getId().equals(customerId))) {
@@ -152,7 +210,7 @@ public class OrderService {
             throw new BadRequestException("Cart is empty");
         }
 
-        List<CartItem> cartItems = cartItemService.getCartItems(customer.getCart().getId());
+        List<CartItem> cartItems = cartItemService.getCartItemsForCheckout(customer.getCart().getId());
         if (cartItems == null || cartItems.isEmpty()) {
             throw new BadRequestException("Cart is empty");
         }
@@ -344,7 +402,7 @@ public class OrderService {
 
         Long cartId = customer.getCart().getId();
 
-        List<CartItem> cartItems = cartItemService.getCartItems(cartId);
+        List<CartItem> cartItems = cartItemService.getCartItemsForCheckout(cartId);
 
         if (cartItems == null || cartItems.isEmpty()) {
             throw new BadRequestException("Cart is empty");
@@ -501,11 +559,30 @@ public class OrderService {
         orderItemRepository.saveAll(newOrderItems);
 
         // Reduce inventory using the rows we already locked above.
+        //
+        // No save() call: these Inventory instances were loaded by
+        // findByProductVariantIdForUpdate inside THIS transaction, so they
+        // are managed entities and Hibernate's dirty checking writes the new
+        // stock at flush. Calling save() on an already-managed entity adds a
+        // merge and a validation pass per item without changing what reaches
+        // the database, and it obscures that the row is already locked and
+        // owned by this transaction.
+        //
+        // The lock is untouched and must stay: the row was selected FOR
+        // UPDATE above, which is what makes read-modify-write safe here.
+        // Dropping save() changes when the UPDATE is issued, never whether
+        // the row is protected.
         for (int i = 0; i < cartItems.size(); i++) {
             Inventory inventory = lockedInventories.get(i);
             CartItem item = cartItems.get(i);
-            inventory.setStock(inventory.getStock() - item.getQuantity());
-            inventoryService.save(inventory);
+            int newStock = inventory.getStock() - item.getQuantity();
+            if (newStock < 0) {
+                // Defensive: the availability check above should already have
+                // rejected this. Kept because silently persisting negative
+                // stock is far worse than an explicit failure.
+                throw new ConflictException("Insufficient stock while placing the order - please try again.");
+            }
+            inventory.setStock(newStock);
         }
 
         // Clear cart
@@ -727,12 +804,33 @@ public class OrderService {
         }
 
         Order savedOrder = repository.save(order);
-        notificationService.notifyOrderStatusChange(savedOrder, savedOrder.getOrderStatus());
+
+        // Audit stays IN the transaction: it is one INSERT, it is a
+        // compliance record, and it should commit or roll back exactly with
+        // the transition it describes. Cheap enough that deferring it would
+        // trade real durability for negligible latency.
         auditLogService.log("ORDER_STATUS_CHANGED", "Order", savedOrder.getId(),
                 "status: " + currentStatus + " -> " + status);
 
+        // The notification does NOT stay: it writes a row and then calls
+        // FirebaseMessaging.send(), a blocking network round trip to Google,
+        // which was happening while this order's row lock was still held.
+        // That put an external service's latency directly in the customer's
+        // response time AND in the critical section other requests for this
+        // order queue behind. Losing a push on a crash is acceptable; making
+        // every status change wait for Google is not.
+        final Order notifyOrder = savedOrder;
+        final OrderStatus notifyStatus = savedOrder.getOrderStatus();
+        runAfterCommitOffRequestThread("Order status notification", savedOrder.getId(),
+                () -> notificationService.notifyOrderStatusChange(notifyOrder, notifyStatus));
+
         var delivery = deliveryRepository.findByOrderId(savedOrder.getId()).orElse(null);
-        return com.gpstore.dto.response.OrderDetailResponse.from(savedOrder, delivery);
+        // Re-read fetch-joined purely to BUILD THE RESPONSE. savedOrder is
+        // already managed and correct, but its items/variants/products and
+        // address are still lazy, so rendering the DTO from it would issue
+        // one query per item. This is one extra query that removes several.
+        Order forResponse = repository.findByIdWithDetails(savedOrder.getId()).orElse(savedOrder);
+        return com.gpstore.dto.response.OrderDetailResponse.from(forResponse, delivery);
     }
 
     /**
@@ -802,19 +900,40 @@ public class OrderService {
         restoreInventoryOnce(order);
 
         Order savedOrder = repository.save(order);
-        notificationService.notifyOrderStatusChange(savedOrder, savedOrder.getOrderStatus());
 
-        // This was never triggered anywhere before - a cancelled order's
-        // invoice would stay in whatever state it was, still implying a
-        // valid sale for GST/accounting purposes even though the order
-        // itself no longer represents one.
-        invoiceService.getInvoiceByOrderId(orderId).ifPresent(invoice -> invoiceService.cancelInvoice(invoice.getInvoiceId()));
-
+        // Audit stays in the transaction - one INSERT, and a cancellation is
+        // exactly the kind of event that must not be missing from the record
+        // if the process dies a moment later.
         auditLogService.log("ORDER_CANCELLED", "Order", savedOrder.getId(),
                 "cancelled by " + (isAdmin ? "admin/staff" : "customer"));
 
+        // Invoice cancellation is ACCOUNTING work, not a nicety: a cancelled
+        // order whose invoice stays active still reads as a valid sale for
+        // GST purposes. It therefore goes in the durable outbox rather than
+        // the fire-and-forget executor - the executor cannot survive the
+        // redeploys this service gets on every push, and losing this
+        // silently would leave the books wrong with nothing reporting it.
+        // The row is written inside THIS transaction, so it commits with the
+        // cancellation or not at all.
+        outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
+                OutboxWorker.AGGREGATE_ORDER, savedOrder.getId(), OutboxWorker.EVENT_ORDER_CANCELLED));
+
+        // The push notification is genuinely best-effort and involves a
+        // blocking network call to Google (FirebaseMessaging.send), so it
+        // leaves the request path entirely. It was previously executed while
+        // this order's row lock was still held.
+        final Order notifyOrder = savedOrder;
+        final OrderStatus notifyStatus = savedOrder.getOrderStatus();
+        runAfterCommitOffRequestThread("Order cancellation notification", savedOrder.getId(),
+                () -> notificationService.notifyOrderStatusChange(notifyOrder, notifyStatus));
+
         var delivery = deliveryRepository.findByOrderId(savedOrder.getId()).orElse(null);
-        return com.gpstore.dto.response.OrderDetailResponse.from(savedOrder, delivery);
+        // Re-read fetch-joined purely to BUILD THE RESPONSE. savedOrder is
+        // already managed and correct, but its items/variants/products and
+        // address are still lazy, so rendering the DTO from it would issue
+        // one query per item. This is one extra query that removes several.
+        Order forResponse = repository.findByIdWithDetails(savedOrder.getId()).orElse(savedOrder);
+        return com.gpstore.dto.response.OrderDetailResponse.from(forResponse, delivery);
     }
 
     /**
@@ -865,7 +984,7 @@ public class OrderService {
 
         Customer customer = customerService.getById(customerId);
         if (customer != null && customer.getCart() != null) {
-            List<CartItem> items = cartItemService.getCartItems(customer.getCart().getId());
+            List<CartItem> items = cartItemService.getCartItemsForCheckout(customer.getCart().getId());
             if (items != null) {
                 items.stream()
                         .filter(item -> item.getProductVariant() != null)
@@ -904,7 +1023,7 @@ public class OrderService {
         if (customer == null || customer.getCart() == null) {
             return true;
         }
-        List<CartItem> items = cartItemService.getCartItems(customer.getCart().getId());
+        List<CartItem> items = cartItemService.getCartItemsForCheckout(customer.getCart().getId());
         return items == null || items.isEmpty();
     }
 

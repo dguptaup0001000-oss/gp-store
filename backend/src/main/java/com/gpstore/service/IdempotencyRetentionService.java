@@ -68,7 +68,7 @@ public class IdempotencyRetentionService {
      * and an interrupted run keeps whatever it already deleted instead of
      * rolling the whole thing back.
      */
-    @Scheduled(fixedDelay = 60 * 60 * 1000)
+    @Scheduled(fixedDelayString = "${idempotency.cleanup-interval-ms:3600000}", initialDelayString = "${idempotency.cleanup-initial-delay-ms:60000}")
     @SchedulerLock(name = "cleanupExpiredIdempotencyRecords", lockAtMostFor = "30m", lockAtLeastFor = "1m")
     public void cleanupExpiredRecords() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(retentionDays);

@@ -86,7 +86,7 @@ class OrderOwnershipTest {
 
     @Test
     void getOwnedOrderDetailRejectsNonOwnerAsIfOrderDidNotExist() {
-        when(repository.findById(ORDER_ID)).thenReturn(Optional.of(orderOwnedBy(OWNER_ID)));
+        when(repository.findByIdWithDetails(ORDER_ID)).thenReturn(Optional.of(orderOwnedBy(OWNER_ID)));
 
         assertThrows(ResourceNotFoundException.class,
                 () -> orderService.getOwnedOrderDetail(ORDER_ID, OTHER_CUSTOMER_ID, false),
@@ -95,7 +95,7 @@ class OrderOwnershipTest {
 
     @Test
     void getOwnedOrderDetailSucceedsForTheActualOwner() {
-        when(repository.findById(ORDER_ID)).thenReturn(Optional.of(orderOwnedBy(OWNER_ID)));
+        when(repository.findByIdWithDetails(ORDER_ID)).thenReturn(Optional.of(orderOwnedBy(OWNER_ID)));
         when(deliveryRepository.findByOrderId(ORDER_ID)).thenReturn(Optional.empty());
 
         assertDoesNotThrow(() -> orderService.getOwnedOrderDetail(ORDER_ID, OWNER_ID, false));
@@ -103,7 +103,7 @@ class OrderOwnershipTest {
 
     @Test
     void getOwnedOrderDetailAdminBypassesOwnershipCheck() {
-        when(repository.findById(ORDER_ID)).thenReturn(Optional.of(orderOwnedBy(OWNER_ID)));
+        when(repository.findByIdWithDetails(ORDER_ID)).thenReturn(Optional.of(orderOwnedBy(OWNER_ID)));
         when(deliveryRepository.findByOrderId(ORDER_ID)).thenReturn(Optional.empty());
 
         assertDoesNotThrow(() -> orderService.getOwnedOrderDetail(ORDER_ID, OTHER_CUSTOMER_ID, true),
