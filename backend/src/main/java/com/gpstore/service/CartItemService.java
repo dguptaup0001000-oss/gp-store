@@ -58,8 +58,13 @@ public class CartItemService {
         }
     }
 
+    // Unused by the current frontend (confirmed) and admin-only, but was a
+    // plain findAll() - every cart item across every customer's cart, ever.
+    // Capped defensively rather than left as live unbounded API surface.
+    private static final int ADMIN_LIST_CAP = 500;
+
     public List<CartItem> getAll() {
-        return repository.findAll();
+        return repository.findAll(org.springframework.data.domain.PageRequest.of(0, ADMIN_LIST_CAP)).getContent();
     }
 
     public List<CartItem> getCartItems(Long cartId) {
