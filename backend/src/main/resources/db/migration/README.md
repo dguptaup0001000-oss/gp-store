@@ -1,57 +1,73 @@
-# How to move off `ddl-auto=update` safely
+# How `ddl-auto` and Flyway actually relate here (and how to turn `ddl-auto=update` off in production)
 
-**Correction:** this doc previously claimed Flyway defaults to disabled
-(`FLYWAY_ENABLED=false`) - that was never actually true. Check
-`application.properties`: `spring.flyway.enabled=${FLYWAY_ENABLED:true}` -
-Flyway runs by default in every environment unless something explicitly sets
-`FLYWAY_ENABLED=false` (CI does, in `.github/workflows/ci.yml`, so its
-ddl-auto-only test schema doesn't hit V2-V6's `CREATE INDEX`/`CREATE TABLE`
-statements against tables that migration set doesn't itself create).
+**Status as of 2026-08-19:** production's live schema has been confirmed
+(via a real schema dump, see below) to already match what the JPA entities
+expect - `DDL_AUTO=validate` is safe to set in Render's environment
+variables. That env var change itself is a manual step in Render's
+dashboard, done outside this repo. This file documents the reasoning, in
+case the question ever comes up again (a new environment, a new developer,
+"why isn't this ddl-auto=update?").
 
-Practically: `ddl-auto=update` also still defaults on (`DDL_AUTO:update`,
-same file), so right now BOTH run together in any environment that hasn't
-explicitly overridden either - Flyway applies V2-V6 (indexes, the shedlock
-table, the payment unique constraint, trigram indexes, the order-number
-sequence - all either idempotent `IF NOT EXISTS` or additive), and
-ddl-auto still owns the base table/column schema derived from the JPA
-entities, on top of whatever Flyway already added. That's been the
-project's actual real-world default since Flyway was introduced, not
-something anyone deliberately chose over the safer split this doc
-describes below - which is still the right target to move to.
+## What actually happened
 
-Hibernate auto-generating and mutating schema (`ddl-auto=update`) is fine
-for local dev, but risky in anything shared/production: it can silently
-alter columns and never rolls back. Here's the safe way to switch to real
-Flyway migrations, using YOUR actual running database as the source of
-truth (not a hand-written guess):
+Two things were true at the same time, and they don't depend on each other
+the way an earlier version of this doc assumed:
 
-1. Run the app locally against your dev Postgres at least once with
-   `ddl-auto=update` so Hibernate has created the full current schema.
+1. **Flyway has been running in production the whole time.** `FLYWAY_ENABLED`
+   defaults to `true` (`application.properties`), and `DEPLOYMENT.md`'s setup
+   steps always told you to set it explicitly too. Production's
+   `flyway_schema_history` table already has migrations V2-V6 tracked as
+   applied (confirmed directly against a real schema dump - see
+   `backend/docs/production-schema-reference.sql`). Only CI's test database
+   runs with `FLYWAY_ENABLED=false` (see `.github/workflows/ci.yml`) - that's
+   a CI-only override, never how production has run.
 
-2. Dump that real schema (structure only, no data):
-   ```
-   pg_dump -h localhost -U <your_user> -d gpstore --schema-only \
-     --no-owner --no-privileges -f V1__baseline.sql
-   ```
+2. **`ddl-auto=update` was still the default (`DDL_AUTO:update`) alongside
+   it.** Flyway owned the handful of things ddl-auto can't reach (indexes,
+   the shedlock table, the payments unique constraint, trigram indexes, the
+   order-number sequence - V2 through V6). Everything else - every actual
+   table `ddl-auto=update` derives from the JPA `@Entity` classes - was never
+   Flyway's concern at all; Hibernate created and had been silently free to
+   alter it directly against production on every deploy.
 
-3. Put that file here: `src/main/resources/db/migration/V1__baseline.sql`
+**Why an earlier version of this doc got the fix wrong:** it assumed making
+`ddl-auto=validate` safe required first getting Flyway to own the entity
+tables too - dump the schema, add it as a new migration file, then flip the
+setting. That's backwards for a database Flyway is already tracking:
 
-4. In `application.properties`, set:
-   ```
-   FLYWAY_ENABLED=true
-   DDL_AUTO=validate
-   ```
-   `validate` means Hibernate will only check your entities match the schema,
-   never silently change it. Any future schema change becomes a new
-   `V2__description.sql`, `V3__description.sql` file — a real, reviewable,
-   rollback-able history instead of implicit auto-migration.
+- Production's schema_history already has V2-V6 applied. A *new* file
+  numbered lower (a "V1") would be older than migrations Flyway has already
+  run - Flyway rejects that by default as out-of-order and refuses to start.
+- A new file numbered higher (a "V7") would fail the moment Flyway actually
+  tried to run it, since every `CREATE TABLE` in it targets a table that
+  already exists - Postgres rejects that as `relation already exists`.
 
-5. From then on: every entity change gets a matching new migration file
-   checked into git alongside it. That's what makes schema changes safe to
-   deploy to a real production database.
+**What `ddl-auto=validate` actually depends on - and it isn't Flyway.** At
+startup, Hibernate in `validate` mode just compares the live database
+structure against what the `@Entity` classes expect, and refuses to start if
+they don't match. It has no dependency on Flyway, `flyway_schema_history`, or
+any migration file existing. Since `ddl-auto=update` had been keeping
+production's schema in sync with the entities continuously, that check
+already passed - no baseline migration was ever actually required to flip it
+safely.
 
-I didn't fabricate a V1 migration file directly because guessing the exact
-column types/constraints for 20+ linked entities without a live database to
-verify against is exactly the kind of confident-but-wrong output that causes
-real data loss. Generating it from your actual schema (step 2) is the
-correct and safe way to do this.
+## What was done, and what's left
+
+1. **Done:** generated a schema-only dump directly from production
+   (`pg_dump --schema=public --schema-only`) to confirm the live schema
+   really did match expectations before touching anything - kept at
+   `backend/docs/production-schema-reference.sql` as a reference snapshot.
+   It is deliberately **not** a Flyway migration file (wrong filename
+   pattern, wrong directory) - see that file's own header for why it must
+   never be treated as one.
+2. **Manual step, outside this repo:** set `DDL_AUTO=validate` in Render's
+   environment variables (Render → your service → Environment) and confirm
+   the app starts cleanly on the redeploy that triggers. If it fails to
+   start, revert `DDL_AUTO` (unset it, or set it back to `update`) and
+   redeploy - `validate` mode never writes anything, so there's no data risk
+   either way, just a startup check that either passes or doesn't.
+
+Once that's set: any future schema change needs an explicit new Flyway
+migration (`V7__description.sql`, `V8__...`, etc.) - `ddl-auto` will never
+again silently apply one for you. That's the actual safety improvement this
+whole exercise is for.
