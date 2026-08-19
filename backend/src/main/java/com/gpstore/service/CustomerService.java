@@ -222,9 +222,16 @@ public class CustomerService {
                 .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
 
         refreshTokenService.revokeAllForCustomer(customerId);
-        notificationRepository.deleteAll(notificationRepository.findByCustomerId(customerId));
-        wishlistRepository.deleteAll(wishlistRepository.findByCustomerId(customerId));
-        addressRepository.deleteAll(addressRepository.findByCustomerId(customerId));
+
+        // Bulk deletes rather than deleteAll(findByCustomerId(...)). The old
+        // form loaded every one of the account's notifications - which grow
+        // for the life of the account, one per order status change - into
+        // memory and issued a DELETE per row, all inside the transaction the
+        // user is waiting on. Addresses and wishlist entries are smaller but
+        // are the same shape of query, so they move for consistency.
+        notificationRepository.deleteByCustomerId(customerId);
+        wishlistRepository.deleteByCustomerIdBulk(customerId);
+        addressRepository.deleteByCustomerIdBulk(customerId);
         cartRepository.findByCustomerId(customerId).ifPresent(cartRepository::delete);
 
         customer.setFullName("Deleted User");

@@ -56,6 +56,4 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
                                      @Param("cutoff") LocalDateTime cutoff,
                                      Pageable pageable);
 
-    List<Payment> findByPaymentStatusAndPaymentMethodAndPaymentDateBefore(
-            PaymentStatus paymentStatus, PaymentMethod paymentMethod, LocalDateTime cutoff);
 }

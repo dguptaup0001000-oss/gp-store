@@ -17,6 +17,9 @@ import java.util.HexFormat;
 @Service
 public class OtpService {
 
+    private static final int OTP_CLEANUP_BATCH_SIZE = 500;
+    private static final int OTP_CLEANUP_MAX_BATCHES = 40;
+
     private static final String INVALID_OTP_MESSAGE = "Invalid or expired OTP";
 
     private final OtpVerificationRepository repository;
@@ -120,13 +123,26 @@ public class OtpService {
         }
     }
 
-    /** Housekeeping - deletes OTP rows that expired over a day ago. Nothing security-sensitive here, just table growth. */
+    /**
+     * Housekeeping - deletes OTP rows that expired over a day ago. Nothing
+     * security-sensitive here, just table growth.
+     *
+     * Batched: the previous version loaded every expired row into memory and
+     * deleted them one at a time. OTP volume grows with signups and login
+     * attempts, and if this job is ever paused (a deploy, an outage) the
+     * backlog is whatever built up meanwhile - precisely the moment loading
+     * it all at once behaves worst. Each batch is its own statement, so a
+     * large backlog drains steadily instead of in one long transaction.
+     */
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60 * 60 * 1000)
     @Transactional
     public void cleanUpExpiredOtps() {
-        var stale = repository.findByExpiresAtBefore(LocalDateTime.now().minusDays(1));
-        if (!stale.isEmpty()) {
-            repository.deleteAll(stale);
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(1);
+        for (int batch = 0; batch < OTP_CLEANUP_MAX_BATCHES; batch++) {
+            int deleted = repository.deleteExpiredBatch(cutoff, OTP_CLEANUP_BATCH_SIZE);
+            if (deleted < OTP_CLEANUP_BATCH_SIZE) {
+                break;
+            }
         }
     }
 }

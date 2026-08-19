@@ -19,6 +19,14 @@ import java.util.Set;
 @Service
 public class RecommendationService {
 
+    /**
+     * How many recent order items to consider when building "buy again"
+     * suggestions. Sized so that even a basket-heavy customer's last several
+     * orders are covered, while keeping the query cost constant instead of
+     * growing with account age.
+     */
+    private static final int RECENT_HISTORY_CAP = 200;
+
     private final OrderItemRepository orderItemRepository;
     private final ProductRepository productRepository;
 
@@ -53,7 +61,13 @@ public class RecommendationService {
         // query) - see the repository method's doc comment for why this
         // matters: walking a customer's whole history to dedupe products
         // previously triggered two lazy-load queries per order item.
-        List<OrderItem> history = orderItemRepository.findByCustomerIdWithProductFetched(customerId);
+        // Hard cap rather than the customer's whole history. Only the most
+        // recent purchases matter for "buy again" suggestions, and the old
+        // unbounded query got slower the longer someone had been a
+        // customer. RECENT_HISTORY_CAP is generous relative to `limit` so
+        // dedupe still has plenty to work with.
+        List<OrderItem> history = orderItemRepository.findByCustomerIdWithProductFetched(
+                customerId, org.springframework.data.domain.PageRequest.of(0, RECENT_HISTORY_CAP));
 
         Set<Long> seenProductIds = new LinkedHashSet<>();
         List<Long> orderedIds = new ArrayList<>();

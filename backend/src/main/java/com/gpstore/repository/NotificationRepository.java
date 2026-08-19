@@ -30,6 +30,17 @@ public interface NotificationRepository
     long countByCustomerIdAndIsReadFalse(Long customerId);
 
     /**
+     * Bulk delete for account deletion. The previous
+     * deleteAll(findByCustomerId(...)) loaded every notification the account
+     * had ever received into memory and issued one DELETE per row - for a
+     * long-lived account that is a large load and a long transaction, on a
+     * path the user is waiting on.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from Notification n where n.customer.id = :customerId")
+    int deleteByCustomerId(@Param("customerId") Long customerId);
+
+    /**
      * Marks every unread notification for one customer as read in a single
      * statement.
      *
