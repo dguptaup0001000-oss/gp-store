@@ -62,9 +62,6 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: Install postgresql-client
-        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
-
       # FLYWAY_ENABLED is false below (schema comes from DDL_AUTO=update
       # instead, see that env var's own comment) - so none of the
       # hand-written SQL migrations (db/migration/V*.sql) ever run here.
@@ -75,11 +72,22 @@ jobs:
       # order fails without it), and the shedlock table (V3 - ShedLock's own
       # required layout, not a domain table, so it was never going to come
       # from ddl-auto either).
+      #
+      # Runs psql via the postgres:16 image (already pulled locally for the
+      # "postgres" service container above) instead of
+      # "apt-get install postgresql-client" - that step has repeatedly hung
+      # indefinitely on ubuntu-latest runners (apt mirror reachability, not
+      # anything about this repo) across multiple PRs. --network=host lets
+      # the container reach the service's published localhost:5432 port.
       - name: Create schema objects Flyway would normally own
         run: |
-          PGPASSWORD=gpstore_test_password psql -h localhost -U gpstore -d gpstore_test -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-          PGPASSWORD=gpstore_test_password psql -h localhost -U gpstore -d gpstore_test -c "CREATE SEQUENCE IF NOT EXISTS order_number_seq START WITH 1 INCREMENT BY 1;"
-          PGPASSWORD=gpstore_test_password psql -h localhost -U gpstore -d gpstore_test -c "CREATE TABLE IF NOT EXISTS shedlock (name VARCHAR(64) NOT NULL, lock_until TIMESTAMP NOT NULL, locked_at TIMESTAMP NOT NULL, locked_by VARCHAR(255) NOT NULL, PRIMARY KEY (name));"
+          run_psql() {
+            docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:16 \
+              psql -h localhost -U gpstore -d gpstore_test -c "$1"
+          }
+          run_psql "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+          run_psql "CREATE SEQUENCE IF NOT EXISTS order_number_seq START WITH 1 INCREMENT BY 1;"
+          run_psql "CREATE TABLE IF NOT EXISTS shedlock (name VARCHAR(64) NOT NULL, lock_until TIMESTAMP NOT NULL, locked_at TIMESTAMP NOT NULL, locked_by VARCHAR(255) NOT NULL, PRIMARY KEY (name));"
 
       - name: Build and run tests
         env:
