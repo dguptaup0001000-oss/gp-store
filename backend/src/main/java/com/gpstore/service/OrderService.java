@@ -108,10 +108,6 @@ public class OrderService {
         return repository.save(order);
     }
 
-    public List<Order> getAll() {
-        return repository.findAll();
-    }
-
     /** Ownership-checked single order lookup with real items/tracking info - see OrderDetailResponse. */
     /**
      * isAdmin bypasses the ownership check entirely - same pattern already

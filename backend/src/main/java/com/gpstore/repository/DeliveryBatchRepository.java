@@ -13,6 +13,8 @@ public interface DeliveryBatchRepository extends JpaRepository<DeliveryBatch, Lo
 
     List<DeliveryBatch> findByStatus(String status);
 
+    List<DeliveryBatch> findByStatus(String status, org.springframework.data.domain.Pageable pageable);
+
     /**
      * Locks the most recent OPEN batch for this partner+area so two orders being
      * assigned at the same moment can't both squeeze past the 20-order cap

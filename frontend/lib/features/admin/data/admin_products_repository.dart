@@ -196,9 +196,20 @@ class AdminProductsRepository {
     await apiClient.dio.delete('/api/categories/$categoryId');
   }
 
-  Future<List<InventoryItem>> getAllInventory() async {
-    final response = await apiClient.dio.get('/api/inventory');
-    return (response.data as List).map((e) => InventoryItem.fromJson(e as Map<String, dynamic>)).toList();
+  // Real pagination now (used to be a bare unbounded array) - every
+  // inventory row ever created was being loaded on every visit to this
+  // screen otherwise.
+  Future<({List<InventoryItem> items, int totalPages})> getAllInventory({int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/inventory',
+      queryParameters: {'page': page, 'size': size},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+    return (
+      items: content.map((e) => InventoryItem.fromJson(e as Map<String, dynamic>)).toList(),
+      totalPages: data['totalPages'] as int,
+    );
   }
 
   Future<List<InventoryItem>> getLowStock() async {

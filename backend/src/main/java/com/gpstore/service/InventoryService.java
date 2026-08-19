@@ -25,8 +25,12 @@ public class InventoryService {
         return repository.save(inventory);
     }
 
-    public List<Inventory> getAll() {
-        return repository.findAll();
+    // Was an unbounded findAll() - every inventory row ever created, loaded
+    // into memory on every call to the admin inventory screen. Now genuinely
+    // paginated (see admin_inventory_screen.dart's infinite scroll), not
+    // just capped.
+    public org.springframework.data.domain.Page<Inventory> getAll(org.springframework.data.domain.Pageable pageable) {
+        return repository.findAllByOrderByIdAsc(pageable);
     }
 
     public Inventory getById(Long id) {
@@ -85,6 +89,29 @@ public class InventoryService {
     public Inventory getByProductVariantForUpdate(Long productVariantId) {
         return repository.findByProductVariantIdForUpdate(productVariantId)
                 .orElse(null);
+    }
+
+    /**
+     * Concurrency-safe stock decrement: locks the row for the duration of
+     * this transaction (see getByProductVariantForUpdate above), then
+     * checks and decrements under that lock - the same pattern
+     * OrderService.placeOrder() already applies inline for real checkout,
+     * extracted here as its own reusable, directly-testable unit (see
+     * ConcurrencyIntegrationTest). Throws ConflictException rather than
+     * silently clamping to zero - a caller must never treat insufficient
+     * stock as a successful purchase.
+     */
+    @Transactional
+    public Inventory decrementForPurchase(Long productVariantId, int quantity) {
+        Inventory inventory = getByProductVariantForUpdate(productVariantId);
+        if (inventory == null) {
+            throw new ResourceNotFoundException("Inventory not found for product variant " + productVariantId);
+        }
+        if (inventory.getStock() == null || inventory.getStock() < quantity) {
+            throw new com.gpstore.exception.ConflictException("Insufficient stock");
+        }
+        inventory.setStock(inventory.getStock() - quantity);
+        return repository.save(inventory);
     }
 
     private void validateNonNegativeStock(Inventory inventory) {

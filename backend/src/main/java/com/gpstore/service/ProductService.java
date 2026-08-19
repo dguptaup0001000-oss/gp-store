@@ -39,14 +39,25 @@ public class ProductService {
         return ProductResponse.from(productRepository.save(product));
     }
 
+    // A public, unauthenticated GET endpoint backs each of the three methods
+    // below (see ProductController) - none of them may ever run an unbounded
+    // findAll()/findByX() again. Real clients use the paginated/ranked
+    // /api/products/search/instant endpoint; these three exist only for
+    // backward compatibility with old callers that expect a bare JSON array,
+    // capped at a safe size instead of the whole catalog.
+    private static final int LEGACY_UNPAGINATED_CAP = 100;
+
     // Get All Products - CUSTOMER-FACING, active only. This was returning
     // deactivated products too before - deactivating a product did nothing
-    // to actually hide it from the public browsing endpoint.
+    // to actually hide it from the public browsing endpoint. Was also
+    // previously a full unbounded findAll() - on a public endpoint, that's a
+    // full-catalog-dump-on-every-request risk that only gets worse as the
+    // catalog grows, regardless of concurrent user count.
     @Transactional(readOnly = true)
     @Cacheable("products")
     public List<ProductResponse> getAllProducts() {
-        return productRepository.findAll().stream()
-                .filter(p -> Boolean.TRUE.equals(p.getActive()))
+        return productRepository
+                .findByActiveTrueOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
                 .map(ProductResponse::from)
                 .toList();
     }
@@ -54,7 +65,8 @@ public class ProductService {
     /** Admin management view - includes inactive/deactivated products too, unlike the customer-facing list above. */
     @Transactional(readOnly = true)
     public List<ProductResponse> getAllForAdmin() {
-        return productRepository.findAll().stream()
+        return productRepository
+                .findAllByOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
                 .map(ProductResponse::from)
                 .toList();
     }
@@ -63,7 +75,9 @@ public class ProductService {
     // unranked, unpaginated search.
     @Transactional(readOnly = true)
     public List<ProductResponse> search(String keyword) {
-        return productRepository.findByNameContainingIgnoreCase(keyword).stream()
+        return productRepository
+                .findByNameContainingIgnoreCase(keyword, org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
+                .stream()
                 .map(ProductResponse::from)
                 .toList();
     }

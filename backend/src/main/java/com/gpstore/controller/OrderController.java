@@ -63,12 +63,6 @@ public class OrderController {
         return orderService.previewCheckout(currentUser.customerId(), addressId, couponCode);
     }
 
-    // Admin only (enforced in SecurityConfig): every order in the system.
-    @GetMapping
-    public List<Order> getAllOrders() {
-        return orderService.getAll();
-    }
-
     // Admin only (enforced in SecurityConfig): a specific customer's order
     // history, newest first - for support/dispute lookups.
     @GetMapping("/customer/{customerId}")

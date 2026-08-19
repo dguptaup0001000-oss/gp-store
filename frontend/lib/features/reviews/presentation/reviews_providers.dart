@@ -8,10 +8,14 @@ final reviewsRepositoryProvider = Provider<ReviewsRepository>((ref) {
   return ReviewsRepository(apiClient: ref.watch(apiClientProvider));
 });
 
-final productReviewsProvider = FutureProvider.family<List<Review>, int>((ref, productId) {
+// autoDispose - a customer can browse many different products' reviews (and
+// visit their own review history) in one session; keeping every one of
+// those cached forever once no longer visible is unbounded growth for no
+// benefit, unlike a screen you return to constantly.
+final productReviewsProvider = FutureProvider.autoDispose.family<List<Review>, int>((ref, productId) {
   return ref.watch(reviewsRepositoryProvider).getForProduct(productId);
 });
 
-final myReviewsProvider = FutureProvider<List<Review>>((ref) {
+final myReviewsProvider = FutureProvider.autoDispose<List<Review>>((ref) {
   return ref.watch(reviewsRepositoryProvider).getMyReviews();
 });

@@ -29,9 +29,13 @@ public class DeliveryBatchService {
         this.deliveryRepository = deliveryRepository;
     }
 
+    // Unused by the current frontend (confirmed) and admin-only, but both
+    // getAll() and getByStatus() below were unbounded - every delivery
+    // batch ever created, growing forever with order volume. Capped
+    // defensively rather than left as live unbounded API surface.
+    private static final int ADMIN_LIST_CAP = 500;
+
     @Transactional
-
-
     public com.gpstore.dto.response.DeliveryBatchResponse save(com.gpstore.dto.request.DeliveryBatchRequest request) {
 
 
@@ -71,14 +75,8 @@ public class DeliveryBatchService {
 
 
     public List<com.gpstore.dto.response.DeliveryBatchResponse> getAll() {
-
-
-        return repository.findAll().stream()
-
-
+        return repository.findAll(org.springframework.data.domain.PageRequest.of(0, ADMIN_LIST_CAP)).stream()
                 .map(com.gpstore.dto.response.DeliveryBatchResponse::from)
-
-
                 .collect(java.util.stream.Collectors.toList());
     }
 
@@ -86,14 +84,8 @@ public class DeliveryBatchService {
 
 
     public List<com.gpstore.dto.response.DeliveryBatchResponse> getByStatus(String status) {
-
-
-        return repository.findByStatus(status).stream()
-
-
+        return repository.findByStatus(status, org.springframework.data.domain.PageRequest.of(0, ADMIN_LIST_CAP)).stream()
                 .map(com.gpstore.dto.response.DeliveryBatchResponse::from)
-
-
                 .collect(java.util.stream.Collectors.toList());
     }
 

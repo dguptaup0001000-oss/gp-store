@@ -23,12 +23,16 @@
              managed version - if your JDK is newer than what that managed
              version supports, Lombok's annotation processor can silently
              generate NOTHING (no error, just missing getters/setters
-             everywhere) rather than fail loudly. 1.18.34 is a current release
-             with active JDK 21+ support. If you still see "cannot find
-             symbol" errors on Lombok-generated methods after this, run
-             `java -version` in Termux and tell me the exact version -
-             we may need to bump this further. -->
-        <lombok.version>1.18.34</lombok.version>
+             everywhere) rather than fail loudly, exactly the failure this
+             comment originally warned about. It happened for real: CI's
+             hosted runner drifted to a newer Temurin 21 patch (21.0.12)
+             than 1.18.34 handled reliably, and the exact same "cannot find
+             symbol" pattern reproduced in a from-scratch build even though
+             nothing in the source had changed. Bumped to 1.18.46 (current
+             as of this fix) - if this ever recurs, run `java -version` and
+             check whether Lombok has since fallen behind the JDK patch
+             level again. -->
+        <lombok.version>1.18.46</lombok.version>
     </properties>
 
     <dependencies>

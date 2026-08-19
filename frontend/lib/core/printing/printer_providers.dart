@@ -13,6 +13,6 @@ final printerServiceProvider = Provider<PrinterService>((ref) {
 
 /// Whether a printer has been paired and saved yet - drives whether
 /// AdminPrinterSettingsScreen shows "connect a printer" or "connected to X".
-final savedPrinterNameProvider = FutureProvider<String?>((ref) {
+final savedPrinterNameProvider = FutureProvider.autoDispose<String?>((ref) {
   return ref.watch(printerSettingsStorageProvider).getSavedPrinterName();
 });

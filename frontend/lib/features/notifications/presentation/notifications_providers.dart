@@ -13,7 +13,7 @@ typedef MyNotificationsPage = ({List<AppNotification> notifications, int page, i
 /// Paginated - see NotificationsRepository.getMyNotifications's doc comment.
 /// AsyncNotifier (not a plain FutureProvider) so loadMore() can append to
 /// the existing state.
-class MyNotificationsController extends AsyncNotifier<MyNotificationsPage> {
+class MyNotificationsController extends AutoDisposeAsyncNotifier<MyNotificationsPage> {
   @override
   Future<MyNotificationsPage> build() async {
     final result = await ref.read(notificationsRepositoryProvider).getMyNotifications(page: 0);
@@ -39,7 +39,7 @@ class MyNotificationsController extends AsyncNotifier<MyNotificationsPage> {
   }
 }
 
-final myNotificationsProvider = AsyncNotifierProvider<MyNotificationsController, MyNotificationsPage>(
+final myNotificationsProvider = AsyncNotifierProvider.autoDispose<MyNotificationsController, MyNotificationsPage>(
   MyNotificationsController.new,
 );
 

@@ -27,8 +27,14 @@ public class ProductVariantService {
         return productVariantRepository.save(productVariant);
     }
 
+    // Unused by the current frontend (confirmed - product creation goes
+    // through POST, not this) and admin-only, but was a plain findAll() -
+    // every variant of every product ever created. Capped defensively
+    // rather than left as live unbounded API surface.
+    private static final int ADMIN_LIST_CAP = 500;
+
     public List<ProductVariant> getAllProductVariants() {
-        return productVariantRepository.findAll();
+        return productVariantRepository.findAll(org.springframework.data.domain.PageRequest.of(0, ADMIN_LIST_CAP)).getContent();
     }
 
     public ProductVariant getById(Long id) {
