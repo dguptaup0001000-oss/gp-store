@@ -29,6 +29,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   String? _errorMessage;
   bool _hasSearched = false;
 
+  // Debouncing alone only limits how often a request FIRES, not the order
+  // responses come back in - a slow/flaky connection can still let an older
+  // search's response arrive after a newer one's and stomp its results.
+  // Each _search() call claims the next number and only applies its result
+  // if it's still the latest call by the time the response arrives.
+  int _searchSeq = 0;
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -55,6 +62,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Future<void> _search(String query) async {
+    final seq = ++_searchSeq;
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -63,13 +72,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
     try {
       final results = await ref.read(productsRepositoryProvider).searchInstant(query);
-      if (!mounted) return;
+      if (!mounted || seq != _searchSeq) return;
       setState(() {
         _results = results;
         _isLoading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || seq != _searchSeq) return;
       setState(() {
         _errorMessage = extractErrorMessage(e);
         _isLoading = false;

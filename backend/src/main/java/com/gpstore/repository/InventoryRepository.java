@@ -2,6 +2,7 @@ package com.gpstore.repository;
 
 import com.gpstore.entity.Inventory;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -12,6 +13,13 @@ import java.util.Optional;
 public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
     Optional<Inventory> findByProductVariantId(Long productVariantId);
+
+    // Capped, not truly paginated (see InventoryService.getAll()'s doc
+    // comment) - the admin inventory screen currently fetches this as one
+    // flat list with no page/size UI, so a full Page<>/infinite-scroll
+    // rewrite is a separate frontend change. This stops the endpoint from
+    // loading every inventory row ever created into memory in the meantime.
+    List<Inventory> findAllByOrderByIdAsc(Pageable pageable);
 
     /**
      * Locks the inventory row for the duration of the transaction so two

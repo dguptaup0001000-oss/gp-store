@@ -30,6 +30,11 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     // Kept for backward compatibility - existing callers still work unchanged.
     List<Product> findByNameContainingIgnoreCase(String keyword);
 
+    // Same query, capped - see ProductService.search()'s doc comment for why
+    // the uncapped version above is dangerous as a public, unauthenticated
+    // endpoint and must never be called directly from a controller again.
+    List<Product> findByNameContainingIgnoreCase(String keyword, Pageable pageable);
+
     List<Product> findByCategoryId(Long categoryId);
 
     /**
@@ -71,6 +76,11 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     @EntityGraph(attributePaths = {"category"})
     Page<Product> findByActiveTrueOrderByCreatedAtDesc(Pageable pageable);
+
+    // Admin management view's equivalent of the query above - includes
+    // inactive/deactivated products too, still capped via Pageable.
+    @EntityGraph(attributePaths = {"category"})
+    Page<Product> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
     /**
      * Only brands that actually have at least one active product - the

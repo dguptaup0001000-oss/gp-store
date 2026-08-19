@@ -25,8 +25,15 @@ public class InventoryService {
         return repository.save(inventory);
     }
 
+    // Was an unbounded findAll() - every inventory row ever created, loaded
+    // into memory on every call to the admin inventory screen. Capped at a
+    // generous size rather than truly paginated since the current frontend
+    // fetches this as one flat list with no page/size control yet - revisit
+    // with real pagination if the catalog ever grows past this.
+    private static final int ADMIN_LIST_CAP = 500;
+
     public List<Inventory> getAll() {
-        return repository.findAll();
+        return repository.findAllByOrderByIdAsc(org.springframework.data.domain.PageRequest.of(0, ADMIN_LIST_CAP));
     }
 
     public Inventory getById(Long id) {

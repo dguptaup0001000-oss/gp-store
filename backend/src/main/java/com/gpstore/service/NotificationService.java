@@ -18,30 +18,38 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 @Service
 public class NotificationService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(NotificationService.class);
 
     private final NotificationRepository notificationRepository;
     private final CustomerRepository customerRepository;
     private final OrderRepository orderRepository;
     private final AuditLogService auditLogService;
     private final PushNotificationService pushNotificationService;
+    private final ExecutorService orderSideEffectsExecutor;
 
     public NotificationService(
             NotificationRepository notificationRepository,
             CustomerRepository customerRepository,
             OrderRepository orderRepository,
             AuditLogService auditLogService,
-            PushNotificationService pushNotificationService) {
+            PushNotificationService pushNotificationService,
+            ExecutorService orderSideEffectsExecutor) {
 
         this.notificationRepository = notificationRepository;
         this.customerRepository = customerRepository;
         this.orderRepository = orderRepository;
         this.auditLogService = auditLogService;
         this.pushNotificationService = pushNotificationService;
+        this.orderSideEffectsExecutor = orderSideEffectsExecutor;
     }
 
     public Notification sendNotification(Notification notification) {
@@ -89,19 +97,64 @@ public class NotificationService {
      * each customer can independently mark their own copy read/delete it
      * without affecting anyone else's.
      */
-    @org.springframework.transaction.annotation.Transactional
+    // Loaded every customer row into memory at once and sent one synchronous
+    // FCM network call per customer, inside a single request/transaction -
+    // fine at a few dozen customers, but a real store with thousands would
+    // time out the HTTP request and hold one DB transaction open for as
+    // long as it took every push to complete (network calls, not just DB
+    // writes - potentially minutes). Now pages through active customers in
+    // bounded batches (each batch its own short transaction, via
+    // saveNotificationBatch), and hands the actual FCM sends to
+    // orderSideEffectsExecutor so the admin's request returns as soon as
+    // the notification rows are written, not after every push is sent.
+    //
+    // Still sends one FCM message per customer, not a single multicast/topic
+    // send - at genuinely large scale (tens of thousands of customers) that
+    // remains the real bottleneck on total broadcast completion time even
+    // though it no longer blocks anything. Switching to FCM's topic-based
+    // broadcast (subscribe every device to one topic, send once) would
+    // remove that too, but changes how device registration works - a
+    // separate, deliberate change, not bundled into this fix.
+    private static final int BROADCAST_PAGE_SIZE = 200;
+
     public int broadcastToAll(String title, String message) {
         if (title == null || title.isBlank() || message == null || message.isBlank()) {
             throw new BadRequestException("Title and message are required");
         }
 
-        List<Customer> activeCustomers = customerRepository.findAll().stream()
-                .filter(c -> Boolean.TRUE.equals(c.getActive()))
-                .toList();
+        int totalCustomers = 0;
+        int pageNumber = 0;
+        Page<Customer> page;
 
+        do {
+            page = customerRepository.findByActiveTrue(PageRequest.of(pageNumber, BROADCAST_PAGE_SIZE));
+            List<Customer> customers = page.getContent();
+            totalCustomers += customers.size();
+
+            saveNotificationBatch(customers, title, message);
+
+            orderSideEffectsExecutor.submit(() -> {
+                for (Customer customer : customers) {
+                    pushNotificationService.sendPush(
+                            customer.getFcmToken(), title, message, Map.of("type", "ANNOUNCEMENT"));
+                }
+            });
+
+            pageNumber++;
+        } while (page.hasNext());
+
+        return totalCustomers;
+    }
+
+    // No @Transactional here - it would be a no-op anyway (self-invocation
+    // from broadcastToAll bypasses Spring's proxy). saveAll() below is
+    // already transactional on its own (Spring Data's SimpleJpaRepository
+    // annotates it internally), which is the only atomicity guarantee this
+    // batch actually needs.
+    void saveNotificationBatch(List<Customer> customers, String title, String message) {
         LocalDateTime now = LocalDateTime.now();
 
-        for (Customer customer : activeCustomers) {
+        List<Notification> notifications = customers.stream().map(customer -> {
             Notification notification = new Notification();
             notification.setCustomer(customer);
             notification.setTitle(title);
@@ -110,12 +163,14 @@ public class NotificationService {
             notification.setNotificationStatus(NotificationStatus.PENDING);
             notification.setSentAt(now);
             notification.setActive(true);
-            notificationRepository.save(notification);
+            return notification;
+        }).toList();
 
-            pushNotificationService.sendPush(customer.getFcmToken(), title, message, Map.of("type", "ANNOUNCEMENT"));
-        }
-
-        return activeCustomers.size();
+        // saveAll(), not one save() per customer in a loop - lets Hibernate's
+        // batch_size/order_inserts config (see application.properties) group
+        // these into real batched INSERT statements instead of one
+        // individual round trip per row.
+        notificationRepository.saveAll(notifications);
     }
 
     /**
