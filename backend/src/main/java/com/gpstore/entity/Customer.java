@@ -48,6 +48,13 @@ private Role role;
 
 private Boolean enabled;
     
+    // Same reasoning as cart below: addresses have their own dedicated
+    // endpoint (GET /api/addresses/mine, see AddressController), and without
+    // this every Customer/Profile JSON response (GET /me, admin customer
+    // list, etc) was pulling the full lazy Address collection - GPS
+    // coordinates, mobile numbers, full text - for no reason any client
+    // actually needs.
+    @JsonIgnore
     @OneToMany(mappedBy = "customer")
 private List<Address> addresses;
 

@@ -181,22 +181,33 @@ public class DeliveryService {
     @Transactional(readOnly = true)
 
 
-    public List<Delivery> getAllDeliveries() {
-        return deliveryRepository.findAll();
+    public List<com.gpstore.dto.response.DeliveryResponse> getAllDeliveries() {
+        // Delivery.order is EAGER with no @JsonIgnore (see Delivery.java) - if
+        // this returned raw entities, every admin list load would nest the
+        // full Order graph (address, order items, product variants) for
+        // every delivery in the system. Same reason getDeliveryById/
+        // getDeliveryByOrderId/getMyOrderDelivery below all map to the DTO too.
+        // Unused by the current frontend (confirmed) and admin-only, but was
+        // an unbounded findAll() - every delivery ever created, growing
+        // forever with order volume. Capped defensively, same as
+        // DeliveryBatchService.getAll().
+        return deliveryRepository.findAll(org.springframework.data.domain.PageRequest.of(0, 500)).stream()
+                .map(com.gpstore.dto.response.DeliveryResponse::from)
+                .collect(java.util.stream.Collectors.toList());
     }
 
     @Transactional(readOnly = true)
 
 
-    public Optional<Delivery> getDeliveryById(Long id) {
-        return deliveryRepository.findById(id);
+    public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryById(Long id) {
+        return deliveryRepository.findById(id).map(com.gpstore.dto.response.DeliveryResponse::from);
     }
 
     @Transactional(readOnly = true)
 
 
-    public Optional<Delivery> getDeliveryByOrderId(Long orderId) {
-        return deliveryRepository.findByOrderId(orderId);
+    public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryByOrderId(Long orderId) {
+        return deliveryRepository.findByOrderId(orderId).map(com.gpstore.dto.response.DeliveryResponse::from);
     }
 
     /** Returns the delivery only if the order belongs to this customer - closes the IDOR. */

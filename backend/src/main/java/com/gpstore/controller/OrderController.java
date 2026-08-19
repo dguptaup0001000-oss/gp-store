@@ -5,7 +5,6 @@ import com.gpstore.enums.OrderStatus;
 import com.gpstore.dto.OrderResponse;
 import com.gpstore.dto.request.PlaceOrderRequest;
 import com.gpstore.dto.response.PlaceOrderResponse;
-import com.gpstore.entity.Order;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.OrderService;
 
@@ -100,13 +99,13 @@ public class OrderController {
 
     // Admin only (enforced in SecurityConfig).
     @PutMapping("/{orderId}/status")
-    public Order updateOrderStatus(@PathVariable Long orderId, @RequestParam OrderStatus status) {
+    public com.gpstore.dto.response.OrderDetailResponse updateOrderStatus(@PathVariable Long orderId, @RequestParam OrderStatus status) {
         return orderService.updateOrderStatus(orderId, status);
     }
 
     // Customers may cancel only their own order; admins may cancel any order.
     @PutMapping("/{orderId}/cancel")
-    public Order cancelOrder(@PathVariable Long orderId) {
+    public com.gpstore.dto.response.OrderDetailResponse cancelOrder(@PathVariable Long orderId) {
         boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
         return orderService.cancelOrder(orderId, currentUser.customerId(), isAdmin);
     }

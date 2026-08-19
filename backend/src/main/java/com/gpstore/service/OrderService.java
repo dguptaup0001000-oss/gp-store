@@ -627,7 +627,7 @@ public class OrderService {
     }
 
     @Transactional
-    public Order updateOrderStatus(Long orderId, OrderStatus status) {
+    public com.gpstore.dto.response.OrderDetailResponse updateOrderStatus(Long orderId, OrderStatus status) {
 
         Order order = repository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
@@ -674,7 +674,9 @@ public class OrderService {
         notificationService.notifyOrderStatusChange(savedOrder, savedOrder.getOrderStatus());
         auditLogService.log("ORDER_STATUS_CHANGED", "Order", savedOrder.getId(),
                 "status: " + currentStatus + " -> " + status);
-        return savedOrder;
+
+        var delivery = deliveryRepository.findByOrderId(savedOrder.getId()).orElse(null);
+        return com.gpstore.dto.response.OrderDetailResponse.from(savedOrder, delivery);
     }
 
     /**
@@ -682,7 +684,7 @@ public class OrderService {
      * own order, while staff can cancel any order.
      */
     @Transactional
-    public Order cancelOrder(Long orderId, Long callerCustomerId, boolean isAdmin) {
+    public com.gpstore.dto.response.OrderDetailResponse cancelOrder(Long orderId, Long callerCustomerId, boolean isAdmin) {
 
         Order order = repository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
@@ -736,7 +738,9 @@ public class OrderService {
 
         auditLogService.log("ORDER_CANCELLED", "Order", savedOrder.getId(),
                 "cancelled by " + (isAdmin ? "admin/staff" : "customer"));
-        return savedOrder;
+
+        var delivery = deliveryRepository.findByOrderId(savedOrder.getId()).orElse(null);
+        return com.gpstore.dto.response.OrderDetailResponse.from(savedOrder, delivery);
     }
 
     /**
