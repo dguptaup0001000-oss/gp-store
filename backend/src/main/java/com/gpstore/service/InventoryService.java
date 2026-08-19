@@ -94,6 +94,29 @@ public class InventoryService {
                 .orElse(null);
     }
 
+    /**
+     * Concurrency-safe stock decrement: locks the row for the duration of
+     * this transaction (see getByProductVariantForUpdate above), then
+     * checks and decrements under that lock - the same pattern
+     * OrderService.placeOrder() already applies inline for real checkout,
+     * extracted here as its own reusable, directly-testable unit (see
+     * ConcurrencyIntegrationTest). Throws ConflictException rather than
+     * silently clamping to zero - a caller must never treat insufficient
+     * stock as a successful purchase.
+     */
+    @Transactional
+    public Inventory decrementForPurchase(Long productVariantId, int quantity) {
+        Inventory inventory = getByProductVariantForUpdate(productVariantId);
+        if (inventory == null) {
+            throw new ResourceNotFoundException("Inventory not found for product variant " + productVariantId);
+        }
+        if (inventory.getStock() == null || inventory.getStock() < quantity) {
+            throw new com.gpstore.exception.ConflictException("Insufficient stock");
+        }
+        inventory.setStock(inventory.getStock() - quantity);
+        return repository.save(inventory);
+    }
+
     private void validateNonNegativeStock(Inventory inventory) {
         if (inventory.getStock() != null && inventory.getStock() < 0) {
             throw new BadRequestException("Stock cannot be negative");
