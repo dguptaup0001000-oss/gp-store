@@ -1,14 +1,28 @@
 # How to move off `ddl-auto=update` safely
 
-**Update:** the Flyway dependencies are now actually in `pom.xml` (they weren't
-before - an earlier version of this doc assumed they existed when they
-didn't, my mistake). Flyway is on the classpath but still disabled by default
-(`FLYWAY_ENABLED=false`) until you complete the steps below.
+**Correction:** this doc previously claimed Flyway defaults to disabled
+(`FLYWAY_ENABLED=false`) - that was never actually true. Check
+`application.properties`: `spring.flyway.enabled=${FLYWAY_ENABLED:true}` -
+Flyway runs by default in every environment unless something explicitly sets
+`FLYWAY_ENABLED=false` (CI does, in `.github/workflows/ci.yml`, so its
+ddl-auto-only test schema doesn't hit V2-V6's `CREATE INDEX`/`CREATE TABLE`
+statements against tables that migration set doesn't itself create).
 
-Right now Hibernate auto-generates and mutates your schema (`ddl-auto=update`).
-That's fine for local dev, but risky in anything shared/production: it can
-silently alter columns and never rolls back. Here's the safe way to switch to
-real Flyway migrations, using YOUR actual running database as the source of
+Practically: `ddl-auto=update` also still defaults on (`DDL_AUTO:update`,
+same file), so right now BOTH run together in any environment that hasn't
+explicitly overridden either - Flyway applies V2-V6 (indexes, the shedlock
+table, the payment unique constraint, trigram indexes, the order-number
+sequence - all either idempotent `IF NOT EXISTS` or additive), and
+ddl-auto still owns the base table/column schema derived from the JPA
+entities, on top of whatever Flyway already added. That's been the
+project's actual real-world default since Flyway was introduced, not
+something anyone deliberately chose over the safer split this doc
+describes below - which is still the right target to move to.
+
+Hibernate auto-generating and mutating schema (`ddl-auto=update`) is fine
+for local dev, but risky in anything shared/production: it can silently
+alter columns and never rolls back. Here's the safe way to switch to real
+Flyway migrations, using YOUR actual running database as the source of
 truth (not a hand-written guess):
 
 1. Run the app locally against your dev Postgres at least once with
