@@ -90,13 +90,20 @@ class HomeScreen extends ConsumerWidget {
       ),
       bottomNavigationBar: const CartSummaryBar(),
       body: RefreshIndicator(
-        onRefresh: () async {
-          ref.invalidate(categoriesProvider);
-          ref.invalidate(activeOffersProvider);
-          ref.invalidate(newArrivalsProvider);
-          ref.invalidate(trendingProvider);
-          ref.invalidate(recommendedForMeProvider);
-        },
+        // ref.invalidate() alone doesn't return anything tied to the actual
+        // refetch completing - it just marks each provider dirty and
+        // returns immediately, so RefreshIndicator's spinner was dismissing
+        // itself before the new data had even come back. ref.refresh(...future)
+        // both invalidates AND returns the new Future, which is what
+        // RefreshIndicator needs to know when the pull-to-refresh is
+        // actually done.
+        onRefresh: () => Future.wait([
+          ref.refresh(categoriesProvider.future),
+          ref.refresh(activeOffersProvider.future),
+          ref.refresh(newArrivalsProvider.future),
+          ref.refresh(trendingProvider.future),
+          ref.refresh(recommendedForMeProvider.future),
+        ]),
         child: ListView(
           children: [
             Padding(
