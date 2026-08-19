@@ -587,26 +587,18 @@ public class OrderService {
 
     /**
      * A specific customer's order history, admin-only - for support/dispute
-     * lookups ("this customer says their order never arrived"). Previously
-     * returned a raw, unsorted List<Order> that no Flutter screen ever
-     * actually called - now uses the same clean DTO and newest-first
-     * ordering as every other order list in the app.
+     * lookups ("this customer says their order never arrived"). Was an
+     * unbounded findByCustomerId() loading every order this customer has
+     * ever placed into Java just to sort a handful into view - a customer
+     * with a long order history would load their entire history on every
+     * lookup. Now uses the same paginated, database-sorted query as every
+     * other order list in the app (findByCustomerIdOrderByOrderDateDesc,
+     * already used by the customer-facing /my-orders endpoint).
      */
-    public List<OrderResponse> getCustomerOrdersForAdmin(Long customerId) {
-        List<Order> orders = repository.findByCustomerId(customerId);
-        orders.sort((a, b) -> b.getOrderDate().compareTo(a.getOrderDate()));
-        return toOrderResponseList(orders, false);
-    }
-
-    /** Shared by every order list method - kept as one method so they can never silently drift apart in shape. */
-    private List<OrderResponse> toOrderResponseList(List<Order> orders, boolean includeCustomerName) {
-        List<OrderResponse> responseList = new ArrayList<>();
-
-        for (Order order : orders) {
-            responseList.add(toOrderResponse(order, includeCustomerName));
-        }
-
-        return responseList;
+    public org.springframework.data.domain.Page<OrderResponse> getCustomerOrdersForAdmin(
+            Long customerId, org.springframework.data.domain.Pageable pageable) {
+        return repository.findByCustomerIdOrderByOrderDateDesc(customerId, pageable)
+                .map(order -> toOrderResponse(order, false));
     }
 
     private OrderResponse toOrderResponse(Order order, boolean includeCustomerName) {
@@ -629,7 +621,12 @@ public class OrderService {
     @Transactional
     public com.gpstore.dto.response.OrderDetailResponse updateOrderStatus(Long orderId, OrderStatus status) {
 
-        Order order = repository.findById(orderId)
+        // Locked for the rest of this transaction (see
+        // OrderRepository.findByIdForUpdate's doc comment) - a second
+        // concurrent status update or cancellation for this same order
+        // blocks here until this one commits, instead of both reading the
+        // same pre-change status and both applying conflicting changes.
+        Order order = repository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
         if (order.getOrderStatus() == OrderStatus.DELIVERED) {
@@ -686,7 +683,12 @@ public class OrderService {
     @Transactional
     public com.gpstore.dto.response.OrderDetailResponse cancelOrder(Long orderId, Long callerCustomerId, boolean isAdmin) {
 
-        Order order = repository.findById(orderId)
+        // See OrderRepository.findByIdForUpdate's doc comment - this is the
+        // fix for the exact race a double-tap on "Cancel order" (or two
+        // concurrent cancellation requests) could otherwise trigger: both
+        // reading CONFIRMED, both passing the not-yet-cancelled check below,
+        // and both restoring inventory for the same order.
+        Order order = repository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
         if (!isAdmin && (order.getCustomer() == null

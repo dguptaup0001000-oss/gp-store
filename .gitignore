@@ -34,6 +34,14 @@ build/
 
 ### Environment secrets ###
 .env
+firebase_base64.txt
+*firebase*credential*
+*service-account*.json
+
+### Editor/manual backup files - stale snapshots left in place during
+### editing, never meant to be committed or compiled ###
+*.bak
+*.orig
 
 ### Claude Code tooling scratch space (agent worktrees, etc.) ###
 .claude/

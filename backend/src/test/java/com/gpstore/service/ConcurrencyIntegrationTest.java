@@ -8,6 +8,7 @@ import com.gpstore.entity.Customer;
 import com.gpstore.entity.IdempotencyRecord;
 import com.gpstore.entity.Inventory;
 import com.gpstore.entity.Order;
+import com.gpstore.entity.OrderItem;
 import com.gpstore.entity.Product;
 import com.gpstore.entity.ProductVariant;
 import com.gpstore.dto.request.InitiatePaymentRequest;
@@ -72,6 +73,8 @@ class ConcurrencyIntegrationTest {
     @Autowired private CartService cartService;
     @Autowired private CartRepository cartRepository;
     @Autowired private CartItemRepository cartItemRepository;
+    @Autowired private OrderService orderService;
+    @Autowired private com.gpstore.repository.OrderItemRepository orderItemRepository;
 
     /**
      * The exact scenario from the scalability audit: stock = 10, 20
@@ -344,6 +347,135 @@ class ConcurrencyIntegrationTest {
 
         assertEquals(1, items.size(), "All 10 adds of the same variant must land on one CartItem row, never split into duplicates");
         assertEquals(10, items.get(0).getQuantity(), "Quantity must reflect all 10 increments - a lost update would leave this lower");
+    }
+
+    /**
+     * The race the audit specifically called out: two concurrent
+     * cancellation requests for the same order (a double-tap, or a
+     * customer and an admin cancelling at the same instant). Before
+     * OrderRepository.findByIdForUpdate, cancelOrder did a plain
+     * read-check-write - both requests could read the same
+     * not-yet-cancelled status, both pass the check, and both restore
+     * inventory for the same order, inflating stock. Exactly one
+     * cancellation must succeed, and inventory must be restored by exactly
+     * the ordered quantity - never twice.
+     */
+    @Test
+    void concurrentCancellationRestoresInventoryExactlyOnce() throws InterruptedException {
+        int orderedQuantity = 4;
+        int stockAfterOrderPlaced = 6;
+
+        Long variantId = createProductVariant("Cancellation Race Test Item");
+        Inventory inventory = new Inventory();
+        inventory.setProductVariant(productVariantRepository.findById(variantId).orElseThrow());
+        inventory.setStock(stockAfterOrderPlaced);
+        inventory = inventoryRepository.save(inventory);
+
+        Long orderId = createOrder();
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        Long customerId = order.getCustomer().getId();
+
+        OrderItem item = new OrderItem();
+        item.setOrder(order);
+        item.setProductVariant(productVariantRepository.findById(variantId).orElseThrow());
+        item.setQuantity(orderedQuantity);
+        item.setPrice(new BigDecimal("90.00"));
+        item.setTotalPrice(new BigDecimal("360.00"));
+        item.setActive(true);
+        orderItemRepository.save(item);
+
+        int attackers = 10;
+        ExecutorService pool = Executors.newFixedThreadPool(attackers);
+        CountDownLatch ready = new CountDownLatch(attackers);
+        CountDownLatch go = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(attackers);
+        AtomicInteger successCount = new AtomicInteger();
+        AtomicInteger rejectedCount = new AtomicInteger();
+
+        for (int i = 0; i < attackers; i++) {
+            pool.submit(() -> {
+                try {
+                    ready.countDown();
+                    go.await();
+                    orderService.cancelOrder(orderId, customerId, false);
+                    successCount.incrementAndGet();
+                } catch (ConflictException expectedForEveryLoser) {
+                    rejectedCount.incrementAndGet();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+
+        ready.await(5, TimeUnit.SECONDS);
+        go.countDown();
+        assertTrue(done.await(30, TimeUnit.SECONDS), "All cancellation attempts should finish within 30s");
+        pool.shutdown();
+
+        assertEquals(1, successCount.get(), "Exactly one of the 10 concurrent cancellations may succeed");
+        assertEquals(9, rejectedCount.get(), "The other 9 must be rejected as already-cancelled, not each restore inventory again");
+
+        Order after = orderRepository.findById(orderId).orElseThrow();
+        assertEquals(OrderStatus.CANCELLED, after.getOrderStatus());
+
+        Inventory afterInventory = inventoryRepository.findByProductVariantId(variantId).orElseThrow();
+        assertEquals(stockAfterOrderPlaced + orderedQuantity, afterInventory.getStock(),
+                "Stock must be restored by exactly the ordered quantity once - double-restoration would show up here as too much stock");
+    }
+
+    /**
+     * The other state-transition race the audit called out: two
+     * concurrent status updates on the same order (two admins/delivery
+     * staff both advancing it at once). OrderRepository.findByIdForUpdate
+     * serializes these the same way it does for cancellation - exactly one
+     * transition may succeed per call, the loser sees the already-updated
+     * status and gets a clean ConflictException instead of silently
+     * re-applying (and double-triggering side effects like the
+     * notification/audit-log entries).
+     */
+    @Test
+    void concurrentOrderStatusUpdatesApplyExactlyOnce() throws InterruptedException {
+        Long orderId = createOrder();
+        // createOrder() starts the order at PENDING_CONFIRMATION - the only
+        // valid transition from there is to CONFIRMED.
+
+        int attackers = 10;
+        ExecutorService pool = Executors.newFixedThreadPool(attackers);
+        CountDownLatch ready = new CountDownLatch(attackers);
+        CountDownLatch go = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(attackers);
+        AtomicInteger successCount = new AtomicInteger();
+        AtomicInteger rejectedCount = new AtomicInteger();
+
+        for (int i = 0; i < attackers; i++) {
+            pool.submit(() -> {
+                try {
+                    ready.countDown();
+                    go.await();
+                    orderService.updateOrderStatus(orderId, OrderStatus.CONFIRMED);
+                    successCount.incrementAndGet();
+                } catch (ConflictException expectedForEveryLoser) {
+                    rejectedCount.incrementAndGet();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+
+        ready.await(5, TimeUnit.SECONDS);
+        go.countDown();
+        assertTrue(done.await(30, TimeUnit.SECONDS), "All status-update attempts should finish within 30s");
+        pool.shutdown();
+
+        assertEquals(1, successCount.get(), "Exactly one of the 10 concurrent status transitions may succeed");
+        assertEquals(9, rejectedCount.get(), "The other 9 must see the already-transitioned status as a conflict, not silently re-apply");
+
+        Order after = orderRepository.findById(orderId).orElseThrow();
+        assertEquals(OrderStatus.CONFIRMED, after.getOrderStatus(), "Final status must reflect exactly one transition");
     }
 
     private Long createCustomer() {

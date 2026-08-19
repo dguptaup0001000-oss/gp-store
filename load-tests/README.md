@@ -30,12 +30,41 @@ BASE_URL=https://your-backend.onrender.com/v1 COUNT=50 node seed-accounts.js
 BASE_URL=https://your-backend.onrender.com/v1 BROWSE_VUS=50 CART_VUS=15 k6 run browse-cart-checkout.js
 ```
 
-Read the actual numbers from k6's summary at the end: `http_req_duration` (p95 latency
-per endpoint, broken out by the `name` tag), `http_req_failed` (error rate), and
-`checks` (pass rate per assertion). Cross-reference against Render's own metrics and
-Supabase's connection-count graph for the same time window - that combination tells
-you what actually saturated first (app CPU, DB connections, Redis, etc.), not just
-that something did.
+Read the actual numbers from k6's summary at the end: `http_req_duration` (p50/p95/p99
+latency per endpoint, broken out by the `name` tag - k6 prints all three percentiles
+by default, not just the one named in `thresholds`), `http_req_failed` (error rate),
+`iterations`/`http_reqs` (real throughput - requests/second, NOT the same number as
+concurrent VUs, see the distinction below), and `checks` (pass rate per assertion).
+The custom `orders_placed`/`orders_rate_limited`/`orders_rejected_client_error`
+counters report actual checkout outcomes - `orders_placed` is what a follow-up
+duplicate-order/duplicate-payment check against the database should use as its
+baseline (this script can't query Postgres directly to verify that itself). Cross-
+reference the whole run against Render's own metrics and Supabase's connection-count
+graph for the same time window - that combination tells you what actually saturated
+first (app CPU, DB connections, Redis, etc.), not just that something did.
+
+**Concurrent users vs. requests per second - these are not the same number.**
+`BROWSE_VUS=1000` means 1,000 virtual users are open at once, each pausing 1-3s
+between actions (`thinkTime()`) - the actual request rate that produces is roughly
+`VUs / average_think_time`, not 1,000 requests/second. k6's summary reports the real
+achieved rate (`http_reqs` / test duration); read that number, don't infer it from the
+VU count.
+
+### Staged execution
+
+Run these in order, on a machine with a real network path to the target (not
+localhost), and only past the "browse, against a staging/dev target" tier with
+explicit approval - see the honesty section below for exactly why going straight to
+50k VUs from one machine, or against production, doesn't measure what it looks like
+it measures.
+
+| Stage | Command | What it validates |
+|---|---|---|
+| 1,000 VU | `BROWSE_VUS=1000 CART_VUS=100 k6 run browse-cart-checkout.js` | Baseline - the number this whole ladder is measured against. Safe against production. |
+| 5,000 VU | `BROWSE_VUS=5000 CART_VUS=300 k6 run browse-cart-checkout.js` | Where p95 latency starts climbing, if it does. Prefer staging once you're sizing infrastructure changes off these numbers, since this is enough sustained load to be felt by real concurrent shoppers if run against production. |
+| 10,000 VU | `BROWSE_VUS=10000 CART_VUS=600 k6 run browse-cart-checkout.js` | Approaching a single k6 process's own realistic ceiling (see below) - watch k6's own CPU/memory, not just the target's, past this point. Staging only. |
+| 25,000 VU | Needs a distributed generator (k6 Cloud, or several self-hosted k6 instances behind a coordinator) - one machine can't reliably produce this much load itself. | Requires infrastructure already sized for this range (Phase 3 of the roadmap) - running it against today's single Render instance mostly re-confirms the 5k/10k findings, not new information. |
+| 50,000 VU | Same distributed-generator requirement as 25k, plus explicit sign-off before running - this is real production-scale load. | The actual target number. Only meaningful once infrastructure was sized for it - see below for why running this today would just measure today's infrastructure, not the app. |
 
 ## Quickstart (phone, using Termux - no k6)
 
