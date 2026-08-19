@@ -91,7 +91,13 @@ dependencies:
   # print_bluetooth_thermal only CHECKS Bluetooth permission
   # (isPermissionBluetoothGranted) - it doesn't trigger the OS prompt
   # itself. This is what actually asks, once (see printer_service.dart).
-  permission_handler: ^13.0.1
+  # Pinned to 12.0.3, not 13.x/14.x - permission_handler_android 14.0.0's
+  # own build.gradle.kts assumes a newer Flutter Gradle template (Kotlin
+  # version-catalog wiring) than this project has, and fails to even
+  # resolve its own `kotlin { compilerOptions { ... } }` block
+  # ("Unresolved reference: compilerOptions") - a real CI failure, not a
+  # guess. 12.0.3 predates that Android module restructuring.
+  permission_handler: ^12.0.3
 
 dev_dependencies:
   flutter_test:
