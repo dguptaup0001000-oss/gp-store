@@ -36,8 +36,17 @@ class PaymentServiceTest {
 
     @BeforeEach
     void setUp() {
+        // `self` is this bean's own Spring proxy in production, used only so
+        // the expiry sweep's per-payment REQUIRES_NEW transaction actually
+        // applies (see PaymentService.self). Null here on purpose: none of
+        // the tests in this class go through the sweep, and a null that would
+        // NPE loudly is better than a self-reference that quietly pretends
+        // transaction boundaries exist in a plain-constructed instance where
+        // they cannot. The sweep's real behaviour is covered against a live
+        // database in InventoryRestorationConcurrencyTest instead.
         paymentService = new PaymentService(
-                paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService, 30);
+                paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService,
+                null, 30, 100, 50);
     }
 
     @Test
@@ -45,7 +54,8 @@ class PaymentServiceTest {
         Order order = orderWithStatus(1L, OrderStatus.PENDING_CONFIRMATION);
         Payment payment = pendingUpiPayment(order);
 
-        when(paymentRepository.findByOrderId(1L)).thenReturn(Optional.of(payment));
+        when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(payment.getOrder()));
+        when(paymentRepository.findByOrderIdForUpdate(1L)).thenReturn(Optional.of(payment));
         when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PaymentResponse result = paymentService.confirmUpiPayment(1L, "TXN123");
@@ -60,7 +70,8 @@ class PaymentServiceTest {
         Payment payment = pendingUpiPayment(order);
         payment.setPaymentStatus(PaymentStatus.SUCCESS); // already confirmed once
 
-        when(paymentRepository.findByOrderId(1L)).thenReturn(Optional.of(payment));
+        when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(payment.getOrder()));
+        when(paymentRepository.findByOrderIdForUpdate(1L)).thenReturn(Optional.of(payment));
 
         assertThrows(ConflictException.class, () -> paymentService.confirmUpiPayment(1L, "TXN999"));
     }
@@ -73,7 +84,8 @@ class PaymentServiceTest {
         payment.setPaymentMethod(PaymentMethod.COD);
         payment.setPaymentStatus(PaymentStatus.COD_PENDING);
 
-        when(paymentRepository.findByOrderId(1L)).thenReturn(Optional.of(payment));
+        when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(payment.getOrder()));
+        when(paymentRepository.findByOrderIdForUpdate(1L)).thenReturn(Optional.of(payment));
 
         assertThrows(ConflictException.class, () -> paymentService.confirmUpiPayment(1L, "TXN1"));
     }
@@ -86,7 +98,8 @@ class PaymentServiceTest {
         payment.setPaymentMethod(PaymentMethod.COD);
         payment.setPaymentStatus(PaymentStatus.COD_PENDING);
 
-        when(paymentRepository.findByOrderId(2L)).thenReturn(Optional.of(payment));
+        when(orderRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(payment.getOrder()));
+        when(paymentRepository.findByOrderIdForUpdate(2L)).thenReturn(Optional.of(payment));
         when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PaymentResponse result = paymentService.completeCodPayment(2L);
@@ -102,7 +115,8 @@ class PaymentServiceTest {
         payment.setPaymentMethod(PaymentMethod.COD);
         payment.setPaymentStatus(PaymentStatus.COD_PENDING);
 
-        when(paymentRepository.findByOrderId(3L)).thenReturn(Optional.of(payment));
+        when(orderRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(payment.getOrder()));
+        when(paymentRepository.findByOrderIdForUpdate(3L)).thenReturn(Optional.of(payment));
 
         assertThrows(ConflictException.class, () -> paymentService.refundPayment(3L));
     }
@@ -115,7 +129,8 @@ class PaymentServiceTest {
         payment.setPaymentMethod(PaymentMethod.UPI);
         payment.setPaymentStatus(PaymentStatus.REFUNDED);
 
-        when(paymentRepository.findByOrderId(4L)).thenReturn(Optional.of(payment));
+        when(orderRepository.findByIdForUpdate(4L)).thenReturn(Optional.of(payment.getOrder()));
+        when(paymentRepository.findByOrderIdForUpdate(4L)).thenReturn(Optional.of(payment));
 
         assertThrows(ConflictException.class, () -> paymentService.refundPayment(4L));
     }
@@ -129,7 +144,8 @@ class PaymentServiceTest {
         payment.setPaymentStatus(PaymentStatus.SUCCESS);
         payment.setAmount(new BigDecimal("200"));
 
-        when(paymentRepository.findByOrderId(5L)).thenReturn(Optional.of(payment));
+        when(orderRepository.findByIdForUpdate(5L)).thenReturn(Optional.of(payment.getOrder()));
+        when(paymentRepository.findByOrderIdForUpdate(5L)).thenReturn(Optional.of(payment));
         when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PaymentResponse result = paymentService.refundPayment(5L);

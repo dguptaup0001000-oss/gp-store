@@ -706,7 +706,12 @@ public class OrderService {
 
         order.setOrderStatus(OrderStatus.CANCELLED);
 
-        Payment payment = paymentRepository.findByOrderId(orderId).orElse(null);
+        // ORDER (already locked above) -> PAYMENT -> INVENTORY. Locking the
+        // payment row rather than plain-reading it: the expiry sweep and the
+        // UPI/COD confirmation paths can be looking at this same payment
+        // right now, and its status has to be re-read under the lock before
+        // being acted on rather than trusted from an unlocked read.
+        Payment payment = paymentRepository.findByOrderIdForUpdate(orderId).orElse(null);
 
         if (payment != null) {
 
@@ -718,16 +723,24 @@ public class OrderService {
             } else if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
 
                 payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
+
+            } else if (payment.getPaymentStatus() == PaymentStatus.PENDING) {
+
+                // Previously fell through untouched, which is what let a
+                // cancelled order keep a PENDING UPI payment carrying an old
+                // payment_date - still matching the stale-payment sweep's
+                // query, which then restored this order's stock a second
+                // time. A cancelled order's unconfirmed payment can never
+                // legitimately succeed later, so it is terminal now.
+                payment.setPaymentStatus(PaymentStatus.FAILED);
             }
             paymentRepository.save(payment);
         }
 
-        // Give back the stock that was reserved for this order at checkout time.
-        // Previously missing entirely - a cancelled order permanently lost its
-        // stock from the count, understating real available inventory forever.
-        // Row-locked the same way placeOrder() locks it, so a cancellation
-        // racing a fresh checkout on the same variant can't corrupt the count.
-        restoreInventoryForOrder(orderId);
+        // Give back the stock that was reserved for this order at checkout
+        // time. Guarded so it happens exactly once across every path that
+        // can trigger it - see restoreInventoryOnce.
+        restoreInventoryOnce(order);
 
         Order savedOrder = repository.save(order);
         notificationService.notifyOrderStatusChange(savedOrder, savedOrder.getOrderStatus());
@@ -766,17 +779,58 @@ public class OrderService {
     }
 
     /**
-     * Adds back every line item's quantity to its variant's stock count -
-     * the exact inverse of the decrement placeOrder() does at checkout.
-     * Public and reused by PaymentService.expireStalePendingUpiPayments():
-     * an order whose payment never confirmed has exactly the same "give the
-     * stock back" need as an explicitly cancelled one. Locks each inventory
-     * row the same way placeOrder() does, so this can't race a concurrent
-     * checkout on the same variant into an inconsistent count.
+     * Entry point for any caller that is NOT already holding this order's
+     * row lock - currently the stale-UPI expiry sweep. Takes the order lock
+     * first, then delegates, keeping the project-wide ORDER -> PAYMENT ->
+     * INVENTORY ordering intact.
+     *
+     * @return true if this call is the one that actually restored the stock,
+     *         false if some other path had already done it. Callers use the
+     *         return value to decide whether to log/audit a restore, so the
+     *         audit trail records one restore per order rather than one per
+     *         attempt.
      */
     @Transactional
-    public void restoreInventoryForOrder(Long orderId) {
-        List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
+    public boolean restoreInventoryForOrder(Long orderId) {
+        Order order = repository.findByIdForUpdate(orderId).orElse(null);
+        if (order == null) {
+            return false;
+        }
+        boolean restored = restoreInventoryOnce(order);
+        if (restored) {
+            repository.save(order);
+        }
+        return restored;
+    }
+
+    /**
+     * Adds back every line item's quantity to its variant's stock count -
+     * the exact inverse of the decrement placeOrder() does at checkout -
+     * but only if no other path has already done so for this order.
+     *
+     * The caller MUST already hold this order's row lock (cancelOrder gets
+     * it from findByIdForUpdate; restoreInventoryForOrder takes it itself).
+     * That lock is what makes the check-and-set below atomic: two paths
+     * racing to restore the same order serialize on the order row, the
+     * first sets the flag, and the second sees it set and does nothing.
+     *
+     * Reading and writing order status instead would not be enough - the
+     * paths disagree about what status means. The expiry sweep restores
+     * stock for orders that were never cancelled at all, so "is it
+     * CANCELLED" cannot be the guard; "has the stock gone back" has to be
+     * tracked as its own fact.
+     *
+     * Inventory rows are locked individually and in the order the items
+     * come back in, matching what placeOrder() does, so a restore racing a
+     * fresh checkout on the same variant cannot interleave into a wrong
+     * count.
+     */
+    private boolean restoreInventoryOnce(Order order) {
+        if (Boolean.TRUE.equals(order.getInventoryRestored())) {
+            return false;
+        }
+
+        List<OrderItem> items = orderItemRepository.findByOrderId(order.getId());
         for (OrderItem item : items) {
             if (item.getProductVariant() == null) {
                 continue;
@@ -788,5 +842,11 @@ public class OrderService {
             inventory.setStock(inventory.getStock() + item.getQuantity());
             inventoryService.save(inventory);
         }
+
+        // Set even when the order had no restorable items: the question this
+        // answers is "has the restore step run for this order", and running
+        // it again for a zero-item order is still pointless work.
+        order.setInventoryRestored(true);
+        return true;
     }
 }

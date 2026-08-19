@@ -321,9 +321,19 @@ public class NotificationService {
         }
     }
 
-    public org.springframework.data.domain.Page<Notification> getAllNotifications(
+    /**
+     * Admin feed. Returns DTOs for the same reason the customer feed does
+     * (see NotificationResponse): a raw entity page leaves Jackson resolving
+     * lazy proxies during response serialization, which fails as an opaque
+     * 500 rather than anything actionable. Pagination stays database-side -
+     * findAll(Pageable) issues its own LIMIT/OFFSET, and the mapping happens
+     * per page, never over the full table.
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public Page<com.gpstore.dto.response.NotificationResponse> getAllNotifications(
             org.springframework.data.domain.Pageable pageable) {
-        return notificationRepository.findAll(pageable);
+        return notificationRepository.findAll(pageable)
+                .map(com.gpstore.dto.response.NotificationResponse::from);
     }
 
     public Optional<Notification> getNotificationById(Long id) {
@@ -357,8 +367,17 @@ public class NotificationService {
         return notificationRepository.countByCustomerIdAndIsReadFalse(customerId);
     }
 
-    public List<Notification> getNotificationsByOrderId(Long orderId) {
-        return notificationRepository.findByOrderId(orderId);
+    /**
+     * Paginated rather than returning every notification an order has ever
+     * generated - one is written per status change, so this grows with the
+     * order's history. Currently unused by any endpoint; bounded now so it
+     * cannot become an unbounded load the first time something wires it up.
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public Page<com.gpstore.dto.response.NotificationResponse> getNotificationsByOrderId(
+            Long orderId, org.springframework.data.domain.Pageable pageable) {
+        return notificationRepository.findByOrderId(orderId, pageable)
+                .map(com.gpstore.dto.response.NotificationResponse::from);
     }
 
     /** Ownership-checked - a customer marking one of THEIR OWN notifications as read. */
@@ -375,12 +394,22 @@ public class NotificationService {
     }
 
     /** Only ever touches the caller's own notifications - never a client-supplied customer id. */
-    public void markAllAsRead(Long customerId) {
-        List<Notification> notifications = notificationRepository.findByCustomerId(customerId);
-        for (Notification notification : notifications) {
-            notification.setIsRead(true);
-        }
-        notificationRepository.saveAll(notifications);
+    /**
+     * One UPDATE, executed in the database.
+     *
+     * Previously loaded every notification the customer had ever received
+     * into JVM memory, set a flag on each, and saved them back - unbounded
+     * memory and one UPDATE per row, both growing for the life of the
+     * account. A customer with 20k notifications made this a 20k-entity
+     * load and 20k statements to set a single boolean.
+     *
+     * @return how many rows actually changed - 0 when everything was
+     *         already read, which the caller can surface instead of
+     *         implying work happened.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public int markAllAsRead(Long customerId) {
+        return notificationRepository.markAllAsReadForCustomer(customerId);
     }
 
     /**
