@@ -33,4 +33,13 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     @Query("select i from Inventory i where i.minimumStock is not null and i.stock <= i.minimumStock")
     List<Inventory> findLowStock();
 
+    /**
+     * Same filter as findLowStock, but for AnalyticsService.getLowStockCount -
+     * that call only ever needed the count, not every matching Inventory row
+     * (with its ProductVariant join) loaded into memory just to call
+     * .size() on the list.
+     */
+    @Query("select count(i) from Inventory i where i.minimumStock is not null and i.stock <= i.minimumStock")
+    long countLowStock();
+
 }

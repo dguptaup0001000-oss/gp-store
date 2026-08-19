@@ -91,6 +91,6 @@ public class AnalyticsService {
     }
 
     public long getLowStockCount() {
-        return inventoryRepository.findLowStock().size();
+        return inventoryRepository.countLowStock();
     }
 }
