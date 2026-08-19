@@ -72,6 +72,23 @@ dependencies:
   # customers see over and over: bestsellers, cart, product detail.
   cached_network_image: ^3.4.1
 
+  # Bluetooth (Classic/SPP) connection to a cheap ESC/POS thermal receipt
+  # printer, for auto-printing new-order receipts on the admin's device.
+  # Chosen specifically because it does NOT require location permission on
+  # Android (only BLUETOOTH_CONNECT on API 31+) - it only ever talks to a
+  # device already paired in Android's own Bluetooth settings, it doesn't
+  # scan for new ones itself.
+  print_bluetooth_thermal: ^1.2.2
+
+  # Builds the raw ESC/POS command bytes (text, bold, alignment, cut) that
+  # print_bluetooth_thermal sends over the connection above.
+  esc_pos_utils_plus: ^2.0.4
+
+  # print_bluetooth_thermal only CHECKS Bluetooth permission
+  # (isPermissionBluetoothGranted) - it doesn't trigger the OS prompt
+  # itself. This is what actually asks, once (see printer_service.dart).
+  permission_handler: ^13.0.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

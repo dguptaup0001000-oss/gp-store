@@ -494,6 +494,7 @@ public class OrderService {
             // customer. generateForOrder has no such internal guard, so it
             // gets one here, same pattern as the other three.
             notificationService.notifyOrderStatusChange(placedOrder, placedOrder.getOrderStatus());
+            notificationService.notifyAdminsOfNewOrder(placedOrder);
             auditLogService.log("ORDER_PLACED", "Order", placedOrderId,
                     "total=" + placedOrder.getTotalAmount() + ", paymentMethod=" + request.getPaymentMethod());
             try {
