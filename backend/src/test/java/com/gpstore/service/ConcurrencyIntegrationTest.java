@@ -1,16 +1,28 @@
 package com.gpstore.service;
 
 import com.gpstore.entity.Category;
+import com.gpstore.entity.Cart;
+import com.gpstore.entity.CartItem;
 import com.gpstore.entity.Coupon;
+import com.gpstore.entity.Customer;
 import com.gpstore.entity.IdempotencyRecord;
 import com.gpstore.entity.Inventory;
+import com.gpstore.entity.Order;
 import com.gpstore.entity.Product;
 import com.gpstore.entity.ProductVariant;
+import com.gpstore.dto.request.InitiatePaymentRequest;
 import com.gpstore.enums.DiscountType;
+import com.gpstore.enums.OrderStatus;
+import com.gpstore.exception.ConflictException;
+import com.gpstore.repository.CartItemRepository;
+import com.gpstore.repository.CartRepository;
 import com.gpstore.repository.CategoryRepository;
 import com.gpstore.repository.CouponRepository;
+import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.IdempotencyRecordRepository;
 import com.gpstore.repository.InventoryRepository;
+import com.gpstore.repository.OrderRepository;
+import com.gpstore.repository.PaymentRepository;
 import com.gpstore.repository.ProductRepository;
 import com.gpstore.repository.ProductVariantRepository;
 
@@ -22,6 +34,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -52,6 +65,13 @@ class ConcurrencyIntegrationTest {
     @Autowired private CouponRepository couponRepository;
     @Autowired private CouponService couponService;
     @Autowired private IdempotencyRecordRepository idempotencyRecordRepository;
+    @Autowired private CustomerRepository customerRepository;
+    @Autowired private OrderRepository orderRepository;
+    @Autowired private PaymentRepository paymentRepository;
+    @Autowired private PaymentService paymentService;
+    @Autowired private CartService cartService;
+    @Autowired private CartRepository cartRepository;
+    @Autowired private CartItemRepository cartItemRepository;
 
     /**
      * The exact scenario from the scalability audit: stock = 10, 20
@@ -214,6 +234,142 @@ class ConcurrencyIntegrationTest {
 
         Coupon after = couponRepository.findByCouponCodeIgnoreCase(code).orElseThrow();
         assertEquals(1, after.getUsedCount(), "usedCount must land at exactly 1, never overshoot the limit");
+    }
+
+    /**
+     * Phase 7's other missing case: a double-tap on "Pay now" (or a client
+     * retry after a timeout) firing two concurrent initiatePayment() calls
+     * for the same order. PaymentService.initiatePayment checks
+     * findByOrderId first, but that check-then-insert has a race window
+     * under real concurrency - uq_payments_order_id (V4 migration) is the
+     * actual backstop (see the comment in PaymentService.initiatePayment),
+     * so exactly one concurrent request should succeed and the rest should
+     * see a clean ConflictException, never two Payment rows for one order.
+     */
+    @Test
+    void concurrentDuplicatePaymentInitiationOnlyOneSucceeds() throws InterruptedException {
+        Long orderId = createOrder();
+        Long customerId = orderRepository.findById(orderId).orElseThrow().getCustomer().getId();
+
+        int attackers = 10;
+        ExecutorService pool = Executors.newFixedThreadPool(attackers);
+        CountDownLatch ready = new CountDownLatch(attackers);
+        CountDownLatch go = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(attackers);
+        AtomicInteger successCount = new AtomicInteger();
+        AtomicInteger rejectedCount = new AtomicInteger();
+
+        for (int i = 0; i < attackers; i++) {
+            pool.submit(() -> {
+                try {
+                    ready.countDown();
+                    go.await();
+
+                    InitiatePaymentRequest request = new InitiatePaymentRequest();
+                    request.setOrderId(orderId);
+                    request.setPaymentMethod("COD");
+                    paymentService.initiatePayment(request, customerId);
+                    successCount.incrementAndGet();
+                } catch (ConflictException expectedForEveryLoser) {
+                    rejectedCount.incrementAndGet();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+
+        ready.await(5, TimeUnit.SECONDS);
+        go.countDown();
+        assertTrue(done.await(30, TimeUnit.SECONDS), "All payment initiation attempts should finish within 30s");
+        pool.shutdown();
+
+        assertEquals(1, successCount.get(), "Exactly one of the 10 concurrent initiatePayment calls for the same order may succeed");
+        assertEquals(9, rejectedCount.get(), "The other 9 must be rejected with a clean 409, not each create their own Payment row");
+
+        long paymentRowsForOrder = paymentRepository.findByOrderId(orderId).isPresent() ? 1 : 0;
+        assertEquals(1, paymentRowsForOrder, "Only one Payment row should exist for this order, never two");
+    }
+
+    /**
+     * Phase 11: CartService.addToCart does a read-then-write on the
+     * existing CartItem's quantity (see CartRepository.findByCustomerIdForUpdate's
+     * doc comment) with no unique constraint backing it. Ten concurrent
+     * "add 1 of the same item" calls for the same customer/cart must land
+     * on exactly one CartItem row with quantity 10 - not two rows, and not
+     * a lower quantity from a lost update where two requests both read the
+     * same pre-increment value.
+     */
+    @Test
+    void concurrentAddToCartNeverLosesAnIncrement() throws InterruptedException {
+        Long customerId = createCustomer();
+        Long variantId = createProductVariant("Cart Race Test Item");
+
+        int attackers = 10;
+        ExecutorService pool = Executors.newFixedThreadPool(attackers);
+        CountDownLatch ready = new CountDownLatch(attackers);
+        CountDownLatch go = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(attackers);
+        AtomicInteger successCount = new AtomicInteger();
+        AtomicInteger failureCount = new AtomicInteger();
+
+        for (int i = 0; i < attackers; i++) {
+            pool.submit(() -> {
+                try {
+                    ready.countDown();
+                    go.await();
+                    cartService.addToCart(customerId, variantId, 1);
+                    successCount.incrementAndGet();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } catch (Exception unexpected) {
+                    failureCount.incrementAndGet();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+
+        ready.await(5, TimeUnit.SECONDS);
+        go.countDown();
+        assertTrue(done.await(30, TimeUnit.SECONDS), "All add-to-cart attempts should finish within 30s");
+        pool.shutdown();
+
+        assertEquals(attackers, successCount.get(), "Every concurrent add-1 call should succeed - there's no stock/limit check here");
+        assertEquals(0, failureCount.get(), "None of these should fail");
+
+        Cart cart = cartRepository.findByCustomerId(customerId).orElseThrow();
+        List<CartItem> items = cartItemRepository.findByCartId(cart.getId());
+
+        assertEquals(1, items.size(), "All 10 adds of the same variant must land on one CartItem row, never split into duplicates");
+        assertEquals(10, items.get(0).getQuantity(), "Quantity must reflect all 10 increments - a lost update would leave this lower");
+    }
+
+    private Long createCustomer() {
+        Customer customer = new Customer();
+        customer.setFullName("Concurrency Test Customer");
+        customer.setEmail("concurrency-test-" + System.nanoTime() + "@example.com");
+        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setPassword("irrelevant-for-this-test");
+        customer.setEnabled(true);
+        customer.setActive(true);
+        return customerRepository.save(customer).getId();
+    }
+
+    private Long createOrder() {
+        Customer customer = customerRepository.findById(createCustomer()).orElseThrow();
+
+        Order order = new Order();
+        order.setOrderNumber("TESTORD-" + System.nanoTime());
+        order.setCustomer(customer);
+        order.setTotalAmount(new BigDecimal("199.00"));
+        order.setOrderStatus(OrderStatus.PENDING_CONFIRMATION);
+        order.setOrderDate(LocalDateTime.now());
+        order.setActive(true);
+        order = orderRepository.save(order);
+
+        return order.getId();
     }
 
     private Long createProductVariant(String namePrefix) {

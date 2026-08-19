@@ -69,6 +69,8 @@ class WishlistScreen extends ConsumerWidget {
                                 child: CachedNetworkImage(
                                   imageUrl: variant!.imageUrl!,
                                   fit: BoxFit.contain,
+                                  // 56x56 tile - avoid decoding the full original.
+                                  memCacheWidth: 160,
                                   errorWidget: (context, url, error) =>
                                       const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary),
                                 ),

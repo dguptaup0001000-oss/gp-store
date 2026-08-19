@@ -1,6 +1,5 @@
 package com.gpstore.controller;
 
-import com.gpstore.entity.Delivery;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.DeliveryService;
 
@@ -52,25 +51,26 @@ public class DeliveryController {
     }
 
     @GetMapping
-    public List<Delivery> getAllDeliveries() {
+    public List<com.gpstore.dto.response.DeliveryResponse> getAllDeliveries() {
         return deliveryService.getAllDeliveries();
     }
 
     @GetMapping("/{id}")
-    public Optional<Delivery> getDeliveryById(@PathVariable Long id) {
+    public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryById(@PathVariable Long id) {
         return deliveryService.getDeliveryById(id);
     }
 
     @GetMapping("/order/{orderId}")
-    public Optional<Delivery> getDeliveryByOrderId(@PathVariable Long orderId) {
+    public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryByOrderId(@PathVariable Long orderId) {
         return deliveryService.getDeliveryByOrderId(orderId);
     }
 
     // Lets a customer check their own order's delivery status/ETA.
     // Ownership is enforced here - never trust customerId from a client.
     @GetMapping("/my-order/{orderId}")
-    public Optional<Delivery> getMyOrderDelivery(@PathVariable Long orderId) {
-        return deliveryService.getOwnedDeliveryByOrderId(orderId, currentUser.customerId());
+    public Optional<com.gpstore.dto.response.DeliveryResponse> getMyOrderDelivery(@PathVariable Long orderId) {
+        return deliveryService.getOwnedDeliveryByOrderId(orderId, currentUser.customerId())
+                .map(com.gpstore.dto.response.DeliveryResponse::from);
     }
 
     // Live tracking screen data for a customer's own order - assigned

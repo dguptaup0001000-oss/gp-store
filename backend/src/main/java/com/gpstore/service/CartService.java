@@ -58,7 +58,15 @@ public class CartService {
             throw new BadRequestException("Quantity must be positive");
         }
 
-        Customer customer = customerRepository.findById(customerId)
+        // Locked for the rest of this transaction (see
+        // CustomerRepository.findByIdForUpdate) - a second concurrent
+        // addToCart/updateItemQuantity/removeItem for this same customer
+        // blocks here until this one commits, instead of racing the cart
+        // lookup-or-create and item quantity increment below. The customer
+        // row (unlike the cart row) is guaranteed to already exist, so this
+        // also closes the "this customer's very first cart, created twice
+        // at once" race that locking the cart row alone couldn't.
+        Customer customer = customerRepository.findByIdForUpdate(customerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
 
         ProductVariant variant = productVariantRepository.findById(variantId)
@@ -117,6 +125,11 @@ public class CartService {
      */
     @Transactional
     public Cart updateItemQuantity(Long customerId, Long cartItemId, int newQuantity) {
+        // See CustomerRepository.findByIdForUpdate's doc comment - locks out
+        // any concurrent addToCart/updateItemQuantity/removeItem for this
+        // customer until this transaction commits.
+        customerRepository.findByIdForUpdate(customerId);
+
         CartItem item = getOwnedCartItem(customerId, cartItemId);
         Cart cart = item.getCart();
 
@@ -135,6 +148,9 @@ public class CartService {
 
     @Transactional
     public Cart removeItem(Long customerId, Long cartItemId) {
+        // See CustomerRepository.findByIdForUpdate's doc comment.
+        customerRepository.findByIdForUpdate(customerId);
+
         CartItem item = getOwnedCartItem(customerId, cartItemId);
         Cart cart = item.getCart();
 

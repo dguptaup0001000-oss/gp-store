@@ -126,6 +126,8 @@ class _ThumbnailStack extends StatelessWidget {
                     ? CachedNetworkImage(
                         imageUrl: items[i].imageUrl!,
                         fit: BoxFit.contain,
+                        // 34x34 avatar - avoid decoding the full original.
+                        memCacheWidth: 100,
                         errorWidget: (context, url, error) =>
                             const Icon(Icons.shopping_bag_outlined, color: AppColors.primary, size: 16),
                       )

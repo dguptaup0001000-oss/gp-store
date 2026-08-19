@@ -91,6 +91,8 @@ class _BestsellerTile extends ConsumerWidget {
                                   // fill the tile, which was cutting off parts
                                   // of product photos in this 2x2 collage.
                                   fit: BoxFit.contain,
+                                  // A 2x2 collage tile - tiny on screen.
+                                  memCacheWidth: 200,
                                   errorWidget: (c, url, e) => const Icon(
                                     Icons.image_outlined,
                                     size: 16,

@@ -89,6 +89,8 @@ class _CategoryTile extends StatelessWidget {
                     child: CachedNetworkImage(
                       imageUrl: category.imageUrl!,
                       fit: BoxFit.cover,
+                      // 72x72 tile - avoid decoding the full original.
+                      memCacheWidth: 200,
                       errorWidget: (context, url, error) =>
                           const Icon(Icons.category_outlined, color: AppColors.textSecondary),
                     ),

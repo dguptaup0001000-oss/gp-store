@@ -103,6 +103,12 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                 child: CachedNetworkImage(
                                   imageUrl: variant!.imageUrl!,
                                   fit: BoxFit.contain,
+                                  // The one full-width hero image on this screen - worth
+                                  // more resolution than a grid thumbnail, but still
+                                  // bounded so an oversized original doesn't decode at
+                                  // full size on a screen that's at most ~430 logical px
+                                  // wide.
+                                  memCacheWidth: 1000,
                                   errorWidget: (context, url, error) => const Icon(
                                     Icons.image_not_supported_outlined,
                                     size: 48,
