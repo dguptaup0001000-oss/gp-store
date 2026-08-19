@@ -129,4 +129,57 @@ public class PushNotificationService {
             log.error("Unexpected error sending push notification", ex);
         }
     }
+
+    // The topic every customer device is subscribed to on registration (see
+    // CustomerService.updateMyFcmToken) - what makes broadcastToAll's actual
+    // push a single FCM call instead of one per customer. "all_customers" is
+    // deliberately the only topic today; a per-segment broadcast (e.g. only
+    // customers in one city) would need its own topic, not built here since
+    // nothing in this app currently needs to target a subset.
+    public static final String ALL_CUSTOMERS_TOPIC = "all_customers";
+
+    /**
+     * Best-effort - a subscribe failure just means this one device won't get
+     * broadcast pushes until its next successful registration retries this,
+     * never something that should block login/app-open.
+     */
+    public void subscribeToTopic(String fcmToken, String topic) {
+        if (!initialized || fcmToken == null || fcmToken.isBlank()) {
+            return;
+        }
+        try {
+            FirebaseMessaging.getInstance().subscribeToTopic(java.util.List.of(fcmToken), topic);
+        } catch (Exception ex) {
+            log.warn("Failed to subscribe device to topic {}: {}", topic, ex.getMessage());
+        }
+    }
+
+    /**
+     * One real FCM call reaches every device subscribed to the topic,
+     * regardless of how many that is - this is what makes
+     * NotificationService.broadcastToAll's actual push delivery O(1)
+     * instead of O(customer count). In-app notification history (the
+     * per-customer Notification rows) is unaffected - this only replaces
+     * the push transport for broadcasts.
+     */
+    public void sendToTopic(String topic, String title, String body, Map<String, String> data) {
+        if (!initialized) {
+            log.debug("Topic push not sent (Firebase not configured): title={}", title);
+            return;
+        }
+
+        try {
+            Message.Builder messageBuilder = Message.builder()
+                    .setTopic(topic)
+                    .setNotification(Notification.builder().setTitle(title).setBody(body).build());
+
+            if (data != null) {
+                messageBuilder.putAllData(data);
+            }
+
+            FirebaseMessaging.getInstance().send(messageBuilder.build());
+        } catch (Exception ex) {
+            log.error("Unexpected error sending topic push", ex);
+        }
+    }
 }

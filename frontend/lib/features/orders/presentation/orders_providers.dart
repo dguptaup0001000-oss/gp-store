@@ -17,7 +17,7 @@ typedef MyOrdersPage = ({List<OrderSummary> orders, int page, int totalPages});
 /// AsyncNotifier (not a plain FutureProvider) so loadMore() can append to
 /// the existing state, and so ref.invalidate(myOrdersProvider) elsewhere
 /// (e.g. after cancelling an order) still resets it back to page 0.
-class MyOrdersController extends AsyncNotifier<MyOrdersPage> {
+class MyOrdersController extends AutoDisposeAsyncNotifier<MyOrdersPage> {
   @override
   Future<MyOrdersPage> build() async {
     final result = await ref.read(ordersRepositoryProvider).getMyOrders(page: 0);
@@ -43,9 +43,12 @@ class MyOrdersController extends AsyncNotifier<MyOrdersPage> {
   }
 }
 
-final myOrdersProvider = AsyncNotifierProvider<MyOrdersController, MyOrdersPage>(MyOrdersController.new);
+final myOrdersProvider =
+    AsyncNotifierProvider.autoDispose<MyOrdersController, MyOrdersPage>(MyOrdersController.new);
 
-final orderDetailProvider = FutureProvider.family<OrderDetail, int>((ref, orderId) {
+// autoDispose - a customer views many different orders' details over a
+// session; no reason to keep every one cached once they've navigated away.
+final orderDetailProvider = FutureProvider.autoDispose.family<OrderDetail, int>((ref, orderId) {
   return ref.watch(ordersRepositoryProvider).getOrderDetail(orderId);
 });
 

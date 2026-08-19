@@ -18,57 +18,63 @@ final adminProductsRepositoryProvider = Provider<AdminProductsRepository>((ref) 
   return AdminProductsRepository(apiClient: ref.watch(apiClientProvider));
 });
 
-final adminAllProductsProvider = FutureProvider<List<Product>>((ref) {
+// autoDispose on every provider below this point (admin screens are
+// drill-down: visited occasionally, not the app's persistent home tab) -
+// a store owner clicking through Products, Inventory, Coupons, Analytics,
+// Audit Log, etc. over one session would otherwise leave every single one
+// of those lists cached in memory for the rest of the app's lifetime,
+// growing unboundedly the longer an admin session runs.
+final adminAllProductsProvider = FutureProvider.autoDispose<List<Product>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getAllForAdmin();
 });
 
-final adminCategoriesProvider = FutureProvider<List<Category>>((ref) {
+final adminCategoriesProvider = FutureProvider.autoDispose<List<Category>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getCategories();
 });
 
-final adminAllInventoryProvider = FutureProvider<List<InventoryItem>>((ref) {
+final adminAllInventoryProvider = FutureProvider.autoDispose<List<InventoryItem>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getAllInventory();
 });
 
-final adminLowStockProvider = FutureProvider<List<InventoryItem>>((ref) {
+final adminLowStockProvider = FutureProvider.autoDispose<List<InventoryItem>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getLowStock();
 });
 
-final adminAllCouponsProvider = FutureProvider<List<AdminCoupon>>((ref) {
+final adminAllCouponsProvider = FutureProvider.autoDispose<List<AdminCoupon>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getAllCoupons();
 });
 
-final adminDeliveryPartnersProvider = FutureProvider<List<DeliveryPartnerModel>>((ref) {
+final adminDeliveryPartnersProvider = FutureProvider.autoDispose<List<DeliveryPartnerModel>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getAllDeliveryPartners();
 });
 
 /// Lets the dashboard's period selector (7/30/90 days) drive both the sales
 /// summary and top products together, without duplicating the days value.
-final analyticsPeriodDaysProvider = StateProvider<int>((ref) => 30);
+final analyticsPeriodDaysProvider = StateProvider.autoDispose<int>((ref) => 30);
 
-final adminSalesSummaryProvider = FutureProvider<SalesSummary>((ref) {
+final adminSalesSummaryProvider = FutureProvider.autoDispose<SalesSummary>((ref) {
   final days = ref.watch(analyticsPeriodDaysProvider);
   return ref.watch(adminProductsRepositoryProvider).getSalesSummary(days: days);
 });
 
-final adminOrderStatusBreakdownProvider = FutureProvider<Map<String, int>>((ref) {
+final adminOrderStatusBreakdownProvider = FutureProvider.autoDispose<Map<String, int>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getOrderStatusBreakdown();
 });
 
-final adminTopProductsProvider = FutureProvider<List<TopProduct>>((ref) {
+final adminTopProductsProvider = FutureProvider.autoDispose<List<TopProduct>>((ref) {
   final days = ref.watch(analyticsPeriodDaysProvider);
   return ref.watch(adminProductsRepositoryProvider).getTopProducts(days: days);
 });
 
-final adminLowStockCountProvider = FutureProvider<int>((ref) {
+final adminLowStockCountProvider = FutureProvider.autoDispose<int>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getLowStockCount();
 });
 
-final adminDeliveryBreachesProvider = FutureProvider<List<DeliveryBreach>>((ref) {
+final adminDeliveryBreachesProvider = FutureProvider.autoDispose<List<DeliveryBreach>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getBreachedDeliveries();
 });
 
-final adminAuditLogProvider = FutureProvider<List<AuditLogEntry>>((ref) {
+final adminAuditLogProvider = FutureProvider.autoDispose<List<AuditLogEntry>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getAuditLog();
 });
 
@@ -77,7 +83,7 @@ typedef AdminOrdersPage = ({List<OrderSummary> orders, int page, int totalPages}
 /// Paginated - every order ever placed, system-wide, has no natural upper
 /// bound. AsyncNotifier (not a plain FutureProvider) so loadMore() can
 /// append to the existing state.
-class AdminAllOrdersController extends AsyncNotifier<AdminOrdersPage> {
+class AdminAllOrdersController extends AutoDisposeAsyncNotifier<AdminOrdersPage> {
   @override
   Future<AdminOrdersPage> build() async {
     final result = await ref.read(adminProductsRepositoryProvider).getAllOrders(page: 0);
@@ -103,11 +109,11 @@ class AdminAllOrdersController extends AsyncNotifier<AdminOrdersPage> {
   }
 }
 
-final adminAllOrdersProvider = AsyncNotifierProvider<AdminAllOrdersController, AdminOrdersPage>(
+final adminAllOrdersProvider = AsyncNotifierProvider.autoDispose<AdminAllOrdersController, AdminOrdersPage>(
   AdminAllOrdersController.new,
 );
 
-final adminCustomerOrdersProvider = FutureProvider.family<List<OrderSummary>, int>((ref, customerId) {
+final adminCustomerOrdersProvider = FutureProvider.autoDispose.family<List<OrderSummary>, int>((ref, customerId) {
   return ref.watch(adminProductsRepositoryProvider).getCustomerOrders(customerId);
 });
 
@@ -115,7 +121,7 @@ typedef AdminReviewsPage = ({List<AdminReview> reviews, int page, int totalPages
 
 /// Paginated - see AdminAllOrdersController's doc comment for why this is an
 /// AsyncNotifier rather than a plain FutureProvider.
-class AdminAllReviewsController extends AsyncNotifier<AdminReviewsPage> {
+class AdminAllReviewsController extends AutoDisposeAsyncNotifier<AdminReviewsPage> {
   @override
   Future<AdminReviewsPage> build() async {
     final result = await ref.read(adminProductsRepositoryProvider).getAllReviews(page: 0);
@@ -141,7 +147,7 @@ class AdminAllReviewsController extends AsyncNotifier<AdminReviewsPage> {
   }
 }
 
-final adminAllReviewsProvider = AsyncNotifierProvider<AdminAllReviewsController, AdminReviewsPage>(
+final adminAllReviewsProvider = AsyncNotifierProvider.autoDispose<AdminAllReviewsController, AdminReviewsPage>(
   AdminAllReviewsController.new,
 );
 
@@ -149,7 +155,7 @@ typedef AdminCustomersPage = ({List<AdminCustomer> customers, int page, int tota
 
 /// Paginated - see AdminAllOrdersController's doc comment for why this is an
 /// AsyncNotifier rather than a plain FutureProvider.
-class AdminAllCustomersController extends AsyncNotifier<AdminCustomersPage> {
+class AdminAllCustomersController extends AutoDisposeAsyncNotifier<AdminCustomersPage> {
   @override
   Future<AdminCustomersPage> build() async {
     final result = await ref.read(adminProductsRepositoryProvider).getAllCustomers(page: 0);
@@ -175,7 +181,7 @@ class AdminAllCustomersController extends AsyncNotifier<AdminCustomersPage> {
   }
 }
 
-final adminAllCustomersProvider = AsyncNotifierProvider<AdminAllCustomersController, AdminCustomersPage>(
+final adminAllCustomersProvider = AsyncNotifierProvider.autoDispose<AdminAllCustomersController, AdminCustomersPage>(
   AdminAllCustomersController.new,
 );
 
@@ -183,7 +189,7 @@ typedef AdminPaymentsPage = ({List<AdminPayment> payments, int page, int totalPa
 
 /// Paginated - see AdminAllOrdersController's doc comment for why this is an
 /// AsyncNotifier rather than a plain FutureProvider.
-class AdminAllPaymentsController extends AsyncNotifier<AdminPaymentsPage> {
+class AdminAllPaymentsController extends AutoDisposeAsyncNotifier<AdminPaymentsPage> {
   @override
   Future<AdminPaymentsPage> build() async {
     final result = await ref.read(adminProductsRepositoryProvider).getAllPayments(page: 0);
@@ -209,10 +215,10 @@ class AdminAllPaymentsController extends AsyncNotifier<AdminPaymentsPage> {
   }
 }
 
-final adminAllPaymentsProvider = AsyncNotifierProvider<AdminAllPaymentsController, AdminPaymentsPage>(
+final adminAllPaymentsProvider = AsyncNotifierProvider.autoDispose<AdminAllPaymentsController, AdminPaymentsPage>(
   AdminAllPaymentsController.new,
 );
 
-final adminAvailablePartnersProvider = FutureProvider<List<DeliveryPartnerModel>>((ref) {
+final adminAvailablePartnersProvider = FutureProvider.autoDispose<List<DeliveryPartnerModel>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getAvailablePartners();
 });

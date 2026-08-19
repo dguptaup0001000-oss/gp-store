@@ -26,6 +26,7 @@ public class CustomerService {
     private final CartRepository cartRepository;
     private final WishlistRepository wishlistRepository;
     private final NotificationRepository notificationRepository;
+    private final PushNotificationService pushNotificationService;
 
     public CustomerService(
             CustomerRepository customerRepository,
@@ -34,10 +35,12 @@ public class CustomerService {
             AddressRepository addressRepository,
             CartRepository cartRepository,
             WishlistRepository wishlistRepository,
-            NotificationRepository notificationRepository) {
+            NotificationRepository notificationRepository,
+            PushNotificationService pushNotificationService) {
         this.customerRepository = customerRepository;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
+        this.pushNotificationService = pushNotificationService;
         this.addressRepository = addressRepository;
         this.cartRepository = cartRepository;
         this.wishlistRepository = wishlistRepository;
@@ -173,6 +176,15 @@ public class CustomerService {
         Customer customer = getOwnProfile(customerId);
         customer.setFcmToken(fcmToken);
         customerRepository.save(customer);
+
+        // Subscribing every device to one shared topic here is what lets
+        // NotificationService.broadcastToAll send a single FCM call instead
+        // of one per customer - see PushNotificationService.ALL_CUSTOMERS_TOPIC.
+        // Re-subscribing on every call (not just first registration) is
+        // deliberate and cheap - FCM treats an already-subscribed token as a
+        // no-op, and this guarantees a token that rotated still ends up
+        // subscribed without needing separate unsubscribe/resubscribe logic.
+        pushNotificationService.subscribeToTopic(fcmToken, PushNotificationService.ALL_CUSTOMERS_TOPIC);
     }
 
     /**

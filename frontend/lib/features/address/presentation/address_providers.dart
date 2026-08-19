@@ -8,7 +8,11 @@ final addressRepositoryProvider = Provider<AddressRepository>((ref) {
   return AddressRepository(apiClient: ref.watch(apiClientProvider));
 });
 
-final myAddressesProvider = FutureProvider<List<AddressModel>>((ref) {
+// autoDispose - the address list is a drill-down screen (Profile > My
+// Addresses), not persistent app state, so there's no reason to keep it (or
+// its per-address deliverability checks below) cached once the customer
+// navigates away.
+final myAddressesProvider = FutureProvider.autoDispose<List<AddressModel>>((ref) {
   return ref.watch(addressRepositoryProvider).getMyAddresses();
 });
 
@@ -17,6 +21,6 @@ final myAddressesProvider = FutureProvider<List<AddressModel>>((ref) {
 /// an address was deliverable after reaching checkout. This surfaces it
 /// directly on the address list instead.
 final addressDeliverableProvider =
-    FutureProvider.family<({bool deliverable, double? distanceKm}), int>((ref, addressId) {
+    FutureProvider.autoDispose.family<({bool deliverable, double? distanceKm}), int>((ref, addressId) {
   return ref.watch(addressRepositoryProvider).checkDeliverable(addressId);
 });

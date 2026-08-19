@@ -27,8 +27,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class NotificationService {
 
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(NotificationService.class);
-
     private final NotificationRepository notificationRepository;
     private final CustomerRepository customerRepository;
     private final OrderRepository orderRepository;
@@ -97,30 +95,30 @@ public class NotificationService {
      * each customer can independently mark their own copy read/delete it
      * without affecting anyone else's.
      */
-    // Loaded every customer row into memory at once and sent one synchronous
-    // FCM network call per customer, inside a single request/transaction -
-    // fine at a few dozen customers, but a real store with thousands would
-    // time out the HTTP request and hold one DB transaction open for as
-    // long as it took every push to complete (network calls, not just DB
-    // writes - potentially minutes). Now pages through active customers in
-    // bounded batches (each batch its own short transaction, via
-    // saveNotificationBatch), and hands the actual FCM sends to
-    // orderSideEffectsExecutor so the admin's request returns as soon as
-    // the notification rows are written, not after every push is sent.
-    //
-    // Still sends one FCM message per customer, not a single multicast/topic
-    // send - at genuinely large scale (tens of thousands of customers) that
-    // remains the real bottleneck on total broadcast completion time even
-    // though it no longer blocks anything. Switching to FCM's topic-based
-    // broadcast (subscribe every device to one topic, send once) would
-    // remove that too, but changes how device registration works - a
-    // separate, deliberate change, not bundled into this fix.
+    // Originally loaded every customer row into memory at once and sent one
+    // synchronous FCM network call per customer, inside a single request/
+    // transaction - fine at a few dozen customers, but a real store with
+    // thousands would time out the HTTP request and hold one DB transaction
+    // open for as long as it took every push to complete. Fixed in two
+    // layers: the actual push is now ONE FCM call to a topic every device
+    // subscribes to on registration (see CustomerService.updateMyFcmToken /
+    // PushNotificationService.ALL_CUSTOMERS_TOPIC) - O(1), not O(customer
+    // count), regardless of whether there are 50 customers or 50,000. The
+    // per-customer in-app Notification rows (so each customer's own
+    // notification history/read-state still works exactly as before) are
+    // still created by paging through active customers in bounded batches
+    // rather than one giant findAll(), and that batch-save work runs on
+    // orderSideEffectsExecutor so the admin's request returns immediately
+    // rather than waiting on it.
     private static final int BROADCAST_PAGE_SIZE = 200;
 
     public int broadcastToAll(String title, String message) {
         if (title == null || title.isBlank() || message == null || message.isBlank()) {
             throw new BadRequestException("Title and message are required");
         }
+
+        pushNotificationService.sendToTopic(
+                PushNotificationService.ALL_CUSTOMERS_TOPIC, title, message, Map.of("type", "ANNOUNCEMENT"));
 
         int totalCustomers = 0;
         int pageNumber = 0;
@@ -131,14 +129,7 @@ public class NotificationService {
             List<Customer> customers = page.getContent();
             totalCustomers += customers.size();
 
-            saveNotificationBatch(customers, title, message);
-
-            orderSideEffectsExecutor.submit(() -> {
-                for (Customer customer : customers) {
-                    pushNotificationService.sendPush(
-                            customer.getFcmToken(), title, message, Map.of("type", "ANNOUNCEMENT"));
-                }
-            });
+            orderSideEffectsExecutor.submit(() -> saveNotificationBatch(customers, title, message));
 
             pageNumber++;
         } while (page.hasNext());
