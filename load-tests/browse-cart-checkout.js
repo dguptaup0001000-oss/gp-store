@@ -34,6 +34,16 @@
 import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 import { SharedArray } from 'k6/data';
+import { Counter } from 'k6/metrics';
+
+// Custom counters so the end-of-run summary reports actual order-placement
+// outcomes, not just HTTP pass/fail - "how many orders actually got placed
+// this run" is what a duplicate-order check against the DB afterward needs
+// as its baseline (k6 itself has no DB access to verify duplicates directly
+// - see load-tests/README.md's "what this can't validate yet" section).
+const ordersPlaced = new Counter('orders_placed');
+const ordersRateLimited = new Counter('orders_rate_limited');
+const ordersRejected = new Counter('orders_rejected_client_error');
 
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8081/v1').replace(/\/$/, '');
 const BROWSE_VUS = parseInt(__ENV.BROWSE_VUS || '50', 10);
@@ -181,6 +191,25 @@ export function cart(data) {
 
     const cartRes = http.get(`${BASE_URL}/api/carts/mine`, authHeaders(account));
     check(cartRes, { 'view cart: 200': (r) => r.status === 200 });
+
+    // Real users often bump quantity up/down before settling - a stepper
+    // tap, not just a one-shot add.
+    try {
+      const cartBody = cartRes.json();
+      const items = (cartBody && cartBody.items) || [];
+      if (items.length > 0) {
+        thinkTime();
+        const item = randomItem(items);
+        const updateRes = http.put(
+          `${BASE_URL}/api/carts/items/${item.cartItemId}?quantity=2`,
+          null,
+          authHeaders(account),
+        );
+        check(updateRes, { 'update cart quantity: 200': (r) => r.status === 200 });
+      }
+    } catch (e) {
+      // Cart body shape mismatch would already have failed the check above.
+    }
   });
 }
 
@@ -208,6 +237,15 @@ export function checkout(data) {
     if (addRes.status !== 200) return;
     thinkTime();
 
+    // Real checkout always shows a cost preview before the customer commits
+    // - not part of what's being placed, but part of the flow.
+    const previewRes = http.get(
+      `${BASE_URL}/api/orders/checkout-preview?addressId=${account.addressId}`,
+      authHeaders(account),
+    );
+    check(previewRes, { 'checkout preview: 200': (r) => r.status === 200 });
+    thinkTime();
+
     const orderRes = http.post(
       `${BASE_URL}/api/orders/place`,
       JSON.stringify({ addressId: account.addressId, paymentMethod: 'COD' }),
@@ -217,5 +255,19 @@ export function checkout(data) {
       'place order: 200 or expected 4xx (empty cart / rate limit)': (r) => r.status === 200 || r.status === 400 || r.status === 429,
       'place order: not a 5xx': (r) => r.status < 500,
     });
+
+    if (orderRes.status === 200) {
+      ordersPlaced.add(1);
+      thinkTime();
+      // Realistic flow completion: a customer who just checked out looks at
+      // their order history next, not nothing - see the flow this scenario
+      // is meant to mirror (browse -> cart -> checkout -> order history).
+      const historyRes = http.get(`${BASE_URL}/api/orders/my-orders?page=0&size=20`, authHeaders(account));
+      check(historyRes, { 'order history: 200': (r) => r.status === 200 });
+    } else if (orderRes.status === 429) {
+      ordersRateLimited.add(1);
+    } else if (orderRes.status >= 400 && orderRes.status < 500) {
+      ordersRejected.add(1);
+    }
   });
 }
