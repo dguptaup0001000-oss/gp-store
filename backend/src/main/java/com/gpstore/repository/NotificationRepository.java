@@ -17,7 +17,19 @@ public interface NotificationRepository
 
     List<Notification> findByCustomerIdOrderBySentAtDesc(Long customerId);
 
-    Page<Notification> findByCustomerIdOrderBySentAtDesc(Long customerId, Pageable pageable);
+    /**
+     * The customer feed, with each notification's order fetched in the same
+     * query.
+     *
+     * NotificationResponse links back to an order, and Notification.order is
+     * a LAZY @ManyToOne - so mapping a page of 20 issued 1 query for the
+     * page plus up to 20 more for the orders. LEFT (not inner) join because
+     * broadcasts legitimately have no order and must still appear.
+     */
+    @Query(value = "select n from Notification n left join fetch n.order "
+            + "where n.customer.id = :customerId order by n.sentAt desc",
+            countQuery = "select count(n) from Notification n where n.customer.id = :customerId")
+    Page<Notification> findByCustomerIdOrderBySentAtDesc(@Param("customerId") Long customerId, Pageable pageable);
 
     /**
      * Paginated deliberately. A single order accumulates a notification per
