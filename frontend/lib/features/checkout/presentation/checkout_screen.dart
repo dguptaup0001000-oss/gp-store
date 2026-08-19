@@ -7,6 +7,7 @@ import '../../address/domain/address_models.dart';
 import '../../address/presentation/address_list_screen.dart';
 import '../../address/presentation/address_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../../core/util/idempotency_key.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../domain/checkout_models.dart';
 import 'checkout_providers.dart';
@@ -28,6 +29,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   CheckoutPreview? _preview;
   bool _isLoadingPreview = false;
   bool _isPlacingOrder = false;
+
+  /// Idempotency key for the checkout currently in progress. Held across
+  /// retries on purpose (see _placeOrder) and cleared only once an order has
+  /// actually been placed, so a retry of a failed attempt reuses it while a
+  /// brand-new checkout gets a fresh one.
+  String? _idempotencyKey;
   String? _previewError;
 
   @override
@@ -120,12 +127,27 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
     setState(() => _isPlacingOrder = true);
 
+    // Generated once per logical checkout and deliberately NOT regenerated
+    // on retry: reusing the key is the entire point. If a previous attempt
+    // timed out after the server had already created the order, re-sending
+    // the same key returns that original order instead of placing a second
+    // one. Generating a fresh key per attempt would defeat this completely
+    // and produce exactly the duplicate orders it exists to prevent.
+    //
+    // Note this is not the same protection as the _isPlacingOrder flag
+    // below. That stops a second TAP; this stops a second REQUEST, including
+    // ones the UI never initiated (a Dio-level retry on a reset connection,
+    // or a request that was actually delivered despite the client timing
+    // out). Only the server can settle those, which is why the key exists.
+    _idempotencyKey ??= generateIdempotencyKey();
+
     try {
       final repository = ref.read(checkoutRepositoryProvider);
 
       final orderResult = await repository.placeOrder(
         addressId: address!.id!,
         paymentMethod: _paymentMethod,
+        idempotencyKey: _idempotencyKey!,
         couponCode: _couponController.text.trim(),
       );
 
@@ -137,6 +159,13 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         orderId: orderResult.orderId!,
         paymentMethod: _paymentMethod,
       );
+
+      // Terminal success: this checkout is finished, so the key retires with
+      // it. Anything the customer starts after this is a NEW logical
+      // checkout and must carry a new key - reusing this one would make the
+      // server replay the order just placed. Cleared here rather than in
+      // finally{} precisely because a failure must KEEP the key for retry.
+      _idempotencyKey = null;
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(

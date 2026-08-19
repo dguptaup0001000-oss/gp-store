@@ -229,9 +229,16 @@ public class SecurityConfig {
                 // Everything else requires a valid, authenticated customer
                 .anyRequest().authenticated()
             )
-            .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
-            .addFilterBefore(jwtFilter,
-                    UsernamePasswordAuthenticationFilter.class);
+            // Order matters, and it changed: JwtFilter must run FIRST so the
+            // SecurityContext is populated by the time RateLimitFilter looks
+            // at it. Both used to be added with addFilterBefore against the
+            // same target, which put the rate limiter first - so it never had
+            // an authenticated principal to key on and fell back to IP for
+            // every request, including authenticated ones. That is what made
+            // carrier-NAT customers share a single quota. See
+            // RateLimitFilter's identity strategy.
+            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(rateLimitFilter, JwtFilter.class);
 
         return http.build();
     }

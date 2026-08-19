@@ -68,7 +68,10 @@ class OrderOwnershipTest {
                 cartItemServiceUnused, inventoryServiceUnused, paymentRepositoryUnused, couponServiceUnused,
                 deliveryEstimateServiceUnused, deliveryFeeServiceUnused, notificationServiceUnused,
                 auditLogServiceUnused, invoiceServiceUnused, taxServiceUnused, deliveryRepository,
-                deliveryServiceUnused, idempotencyRecordRepositoryUnused, orderSideEffectsExecutorUnused);
+                deliveryServiceUnused, idempotencyRecordRepositoryUnused, orderSideEffectsExecutorUnused,
+                // requireIdempotencyKey: these tests cover cancellation and
+                // ownership, never the checkout entry point that reads it.
+                false);
     }
 
     private Order orderOwnedBy(Long ownerId) {

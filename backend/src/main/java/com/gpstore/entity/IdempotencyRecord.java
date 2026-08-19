@@ -49,6 +49,28 @@ public class IdempotencyRecord {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    /**
+     * SHA-256 of the canonical form of the checkout this key was first used
+     * for - see OrderService.computeRequestFingerprint for exactly which
+     * fields go into it.
+     *
+     * Without this, an idempotency key only answered "has this key been
+     * used", so reusing one key for a genuinely different checkout would
+     * silently replay the FIRST order and the customer would never receive
+     * the second. Storing the fingerprint lets a reused key be told apart
+     * from a retried one: same key + same request replays, same key +
+     * different request is a client bug and gets a 409 instead of a wrong
+     * order.
+     *
+     * Nullable because rows written before this column existed have no
+     * fingerprint to compare against; those are treated as "cannot verify"
+     * and replayed rather than rejected, which preserves the old behaviour
+     * for in-flight keys across the deploy instead of failing real
+     * customers' retries.
+     */
+    @Column(name = "request_fingerprint", length = 64)
+    private String requestFingerprint;
+
     public IdempotencyRecord() {
     }
 
@@ -86,5 +108,13 @@ public class IdempotencyRecord {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getRequestFingerprint() {
+        return requestFingerprint;
+    }
+
+    public void setRequestFingerprint(String requestFingerprint) {
+        this.requestFingerprint = requestFingerprint;
     }
 }

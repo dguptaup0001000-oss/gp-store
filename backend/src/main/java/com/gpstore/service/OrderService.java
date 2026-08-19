@@ -58,6 +58,7 @@ public class OrderService {
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
     private final java.util.concurrent.ExecutorService orderSideEffectsExecutor;
+    private final boolean requireIdempotencyKey;
 
     public OrderService(
             OrderRepository repository,
@@ -82,7 +83,9 @@ public class OrderService {
             // at boot, not just this feature.
             @org.springframework.context.annotation.Lazy DeliveryService deliveryService,
             com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository,
-            java.util.concurrent.ExecutorService orderSideEffectsExecutor) {
+            java.util.concurrent.ExecutorService orderSideEffectsExecutor,
+            @org.springframework.beans.factory.annotation.Value("${orders.require-idempotency-key:true}")
+            boolean requireIdempotencyKey) {
 
         this.repository = repository;
         this.orderItemRepository = orderItemRepository;
@@ -102,6 +105,7 @@ public class OrderService {
         this.deliveryService = deliveryService;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.orderSideEffectsExecutor = orderSideEffectsExecutor;
+        this.requireIdempotencyKey = requireIdempotencyKey;
     }
 
     public Order save(Order order) {
@@ -207,18 +211,33 @@ public class OrderService {
      * never from the request body - this is what closes the IDOR that let any
      * caller place orders as any customer.
      *
-     * idempotencyKey is optional (null/blank if the client didn't send one -
-     * older clients simply get the old behavior, no breaking change). When
-     * present, a repeat call with the same (customerId, idempotencyKey) pair
-     * returns the original order instead of creating a second one - this is
-     * what stops a double-tap on Place Order, or a client retry after a
-     * network timeout, from creating two real orders for one purchase.
+     * idempotencyKey is REQUIRED by default (orders.require-idempotency-key,
+     * default true). A repeat call with the same (customerId, idempotencyKey)
+     * pair returns the original order instead of creating a second one -
+     * which is what stops a double-tap on Place Order, or a client retry
+     * after a network timeout, from creating two real orders for one
+     * purchase.
+     *
+     * It used to be optional, which in practice meant unused: the Flutter
+     * app never sent one, so real checkout had no duplicate protection at
+     * all despite the mechanism existing. Accepting a missing key silently
+     * is the failure mode that hides that, so order creation now rejects it.
+     *
+     * The flag exists so the requirement can be turned off for one deploy if
+     * an older client build is still in the wild, not as a permanent option
+     * - leaving it off returns checkout to having no retry protection.
      */
     @Transactional
     public PlaceOrderResponse placeOrder(PlaceOrderRequest request, Long customerId, String idempotencyKey) {
 
         if (request == null) {
             throw new BadRequestException("Request cannot be null");
+        }
+
+        if (requireIdempotencyKey && (idempotencyKey == null || idempotencyKey.isBlank())) {
+            throw new BadRequestException(
+                    "Idempotency-Key header is required for placing an order. "
+                            + "Generate one UUID per checkout attempt and re-send the SAME value on any retry.");
         }
 
         // Idempotency check. The unique DB constraint on
@@ -231,12 +250,42 @@ public class OrderService {
         boolean hasIdempotencyKey = idempotencyKey != null && !idempotencyKey.isBlank();
         com.gpstore.entity.IdempotencyRecord idempotencyRecord = null;
 
+        String fingerprint = hasIdempotencyKey ? computeRequestFingerprint(request, customerId) : null;
+
         if (hasIdempotencyKey) {
             Optional<com.gpstore.entity.IdempotencyRecord> existing =
                     idempotencyRecordRepository.findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey);
 
             if (existing.isPresent()) {
                 com.gpstore.entity.IdempotencyRecord record = existing.get();
+
+                // Same key, DIFFERENT request = the client reused a key for a
+                // genuinely different checkout. Replaying the first order here
+                // would mean the customer never receives this second one and
+                // has no way to tell, so this is a hard 409 instead.
+                //
+                // Deliberately skipped when this request's cart is empty. A
+                // successful checkout clears the cart, so a legitimate retry
+                // of an already-completed attempt necessarily arrives with an
+                // empty cart and would otherwise fingerprint differently from
+                // the request that created the record - false-409ing exactly
+                // the retry this whole mechanism exists to serve. An empty
+                // cart can never be a new logical checkout anyway (checkout
+                // rejects it outright below), so treating it as "unverifiable,
+                // fall through to replay" is safe.
+                //
+                // Also skipped when the stored fingerprint is null: rows
+                // written before this column existed cannot be compared, and
+                // failing in-flight keys across a deploy would break real
+                // customers mid-checkout.
+                if (record.getRequestFingerprint() != null
+                        && !record.getRequestFingerprint().equals(fingerprint)
+                        && !cartIsEmpty(customerId)) {
+                    throw new ConflictException(
+                            "This Idempotency-Key was already used for a different order. "
+                                    + "Use a new key for a new checkout.");
+                }
+
                 if (record.getOrderId() != null) {
                     // Genuine replay: same checkout attempt, already completed.
                     // Return the original result rather than processing again.
@@ -256,6 +305,7 @@ public class OrderService {
             idempotencyRecord.setCustomerId(customerId);
             idempotencyRecord.setIdempotencyKey(idempotencyKey);
             idempotencyRecord.setCreatedAt(LocalDateTime.now());
+            idempotencyRecord.setRequestFingerprint(fingerprint);
             try {
                 idempotencyRecord = idempotencyRecordRepository.saveAndFlush(idempotencyRecord);
             } catch (org.springframework.dao.DataIntegrityViolationException raceLost) {
@@ -756,6 +806,97 @@ public class OrderService {
 
         var delivery = deliveryRepository.findByOrderId(savedOrder.getId()).orElse(null);
         return com.gpstore.dto.response.OrderDetailResponse.from(savedOrder, delivery);
+    }
+
+    /**
+     * Deterministic fingerprint of "which checkout is this", used to tell a
+     * retried request apart from a reused key (see the idempotency block in
+     * placeOrder).
+     *
+     * CANONICAL FIELDS - exactly these, in this order:
+     *
+     *   1. customerId      - scopes the hash to one account, so two
+     *                        customers' identical carts never collide.
+     *   2. addressId       - delivering the same basket somewhere else is a
+     *                        different order.
+     *   3. paymentMethod   - upper-cased; "cod" and "COD" are the same
+     *                        request, not two.
+     *   4. couponCode      - upper-cased, null and blank both normalise to
+     *                        empty, so "no coupon" has one representation.
+     *   5. cart line items - each as variantId:quantity, SORTED by variant
+     *                        id. Sorted because cart iteration order is not
+     *                        guaranteed and must not change the hash; the
+     *                        same basket has to fingerprint identically
+     *                        every time.
+     *
+     * Cart contents are included on purpose: the request body alone carries
+     * no basket, so without them "same key, different quantity" and "same
+     * key, different product" would be indistinguishable from a retry.
+     *
+     * NOT included, deliberately: nothing sensitive and nothing unstable.
+     * No prices (server-derived, and a price change between attempts must
+     * not turn a retry into a conflict), no timestamps, no request ids, no
+     * customer name/phone/address text - the address is referenced by id
+     * rather than hashing where somebody lives.
+     *
+     * SHA-256 because it is collision-resistant and fixed-width, so the
+     * column stays 64 chars regardless of basket size. This is a
+     * change-detector, not a security control - it protects against client
+     * mistakes, not against a caller deliberately forging a matching hash,
+     * who could equally just send the original request.
+     */
+    private String computeRequestFingerprint(PlaceOrderRequest request, Long customerId) {
+        StringBuilder canonical = new StringBuilder()
+                .append(customerId).append('|')
+                .append(request.getAddressId()).append('|')
+                .append(request.getPaymentMethod() == null
+                        ? "" : request.getPaymentMethod().trim().toUpperCase()).append('|')
+                .append(request.getCouponCode() == null
+                        ? "" : request.getCouponCode().trim().toUpperCase()).append('|');
+
+        Customer customer = customerService.getById(customerId);
+        if (customer != null && customer.getCart() != null) {
+            List<CartItem> items = cartItemService.getCartItems(customer.getCart().getId());
+            if (items != null) {
+                items.stream()
+                        .filter(item -> item.getProductVariant() != null)
+                        .sorted(java.util.Comparator.comparing(item -> item.getProductVariant().getId()))
+                        .forEach(item -> canonical
+                                .append(item.getProductVariant().getId())
+                                .append(':')
+                                .append(item.getQuantity())
+                                .append(','));
+            }
+        }
+
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16))
+                        .append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            // SHA-256 is required of every JVM - unreachable in practice.
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
+    }
+
+    /**
+     * Whether this customer's cart currently has nothing in it. Used only to
+     * decide whether a fingerprint mismatch is meaningful - see the
+     * idempotency block in placeOrder for why an empty cart makes the
+     * comparison unverifiable rather than conflicting.
+     */
+    private boolean cartIsEmpty(Long customerId) {
+        Customer customer = customerService.getById(customerId);
+        if (customer == null || customer.getCart() == null) {
+            return true;
+        }
+        List<CartItem> items = cartItemService.getCartItems(customer.getCart().getId());
+        return items == null || items.isEmpty();
     }
 
     /**
