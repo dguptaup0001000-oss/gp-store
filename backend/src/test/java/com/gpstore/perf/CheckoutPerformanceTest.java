@@ -259,6 +259,62 @@ class CheckoutPerformanceTest {
                         + "Was: " + result);
     }
 
+
+    /**
+     * Cart quantity update and removal - the two most-tapped mutations in the
+     * app. Both go through CartService's fetchWithItems, which uses the
+     * fetch-joined cart query, so their cost must not scale with basket size.
+     */
+    @Test
+    void cartUpdateAndRemoveDoNotScaleWithCartSize() {
+        Fixture fixture = newCustomerWithCart(CART_SIZE);
+        var items = cartItemRepository.findByCartId(fixture.cartId);
+        var firstItem = items.get(0);
+        var secondItem = items.get(1);
+
+        QueryCounter.Result update = QueryCounter.measure(entityManagerFactory,
+                () -> cartService.updateItemQuantity(fixture.customerId, firstItem.getId(), 3));
+        System.out.println("[PERF] cart-update (cart of " + CART_SIZE + "): " + update);
+
+        QueryCounter.Result remove = QueryCounter.measure(entityManagerFactory,
+                () -> cartService.removeItem(fixture.customerId, secondItem.getId()));
+        System.out.println("[PERF] cart-remove (cart of " + CART_SIZE + "): " + remove);
+
+        assertTrue(update.queryCount() <= 14,
+                "Cart quantity update should not cost a query per existing item. Was: " + update);
+        assertTrue(remove.queryCount() <= 14,
+                "Cart removal should not cost a query per existing item. Was: " + remove);
+    }
+
+    /**
+     * Order detail - the endpoint behind "track my order".
+     *
+     * Guards the fetch join added for OrderDetailResponse: without it this
+     * lazily loaded the items collection, then each item's variant and
+     * product, then the address, so its cost grew with the number of lines on
+     * the order.
+     */
+    @Test
+    void orderDetailDoesNotScaleWithOrderSize() {
+        Fixture fixture = newCustomerWithCart(CART_SIZE);
+        PlaceOrderRequest request = new PlaceOrderRequest();
+        request.setAddressId(fixture.addressId);
+        request.setPaymentMethod("COD");
+        Long orderId = orderService.placeOrder(request, fixture.customerId, UUID.randomUUID().toString()).getOrderId();
+
+        // Warm up so one-off query-plan costs are not attributed here.
+        orderService.getOwnedOrderDetail(orderId, fixture.customerId, false);
+
+        QueryCounter.Result result = QueryCounter.measure(entityManagerFactory,
+                () -> orderService.getOwnedOrderDetail(orderId, fixture.customerId, false));
+
+        System.out.println("[PERF] order-detail (" + CART_SIZE + " items): " + result);
+
+        assertTrue(result.queryCount() <= 6,
+                "Order detail should be a small constant number of queries regardless of how "
+                        + "many lines the order has. Was: " + result);
+    }
+
     // ---------- fixtures ----------
 
     private record Fixture(Long customerId, Long addressId, Long cartId) {
