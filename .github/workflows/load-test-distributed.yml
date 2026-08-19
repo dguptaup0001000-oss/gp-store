@@ -1,0 +1,244 @@
+name: Load Test (distributed, manual)
+
+# Sharded load generation across several GitHub runners.
+#
+# WHY THIS EXISTS SEPARATELY FROM load-test.yml: a single ubuntu-latest
+# runner is 2-4 vCPUs. k6 is efficient, but each virtual user still costs a
+# goroutine, a connection, and JSON parsing per iteration - realistically
+# that runner tops out somewhere around 1,000-3,000 VUs for THIS script
+# before the generator itself becomes the bottleneck. Past that point the
+# numbers stop describing the backend and start describing the runner, which
+# is the single easiest way to produce a load-test result that is confidently
+# wrong.
+#
+# So high VU counts are reached by running N runners at once, each carrying
+# total_vus / shards, rather than by asking one runner for a number it cannot
+# honestly produce.
+#
+# READ THIS BEFORE RAISING THE NUMBERS:
+#
+# 1. Each shard is a separate machine with its own IP. That is what makes
+#    sharding work for AUTH endpoints, which are rate-limited per IP
+#    (rate-limit.auth-per-minute, default 20). It also means per-IP limits
+#    scale with shard count, so a sharded run is NOT equivalent to the same
+#    VU count from one address - that is a deliberate property, not a bug.
+#
+# 2. Authenticated scenarios need seeded accounts, and seeding is
+#    deliberately slow (paced against the auth rate limit). Seeding
+#    thousands of accounts takes hours. High-VU runs are therefore
+#    browse-heavy by design; cart/checkout stay modest.
+#
+# 3. Point this at a target you are allowed to saturate. Against a small
+#    instance the result of a very large run is "everything timed out",
+#    which measures the instance, not the code.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Backend base URL (include /v1)'
+        required: true
+        default: 'https://gp-store.onrender.com/v1'
+      total_browse_vus:
+        description: 'TOTAL concurrent browse VUs across all shards'
+        required: true
+        default: '2000'
+      total_cart_vus:
+        description: 'TOTAL concurrent cart VUs across all shards (needs seeded accounts)'
+        required: true
+        default: '100'
+      shards:
+        description: 'How many runners to split the load across (1-20)'
+        required: true
+        default: '4'
+      duration:
+        description: 'Hold duration at peak (k6 time string)'
+        required: true
+        default: '3m'
+      ramp_time:
+        description: 'Ramp up/down duration (k6 time string)'
+        required: true
+        default: '1m'
+      accounts_per_shard:
+        description: 'Test accounts each shard seeds (0 to skip seeding and run browse-only)'
+        required: true
+        default: '0'
+
+jobs:
+  # Computes the per-shard VU split once, so every shard agrees on it and the
+  # arithmetic is visible in the run log rather than hidden in an expression.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      browse_per_shard: ${{ steps.plan.outputs.browse_per_shard }}
+      cart_per_shard: ${{ steps.plan.outputs.cart_per_shard }}
+      start_at: ${{ steps.plan.outputs.start_at }}
+    steps:
+      - name: Compute shard plan
+        id: plan
+        run: |
+          SHARDS="${{ inputs.shards }}"
+          if [ "$SHARDS" -lt 1 ] || [ "$SHARDS" -gt 20 ]; then
+            echo "shards must be between 1 and 20 (GitHub's concurrent job limit)" >&2
+            exit 1
+          fi
+
+          BROWSE_PER=$(( ${{ inputs.total_browse_vus }} / SHARDS ))
+          CART_PER=$(( ${{ inputs.total_cart_vus }} / SHARDS ))
+
+          # A shard carrying 0 VUs would still spin up a runner and report
+          # meaningless output, so fail loudly instead.
+          if [ "$BROWSE_PER" -lt 1 ]; then
+            echo "total_browse_vus / shards is less than 1 - use fewer shards" >&2
+            exit 1
+          fi
+
+          # Synchronized start. Runners are scheduled independently and can
+          # begin up to tens of seconds apart; without a common start time the
+          # shards ramp at different moments and the peak is lower and
+          # flatter than the requested figure - the run then under-reports
+          # what the backend actually withstood.
+          START_AT=$(( $(date +%s) + 150 ))
+
+          echo "matrix=$(seq -s, 1 "$SHARDS" | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+          echo "browse_per_shard=$BROWSE_PER" >> "$GITHUB_OUTPUT"
+          echo "cart_per_shard=$CART_PER" >> "$GITHUB_OUTPUT"
+          echo "start_at=$START_AT" >> "$GITHUB_OUTPUT"
+
+          echo "### Load plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Shards: $SHARDS" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Browse VUs: ${{ inputs.total_browse_vus }} total -> $BROWSE_PER per shard" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Cart VUs: ${{ inputs.total_cart_vus }} total -> $CART_PER per shard" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Target: ${{ inputs.base_url }}" >> "$GITHUB_STEP_SUMMARY"
+
+  load:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      # fail-fast off: one shard dying must not cancel the others, or a
+      # single flaky runner destroys the whole measurement.
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Seed test accounts for this shard
+        if: ${{ inputs.accounts_per_shard != '0' }}
+        working-directory: load-tests
+        # Each shard seeds its OWN accounts from its OWN IP, which is what
+        # keeps seeding inside the per-IP auth rate limit while still scaling
+        # with shard count.
+        run: BASE_URL="${{ inputs.base_url }}" COUNT="${{ inputs.accounts_per_shard }}" node seed-accounts.js
+
+      - uses: grafana/setup-k6-action@v1
+
+      - name: Wait for synchronized start
+        run: |
+          TARGET=${{ needs.plan.outputs.start_at }}
+          NOW=$(date +%s)
+          WAIT=$(( TARGET - NOW ))
+          if [ "$WAIT" -gt 0 ]; then
+            echo "Shard ${{ matrix.shard }} waiting ${WAIT}s so all shards ramp together"
+            sleep "$WAIT"
+          else
+            echo "Shard ${{ matrix.shard }} is ${WAIT#-}s late (setup took longer than the window)."
+            echo "Its peak will overlap the others' but the combined peak may be below target."
+          fi
+
+      - name: Run k6 shard
+        working-directory: load-tests
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          BROWSE_VUS: ${{ needs.plan.outputs.browse_per_shard }}
+          CART_VUS: ${{ needs.plan.outputs.cart_per_shard }}
+          RAMP_TIME: ${{ inputs.ramp_time }}
+          HOLD_TIME: ${{ inputs.duration }}
+        # --summary-export writes machine-readable results so the shards can
+        # be added up afterwards; the console summary alone cannot be
+        # aggregated across runners.
+        run: k6 run --summary-export=summary-shard-${{ matrix.shard }}.json browse-cart-checkout.js
+
+      - name: Upload shard summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary-shard-${{ matrix.shard }}
+          path: load-tests/summary-shard-*.json
+
+  aggregate:
+    needs: [plan, load]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: k6-summary-shard-*
+          merge-multiple: true
+          path: summaries
+
+      - name: Combine shard results
+        run: |
+          python3 - <<'PY'
+          import glob, json, os
+
+          files = sorted(glob.glob("summaries/*.json"))
+          if not files:
+              print("No shard summaries found - every shard failed before k6 ran.")
+              raise SystemExit(0)
+
+          total_reqs = 0
+          total_failed = 0
+          p95s = []
+          shards = 0
+
+          for path in files:
+              with open(path) as handle:
+                  data = json.load(handle)
+              metrics = data.get("metrics", {})
+              reqs = metrics.get("http_reqs", {})
+              failed = metrics.get("http_req_failed", {})
+              duration = metrics.get("http_req_duration", {})
+
+              count = reqs.get("count", 0)
+              total_reqs += count
+              # http_req_failed is a rate; convert back to an absolute count
+              # so shards of different sizes can be summed honestly.
+              total_failed += failed.get("rate", 0) * count
+              if "p(95)" in duration:
+                  p95s.append(duration["p(95)"])
+              shards += 1
+
+          lines = []
+          lines.append("### Combined result across %d shard(s)" % shards)
+          lines.append("")
+          lines.append("| Metric | Value |")
+          lines.append("| --- | --- |")
+          lines.append("| Total HTTP requests | %d |" % total_reqs)
+          lines.append("| Overall error rate | %.2f%% |" %
+                       ((total_failed / total_reqs * 100) if total_reqs else 0))
+          if p95s:
+              # Deliberately reported as a RANGE, not averaged: averaging
+              # percentiles across shards is statistically meaningless, and
+              # the worst shard is the number that matters.
+              lines.append("| p95 latency (best shard) | %.0f ms |" % min(p95s))
+              lines.append("| p95 latency (WORST shard) | %.0f ms |" % max(p95s))
+          lines.append("")
+          lines.append("Per-shard percentiles are a range, not an average - averaging "
+                       "percentiles across generators is not meaningful. Judge the run "
+                       "by the worst shard.")
+          lines.append("")
+          lines.append("Cross-check against the target's own metrics (Render CPU/memory, "
+                       "Supabase connection count, /v1/actuator/prometheus) for the same "
+                       "window. Without that, a clean result may only mean the load never "
+                       "actually arrived.")
+
+          out = "\\n".join(lines)
+          print(out)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write(out + "\\n")
+          PY

@@ -123,3 +123,55 @@ saturation, Redis latency - and at roughly what request rate does that happen. T
 number becomes the baseline the Phase 3 infrastructure changes are sized against, and
 once those are in place, re-running this same script at higher `BROWSE_VUS`/`CART_VUS`
 (or via a distributed generator) is what actually closes in on validating 50k.
+
+
+## Running high VU counts on GitHub Actions (distributed)
+
+`.github/workflows/load-test.yml` runs everything on ONE runner. That is the
+right tool up to roughly 1,000-3,000 VUs for this script; past that the
+runner's own 2-4 vCPUs become the limit and the numbers describe the
+generator rather than the backend.
+
+`.github/workflows/load-test-distributed.yml` splits the load across several
+runners instead. Inputs are TOTALS - it divides them by `shards` itself and
+prints the arithmetic in the run summary.
+
+### What one runner can actually generate
+
+A rough working figure for this script, which does JSON parsing and think
+time per iteration: **~1,000-3,000 VUs per runner**. Beyond that k6 starts
+missing its own scheduling targets, and the first symptom is latency that
+looks like backend slowness but is really generator queueing. k6 reports
+`dropped_iterations` when this happens - if that number is non-zero, the run
+did not deliver the load you asked for and the results should not be read as
+backend measurements.
+
+So: 20,000 VUs needs about 8-20 shards. GitHub's concurrency limit (20 jobs
+on the free plan) is the ceiling on shard count.
+
+### Synchronized start
+
+Shards are scheduled independently and can start tens of seconds apart. The
+workflow makes every shard wait until a common wall-clock timestamp before
+starting k6, so the ramps line up. Without that, the shards peak at
+different moments and the combined peak is lower than requested - which
+under-reports what the backend withstood.
+
+### Reading a sharded result
+
+The aggregate job sums requests and error counts and reports p95 as a RANGE
+across shards, deliberately not an average. Averaging percentiles across
+generators is not a meaningful operation, and the worst shard is the number
+that matters.
+
+A sharded run is NOT equivalent to the same VU count from a single address:
+per-IP limits (auth, and anything else keyed on IP) scale with shard count,
+because each runner has its own IP. Authenticated *mutation* limits are keyed
+per customer, so those do NOT scale with shards - they scale with how many
+accounts were seeded.
+
+### Before pointing large numbers at anything
+
+Confirm you are allowed to saturate the target. Against a small instance, a
+very large run produces "everything timed out", which measures the instance,
+not the code - and on a shared platform it can look like abuse.
