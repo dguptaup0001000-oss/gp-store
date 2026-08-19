@@ -1,0 +1,97 @@
+package com.gpstore.controller;
+
+import com.gpstore.entity.Inventory;
+import com.gpstore.security.CurrentUser;
+import com.gpstore.service.InventoryService;
+import com.gpstore.service.OrderService;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * Phase 4/18: every list endpoint is supposed to cap page size server-side
+ * (Math.min(size, 100) is the established pattern across controllers) so a
+ * client asking for size=100000 can never force a full-table dump back out.
+ * These are plain controller unit tests (mocked service layer) - no DB
+ * needed, since the capping happens entirely in the controller before the
+ * service is ever called, and the only thing under test is what Pageable
+ * actually gets passed down.
+ */
+@ExtendWith(MockitoExtension.class)
+class PaginationCapTest {
+
+    @Mock private OrderService orderService;
+    @Mock private CurrentUser currentUser;
+    @Mock private InventoryService inventoryService;
+
+    private OrderController orderController;
+    private InventoryController inventoryController;
+
+    @BeforeEach
+    void setUp() {
+        orderController = new OrderController(orderService, currentUser);
+        inventoryController = new InventoryController(inventoryService);
+    }
+
+    @Test
+    void getMyOrdersCapsRequestedPageSizeAt100() {
+        when(currentUser.customerId()).thenReturn(1L);
+        when(orderService.getMyOrders(eq(1L), any())).thenReturn(Page.empty());
+
+        orderController.getMyOrders(0, 100_000);
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(orderService).getMyOrders(eq(1L), captor.capture());
+        assertEquals(100, captor.getValue().getPageSize(),
+                "size=100000 must be capped to 100, never accepted as-is - this is what stops a client dumping every order in one call");
+    }
+
+    @Test
+    void getAllOrdersForAdminCapsRequestedPageSizeAt100() {
+        when(orderService.getAllOrdersForAdmin(any())).thenReturn(Page.empty());
+
+        orderController.getAllOrdersForAdmin(0, Integer.MAX_VALUE);
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(orderService).getAllOrdersForAdmin(captor.capture());
+        assertEquals(100, captor.getValue().getPageSize(),
+                "Integer.MAX_VALUE must still be capped to 100, not passed straight through to the query");
+    }
+
+    @Test
+    void inventoryGetAllCapsRequestedPageSizeAt100() {
+        when(inventoryService.getAll(any())).thenReturn(Page.<Inventory>empty());
+
+        inventoryController.getAll(0, 5000);
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(inventoryService).getAll(captor.capture());
+        assertEquals(100, captor.getValue().getPageSize(),
+                "size=5000 must be capped to 100, same as every other paginated admin list");
+    }
+
+    @Test
+    void reasonableRequestedPageSizeIsRespectedAsIs() {
+        when(currentUser.customerId()).thenReturn(1L);
+        when(orderService.getMyOrders(eq(1L), any())).thenReturn(Page.empty());
+
+        orderController.getMyOrders(0, 20);
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(orderService).getMyOrders(eq(1L), captor.capture());
+        assertEquals(20, captor.getValue().getPageSize(),
+                "capping should only kick in above the limit - a normal page size shouldn't be silently altered");
+    }
+}
