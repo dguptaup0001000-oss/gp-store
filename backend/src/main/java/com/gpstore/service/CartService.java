@@ -76,7 +76,12 @@ public class CartService {
                             + " is currently unavailable");
         }
 
-        Cart cart = cartRepository.findByCustomerId(customerId)
+        // Locked for the rest of this transaction (see
+        // CartRepository.findByCustomerIdForUpdate) - a second concurrent
+        // addToCart/updateItemQuantity/removeItem for this same cart blocks
+        // here until this one commits, instead of racing the item lookup
+        // and quantity increment below.
+        Cart cart = cartRepository.findByCustomerIdForUpdate(customerId)
                 .orElseGet(() -> {
                     Cart newCart = new Cart();
                     newCart.setCustomer(customer);
@@ -117,6 +122,11 @@ public class CartService {
      */
     @Transactional
     public Cart updateItemQuantity(Long customerId, Long cartItemId, int newQuantity) {
+        // See CartRepository.findByCustomerIdForUpdate's doc comment - locks
+        // out any concurrent addToCart/updateItemQuantity/removeItem on this
+        // same cart until this transaction commits.
+        cartRepository.findByCustomerIdForUpdate(customerId);
+
         CartItem item = getOwnedCartItem(customerId, cartItemId);
         Cart cart = item.getCart();
 
@@ -135,6 +145,9 @@ public class CartService {
 
     @Transactional
     public Cart removeItem(Long customerId, Long cartItemId) {
+        // See CartRepository.findByCustomerIdForUpdate's doc comment.
+        cartRepository.findByCustomerIdForUpdate(customerId);
+
         CartItem item = getOwnedCartItem(customerId, cartItemId);
         Cart cart = item.getCart();
 
