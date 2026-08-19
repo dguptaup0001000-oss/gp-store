@@ -36,7 +36,8 @@ public interface DeliveryRepository
     @Query("select d from Delivery d where d.estimatedDeliveryTime < :now " +
             "and d.deliveryStatus not in ('DELIVERED', 'CANCELLED') " +
             "and (d.guaranteeBreached = false or d.guaranteeBreached is null)")
-    List<Delivery> findLateNotYetFlagged(@Param("now") LocalDateTime now);
+    List<Delivery> findLateNotYetFlagged(@Param("now") LocalDateTime now,
+                                        org.springframework.data.domain.Pageable pageable);
 
     List<Delivery> findByGuaranteeBreachedTrueOrderByEstimatedDeliveryTimeDesc();
 

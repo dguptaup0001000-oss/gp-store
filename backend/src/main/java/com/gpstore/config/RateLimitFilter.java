@@ -1,5 +1,6 @@
 package com.gpstore.config;
 
+import com.gpstore.security.AuthenticatedUser;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -9,6 +10,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -16,30 +19,69 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * Basic brute-force protection on login/register/checkout - the most
- * obvious targets for a credential-stuffing, account-spam, or checkout-spam
- * script. Limits each IP to MAX_REQUESTS per WINDOW_SECONDS on these
- * specific endpoints only - everything else is untouched.
+ * Brute-force and abuse protection on the endpoints worth protecting.
  *
- * Redis-backed (a fixed-window counter via one atomic INCR+EXPIRE, not the
- * sliding-window deque the previous in-memory version used - a fixed window
- * is the standard distributed-rate-limit pattern and close enough here;
- * exact sliding-window precision was never the point) so every backend
- * instance shares the same count. The previous ConcurrentHashMap-based
- * version tracked counts per-instance, meaning the real effective limit
- * became (MAX_REQUESTS x number of instances) the moment more than one
- * instance ran.
+ * Redis-backed (a fixed-window counter via one atomic INCR+EXPIRE) so every
+ * backend instance shares the same count - an in-memory counter would make
+ * the real limit (limit x number of instances) the moment more than one
+ * instance runs. Fails OPEN if Redis is unreachable: a Redis outage should
+ * degrade rate limiting, not take down login and checkout.
  *
- * Fails OPEN (lets the request through) if Redis itself is unreachable -
- * a Redis outage should degrade rate-limiting, not take down login/checkout
- * entirely.
+ * IDENTITY STRATEGY - the important part, and what changed.
+ *
+ * Everything used to be keyed on IP alone at 10 requests/minute. On Indian
+ * mobile networks that is actively wrong: carrier-grade NAT puts thousands
+ * of unrelated subscribers behind one public IP, so ten customers checking
+ * out from the same carrier could lock out every other customer on that
+ * carrier. The limit measured "how busy is this IP", which for mobile
+ * traffic is not a meaningful statement about any individual user.
+ *
+ * So the key now depends on what identity is actually available:
+ *
+ *   AUTHENTICATED endpoints -> keyed by customer id.
+ *     Precise, immune to NAT, and directly meaningful: it caps what one
+ *     account can do, which is the thing worth capping. A shared carrier IP
+ *     no longer causes collateral damage.
+ *
+ *   UNAUTHENTICATED (login/register/OTP) -> keyed by IP, necessarily.
+ *     There is no verified identity yet - that is the point of these
+ *     endpoints - so IP is the only signal available, and IP protection is
+ *     what actually stops credential stuffing. These keep a deliberately
+ *     tighter limit. The NAT trade-off is real and unavoidable here: the
+ *     alternative (no limit) means anyone can brute-force passwords and burn
+ *     SMS credits on OTP sends. The limit is configurable so it can be
+ *     raised if legitimate users on one carrier are being blocked.
+ *
+ * DOCUMENTED LIMITS (all per minute, all overridable by env var):
+ *
+ *   rate-limit.auth-per-minute            default 20, per IP
+ *       login, register, otp/send, otp/verify, reset-password-with-otp.
+ *       Tight on purpose - these are the credential-stuffing and
+ *       SMS-cost targets. 20/min still allows a real person to mistype a
+ *       password several times and request a fresh OTP.
+ *
+ *   rate-limit.checkout-per-minute        default 20, per customer
+ *       orders/place, payments. No human places 20 orders a minute, so
+ *       this only ever catches a stuck retry loop or a script, while
+ *       leaving impatient double-taps (already made safe by idempotency
+ *       keys and row locks) comfortably under the line.
+ *
+ *   rate-limit.mutation-per-minute        default 60, per customer
+ *       cart mutations and review creation. Deliberately generous: a
+ *       customer tapping + on a quantity stepper genuinely can fire
+ *       several requests per second, and blocking that would break normal
+ *       shopping. This exists to stop runaway loops, not to pace users.
+ *
+ * None of this replaces the correctness guards (row locks, unique
+ * constraints, idempotency keys) - those are what make concurrent requests
+ * safe. Rate limiting only stops one client burning capacity that other
+ * shoppers need.
  */
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
 
-    private static final int MAX_REQUESTS = 10;
     private static final long WINDOW_SECONDS = 60;
 
     private static final DefaultRedisScript<Long> INCREMENT_AND_EXPIRE = new DefaultRedisScript<>("""
@@ -52,39 +94,43 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private final StringRedisTemplate redisTemplate;
     private final boolean trustForwardedFor;
+    private final int authPerMinute;
+    private final int checkoutPerMinute;
+    private final int mutationPerMinute;
 
     public RateLimitFilter(
             StringRedisTemplate redisTemplate,
-            @Value("${rate-limit.trust-forwarded-for:false}") boolean trustForwardedFor) {
+            @Value("${rate-limit.trust-forwarded-for:false}") boolean trustForwardedFor,
+            @Value("${rate-limit.auth-per-minute:20}") int authPerMinute,
+            @Value("${rate-limit.checkout-per-minute:20}") int checkoutPerMinute,
+            @Value("${rate-limit.mutation-per-minute:60}") int mutationPerMinute) {
         this.redisTemplate = redisTemplate;
         this.trustForwardedFor = trustForwardedFor;
+        this.authPerMinute = authPerMinute;
+        this.checkoutPerMinute = checkoutPerMinute;
+        this.mutationPerMinute = mutationPerMinute;
     }
+
+    /** Which bucket a request falls into, or null if it is not limited at all. */
+    private enum Bucket { AUTH, CHECKOUT, MUTATION }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
 
-        String path = request.getServletPath();
-        boolean isRateLimited = path.equals("/api/auth/login")
-                || path.equals("/api/auth/register")
-                || path.equals("/api/auth/otp/send")
-                || path.equals("/api/auth/otp/verify")
-                // Order placement and payment initiation are the two write
-                // paths a spike hammers hardest - impatient double-taps and
-                // mobile client retry-on-timeout both replay the same
-                // request. This doesn't replace the DB-level correctness
-                // guards (row locks, unique constraints) already in place
-                // for those - it just stops one client from burning
-                // capacity that legitimate concurrent shoppers need.
-                || path.equals("/api/orders/place")
-                || path.equals("/api/payments");
-
-        if (!isRateLimited) {
+        Bucket bucket = classify(request);
+        if (bucket == null) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        String clientKey = "ratelimit:" + clientIp(request) + ":" + path;
+        int limit = switch (bucket) {
+            case AUTH -> authPerMinute;
+            case CHECKOUT -> checkoutPerMinute;
+            case MUTATION -> mutationPerMinute;
+        };
+
+        String clientKey = "ratelimit:" + identity(bucket, request) + ":" + request.getServletPath();
 
         Long count;
         try {
@@ -96,7 +142,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        if (count != null && count > MAX_REQUESTS) {
+        if (count != null && count > limit) {
             response.setStatus(429); // 429 Too Many Requests
             response.setContentType("application/json");
             response.getWriter().write(
@@ -105,6 +151,59 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private Bucket classify(HttpServletRequest request) {
+        String path = request.getServletPath();
+        String method = request.getMethod();
+
+        if (path.equals("/api/auth/login")
+                || path.equals("/api/auth/register")
+                || path.equals("/api/auth/otp/send")
+                || path.equals("/api/auth/otp/verify")
+                || path.equals("/api/auth/reset-password-with-otp")) {
+            return Bucket.AUTH;
+        }
+
+        if (path.equals("/api/orders/place") || path.equals("/api/payments")) {
+            return Bucket.CHECKOUT;
+        }
+
+        // Only mutations - browsing a cart or reading reviews is not abuse,
+        // and rate-limiting reads would break normal scrolling.
+        boolean isWrite = method.equals("POST") || method.equals("PUT")
+                || method.equals("PATCH") || method.equals("DELETE");
+        if (isWrite && (path.startsWith("/api/carts")
+                || path.startsWith("/api/cart-items")
+                || path.startsWith("/api/reviews"))) {
+            return Bucket.MUTATION;
+        }
+
+        return null;
+    }
+
+    /**
+     * Customer id when the request is authenticated, IP otherwise.
+     *
+     * This filter is registered to run AFTER JwtFilter (see SecurityConfig)
+     * precisely so the SecurityContext is already populated here - the two
+     * used to be registered at the same position with the rate limiter
+     * first, which meant no identity was ever available and IP was the only
+     * possible key.
+     *
+     * AUTH-bucket requests are always keyed by IP even if a token happens to
+     * be present: someone brute-forcing logins while holding a valid token
+     * for a different account must not get a fresh quota per account.
+     */
+    private String identity(Bucket bucket, HttpServletRequest request) {
+        if (bucket != Bucket.AUTH) {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedUser user
+                    && user.getCustomerId() != null) {
+                return "cust:" + user.getCustomerId();
+            }
+        }
+        return "ip:" + clientIp(request);
     }
 
     private String clientIp(HttpServletRequest request) {

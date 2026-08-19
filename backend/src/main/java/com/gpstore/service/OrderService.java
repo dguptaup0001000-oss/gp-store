@@ -58,6 +58,8 @@ public class OrderService {
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
     private final java.util.concurrent.ExecutorService orderSideEffectsExecutor;
+    private final com.gpstore.repository.OutboxEventRepository outboxEventRepository;
+    private final boolean requireIdempotencyKey;
 
     public OrderService(
             OrderRepository repository,
@@ -82,7 +84,10 @@ public class OrderService {
             // at boot, not just this feature.
             @org.springframework.context.annotation.Lazy DeliveryService deliveryService,
             com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository,
-            java.util.concurrent.ExecutorService orderSideEffectsExecutor) {
+            java.util.concurrent.ExecutorService orderSideEffectsExecutor,
+            com.gpstore.repository.OutboxEventRepository outboxEventRepository,
+            @org.springframework.beans.factory.annotation.Value("${orders.require-idempotency-key:true}")
+            boolean requireIdempotencyKey) {
 
         this.repository = repository;
         this.orderItemRepository = orderItemRepository;
@@ -102,6 +107,8 @@ public class OrderService {
         this.deliveryService = deliveryService;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.orderSideEffectsExecutor = orderSideEffectsExecutor;
+        this.outboxEventRepository = outboxEventRepository;
+        this.requireIdempotencyKey = requireIdempotencyKey;
     }
 
     public Order save(Order order) {
@@ -207,18 +214,33 @@ public class OrderService {
      * never from the request body - this is what closes the IDOR that let any
      * caller place orders as any customer.
      *
-     * idempotencyKey is optional (null/blank if the client didn't send one -
-     * older clients simply get the old behavior, no breaking change). When
-     * present, a repeat call with the same (customerId, idempotencyKey) pair
-     * returns the original order instead of creating a second one - this is
-     * what stops a double-tap on Place Order, or a client retry after a
-     * network timeout, from creating two real orders for one purchase.
+     * idempotencyKey is REQUIRED by default (orders.require-idempotency-key,
+     * default true). A repeat call with the same (customerId, idempotencyKey)
+     * pair returns the original order instead of creating a second one -
+     * which is what stops a double-tap on Place Order, or a client retry
+     * after a network timeout, from creating two real orders for one
+     * purchase.
+     *
+     * It used to be optional, which in practice meant unused: the Flutter
+     * app never sent one, so real checkout had no duplicate protection at
+     * all despite the mechanism existing. Accepting a missing key silently
+     * is the failure mode that hides that, so order creation now rejects it.
+     *
+     * The flag exists so the requirement can be turned off for one deploy if
+     * an older client build is still in the wild, not as a permanent option
+     * - leaving it off returns checkout to having no retry protection.
      */
     @Transactional
     public PlaceOrderResponse placeOrder(PlaceOrderRequest request, Long customerId, String idempotencyKey) {
 
         if (request == null) {
             throw new BadRequestException("Request cannot be null");
+        }
+
+        if (requireIdempotencyKey && (idempotencyKey == null || idempotencyKey.isBlank())) {
+            throw new BadRequestException(
+                    "Idempotency-Key header is required for placing an order. "
+                            + "Generate one UUID per checkout attempt and re-send the SAME value on any retry.");
         }
 
         // Idempotency check. The unique DB constraint on
@@ -231,12 +253,42 @@ public class OrderService {
         boolean hasIdempotencyKey = idempotencyKey != null && !idempotencyKey.isBlank();
         com.gpstore.entity.IdempotencyRecord idempotencyRecord = null;
 
+        String fingerprint = hasIdempotencyKey ? computeRequestFingerprint(request, customerId) : null;
+
         if (hasIdempotencyKey) {
             Optional<com.gpstore.entity.IdempotencyRecord> existing =
                     idempotencyRecordRepository.findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey);
 
             if (existing.isPresent()) {
                 com.gpstore.entity.IdempotencyRecord record = existing.get();
+
+                // Same key, DIFFERENT request = the client reused a key for a
+                // genuinely different checkout. Replaying the first order here
+                // would mean the customer never receives this second one and
+                // has no way to tell, so this is a hard 409 instead.
+                //
+                // Deliberately skipped when this request's cart is empty. A
+                // successful checkout clears the cart, so a legitimate retry
+                // of an already-completed attempt necessarily arrives with an
+                // empty cart and would otherwise fingerprint differently from
+                // the request that created the record - false-409ing exactly
+                // the retry this whole mechanism exists to serve. An empty
+                // cart can never be a new logical checkout anyway (checkout
+                // rejects it outright below), so treating it as "unverifiable,
+                // fall through to replay" is safe.
+                //
+                // Also skipped when the stored fingerprint is null: rows
+                // written before this column existed cannot be compared, and
+                // failing in-flight keys across a deploy would break real
+                // customers mid-checkout.
+                if (record.getRequestFingerprint() != null
+                        && !record.getRequestFingerprint().equals(fingerprint)
+                        && !cartIsEmpty(customerId)) {
+                    throw new ConflictException(
+                            "This Idempotency-Key was already used for a different order. "
+                                    + "Use a new key for a new checkout.");
+                }
+
                 if (record.getOrderId() != null) {
                     // Genuine replay: same checkout attempt, already completed.
                     // Return the original result rather than processing again.
@@ -256,6 +308,7 @@ public class OrderService {
             idempotencyRecord.setCustomerId(customerId);
             idempotencyRecord.setIdempotencyKey(idempotencyKey);
             idempotencyRecord.setCreatedAt(LocalDateTime.now());
+            idempotencyRecord.setRequestFingerprint(fingerprint);
             try {
                 idempotencyRecord = idempotencyRecordRepository.saveAndFlush(idempotencyRecord);
             } catch (org.springframework.dao.DataIntegrityViolationException raceLost) {
@@ -458,6 +511,15 @@ public class OrderService {
         // Clear cart
         cartItemService.clearCart(cartId);
 
+        // Durable record of the post-order work that must not be lost.
+        // INSERTed inside THIS transaction on purpose: it commits with the
+        // order or not at all, so there is no window in which an order
+        // exists but its invoice work was never recorded. Contrast the
+        // executor below, which is in-memory and does not survive the
+        // redeploys this service gets on every push.
+        outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
+                OutboxWorker.AGGREGATE_ORDER, order.getId(), OutboxWorker.EVENT_ORDER_PLACED));
+
         // None of notification creation, the audit log entry, invoice
         // generation, or delivery auto-assignment need to block the
         // customer's "order placed" response, or run inside the same
@@ -493,18 +555,15 @@ public class OrderService {
             notificationService.notifyAdminsOfNewOrder(placedOrder);
             auditLogService.log("ORDER_PLACED", "Order", placedOrderId,
                     "total=" + placedOrder.getTotalAmount() + ", paymentMethod=" + request.getPaymentMethod());
-            try {
-                invoiceService.generateForOrder(placedOrderId);
-            } catch (Exception ex) {
-                auditLogService.log("INVOICE_GENERATION_FAILED", "Order", placedOrderId,
-                        "Order placed but invoice could not be generated: " + ex.getMessage()
-                                + " - needs manual generation.");
-            }
-            // Best-effort and fully isolated (see DeliveryService.autoAssignBestEffort's
-            // doc comment) - if no delivery partner happens to be available
-            // right now, the order still succeeds; it just needs manual
-            // assignment afterward.
-            deliveryService.autoAssignBestEffort(placedOrderId);
+            // Invoice generation and delivery assignment deliberately do
+            // NOT run here any more. They are durable outbox work now (see
+            // the outbox insert above and OutboxWorker): losing an invoice
+            // because the process was redeployed mid-flight is a real
+            // accounting problem, and this executor - correctly bounded as
+            // it is - cannot survive a restart. What stays here is the
+            // genuinely best-effort, time-sensitive part: a push
+            // notification is worth little if delivered minutes late by a
+            // background worker, and losing one is acceptable.
         };
 
         // Belt-and-suspenders on top of the comment above: every individual
@@ -706,7 +765,12 @@ public class OrderService {
 
         order.setOrderStatus(OrderStatus.CANCELLED);
 
-        Payment payment = paymentRepository.findByOrderId(orderId).orElse(null);
+        // ORDER (already locked above) -> PAYMENT -> INVENTORY. Locking the
+        // payment row rather than plain-reading it: the expiry sweep and the
+        // UPI/COD confirmation paths can be looking at this same payment
+        // right now, and its status has to be re-read under the lock before
+        // being acted on rather than trusted from an unlocked read.
+        Payment payment = paymentRepository.findByOrderIdForUpdate(orderId).orElse(null);
 
         if (payment != null) {
 
@@ -718,16 +782,24 @@ public class OrderService {
             } else if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
 
                 payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
+
+            } else if (payment.getPaymentStatus() == PaymentStatus.PENDING) {
+
+                // Previously fell through untouched, which is what let a
+                // cancelled order keep a PENDING UPI payment carrying an old
+                // payment_date - still matching the stale-payment sweep's
+                // query, which then restored this order's stock a second
+                // time. A cancelled order's unconfirmed payment can never
+                // legitimately succeed later, so it is terminal now.
+                payment.setPaymentStatus(PaymentStatus.FAILED);
             }
             paymentRepository.save(payment);
         }
 
-        // Give back the stock that was reserved for this order at checkout time.
-        // Previously missing entirely - a cancelled order permanently lost its
-        // stock from the count, understating real available inventory forever.
-        // Row-locked the same way placeOrder() locks it, so a cancellation
-        // racing a fresh checkout on the same variant can't corrupt the count.
-        restoreInventoryForOrder(orderId);
+        // Give back the stock that was reserved for this order at checkout
+        // time. Guarded so it happens exactly once across every path that
+        // can trigger it - see restoreInventoryOnce.
+        restoreInventoryOnce(order);
 
         Order savedOrder = repository.save(order);
         notificationService.notifyOrderStatusChange(savedOrder, savedOrder.getOrderStatus());
@@ -743,6 +815,97 @@ public class OrderService {
 
         var delivery = deliveryRepository.findByOrderId(savedOrder.getId()).orElse(null);
         return com.gpstore.dto.response.OrderDetailResponse.from(savedOrder, delivery);
+    }
+
+    /**
+     * Deterministic fingerprint of "which checkout is this", used to tell a
+     * retried request apart from a reused key (see the idempotency block in
+     * placeOrder).
+     *
+     * CANONICAL FIELDS - exactly these, in this order:
+     *
+     *   1. customerId      - scopes the hash to one account, so two
+     *                        customers' identical carts never collide.
+     *   2. addressId       - delivering the same basket somewhere else is a
+     *                        different order.
+     *   3. paymentMethod   - upper-cased; "cod" and "COD" are the same
+     *                        request, not two.
+     *   4. couponCode      - upper-cased, null and blank both normalise to
+     *                        empty, so "no coupon" has one representation.
+     *   5. cart line items - each as variantId:quantity, SORTED by variant
+     *                        id. Sorted because cart iteration order is not
+     *                        guaranteed and must not change the hash; the
+     *                        same basket has to fingerprint identically
+     *                        every time.
+     *
+     * Cart contents are included on purpose: the request body alone carries
+     * no basket, so without them "same key, different quantity" and "same
+     * key, different product" would be indistinguishable from a retry.
+     *
+     * NOT included, deliberately: nothing sensitive and nothing unstable.
+     * No prices (server-derived, and a price change between attempts must
+     * not turn a retry into a conflict), no timestamps, no request ids, no
+     * customer name/phone/address text - the address is referenced by id
+     * rather than hashing where somebody lives.
+     *
+     * SHA-256 because it is collision-resistant and fixed-width, so the
+     * column stays 64 chars regardless of basket size. This is a
+     * change-detector, not a security control - it protects against client
+     * mistakes, not against a caller deliberately forging a matching hash,
+     * who could equally just send the original request.
+     */
+    private String computeRequestFingerprint(PlaceOrderRequest request, Long customerId) {
+        StringBuilder canonical = new StringBuilder()
+                .append(customerId).append('|')
+                .append(request.getAddressId()).append('|')
+                .append(request.getPaymentMethod() == null
+                        ? "" : request.getPaymentMethod().trim().toUpperCase()).append('|')
+                .append(request.getCouponCode() == null
+                        ? "" : request.getCouponCode().trim().toUpperCase()).append('|');
+
+        Customer customer = customerService.getById(customerId);
+        if (customer != null && customer.getCart() != null) {
+            List<CartItem> items = cartItemService.getCartItems(customer.getCart().getId());
+            if (items != null) {
+                items.stream()
+                        .filter(item -> item.getProductVariant() != null)
+                        .sorted(java.util.Comparator.comparing(item -> item.getProductVariant().getId()))
+                        .forEach(item -> canonical
+                                .append(item.getProductVariant().getId())
+                                .append(':')
+                                .append(item.getQuantity())
+                                .append(','));
+            }
+        }
+
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16))
+                        .append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            // SHA-256 is required of every JVM - unreachable in practice.
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
+    }
+
+    /**
+     * Whether this customer's cart currently has nothing in it. Used only to
+     * decide whether a fingerprint mismatch is meaningful - see the
+     * idempotency block in placeOrder for why an empty cart makes the
+     * comparison unverifiable rather than conflicting.
+     */
+    private boolean cartIsEmpty(Long customerId) {
+        Customer customer = customerService.getById(customerId);
+        if (customer == null || customer.getCart() == null) {
+            return true;
+        }
+        List<CartItem> items = cartItemService.getCartItems(customer.getCart().getId());
+        return items == null || items.isEmpty();
     }
 
     /**
@@ -766,17 +929,58 @@ public class OrderService {
     }
 
     /**
-     * Adds back every line item's quantity to its variant's stock count -
-     * the exact inverse of the decrement placeOrder() does at checkout.
-     * Public and reused by PaymentService.expireStalePendingUpiPayments():
-     * an order whose payment never confirmed has exactly the same "give the
-     * stock back" need as an explicitly cancelled one. Locks each inventory
-     * row the same way placeOrder() does, so this can't race a concurrent
-     * checkout on the same variant into an inconsistent count.
+     * Entry point for any caller that is NOT already holding this order's
+     * row lock - currently the stale-UPI expiry sweep. Takes the order lock
+     * first, then delegates, keeping the project-wide ORDER -> PAYMENT ->
+     * INVENTORY ordering intact.
+     *
+     * @return true if this call is the one that actually restored the stock,
+     *         false if some other path had already done it. Callers use the
+     *         return value to decide whether to log/audit a restore, so the
+     *         audit trail records one restore per order rather than one per
+     *         attempt.
      */
     @Transactional
-    public void restoreInventoryForOrder(Long orderId) {
-        List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
+    public boolean restoreInventoryForOrder(Long orderId) {
+        Order order = repository.findByIdForUpdate(orderId).orElse(null);
+        if (order == null) {
+            return false;
+        }
+        boolean restored = restoreInventoryOnce(order);
+        if (restored) {
+            repository.save(order);
+        }
+        return restored;
+    }
+
+    /**
+     * Adds back every line item's quantity to its variant's stock count -
+     * the exact inverse of the decrement placeOrder() does at checkout -
+     * but only if no other path has already done so for this order.
+     *
+     * The caller MUST already hold this order's row lock (cancelOrder gets
+     * it from findByIdForUpdate; restoreInventoryForOrder takes it itself).
+     * That lock is what makes the check-and-set below atomic: two paths
+     * racing to restore the same order serialize on the order row, the
+     * first sets the flag, and the second sees it set and does nothing.
+     *
+     * Reading and writing order status instead would not be enough - the
+     * paths disagree about what status means. The expiry sweep restores
+     * stock for orders that were never cancelled at all, so "is it
+     * CANCELLED" cannot be the guard; "has the stock gone back" has to be
+     * tracked as its own fact.
+     *
+     * Inventory rows are locked individually and in the order the items
+     * come back in, matching what placeOrder() does, so a restore racing a
+     * fresh checkout on the same variant cannot interleave into a wrong
+     * count.
+     */
+    private boolean restoreInventoryOnce(Order order) {
+        if (Boolean.TRUE.equals(order.getInventoryRestored())) {
+            return false;
+        }
+
+        List<OrderItem> items = orderItemRepository.findByOrderId(order.getId());
         for (OrderItem item : items) {
             if (item.getProductVariant() == null) {
                 continue;
@@ -788,5 +992,11 @@ public class OrderService {
             inventory.setStock(inventory.getStock() + item.getQuantity());
             inventoryService.save(inventory);
         }
+
+        // Set even when the order had no restorable items: the question this
+        // answers is "has the restore step run for this order", and running
+        // it again for a zero-item order is still pointless work.
+        order.setInventoryRestored(true);
+        return true;
     }
 }

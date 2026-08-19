@@ -36,22 +36,26 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
             "order by cnt desc")
     List<Object[]> findTrendingProductIds(@Param("since") LocalDateTime since);
 
-    /** Full purchase history for a customer, most recent order first - used for reorder suggestions. */
-    List<OrderItem> findByOrder_Customer_IdOrderByOrder_OrderDateDesc(Long customerId);
-
     /**
-     * Same as above, but eager-fetches productVariant and its product in the
-     * same query - RecommendationService.forCustomer() needs every item's
-     * product ID just to walk the list and dedupe, which previously meant
-     * two extra lazy-load queries (productVariant, then productVariant's
-     * own product) PER ORDER ITEM in that customer's entire history.
+     * A customer's recent purchase history, most recent order first,
+     * eager-fetching productVariant and its product in the same query -
+     * RecommendationService needs every item's product id just to dedupe,
+     * which without the fetch joins meant two extra lazy-load queries
+     * (productVariant, then its product) PER ORDER ITEM.
+     *
+     * Pageable is required, not optional: this used to return a customer's
+     * ENTIRE lifetime order history to pick a handful of recommendations,
+     * so its cost grew with how long someone had been a customer - the
+     * loyal customers whose pages you least want to be slow. Recommendations
+     * only need recent behaviour anyway, so the caller passes a hard cap.
      */
     @Query("SELECT oi FROM OrderItem oi " +
             "JOIN FETCH oi.productVariant pv " +
             "JOIN FETCH pv.product " +
             "WHERE oi.order.customer.id = :customerId " +
             "ORDER BY oi.order.orderDate DESC")
-    List<OrderItem> findByCustomerIdWithProductFetched(@Param("customerId") Long customerId);
+    List<OrderItem> findByCustomerIdWithProductFetched(@Param("customerId") Long customerId,
+                                                       org.springframework.data.domain.Pageable pageable);
 
     /** Used to enforce "verified purchase only" reviews - has this customer ever actually ordered this product? */
     boolean existsByOrder_Customer_IdAndProductVariant_Product_Id(Long customerId, Long productId);

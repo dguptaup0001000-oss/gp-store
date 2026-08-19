@@ -48,6 +48,28 @@ public class InvoiceService {
      * selling price (the Indian retail norm), so this never changes what the
      * customer paid - it only reports how much of that amount was tax.
      */
+    /**
+     * Idempotent entry point, for callers that may legitimately run twice -
+     * specifically the outbox worker, whose delivery is at-least-once.
+     *
+     * generateForOrder signals "already exists" by THROWING, which is right
+     * for an admin clicking a button twice but wrong for a retry: a
+     * ConflictException raised inside a @Transactional method marks the
+     * surrounding transaction rollback-only, so a caller that catches it
+     * still cannot commit - the work is undone underneath it and the commit
+     * fails with UnexpectedRollbackException. Catching the exception is
+     * therefore not enough; the exception must not be raised at all.
+     *
+     * @return the existing invoice if there is one, otherwise a freshly
+     *         generated one.
+     */
+    @Transactional
+    public com.gpstore.dto.response.InvoiceResponse generateForOrderIfAbsent(Long orderId) {
+        return invoiceRepository.findByOrderId(orderId)
+                .map(com.gpstore.dto.response.InvoiceResponse::from)
+                .orElseGet(() -> generateForOrder(orderId));
+    }
+
     @Transactional
     public com.gpstore.dto.response.InvoiceResponse generateForOrder(Long orderId) {
 

@@ -68,6 +68,36 @@ private PaymentStatus paymentStatus;
 
     private Boolean active;
 
+    /**
+     * Exactly-once guard for giving this order's reserved stock back.
+     *
+     * Three independent paths can decide an order's stock should be
+     * returned - an explicit cancellation, the stale-UPI expiry scheduler,
+     * and a failed/refunded payment - and they don't coordinate through
+     * order status alone. cancelOrder() left a PENDING UPI payment
+     * untouched, so a cancelled order's payment stayed eligible for the
+     * expiry sweep, which then restored the same stock a second time and
+     * silently inflated inventory.
+     *
+     * Statuses can't express this safely on their own: they answer "what
+     * happened to the order", not "has the stock already gone back". This
+     * flag answers exactly that one question, and every restore path now
+     * checks and sets it while holding the order row lock, so whichever
+     * path arrives first wins and the rest become no-ops.
+     *
+     * Mapped without nullable=false on purpose. The NOT NULL and DEFAULT
+     * FALSE live in V7's migration, where they belong; declaring them here
+     * too would make ddl-auto=update (which CI and local dev still use) try
+     * to ADD COLUMN ... NOT NULL against a table that already has rows,
+     * which Postgres rejects and Hibernate then swallows - leaving the
+     * column absent and every insert failing. Java-side the field defaults
+     * to false and every read goes through Boolean.TRUE.equals(...), so a
+     * null from a pre-migration row is treated as "not yet restored", which
+     * is the safe interpretation.
+     */
+    @Column(name = "inventory_restored")
+    private Boolean inventoryRestored = false;
+
     public Order() {
     }
 
@@ -177,5 +207,13 @@ public void setTotalAmount(BigDecimal totalAmount) {
 
     public void setActive(Boolean active) {
         this.active = active;
+    }
+
+    public Boolean getInventoryRestored() {
+        return inventoryRestored;
+    }
+
+    public void setInventoryRestored(Boolean inventoryRestored) {
+        this.inventoryRestored = inventoryRestored;
     }
 }

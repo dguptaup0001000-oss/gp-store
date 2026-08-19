@@ -23,12 +23,28 @@ import java.util.Optional;
 @Service
 public class PaymentService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PaymentService.class);
+
     private final PaymentRepository paymentRepository;
     private final OrderRepository orderRepository;
     private final AuditLogService auditLogService;
     private final UpiPaymentService upiPaymentService;
     private final OrderService orderService;
     private final int upiTimeoutMinutes;
+    private final int expiryBatchSize;
+    private final int maxExpiryBatchesPerRun;
+
+    /**
+     * This bean's own proxy, needed so the expiry sweep's per-payment
+     * REQUIRES_NEW transaction actually takes effect. A plain
+     * this.expireOneStalePayment(...) call would bypass Spring's
+     * transactional proxy entirely (self-invocation), silently running every
+     * batch in the caller's transaction - or in none at all - which is
+     * exactly the "one giant transaction" behaviour the batching exists to
+     * avoid. @Lazy breaks the circular dependency this would otherwise
+     * create on itself during construction.
+     */
+    private final PaymentService self;
 
     public PaymentService(
             PaymentRepository paymentRepository,
@@ -36,14 +52,20 @@ public class PaymentService {
             AuditLogService auditLogService,
             UpiPaymentService upiPaymentService,
             OrderService orderService,
-            @org.springframework.beans.factory.annotation.Value("${payment.upi-timeout-minutes}") int upiTimeoutMinutes) {
+            @org.springframework.context.annotation.Lazy PaymentService self,
+            @org.springframework.beans.factory.annotation.Value("${payment.upi-timeout-minutes}") int upiTimeoutMinutes,
+            @org.springframework.beans.factory.annotation.Value("${payment.expiry-batch-size:100}") int expiryBatchSize,
+            @org.springframework.beans.factory.annotation.Value("${payment.expiry-max-batches-per-run:50}") int maxExpiryBatchesPerRun) {
 
         this.paymentRepository = paymentRepository;
         this.orderRepository = orderRepository;
         this.auditLogService = auditLogService;
         this.upiPaymentService = upiPaymentService;
         this.orderService = orderService;
+        this.self = self;
         this.upiTimeoutMinutes = upiTimeoutMinutes;
+        this.expiryBatchSize = expiryBatchSize;
+        this.maxExpiryBatchesPerRun = maxExpiryBatchesPerRun;
     }
 
     /**
@@ -64,32 +86,132 @@ public class PaymentService {
             name = "expireStalePendingUpiPayments",
             lockAtMostFor = "10m",
             lockAtLeastFor = "1m")
-    @Transactional
     public void expireStalePendingUpiPayments() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(upiTimeoutMinutes);
 
-        List<Payment> stale = paymentRepository
-                .findByPaymentStatusAndPaymentMethodAndPaymentDateBefore(
-                        PaymentStatus.PENDING, PaymentMethod.UPI, cutoff);
+        // Deliberately NOT @Transactional at this level, and deliberately
+        // not one query returning every stale payment. This sweep covers
+        // "everything abandoned since the last successful run", so its size
+        // grows with traffic and with any gap in the scheduler running at
+        // all - a deploy, an outage, a ShedLock hold. One giant transaction
+        // over all of it would hold order/payment/inventory row locks for
+        // its entire duration, blocking live checkouts on those same rows,
+        // and would lose the whole run's progress on a single failure.
+        //
+        // Each batch commits on its own instead (expireOneStalePayment is
+        // REQUIRES_NEW), so locks are released continuously and a failure
+        // costs one payment rather than the run.
+        int processed = 0;
+        for (int batch = 0; batch < maxExpiryBatchesPerRun; batch++) {
+            List<Payment> stale = paymentRepository.findStaleForExpiry(
+                    PaymentStatus.PENDING, PaymentMethod.UPI, cutoff,
+                    org.springframework.data.domain.PageRequest.of(0, expiryBatchSize));
 
-        for (Payment payment : stale) {
-            payment.setPaymentStatus(PaymentStatus.FAILED);
-            paymentRepository.save(payment);
-
-            // Give back the stock reserved for this order at checkout time.
-            // Previously missing - an abandoned/never-confirmed UPI payment
-            // permanently cost the store that stock, since only the Payment
-            // record was ever touched here, never the Order's inventory.
-            // Reuses the exact same locked restore path cancelOrder() uses,
-            // so a concurrent fresh checkout on the same variant can't race
-            // this into an inconsistent count.
-            if (payment.getOrder() != null) {
-                orderService.restoreInventoryForOrder(payment.getOrder().getId());
+            if (stale.isEmpty()) {
+                break;
             }
 
-            auditLogService.log("UPI_PAYMENT_EXPIRED", "Payment", payment.getId(),
-                    "no confirmation within " + upiTimeoutMinutes + " minutes; inventory restored");
+            for (Payment payment : stale) {
+                // Through the proxy (see the `self` field) so REQUIRES_NEW
+                // actually applies and each payment commits independently.
+                self.expireOneStalePayment(payment.getId());
+                processed++;
+            }
+
+            // A short batch means the query has drained - stop rather than
+            // spending another round trip to confirm it.
+            if (stale.size() < expiryBatchSize) {
+                break;
+            }
         }
+
+        if (processed > 0) {
+            log.info("Expired {} stale UPI payment(s) older than {} minutes", processed, upiTimeoutMinutes);
+        }
+    }
+
+    /**
+     * Expires exactly one stale payment, in its own transaction.
+     *
+     * Re-reads BOTH rows under their locks rather than trusting the sweep's
+     * unlocked query result: between that query and this call, the customer
+     * may have confirmed the payment, or cancelled the order, either of
+     * which makes expiring it wrong. The re-check after locking is the
+     * whole point - the pre-lock read is only a candidate list.
+     *
+     * Lock order is ORDER -> PAYMENT -> INVENTORY, identical to
+     * cancelOrder's, so the two racing on the same order serialize on the
+     * order row instead of deadlocking against each other.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void expireOneStalePayment(Long paymentId) {
+        Payment payment = paymentRepository.findById(paymentId).orElse(null);
+        if (payment == null || payment.getOrder() == null) {
+            return;
+        }
+        Long orderId = payment.getOrder().getId();
+
+        // ORDER first. restoreInventoryForOrder takes this same lock, and
+        // taking it here first keeps a consistent acquisition order.
+        Order order = orderRepository.findByIdForUpdate(orderId).orElse(null);
+        if (order == null) {
+            return;
+        }
+
+        // PAYMENT second, and re-read under the lock.
+        Payment locked = paymentRepository.findByOrderIdForUpdate(orderId).orElse(null);
+        if (locked == null
+                || locked.getPaymentStatus() != PaymentStatus.PENDING
+                || locked.getPaymentMethod() != PaymentMethod.UPI) {
+            // Someone confirmed or cancelled it while this run was in
+            // flight - their transition wins, this one is abandoned.
+            return;
+        }
+
+        locked.setPaymentStatus(PaymentStatus.FAILED);
+        paymentRepository.save(locked);
+
+        // INVENTORY last. Returns false when the stock has already gone
+        // back via cancellation - the flag, not this sweep, is what makes
+        // that exactly-once. Only audit the restore that actually happened.
+        boolean restored = orderService.restoreInventoryForOrder(orderId);
+
+        auditLogService.log("UPI_PAYMENT_EXPIRED", "Payment", locked.getId(),
+                "no confirmation within " + upiTimeoutMinutes + " minutes; "
+                        + (restored ? "inventory restored" : "inventory already restored by another path"));
+    }
+
+    /**
+     * Acquires this order's row lock and then its payment's, in that fixed
+     * order, and returns the payment re-read under its lock.
+     *
+     * Every mutating payment path goes through this. Two reasons:
+     *
+     * 1. Correctness. These methods all used to plain-read the payment,
+     *    check its status, and write a new one. Two concurrent callers both
+     *    read PENDING, both pass the check, and both write - so a
+     *    double-submitted UPI confirmation produced two SUCCESS transitions
+     *    and two audit entries. Re-reading under the lock means the second
+     *    caller sees the first's committed status and fails its check.
+     *
+     * 2. Deadlock avoidance. completeCodPayment and confirmUpiPayment end
+     *    by calling advanceOrderIfStillPending, which takes the ORDER lock -
+     *    so they used to acquire PAYMENT then ORDER, the exact reverse of
+     *    cancelOrder's ORDER then PAYMENT. Two of those racing on the same
+     *    order could each hold what the other needed. Taking ORDER first
+     *    here makes every path agree on the sequence
+     *    ORDER -> PAYMENT -> INVENTORY.
+     *
+     * Re-acquiring the order lock later in the same transaction (as
+     * advanceOrderIfStillPending does) is free - a transaction already
+     * holding a row lock can take it again.
+     */
+    private Payment lockOrderThenPayment(Long orderId) {
+        orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        return paymentRepository.findByOrderIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
     }
 
     /**
@@ -186,8 +308,7 @@ public class PaymentService {
     @Transactional
     public com.gpstore.dto.response.PaymentResponse refundPayment(Long orderId) {
 
-        Payment payment = paymentRepository.findByOrderId(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
+        Payment payment = lockOrderThenPayment(orderId);
 
         if (payment.getPaymentMethod() == PaymentMethod.COD &&
                 payment.getPaymentStatus() == PaymentStatus.COD_PENDING) {
@@ -209,8 +330,7 @@ public class PaymentService {
     @Transactional
     public com.gpstore.dto.response.PaymentResponse completeRefund(Long orderId) {
 
-        Payment payment = paymentRepository.findByOrderId(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
+        Payment payment = lockOrderThenPayment(orderId);
 
         if (payment.getPaymentStatus() != PaymentStatus.REFUND_PENDING) {
             throw new ConflictException("Payment is not waiting for refund");
@@ -227,8 +347,7 @@ public class PaymentService {
     @Transactional
     public com.gpstore.dto.response.PaymentResponse completeCodPayment(Long orderId) {
 
-        Payment payment = paymentRepository.findByOrderId(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
+        Payment payment = lockOrderThenPayment(orderId);
 
         if (payment.getPaymentMethod() != PaymentMethod.COD) {
             throw new ConflictException("This payment is not a COD payment");
@@ -257,8 +376,7 @@ public class PaymentService {
     @Transactional
     public com.gpstore.dto.response.PaymentResponse confirmUpiPayment(Long orderId, String transactionId) {
 
-        Payment payment = paymentRepository.findByOrderId(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
+        Payment payment = lockOrderThenPayment(orderId);
 
         if (payment.getPaymentMethod() != PaymentMethod.UPI) {
             throw new ConflictException("This payment is not a UPI payment");

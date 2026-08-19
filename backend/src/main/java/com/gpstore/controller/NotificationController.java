@@ -38,9 +38,11 @@ public class NotificationController {
         return "Sent to " + count + " customer" + (count == 1 ? "" : "s");
     }
 
-    // Admin only (enforced in SecurityConfig).
+    // Admin only (enforced in SecurityConfig). Returns DTOs for the same
+    // reason /mine does - no entity leakage, no lazy-proxy resolution during
+    // response serialization. Pagination stays database-side.
     @GetMapping
-    public Page<Notification> getAllNotifications(
+    public Page<NotificationResponse> getAllNotifications(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
         Pageable pageable = PageRequest.of(page, Math.min(size, 200));
@@ -77,11 +79,12 @@ public class NotificationController {
         return "Marked as read";
     }
 
-    // Only ever affects the caller's own notifications.
+    // Only ever affects the caller's own notifications. Executed as a single
+    // database UPDATE - see NotificationRepository.markAllAsReadForCustomer.
     @PutMapping("/read-all")
     public String markAllAsRead() {
-        notificationService.markAllAsRead(currentUser.customerId());
-        return "All notifications marked as read";
+        int updated = notificationService.markAllAsRead(currentUser.customerId());
+        return updated + " notification" + (updated == 1 ? "" : "s") + " marked as read";
     }
 
     // Ownership verified server-side - can only delete the caller's own notification.

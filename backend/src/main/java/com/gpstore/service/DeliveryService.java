@@ -20,6 +20,9 @@ import java.util.Optional;
 @Service
 public class DeliveryService {
 
+    /** Max deliveries flagged as late in one scheduled sweep - see flagLateDeliveries. */
+    private static final int LATE_FLAG_BATCH_SIZE = 500;
+
     private final DeliveryRepository deliveryRepository;
     private final OrderRepository orderRepository;
     private final DeliveryPartnerRepository deliveryPartnerRepository;
@@ -331,7 +334,16 @@ public class DeliveryService {
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 15 * 60 * 1000)
     @Transactional
     public void flagLateDeliveries() {
-        List<Delivery> lateDeliveries = deliveryRepository.findLateNotYetFlagged(LocalDateTime.now());
+        // Bounded per run. This is a sweep over "everything that went late
+        // since the last successful run", so its size grows with order
+        // volume and with any gap in the scheduler running at all. An
+        // unbounded version is fine every day until the one day it isn't -
+        // and that is the day it holds a long transaction over a table
+        // live deliveries are being written to. Anything not covered by
+        // this run is picked up by the next one 15 minutes later.
+        List<Delivery> lateDeliveries = deliveryRepository.findLateNotYetFlagged(
+                LocalDateTime.now(),
+                org.springframework.data.domain.PageRequest.of(0, LATE_FLAG_BATCH_SIZE));
 
         for (Delivery delivery : lateDeliveries) {
             delivery.setGuaranteeBreached(true);

@@ -40,6 +40,23 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     Page<Order> findByCustomerIdOrderByOrderDateDesc(Long customerId, Pageable pageable);
 
+    /**
+     * Admin order list, newest first, with the customer fetched in the same
+     * query.
+     *
+     * The fetch join is the point: the admin list shows a customer name per
+     * row, and Order.customer is a LAZY @ManyToOne, so rendering a page of
+     * 50 orders issued 1 query for the page plus 50 more for the customers.
+     * That N+1 scales with page size and is invisible in testing with a
+     * handful of orders.
+     *
+     * Fetch-joining a to-ONE relation is safe with Pageable - the LIMIT is
+     * still applied in the database. (The in-memory-pagination problem only
+     * arises when fetch-joining a COLLECTION, which this deliberately does
+     * not do.)
+     */
+    @Query(value = "select o from Order o left join fetch o.customer order by o.orderDate desc",
+            countQuery = "select count(o) from Order o")
     Page<Order> findAllByOrderByOrderDateDesc(Pageable pageable);
 
     /**

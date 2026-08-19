@@ -14,13 +14,61 @@ import java.util.Date;
 @Service
 public class JwtService {
 
+    /**
+     * The exact development fallback in application.properties. Matched by
+     * value rather than by "is a profile active" so it cannot be defeated by
+     * a misconfigured profile: what actually matters is whether the running
+     * app is signing real tokens with a secret that is published in this
+     * repository, and that is answerable directly.
+     */
+    static final String DEV_FALLBACK_SECRET =
+            "dev-only-change-me-GPSTORESECRETKEY123456789012345678901234567890";
+
+    /**
+     * HS256 needs at least 256 bits of key material; jjwt rejects anything
+     * shorter at signing time. Checked here so a too-short JWT_SECRET fails
+     * at startup with a clear message instead of at the first login attempt
+     * with an opaque one.
+     */
+    private static final int MIN_SECRET_BYTES = 32;
+
     private final Key key;
     private final long expirationMs;
 
     public JwtService(
             @Value("${jwt.secret}") String secret,
-            @Value("${jwt.expiration-ms}") long expirationMs) {
-        this.key = Keys.hmacShaKeyFor(secret.getBytes());
+            @Value("${jwt.expiration-ms}") long expirationMs,
+            // Whether this instance is running in production. Defaults to
+            // FALSE so local dev and CI keep working untouched; production
+            // sets APP_ENVIRONMENT=production (see DEPLOYMENT.md).
+            @Value("${app.production:false}") boolean production) {
+
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "JWT_SECRET is not set. Set it to a random 64+ character string.");
+        }
+
+        if (production) {
+            // Refusing to start is the whole point. A production app running
+            // on the repository's own published dev secret lets anyone who
+            // has read this source forge a token for ANY customer id and
+            // role - including ADMIN - and nothing in the logs would look
+            // wrong. Failing loudly at boot is recoverable in minutes;
+            // silently accepting it is a total authentication bypass that
+            // could run unnoticed indefinitely.
+            if (DEV_FALLBACK_SECRET.equals(secret)) {
+                throw new IllegalStateException(
+                        "Refusing to start in production with the built-in development JWT secret. "
+                                + "Set JWT_SECRET to a real random 64+ character value.");
+            }
+            if (secret.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < MIN_SECRET_BYTES) {
+                throw new IllegalStateException(
+                        "JWT_SECRET is too short for HS256 - it must be at least "
+                                + MIN_SECRET_BYTES + " bytes (use a random 64+ character string).");
+            }
+        }
+
+        this.key = Keys.hmacShaKeyFor(secret.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         this.expirationMs = expirationMs;
     }
 
