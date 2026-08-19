@@ -78,7 +78,11 @@ dependencies:
   # Android (only BLUETOOTH_CONNECT on API 31+) - it only ever talks to a
   # device already paired in Android's own Bluetooth settings, it doesn't
   # scan for new ones itself.
-  print_bluetooth_thermal: ^1.2.2
+  # Pinned to 1.2.1, not the newer 1.2.2 - 1.2.2 moved to a pure-Swift iOS
+  # implementation that requires Flutter >=3.44.0, newer than the 3.35.7 CI
+  # (and this project) currently builds against. The Android API this app
+  # actually uses is unchanged between the two versions.
+  print_bluetooth_thermal: ^1.2.1
 
   # Builds the raw ESC/POS command bytes (text, bold, alignment, cut) that
   # print_bluetooth_thermal sends over the connection above.
