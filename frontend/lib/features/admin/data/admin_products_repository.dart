@@ -397,10 +397,19 @@ class AdminProductsRepository {
   }
 
   /// A specific customer's order history - for support/dispute lookups
-  /// ("this customer says their order never arrived").
+  /// ("this customer says their order never arrived"). Backend now
+  /// paginates this (it used to load a customer's entire order history
+  /// unbounded) - this screen has no infinite-scroll UI of its own, so it
+  /// just asks for the most recent 100, which comfortably covers what a
+  /// support lookup actually needs.
   Future<List<OrderSummary>> getCustomerOrders(int customerId) async {
-    final response = await apiClient.dio.get('/api/orders/customer/$customerId');
-    return (response.data as List).map((e) => OrderSummary.fromJson(e as Map<String, dynamic>)).toList();
+    final response = await apiClient.dio.get(
+      '/api/orders/customer/$customerId',
+      queryParameters: {'page': 0, 'size': 100},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+    return content.map((e) => OrderSummary.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<void> updateOrderStatus({required int orderId, required String status}) async {

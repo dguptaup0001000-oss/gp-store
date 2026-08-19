@@ -107,7 +107,11 @@ class OrderOwnershipTest {
 
     @Test
     void cancelOrderRejectsNonOwnerAsIfOrderDidNotExist() {
-        when(repository.findById(ORDER_ID)).thenReturn(Optional.of(orderOwnedBy(OWNER_ID)));
+        // cancelOrder locks the row via findByIdForUpdate (see
+        // OrderRepository's doc comment - the fix for the concurrent
+        // double-cancellation race), not the plain findById the read-only
+        // getOwnedOrderDetail tests above use.
+        when(repository.findByIdForUpdate(ORDER_ID)).thenReturn(Optional.of(orderOwnedBy(OWNER_ID)));
 
         assertThrows(ResourceNotFoundException.class,
                 () -> orderService.cancelOrder(ORDER_ID, OTHER_CUSTOMER_ID, false),

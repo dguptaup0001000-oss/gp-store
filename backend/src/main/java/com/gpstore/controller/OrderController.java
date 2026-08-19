@@ -16,8 +16,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-
 @RestController
 @RequestMapping("/api/orders")
 public class OrderController {
@@ -65,8 +63,12 @@ public class OrderController {
     // Admin only (enforced in SecurityConfig): a specific customer's order
     // history, newest first - for support/dispute lookups.
     @GetMapping("/customer/{customerId}")
-    public List<OrderResponse> getCustomerOrders(@PathVariable Long customerId) {
-        return orderService.getCustomerOrdersForAdmin(customerId);
+    public Page<OrderResponse> getCustomerOrders(
+            @PathVariable Long customerId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        return orderService.getCustomerOrdersForAdmin(customerId, pageable);
     }
 
     // Order history for the logged-in customer only.
