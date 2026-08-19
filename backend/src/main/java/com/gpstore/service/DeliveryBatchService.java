@@ -29,15 +29,13 @@ public class DeliveryBatchService {
         this.deliveryRepository = deliveryRepository;
     }
 
-    @Transactional
-
-
     // Unused by the current frontend (confirmed) and admin-only, but both
     // getAll() and getByStatus() below were unbounded - every delivery
     // batch ever created, growing forever with order volume. Capped
     // defensively rather than left as live unbounded API surface.
     private static final int ADMIN_LIST_CAP = 500;
 
+    @Transactional
     public com.gpstore.dto.response.DeliveryBatchResponse save(com.gpstore.dto.request.DeliveryBatchRequest request) {
 
 
