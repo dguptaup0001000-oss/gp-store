@@ -64,11 +64,50 @@ variables and *how* you get a public URL - not the application itself.
    manually-pasted URL - the upload button just shows a clear "not
    configured" error instead of crashing anything.
 
-   Do **not** set `DDL_AUTO=validate` yet - there's no Flyway baseline
-   migration file in this project yet (see
-   `src/main/resources/db/migration/README.md`), so `validate` mode would
-   fail against an empty database. Leave `DDL_AUTO` unset (defaults to
-   `update`) until you've generated and committed a real baseline migration.
+   `DDL_AUTO=validate` and `APP_PRODUCTION=true` are both required in
+   production now:
+
+   ```
+   DDL_AUTO=validate
+   APP_PRODUCTION=true
+   ```
+
+   `DDL_AUTO=validate` stops Hibernate from silently altering the production
+   schema on deploy; every schema change goes through a Flyway migration
+   instead. An earlier version of this doc said not to set it, on the
+   assumption that a Flyway baseline file was needed first - that was wrong.
+   Flyway has been enabled in production all along (V2-V6 applied), and
+   `validate` only compares the live schema to the JPA entities; it has no
+   dependency on a baseline file. See
+   `src/main/resources/db/migration/README.md`.
+
+   `APP_PRODUCTION=true` makes the app refuse to start if `JWT_SECRET` is
+   missing, too short for HS256, or still the development default committed
+   in `application.properties`. That default is public in this repository, so
+   an instance running on it lets anyone who reads the source forge a token
+   for any customer and any role, including ADMIN, with nothing in the logs
+   looking wrong. Failing at boot is recoverable in minutes; running on it is
+   an authentication bypass that could go unnoticed indefinitely.
+
+## Schema migration procedure
+
+Since `DDL_AUTO=validate`, the database is never changed by deploying code
+alone. To change the schema:
+
+1. Add a new migration file under
+   `backend/src/main/resources/db/migration/`, named `V<n>__description.sql`
+   with `<n>` higher than every existing file. Never edit an already-applied
+   migration - Flyway records a checksum per file and refuses to start if one
+   changes.
+2. Update the matching JPA entity in the same commit. `validate` compares the
+   live schema against the entities at startup, so a migration without its
+   entity change (or the reverse) fails the deploy rather than corrupting
+   anything.
+3. Push. Flyway runs the new migration before Hibernate validates, so the
+   order is always migrate-then-check.
+4. Watch the deploy log. A failed `validate` means the app does not start and
+   the previous version keeps serving - `validate` never writes, so a failure
+   here is a startup check, not a data risk.
 
    `?sslmode=require` in `DB_URL` is required - Supabase's direct connection
    expects an encrypted connection. Never commit the real `DB_PASSWORD` to
