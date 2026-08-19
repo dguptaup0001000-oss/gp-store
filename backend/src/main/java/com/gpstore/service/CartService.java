@@ -52,6 +52,7 @@ public class CartService {
     }
 
     @Transactional
+    @io.micrometer.core.annotation.Timed(value = "cart.add", description = "Cart add mutation", percentiles = {0.5, 0.95, 0.99})
     public Cart addToCart(Long customerId, Long variantId, Integer quantity) {
 
         if (quantity == null || quantity <= 0) {
@@ -124,6 +125,7 @@ public class CartService {
      * this is what stops one customer from editing another's cart item by ID.
      */
     @Transactional
+    @io.micrometer.core.annotation.Timed(value = "cart.update_quantity", description = "Cart quantity mutation", percentiles = {0.5, 0.95, 0.99})
     public Cart updateItemQuantity(Long customerId, Long cartItemId, int newQuantity) {
         // See CustomerRepository.findByIdForUpdate's doc comment - locks out
         // any concurrent addToCart/updateItemQuantity/removeItem for this
@@ -147,6 +149,7 @@ public class CartService {
     }
 
     @Transactional
+    @io.micrometer.core.annotation.Timed(value = "cart.remove", description = "Cart remove mutation", percentiles = {0.5, 0.95, 0.99})
     public Cart removeItem(Long customerId, Long cartItemId) {
         // See CustomerRepository.findByIdForUpdate's doc comment.
         customerRepository.findByIdForUpdate(customerId);

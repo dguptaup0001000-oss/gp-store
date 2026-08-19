@@ -47,6 +47,27 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   /// time. They can still tap "Change address" to override it.
   Future<void> _autoSelectAddress() async {
     if (_selectedAddress != null) return;
+
+    // Synchronous fast path. The cart screen warms myAddressesProvider before
+    // navigating here and that provider now keeps its value briefly, so by
+    // the time this runs the list is usually ALREADY resolved. Reading the
+    // resolved value directly means the address renders and the preview
+    // request starts in the same frame, instead of after an await that had
+    // nothing left to wait for.
+    //
+    // This is the difference between "checkout renders immediately" and
+    // "checkout renders after two sequential round trips" - previously the
+    // address fetch had to complete before the preview request was even
+    // issued.
+    final cached = ref.read(myAddressesProvider).valueOrNull;
+    if (cached != null && cached.isNotEmpty) {
+      setState(() => _selectedAddress = cached.first);
+      _fetchPreview();
+      return;
+    }
+
+    // Slow path: nothing cached (deep link straight to checkout, cache
+    // expired, or a cold start). Behaves exactly as before.
     try {
       final addresses = await ref.read(myAddressesProvider.future);
       if (!mounted || addresses.isEmpty) return;

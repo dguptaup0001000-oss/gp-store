@@ -114,9 +114,20 @@ export const options = {
     checkout: {
       executor: 'constant-arrival-rate',
       exec: 'checkout',
-      // Deliberately under the 10/60s-per-IP limit on POST /orders/place -
-      // see the file header. Raising this above ~8 just produces 429s, not
-      // more signal.
+      // Paced against the backend's checkout rate limit, which CHANGED:
+      // POST /orders/place is now limited per CUSTOMER (default 20/min,
+      // rate-limit.checkout-per-minute), not per IP as it was when this
+      // number was chosen. Per-IP was the binding constraint from a single
+      // generator; per-customer is not, because the script rotates through
+      // seeded accounts.
+      //
+      // Still deliberately modest: the goal of the checkout scenario is to
+      // prove orders are placed correctly under concurrent load, not to
+      // maximise order throughput. Raising it mostly produces 429s from the
+      // per-customer limit once the account pool is small relative to the
+      // rate, which is a property of the test setup rather than a finding
+      // about the backend. Raise the seeded account count first if you want
+      // a higher checkout rate.
       rate: 8,
       timeUnit: '1m',
       duration: HOLD_TIME,

@@ -234,6 +234,7 @@ public class PaymentService {
      * wired up, so ONLINE is rejected rather than silently doing nothing.
      */
     @Transactional
+    @io.micrometer.core.annotation.Timed(value = "payment.initiate", description = "Payment record creation (and UPI link generation)", percentiles = {0.5, 0.95, 0.99})
     public PaymentInitiationResponse initiatePayment(InitiatePaymentRequest request, Long callerCustomerId) {
 
         Order order = orderRepository.findById(request.getOrderId())

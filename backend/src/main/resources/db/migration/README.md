@@ -71,3 +71,45 @@ Once that's set: any future schema change needs an explicit new Flyway
 migration (`V7__description.sql`, `V8__...`, etc.) - `ddl-auto` will never
 again silently apply one for you. That's the actual safety improvement this
 whole exercise is for.
+
+
+## Known limitation: migrations alone cannot provision an EMPTY database
+
+Verified directly, not assumed: pointing this app at a brand-new empty
+database with `FLYWAY_ENABLED=true` fails on V2, because **no migration
+creates the domain tables**. Only V3 (shedlock) and V9 (outbox_events)
+contain `CREATE TABLE` at all; every other table exists solely because
+`ddl-auto=update` created it during the project's early life, and V2 onward
+assume those tables are already there.
+
+This is not a problem for the existing production database - its schema is
+already present and its `flyway_schema_history` already records V2 onward.
+It is a problem the first time somebody provisions a NEW environment
+(a staging copy, a disaster-recovery rebuild), especially now that
+production runs `DDL_AUTO=validate` and will refuse to start against a
+schema it cannot validate.
+
+**Why this is not fixed by adding a V1 baseline:** production's history
+already has V2-V6 applied. Flyway validates on migrate by default, so a
+newly-added lower-numbered V1 is reported as "detected resolved migration
+not applied to database" and the application refuses to start. Adding V1
+would fix fresh installs by breaking the live system - the wrong trade.
+
+**Procedure for a new environment**, until a baseline is introduced
+deliberately (which requires coordinating `flyway.baselineVersion` with the
+existing production history):
+
+1. Create the empty database and `CREATE EXTENSION pg_trgm;`.
+2. Start the app ONCE with `DDL_AUTO=update` and `FLYWAY_ENABLED=false`, so
+   Hibernate creates the entity tables.
+3. Restart with `FLYWAY_ENABLED=true` and `DDL_AUTO=validate`. Flyway applies
+   V2 onward, then Hibernate validates.
+
+Steps 2 and 3 are exactly what was executed to verify this - all eight
+migrations applied cleanly and `validate` then passed, which is also the
+proof that V7/V8/V9 are consistent with the current entities.
+
+Alternatively, restore `backend/docs/production-schema-reference.sql` into
+the empty database first and skip step 2; that file is a real dump of the
+live schema and exists for this purpose. It is deliberately NOT a migration
+- see its own header.

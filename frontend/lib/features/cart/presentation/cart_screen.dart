@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../address/domain/address_models.dart';
+import '../../address/presentation/address_providers.dart';
 import '../../checkout/presentation/checkout_screen.dart';
 import '../domain/cart_models.dart';
 import 'cart_providers.dart';
@@ -225,13 +227,15 @@ class _QuantityStepper extends ConsumerWidget {
   }
 }
 
-class _CartSummary extends StatelessWidget {
+/// ConsumerWidget rather than StatelessWidget purely so the checkout button
+/// can warm the address list before navigating - see the onPressed below.
+class _CartSummary extends ConsumerWidget {
   const _CartSummary({required this.cart});
 
   final CartModel cart;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final savings = cart.items.fold<double>(0, (sum, item) =>
         item.mrp != null && item.mrp! > item.price
             ? sum + (item.mrp! - item.price) * item.quantity
@@ -264,6 +268,23 @@ class _CartSummary extends StatelessWidget {
             FilledButton(
               onPressed: () {
                 HapticFeedback.mediumImpact();
+
+                // Start loading the address list BEFORE navigating. Checkout
+                // needs it to auto-select a delivery address, and it used to
+                // request it in its own initState - so the customer watched
+                // an empty checkout screen for one round trip, and only then
+                // did the checkout-preview request begin. Kicking it off here
+                // overlaps that fetch with the navigation animation, and
+                // myAddressesProvider's keep-alive window means checkout
+                // finds it already resolved instead of asking again.
+                //
+                // Fire-and-forget on purpose: navigation must not wait on it.
+                // If it fails, checkout falls back to its existing behaviour
+                // of fetching and showing its own error.
+                ref.read(myAddressesProvider.future).catchError(
+                      (Object _) => <AddressModel>[],
+                    );
+
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const CheckoutScreen()),
                 );

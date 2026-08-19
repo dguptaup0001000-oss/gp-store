@@ -200,6 +200,7 @@ public class OrderService {
      * the order, instead of only finding out the final cost afterward.
      */
     @Transactional(readOnly = true)
+    @io.micrometer.core.annotation.Timed(value = "checkout.preview", description = "Checkout preview: cart pricing, deliverability and ETA", percentiles = {0.5, 0.95, 0.99})
     public com.gpstore.dto.response.CheckoutPreviewResponse previewCheckout(
             Long customerId, Long addressId, String couponCode) {
 
@@ -289,6 +290,7 @@ public class OrderService {
      * - leaving it off returns checkout to having no retry protection.
      */
     @Transactional
+    @io.micrometer.core.annotation.Timed(value = "checkout.place_order", description = "Order placement critical path (locks + commit)", percentiles = {0.5, 0.95, 0.99})
     public PlaceOrderResponse placeOrder(PlaceOrderRequest request, Long customerId, String idempotencyKey) {
 
         if (request == null) {
@@ -755,6 +757,7 @@ public class OrderService {
     }
 
     @Transactional
+    @io.micrometer.core.annotation.Timed(value = "order.status_update", description = "Order status transition critical path", percentiles = {0.5, 0.95, 0.99})
     public com.gpstore.dto.response.OrderDetailResponse updateOrderStatus(Long orderId, OrderStatus status) {
 
         // Locked for the rest of this transaction (see
@@ -838,6 +841,7 @@ public class OrderService {
      * own order, while staff can cancel any order.
      */
     @Transactional
+    @io.micrometer.core.annotation.Timed(value = "order.cancel", description = "Order cancellation critical path", percentiles = {0.5, 0.95, 0.99})
     public com.gpstore.dto.response.OrderDetailResponse cancelOrder(Long orderId, Long callerCustomerId, boolean isAdmin) {
 
         // See OrderRepository.findByIdForUpdate's doc comment - this is the
