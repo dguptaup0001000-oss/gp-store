@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,6 +6,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/cart_aware_product_card.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/product_card.dart';
+import '../../../shared/widgets/scroll_to_top.dart';
 import '../../../shared/widgets/product_page_route.dart';
 import '../domain/product_models.dart';
 import 'product_detail_screen.dart';
@@ -217,16 +219,28 @@ class _CategoryRail extends StatelessWidget {
                             size: 20,
                             color: isSelected ? AppColors.primary : AppColors.textSecondary,
                           )
-                        : Image.network(
-                            category.imageUrl!,
+                        : CachedNetworkImage(
+                            imageUrl: category.imageUrl!,
                             fit: BoxFit.cover,
+                            // Cached, not Image.network: the rail rebuilds on
+                            // every category tap, and an uncached image
+                            // re-fetches the whole list from the network each
+                            // time somebody browses across categories.
+                            //
+                            // Decoded at 132px (44 logical px x 3 for the
+                            // densest phones) rather than at whatever size the
+                            // original happens to be - a rail of full-size
+                            // category photos is real memory pressure for
+                            // tiles this small.
+                            memCacheWidth: 132,
                             // A broken category image must not blank the rail
                             // and strand the customer with no navigation.
-                            errorBuilder: (_, __, ___) => Icon(
+                            errorWidget: (_, __, ___) => Icon(
                               Icons.category_outlined,
                               size: 20,
                               color: isSelected ? AppColors.primary : AppColors.textSecondary,
                             ),
+                            placeholder: (_, __) => const SizedBox.shrink(),
                           ),
                   ),
                   const SizedBox(height: 6),
@@ -345,12 +359,18 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
 
     return Container(
       color: AppColors.cardBackground,
-      child: NotificationListener<ScrollNotification>(
+      // Wraps the grid rather than the whole screen, so the pill is centred
+      // over the products rather than over the rail as well - and so that
+      // switching category, which replaces this keyed widget, gets a fresh
+      // button state at the new grid's offset zero.
+      child: ScrollToTop(
+        builder: (context, scrollController) => NotificationListener<ScrollNotification>(
         onNotification: (notification) {
           if (notification.metrics.extentAfter < 400) _loadMore();
           return false;
         },
         child: GridView.builder(
+          controller: scrollController,
           padding: const EdgeInsets.all(10),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
@@ -392,6 +412,7 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
               ),
             );
           },
+        ),
         ),
       ),
     );

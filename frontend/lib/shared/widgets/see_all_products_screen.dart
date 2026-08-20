@@ -8,9 +8,10 @@ import '../../features/products/domain/product_models.dart';
 import '../../features/products/presentation/product_detail_screen.dart';
 import '../../features/wishlist/presentation/wishlist_providers.dart';
 import 'product_card.dart';
+import 'scroll_to_top.dart';
 
-/// Deliberately NOT a paginated infinite-scroll browser like
-/// FilteredProductBrowser - trending/new-arrivals/recommended are ranked
+/// Deliberately NOT a paginated infinite-scroll browser like the brand feed
+/// (see BrandFeedController) - trending/new-arrivals/recommended are ranked
 /// "top N" lists from aggregation queries, not an exhaustive catalog to
 /// page through. This just shows more of the same ranked list (up to the
 /// backend's own cap), which is what "See All" actually means here.
@@ -88,7 +89,9 @@ class _SeeAllProductsScreenState extends ConsumerState<SeeAllProductsScreen> {
             );
           }
 
-          return GridView.builder(
+          return ScrollToTop(
+            builder: (context, scrollController) => GridView.builder(
+            controller: scrollController,
             padding: const EdgeInsets.all(16),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 2,
@@ -109,6 +112,7 @@ class _SeeAllProductsScreenState extends ConsumerState<SeeAllProductsScreen> {
                 onWishlistToggle: () => wishlistController.toggle(product.id),
               );
             },
+            ),
           );
         },
       ),

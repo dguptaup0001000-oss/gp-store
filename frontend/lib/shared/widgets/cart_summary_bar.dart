@@ -17,10 +17,9 @@ import '../../features/cart/presentation/cart_screen.dart';
 /// items (search, category/brand browsing, product detail) can show the
 /// same instant "you have items waiting" shortcut, not just the home screen.
 ///
-/// Stadium pill with stacked item thumbnails, kept in the app's own royal
-/// blue rather than switching to green for this one widget - see
-/// AppColors' doc comment on why blue over the "sea of green grocery apps"
-/// was a deliberate choice everywhere else.
+/// Stadium pill with stacked item thumbnails in the brand's forest green -
+/// the same green as every ADD button that filled it, so the bar reads as
+/// the destination those taps were heading towards.
 class CartSummaryBar extends ConsumerWidget {
   const CartSummaryBar({super.key});
 
