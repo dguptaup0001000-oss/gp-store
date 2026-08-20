@@ -24,6 +24,7 @@ import '../../../shared/widgets/buy_by_brand_banner.dart';
 import '../../../shared/widgets/horizontal_product_section.dart';
 import '../../../shared/widgets/see_all_products_screen.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
+import '../../../shared/widgets/scroll_to_top.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -121,7 +122,11 @@ class HomeScreen extends ConsumerWidget {
         // controller to create, hold, or forget to dispose, and this widget
         // does not otherwise need one. It fires on the scroll events the
         // page is already producing.
-        child: NotificationListener<ScrollNotification>(
+        // The controller is only for Back to top; the infinite feed below
+        // still drives itself from scroll notifications, so the two do not
+        // interfere and neither had to be rewritten for the other.
+        child: ScrollToTop(
+          builder: (context, scrollController) => NotificationListener<ScrollNotification>(
           onNotification: (notification) {
             // Trigger a page BEFORE the customer hits the bottom, so the
             // next products are usually already there by the time they
@@ -144,6 +149,7 @@ class HomeScreen extends ConsumerWidget {
             return false;
           },
           child: CustomScrollView(
+            controller: scrollController,
             slivers: [
             SliverList(
               delegate: SliverChildListDelegate([
@@ -280,6 +286,7 @@ class HomeScreen extends ConsumerWidget {
             ...HomeFeedSlivers.build(context, ref, onProductTap: openProduct),
             ],
           ),
+        ),
         ),
       ),
     );

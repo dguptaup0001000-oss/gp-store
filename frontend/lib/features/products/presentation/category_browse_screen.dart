@@ -6,6 +6,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/cart_aware_product_card.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/product_card.dart';
+import '../../../shared/widgets/scroll_to_top.dart';
 import '../../../shared/widgets/product_page_route.dart';
 import '../domain/product_models.dart';
 import 'product_detail_screen.dart';
@@ -358,12 +359,18 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
 
     return Container(
       color: AppColors.cardBackground,
-      child: NotificationListener<ScrollNotification>(
+      // Wraps the grid rather than the whole screen, so the pill is centred
+      // over the products rather than over the rail as well - and so that
+      // switching category, which replaces this keyed widget, gets a fresh
+      // button state at the new grid's offset zero.
+      child: ScrollToTop(
+        builder: (context, scrollController) => NotificationListener<ScrollNotification>(
         onNotification: (notification) {
           if (notification.metrics.extentAfter < 400) _loadMore();
           return false;
         },
         child: GridView.builder(
+          controller: scrollController,
           padding: const EdgeInsets.all(10),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
@@ -405,6 +412,7 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
               ),
             );
           },
+        ),
         ),
       ),
     );

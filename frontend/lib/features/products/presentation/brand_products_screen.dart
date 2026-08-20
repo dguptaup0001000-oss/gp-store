@@ -9,6 +9,7 @@ import '../../../shared/widgets/cart_aware_product_card.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/product_card.dart';
 import '../../../shared/widgets/product_filter_controls.dart';
+import '../../../shared/widgets/scroll_to_top.dart';
 import '../domain/brand_models.dart';
 import 'brand_feed_controller.dart';
 import 'product_detail_screen.dart';
@@ -102,12 +103,17 @@ class _BrandProductsScreenState extends ConsumerState<BrandProductsScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(widget.brand.brand, overflow: TextOverflow.ellipsis)),
       bottomNavigationBar: const CartSummaryBar(),
-      body: NotificationListener<ScrollNotification>(
-        onNotification: _onScroll,
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: _BrandControls(
+      // The controller serves Back to top only; the feed still advances from
+      // scroll notifications, so infinite loading and this button are
+      // independent of each other.
+      body: ScrollToTop(
+        builder: (context, scrollController) => NotificationListener<ScrollNotification>(
+          onNotification: _onScroll,
+          child: CustomScrollView(
+            controller: scrollController,
+            slivers: [
+              SliverToBoxAdapter(
+                child: _BrandControls(
                 brand: widget.brand,
                 searchController: _searchController,
                 onSearchChanged: _onSearchChanged,
@@ -117,8 +123,9 @@ class _BrandProductsScreenState extends ConsumerState<BrandProductsScreen> {
                 onInStockChanged: _feed.setInStockOnly,
               ),
             ),
-            ..._buildFeedSlivers(),
-          ],
+              ..._buildFeedSlivers(),
+            ],
+          ),
         ),
       ),
     );

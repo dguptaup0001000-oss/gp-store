@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../products/domain/product_models.dart';
 import '../../products/presentation/category_products_screen.dart';
 import '../../products/presentation/products_providers.dart';
+import '../../../shared/widgets/scroll_to_top.dart';
 
 /// Full grid of all store categories, reachable from the bottom nav bar.
 /// Complements the compact CategoriesRow shown on the home screen —
@@ -41,7 +42,9 @@ class CategoriesScreen extends ConsumerWidget {
           if (categories.isEmpty) {
             return const Center(child: Text('No categories yet'));
           }
-          return GridView.builder(
+          return ScrollToTop(
+            builder: (context, scrollController) => GridView.builder(
+            controller: scrollController,
             padding: const EdgeInsets.all(16),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
@@ -54,6 +57,7 @@ class CategoriesScreen extends ConsumerWidget {
               final category = categories[index];
               return _CategoryTile(category: category);
             },
+            ),
           );
         },
       ),

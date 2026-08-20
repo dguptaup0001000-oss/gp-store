@@ -12,6 +12,7 @@ import '../../wishlist/presentation/wishlist_providers.dart';
 import '../domain/product_models.dart';
 import 'product_detail_screen.dart';
 import 'products_providers.dart';
+import '../../../shared/widgets/scroll_to_top.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
@@ -141,7 +142,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       );
     }
 
-    return GridView.builder(
+    return ScrollToTop(
+      builder: (context, scrollController) => GridView.builder(
+      controller: scrollController,
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
@@ -163,6 +166,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           onWishlistToggle: () => wishlistController.toggle(product.id),
         );
       },
+      ),
     );
   }
 
