@@ -70,7 +70,13 @@ class Product with _$Product {
   ProductVariant? get primaryVariant {
     if (variants.isEmpty) return null;
     final available = variants.where((v) => v.available).toList();
-    final pool = available.isNotEmpty ? available : variants;
+    // Always a fresh copy, never `variants` itself. Two reasons, and the
+    // second is the one that actually crashed: sorting in place would reorder
+    // the model's own list as a side effect of reading a getter, and the list
+    // a freezed model is deserialised with is UNMODIFIABLE - so aliasing it
+    // here threw "Cannot modify an unmodifiable list" for any product whose
+    // variants are all out of stock, which is the ordinary sold-out case.
+    final pool = available.isNotEmpty ? available : variants.toList();
     pool.sort((a, b) => (a.displayOrder ?? 0).compareTo(b.displayOrder ?? 0));
     return pool.first;
   }
