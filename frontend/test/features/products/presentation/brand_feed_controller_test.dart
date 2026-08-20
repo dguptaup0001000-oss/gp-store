@@ -166,6 +166,21 @@ void main() {
       expect(feed.sections.map((s) => s.brand.brand), ['Lizol', 'Vim']);
     });
 
+    test('one scroll loads one page, not the whole brand', () async {
+      // Paging exists so a customer who flicks once does not pull a
+      // 45-product brand down the wire in a single request storm.
+      final catalogue = FakeCatalogue({'Lizol': 200, 'Vim': 5}, pageSize: 20);
+      final feed = controllerFor(catalogue, anchor: 'Lizol');
+
+      await feed.start();
+      catalogue.requests.clear();
+
+      await feed.advance();
+
+      expect(catalogue.requests, ['Lizol#1']);
+      expect(feed.sections.single.products, hasLength(40));
+    });
+
     test('wraps past the end of the catalogue so every brand is reachable', () async {
       // Opening the alphabetically last brand must not end the feed at once.
       final catalogue = FakeCatalogue({'Aashirvaad': 2, 'Lizol': 2, 'Vim': 2});

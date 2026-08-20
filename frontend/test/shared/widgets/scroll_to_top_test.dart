@@ -9,13 +9,19 @@ double pillOpacity(WidgetTester tester) =>
 
 /// Whether the pill is currently hit-testable.
 ///
-/// Scoped to the ScrollToTop subtree and deliberately not using `.first`:
-/// tester.widget throws when a finder matches more than one widget, so if
-/// something ever introduces a second IgnorePointer here the test fails
-/// loudly instead of quietly inspecting the wrong one.
+/// Has to be pinned down from both sides. Scrollable builds its own
+/// IgnorePointer (it stops taking pointers mid-fling), so "the IgnorePointer
+/// inside ScrollToTop" matches two widgets; and Navigator has one too, so
+/// "an ancestor of the pill" reaches past this widget entirely. The
+/// intersection - inside ScrollToTop AND above the pill's own label - is
+/// exactly one widget, and tester.widget throws if that ever stops being
+/// true rather than quietly inspecting the wrong one.
 bool pillAcceptsTaps(WidgetTester tester) => !tester
     .widget<IgnorePointer>(
-      find.descendant(of: find.byType(ScrollToTop), matching: find.byType(IgnorePointer)),
+      find.ancestor(
+        of: find.text('Back to top'),
+        matching: find.descendant(of: find.byType(ScrollToTop), matching: find.byType(IgnorePointer)),
+      ),
     )
     .ignoring;
 

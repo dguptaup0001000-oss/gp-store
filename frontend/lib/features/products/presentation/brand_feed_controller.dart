@@ -215,6 +215,7 @@ class BrandFeedController extends ChangeNotifier {
     if (_isLoadingMore) notifyListeners();
 
     final sectionsBefore = _sections.length;
+    final productsBefore = _loadedProductCount;
     var failed = false;
 
     try {
@@ -250,7 +251,13 @@ class BrandFeedController extends ChangeNotifier {
     // blank footer with neither products nor an end message. Continuing on a
     // fresh async turn rather than looping inline keeps each batch bounded
     // and lets the frame render in between.
-    if (!failed && !_reachedEnd && _sections.length == sectionsBefore && _sections.isNotEmpty) {
+    // Progress means products OR a section - not sections alone. Loading
+    // another page into the brand already on screen leaves the section count
+    // unchanged, and treating that as "no progress" made this continue
+    // immediately, pulling an entire brand in one scroll instead of a page.
+    final madeProgress = _sections.length != sectionsBefore || _loadedProductCount != productsBefore;
+
+    if (!failed && !_reachedEnd && !madeProgress && _sections.isNotEmpty) {
       await Future<void>.delayed(Duration.zero);
       if (generation != _generation) return;
       await _loadNextChunk(generation);
@@ -341,6 +348,9 @@ class BrandFeedController extends ChangeNotifier {
       return;
     }
   }
+
+  int get _loadedProductCount =>
+      _sections.fold<int>(0, (total, section) => total + section.products.length);
 
   List<Product> _dedupe(List<Product> incoming) {
     final fresh = <Product>[];
