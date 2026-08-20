@@ -16,6 +16,23 @@ import java.math.BigDecimal;
  */
 public class VariantResponse implements Serializable {
 
+    /**
+     * Pinned so this DTO can gain fields without invalidating entries
+     * already sitting in Redis.
+     *
+     * Without an explicit value the JVM derives one from the class
+     * structure, so adding a single field changes it and every cached entry
+     * written by the previous build fails to deserialise with
+     * InvalidClassException on the next read. Spring's default cache error
+     * handler rethrows that, which turns a routine DTO change into a 500 on
+     * every browse request until the TTL drains - see CacheConfig, which
+     * now also makes that survivable.
+     *
+     * Java's rules make ADDING a field compatible once this is pinned;
+     * removing or retyping one is not, and still needs a cache flush.
+     */
+    private static final long serialVersionUID = 1L;
+
     private final Long id;
     private final Double quantity;
     private final String unit;
