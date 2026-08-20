@@ -103,14 +103,22 @@ class GpStoreApp extends ConsumerWidget {
   void _announceIfNewOrder(WidgetRef ref, RemoteMessage message) {
     if (message.data['type'] != 'NEW_ORDER') return;
 
+    final orderId = message.data['orderId'];
     final customerName = message.data['customerName'];
     final orderAmount = message.data['orderAmount'];
 
     // An older backend that predates these fields simply stays silent -
     // the banner and the receipt still work exactly as before.
-    if (customerName == null || orderAmount == null) return;
+    //
+    // orderId is required and not merely preferred: without it there is no
+    // way to tell a redelivered push from a genuine second order placed by
+    // the same customer for the same amount, and announcing on name+amount
+    // would either double-speak one order or swallow a real one. Silence is
+    // the correct behaviour for a push we cannot identify.
+    if (orderId == null || customerName == null || orderAmount == null) return;
 
     ref.read(voiceAnnouncementServiceProvider).announceNewOrder(
+          orderId: orderId,
           customerName: customerName,
           rupees: orderAmount,
         );

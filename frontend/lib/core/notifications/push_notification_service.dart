@@ -40,9 +40,16 @@ Future<void> firebaseBackgroundMessageHandler(RemoteMessage message) async {
 
   if (message.data['type'] != 'NEW_ORDER') return;
 
+  final orderId = message.data['orderId'];
   final customerName = message.data['customerName'];
   final orderAmount = message.data['orderAmount'];
-  if (customerName == null || orderAmount == null) return;
+
+  // orderId is the deduplication key. It matters most on exactly this path:
+  // a push may be handled here in the background isolate and then, if the
+  // shop opens the app moments later, be handled again by the foreground
+  // listener. Both isolates claim against the same persisted log, so the
+  // order is spoken once - but only because both pass the same real id.
+  if (orderId == null || customerName == null || orderAmount == null) return;
 
   try {
     // Required before touching any plugin from a background isolate: this
@@ -53,6 +60,7 @@ Future<void> firebaseBackgroundMessageHandler(RemoteMessage message) async {
     // A fresh service instance - the app's Riverpod-managed one lives in the
     // main isolate and is unreachable from here.
     await VoiceAnnouncementService().announceNewOrder(
+      orderId: orderId,
       customerName: customerName,
       rupees: orderAmount,
     );
