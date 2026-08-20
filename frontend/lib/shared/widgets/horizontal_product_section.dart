@@ -40,9 +40,12 @@ class HorizontalProductSection extends ConsumerWidget {
     return provider.when(
       loading: () => _SectionShell(
         title: title,
-        child: const SizedBox(
-          height: 220,
-          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        // Same height as the loaded carousel below, so the section does not
+        // jump when products arrive - a reserved box is the cheapest
+        // skeleton there is.
+        child: SizedBox(
+          height: ProductGrid.carouselHeight(context),
+          child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         ),
       ),
       error: (error, stackTrace) => _SectionShell(
@@ -75,7 +78,10 @@ class HorizontalProductSection extends ConsumerWidget {
           title: title,
           onSeeAllTap: onSeeAllTap,
           child: SizedBox(
-            height: 220,
+            // Derived from the card's own geometry rather than a fixed 220,
+            // which clipped the card once the user's text scale went above
+            // ~1.15 - the product name and price grow, the box did not.
+            height: ProductGrid.carouselHeight(context),
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
