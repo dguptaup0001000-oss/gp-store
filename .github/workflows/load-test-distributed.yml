@@ -196,6 +196,7 @@ jobs:
           p95s = []
           ok_p95s = []
           dropped = 0
+          outcomes = {}
           shards = 0
 
           for path in files:
@@ -253,6 +254,18 @@ jobs:
               # is describing itself rather than the target.
               dropped += metrics.get("dropped_iterations", {}).get("count", 0)
 
+              # Outcome census by status class. This is the line that turns
+              # "99.89% failed" into an actionable diagnosis: a wall of 429s
+              # means the app rejected the load on purpose, 502/503 means the
+              # app was unreachable, 5xx means it was broken, and status_0
+              # means no response arrived at all. The 10k run could not
+              # distinguish these and was therefore undiagnosable from its
+              # own output.
+              for key in ("status_2xx", "status_3xx", "status_4xx", "status_429",
+                          "status_5xx", "status_502", "status_503", "status_504",
+                          "status_network_error"):
+                  outcomes[key] = outcomes.get(key, 0) + metrics.get(key, {}).get("count", 0)
+
               shards += 1
 
           lines = []
@@ -279,6 +292,35 @@ jobs:
           lines.append("| Dropped iterations | %s |" % (
               dropped if dropped else "0 (not emitted by ramping-vus; check 'interrupted iterations' per shard)"))
           lines.append("")
+
+          # Census first - it is the diagnosis, the rates below are the symptom.
+          if any(outcomes.values()):
+              lines.append("#### Outcome census")
+              lines.append("")
+              lines.append("| Outcome | Count | Share |")
+              lines.append("| --- | --- | --- |")
+              labelled = [
+                  ("2xx success", "status_2xx"),
+                  ("3xx", "status_3xx"),
+                  ("4xx total", "status_4xx"),
+                  ("  of which 429 (rate limited)", "status_429"),
+                  ("5xx total", "status_5xx"),
+                  ("  of which 502 (bad gateway)", "status_502"),
+                  ("  of which 503 (unavailable)", "status_503"),
+                  ("  of which 504 (gateway timeout)", "status_504"),
+                  ("No response (timeout/reset/refused)", "status_network_error"),
+              ]
+              census_total = sum(outcomes.get(k, 0) for _, k in labelled
+                                 if k not in ("status_429", "status_502", "status_503", "status_504"))
+              for label, key in labelled:
+                  n = outcomes.get(key, 0)
+                  share = ("%.2f%%" % (n / census_total * 100)) if census_total else "-"
+                  lines.append("| %s | %d | %s |" % (label, n, share))
+              lines.append("")
+          else:
+              lines.append("_No outcome census in these summaries - the shards ran a build of "
+                           "the script from before status-code instrumentation was added._")
+              lines.append("")
 
           error_pct = (total_failed / total_reqs * 100) if total_reqs else 0
           if error_pct >= 5:

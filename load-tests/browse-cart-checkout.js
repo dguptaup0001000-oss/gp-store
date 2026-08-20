@@ -41,6 +41,50 @@ import { Counter } from 'k6/metrics';
 // this run" is what a duplicate-order check against the DB afterward needs
 // as its baseline (k6 itself has no DB access to verify duplicates directly
 // - see load-tests/README.md's "what this can't validate yet" section).
+/**
+ * Outcome census, by HTTP status class and by network error.
+ *
+ * This exists because the 10,000-VU run could not be diagnosed from its own
+ * output. It reported 99.89% http_req_failed, and NOTHING in the logs said
+ * whether those were 429s, 500s, 502s from the edge proxy, or resets - k6
+ * logs a line for network errors only, so 46,009 of 46,344 failures were
+ * invisible. "It failed" is not a diagnosis, and the difference between a
+ * 429 (the app rejecting on purpose), a 502 (the app unreachable) and a 500
+ * (the app broken) points at three completely different fixes.
+ *
+ * status_0 is k6's code for "no HTTP response at all" - a timeout, reset or
+ * refused connection - and is kept separate from any real status.
+ */
+const status2xx = new Counter('status_2xx');
+const status3xx = new Counter('status_3xx');
+const status4xx = new Counter('status_4xx');
+const status429 = new Counter('status_429');
+const status5xx = new Counter('status_5xx');
+const status502 = new Counter('status_502');
+const status503 = new Counter('status_503');
+const status504 = new Counter('status_504');
+const statusNetworkError = new Counter('status_network_error');
+const bytesReceived = new Counter('response_bytes');
+
+function recordOutcome(res) {
+  const s = res.status;
+  // Response size is recorded too: the 10k run received ~215 KB per request
+  // on average, which matches neither an error body nor a measured browse
+  // payload (6.7 KB for 20 products). Until that is explained, the run's
+  // bandwidth figure cannot be trusted to mean what it appears to mean.
+  bytesReceived.add(res.body ? res.body.length : 0);
+
+  if (s === 0) { statusNetworkError.add(1); return; }
+  if (s === 429) { status429.add(1); status4xx.add(1); return; }
+  if (s === 502) { status502.add(1); status5xx.add(1); return; }
+  if (s === 503) { status503.add(1); status5xx.add(1); return; }
+  if (s === 504) { status504.add(1); status5xx.add(1); return; }
+  if (s >= 500) { status5xx.add(1); return; }
+  if (s >= 400) { status4xx.add(1); return; }
+  if (s >= 300) { status3xx.add(1); return; }
+  if (s >= 200) { status2xx.add(1); return; }
+}
+
 const ordersPlaced = new Counter('orders_placed');
 const ordersRateLimited = new Counter('orders_rate_limited');
 const ordersRejected = new Counter('orders_rejected_client_error');
@@ -179,13 +223,15 @@ export function browse(data) {
     const category = randomItem(data.categories);
 
     const catRes = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, { tags: { name: 'browse_category' } });
+    recordOutcome(catRes);
     check(catRes, { 'browse category: 200': (r) => r.status === 200 });
     thinkTime();
 
     if (Math.random() < 0.4) {
       const term = randomItem(SEARCH_TERMS);
       const searchRes = http.get(`${BASE_URL}/api/products/search/instant?keyword=${term}&page=0&size=20`, { tags: { name: 'search' } });
-      check(searchRes, { 'search: 200': (r) => r.status === 200 });
+      recordOutcome(searchRes);
+    check(searchRes, { 'search: 200': (r) => r.status === 200 });
       thinkTime();
     }
 
@@ -195,7 +241,8 @@ export function browse(data) {
       if (products.length > 0) {
         const product = randomItem(products);
         const detailRes = http.get(`${BASE_URL}/api/products/${product.id}`, { tags: { name: 'product_detail' } });
-        check(detailRes, { 'product detail: 200': (r) => r.status === 200 });
+        recordOutcome(detailRes);
+    check(detailRes, { 'product detail: 200': (r) => r.status === 200 });
         thinkTime();
       }
     } catch (e) {
