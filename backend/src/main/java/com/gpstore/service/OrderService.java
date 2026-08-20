@@ -1134,7 +1134,27 @@ public class OrderService {
             return false;
         }
 
-        List<OrderItem> items = orderItemRepository.findByOrderId(order.getId());
+        // Sorted by variant id before taking ANY inventory lock, for exactly
+        // the same reason placeOrder sorts its cart items - and this path was
+        // missing it, which is a real deadlock.
+        //
+        // The failure it allows: order A contains variants [5, 3] and is
+        // being restored, while a concurrent checkout holds a cart of
+        // [3, 5]. Restoration locks 5 then waits for 3; the checkout locks 3
+        // then waits for 5. Neither can proceed. Postgres eventually kills
+        // one with a deadlock error, so it surfaces as a random failed
+        // cancellation or checkout under load - the kind of thing that never
+        // reproduces on demand and gets written off as a blip.
+        //
+        // Holding the ORDER lock first prevents two restorations of the SAME
+        // order from racing, but it does nothing about a restoration and an
+        // unrelated checkout contending for the same INVENTORY rows. Only a
+        // globally consistent lock order fixes that, so every path that locks
+        // inventory must sort identically: ascending variant id.
+        List<OrderItem> items = orderItemRepository.findByOrderId(order.getId()).stream()
+                .filter(item -> item.getProductVariant() != null)
+                .sorted(java.util.Comparator.comparing(item -> item.getProductVariant().getId()))
+                .toList();
         for (OrderItem item : items) {
             if (item.getProductVariant() == null) {
                 continue;

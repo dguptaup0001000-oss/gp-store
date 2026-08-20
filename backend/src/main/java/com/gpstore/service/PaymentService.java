@@ -30,6 +30,8 @@ public class PaymentService {
     private final AuditLogService auditLogService;
     private final UpiPaymentService upiPaymentService;
     private final OrderService orderService;
+    private final com.gpstore.repository.OutboxEventRepository outboxEventRepository;
+    private final NotificationService notificationService;
     private final int upiTimeoutMinutes;
     private final int expiryBatchSize;
     private final int maxExpiryBatchesPerRun;
@@ -52,6 +54,8 @@ public class PaymentService {
             AuditLogService auditLogService,
             UpiPaymentService upiPaymentService,
             OrderService orderService,
+            com.gpstore.repository.OutboxEventRepository outboxEventRepository,
+            NotificationService notificationService,
             @org.springframework.context.annotation.Lazy PaymentService self,
             @org.springframework.beans.factory.annotation.Value("${payment.upi-timeout-minutes}") int upiTimeoutMinutes,
             @org.springframework.beans.factory.annotation.Value("${payment.expiry-batch-size:100}") int expiryBatchSize,
@@ -62,6 +66,8 @@ public class PaymentService {
         this.auditLogService = auditLogService;
         this.upiPaymentService = upiPaymentService;
         this.orderService = orderService;
+        this.outboxEventRepository = outboxEventRepository;
+        this.notificationService = notificationService;
         this.self = self;
         this.upiTimeoutMinutes = upiTimeoutMinutes;
         this.expiryBatchSize = expiryBatchSize;
@@ -71,8 +77,11 @@ public class PaymentService {
     /**
      * Auto-expires UPI payments nobody ever confirmed within the timeout
      * window - otherwise an abandoned checkout leaves a payment sitting
-     * PENDING forever with no resolution. Runs every 5 minutes; doesn't touch
-     * the order itself (a customer can still retry payment separately).
+     * PENDING forever with no resolution. Runs every 5 minutes.
+     *
+     * Expiry is a complete state transition, not just a payment flag:
+     * payment FAILED -> inventory restored -> order CANCELLED. See
+     * expireOneStalePayment for why the order half is not optional.
      *
      * @SchedulerLock ensures only one app instance actually runs this on any
      * given tick, once more than one instance exists - see
@@ -179,6 +188,96 @@ public class PaymentService {
         auditLogService.log("UPI_PAYMENT_EXPIRED", "Payment", locked.getId(),
                 "no confirmation within " + upiTimeoutMinutes + " minutes; "
                         + (restored ? "inventory restored" : "inventory already restored by another path"));
+
+        // THE ORDER ITSELF. Previously this method stopped at the line
+        // above, and that left the order in a state that cannot be true:
+        // payment FAILED, stock handed back to the shelf, but the order
+        // still sitting at PENDING_CONFIRMATION as if it were waiting to be
+        // packed. Nothing downstream distinguishes it from a live order -
+        // an admin can open the queue and start packing goods that have
+        // already been re-sold to someone else, and the customer sees an
+        // order that will never progress and that they cannot pay for
+        // (the payment row is terminal).
+        //
+        // An abandoned UPI checkout has exactly one correct end state, so
+        // the sweep drives it there: payment FAILED -> inventory restored
+        // -> order CANCELLED. The customer places a new order if they still
+        // want the goods, which is also the only honest option once the
+        // stock has gone back and may no longer be available.
+        //
+        // Guarded rather than assumed. DELIVERED is not reachable in
+        // practice with a PENDING payment, but cancelling a delivered order
+        // would be a far worse bug than leaving a strange one alone, so it
+        // is refused outright. CANCELLED means cancelOrder got here first,
+        // in which case its transition stands and this one is a no-op - the
+        // inventory flag has already made the stock side exactly-once.
+        Order cancelled = null;
+        if (order.getOrderStatus() != OrderStatus.CANCELLED
+                && order.getOrderStatus() != OrderStatus.DELIVERED) {
+
+            order.setOrderStatus(OrderStatus.CANCELLED);
+            cancelled = orderRepository.save(order);
+
+            auditLogService.log("ORDER_CANCELLED", "Order", orderId,
+                    "auto-cancelled: UPI payment not confirmed within " + upiTimeoutMinutes + " minutes");
+
+            // Same durability argument as cancelOrder's: the invoice has to
+            // be cancelled or the books show a sale that never happened.
+            // Written inside THIS transaction, so it commits with the
+            // cancellation or not at all - a crash here cannot leave a
+            // cancelled order with a live invoice.
+            outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
+                    OutboxWorker.AGGREGATE_ORDER, orderId, OutboxWorker.EVENT_ORDER_CANCELLED));
+
+            // Initialised deliberately, while the session is still open. The
+            // notification below runs after commit, by which point this
+            // entity is detached; without this the push would hit a lazy
+            // customer proxy, throw, and be swallowed as NOTIFICATION_FAILED
+            // - the customer would never learn their order is gone. One
+            // extra SELECT per expired order, on a background sweep.
+            if (order.getCustomer() != null) {
+                order.getCustomer().getFcmToken();
+            }
+        }
+
+        // After commit, not before: this sends an FCM push, and the order,
+        // payment and inventory row locks are all still held until this
+        // transaction ends. Doing it inline would hold every one of them
+        // open across a network call to Google, blocking live checkouts on
+        // those same inventory rows. Losing the push on a crash is
+        // acceptable - the cancellation itself is already durable, and the
+        // invoice side is carried by the outbox.
+        notifyCancelledAfterCommit(cancelled);
+    }
+
+    /**
+     * Fires the "order cancelled" notification once the surrounding
+     * transaction has committed, so no row lock is held across the push.
+     *
+     * Runs on the sweep's own thread rather than an executor: this is a
+     * scheduled background job, so there is no request latency to protect,
+     * and staying on the thread keeps the batch's pace tied to the work it
+     * is actually doing. notifyOrderStatusChange swallows its own failures.
+     */
+    private void notifyCancelledAfterCommit(Order cancelled) {
+        if (cancelled == null) {
+            return;
+        }
+        Runnable work = () -> notificationService.notifyOrderStatusChange(cancelled, OrderStatus.CANCELLED);
+
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            work.run();
+                        }
+                    });
+        } else {
+            // Called outside a transaction (a direct call from a test) -
+            // nothing to wait for, so run it rather than drop it.
+            work.run();
+        }
     }
 
 
