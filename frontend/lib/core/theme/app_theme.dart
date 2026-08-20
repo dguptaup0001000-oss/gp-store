@@ -63,6 +63,55 @@ class AppColors {
   static Color tint(Color base) => base.withValues(alpha: 0.12);
 }
 
+/// Depth, as a small fixed vocabulary.
+///
+/// GP-Store's "premium" feel comes from products looking like they physically
+/// sit inside the interface, and physical objects cast TWO shadows, not one:
+/// a tight dark contact shadow where the object meets the surface, and a
+/// wide soft ambient shadow further out. Material's default single shadow
+/// reads as a flat sticker by comparison, which is why these are hand-built
+/// rather than an `elevation:` number.
+///
+/// EVERY EFFECT HERE IS A BoxShadow. That is deliberate and it is the whole
+/// performance story: Skia draws a blurred rounded rect directly, with no
+/// intermediate layer. The alternatives that look similar - BackdropFilter,
+/// ImageFiltered, the Opacity widget - each force a saveLayer, which means
+/// allocating and compositing an offscreen buffer per widget per frame. In a
+/// scrolling grid of product cards that is exactly how a design pass turns
+/// into jank. No blur filters, no WebGL, no 3D assets: shadows, transforms
+/// and alpha only.
+class AppElevation {
+  AppElevation._();
+
+  /// A card at rest. Sits on the page, clearly above the background.
+  static const card = <BoxShadow>[
+    BoxShadow(color: Color(0x0F172033), blurRadius: 2, offset: Offset(0, 1)),
+    BoxShadow(color: Color(0x14172033), blurRadius: 12, offset: Offset(0, 4)),
+  ];
+
+  /// A card under the finger. Shadows tighten and pull IN rather than
+  /// disappearing - a pressed object moves closer to the surface, so its
+  /// contact shadow gets smaller and darker, not lighter.
+  static const cardPressed = <BoxShadow>[
+    BoxShadow(color: Color(0x14172033), blurRadius: 1, offset: Offset(0, 1)),
+    BoxShadow(color: Color(0x0D172033), blurRadius: 4, offset: Offset(0, 1)),
+  ];
+
+  /// The product itself, floating above the card surface.
+  ///
+  /// Offset further down and blurred wider than the card's own shadow, so the
+  /// product reads as a separate object resting ON the card rather than
+  /// printed onto it. This is the single effect that does most of the work.
+  static const product = <BoxShadow>[
+    BoxShadow(color: Color(0x1A172033), blurRadius: 18, offset: Offset(0, 8)),
+  ];
+
+  /// Category icons and other small tiles - the same idea, scaled down.
+  static const tile = <BoxShadow>[
+    BoxShadow(color: Color(0x12172033), blurRadius: 8, offset: Offset(0, 3)),
+  ];
+}
+
 /// Shared corner-radius constants so every screen rounds consistently.
 class AppRadius {
   AppRadius._();

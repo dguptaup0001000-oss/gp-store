@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/cart_aware_product_card.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/product_card.dart';
+import '../../../shared/widgets/product_page_route.dart';
 import '../domain/product_models.dart';
 import 'product_detail_screen.dart';
 import 'products_providers.dart';
@@ -193,7 +194,9 @@ class _CategoryRail extends StatelessWidget {
               ),
               child: Column(
                 children: [
-                  Container(
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeOut,
                     height: 44,
                     width: 44,
                     decoration: BoxDecoration(
@@ -201,6 +204,11 @@ class _CategoryRail extends StatelessWidget {
                           ? AppColors.tint(AppColors.primary)
                           : _washes[index % _washes.length],
                       borderRadius: BorderRadius.circular(AppRadius.md),
+                      // The selected tile lifts; the others sit flat against
+                      // the rail. Depth carries the selection state alongside
+                      // the cobalt bar, so it is legible at a glance without
+                      // adding another colour.
+                      boxShadow: isSelected ? AppElevation.tile : null,
                     ),
                     clipBehavior: Clip.antiAlias,
                     child: category.imageUrl == null
@@ -377,8 +385,10 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
             return CartAwareProductCard(
               key: ValueKey<int>(product.id),
               product: product,
+              // Scale-and-fade rather than the default slide - see
+              // productPageRoute for why this is not a hero flight.
               onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
+                productPageRoute(ProductDetailScreen(product: product)),
               ),
             );
           },
