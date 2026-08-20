@@ -69,9 +69,12 @@ class _ProductImageGalleryState extends State<ProductImageGallery> {
                 controller: _controller,
                 itemCount: urls.length,
                 onPageChanged: (index) => setState(() => _current = index),
-                itemBuilder: (context, index) => CachedNetworkImage(
-                  imageUrl: urls[index],
-                  fit: BoxFit.contain,
+                itemBuilder: (context, index) => _ParallaxPage(
+                  controller: _controller,
+                  index: index,
+                  child: CachedNetworkImage(
+                    imageUrl: urls[index],
+                    fit: BoxFit.contain,
                   // Bounded decode: the hero deserves more resolution than a
                   // grid thumbnail, but an oversized original must not decode
                   // at full size on a screen that is at most ~430 logical px
@@ -86,9 +89,10 @@ class _ProductImageGalleryState extends State<ProductImageGallery> {
                     ),
                   ),
                   // One broken URL must cost one blank page, not the gallery.
-                  errorWidget: (context, url, error) => const Center(
-                    child: Icon(Icons.image_not_supported_outlined,
-                        size: 40, color: AppColors.textSecondary),
+                    errorWidget: (context, url, error) => const Center(
+                      child: Icon(Icons.image_not_supported_outlined,
+                          size: 40, color: AppColors.textSecondary),
+                    ),
                   ),
                 ),
               ),
@@ -105,6 +109,56 @@ class _ProductImageGalleryState extends State<ProductImageGallery> {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// Gives each gallery page a slight parallax and scale as it slides.
+///
+/// The image drifts against the swipe at a fraction of the page's own speed
+/// and eases up to full size as it settles, so moving between photos feels
+/// like turning a physical object rather than sliding a flat sheet. Kept
+/// deliberately small - a large parallax reads as a game transition, not a
+/// shop.
+///
+/// AnimatedBuilder on the PageController rebuilds only this subtree during a
+/// swipe, and the effect is two Transforms: paint-time only, no relayout, no
+/// saveLayer, no image filters. The child is passed through AnimatedBuilder's
+/// `child` slot so the CachedNetworkImage is built ONCE and merely
+/// re-positioned each frame, rather than rebuilt sixty times a second.
+class _ParallaxPage extends StatelessWidget {
+  const _ParallaxPage({required this.controller, required this.index, required this.child});
+
+  final PageController controller;
+  final int index;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      child: child,
+      builder: (context, built) {
+        // How far this page is from the viewport centre, in pages.
+        // hasClients/haveDimensions guard the first frame, before the
+        // controller is attached and `page` would throw.
+        var delta = 0.0;
+        if (controller.hasClients && controller.position.haveDimensions) {
+          delta = (controller.page ?? controller.initialPage.toDouble()) - index;
+        }
+        final clamped = delta.clamp(-1.0, 1.0);
+
+        return Transform.translate(
+          // 24px: enough to read as depth, small enough that the product
+          // never looks detached from its frame.
+          offset: Offset(clamped * 24, 0),
+          child: Transform.scale(
+            // Settles from 0.94 up to 1.0 as the page centres.
+            scale: 1 - (clamped.abs() * 0.06),
+            child: built,
+          ),
+        );
+      },
     );
   }
 }
