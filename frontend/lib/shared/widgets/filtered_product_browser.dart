@@ -221,11 +221,11 @@ class _FilteredProductBrowserState extends ConsumerState<FilteredProductBrowser>
 
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        childAspectRatio: 0.62,
+        childAspectRatio: ProductGrid.aspectRatio(context),
       ),
       itemCount: _products.length + (hasMore ? 1 : 0),
       itemBuilder: (context, index) {

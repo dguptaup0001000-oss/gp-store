@@ -90,11 +90,11 @@ class _SeeAllProductsScreenState extends ConsumerState<SeeAllProductsScreen> {
 
           return GridView.builder(
             padding: const EdgeInsets.all(16),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 2,
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
-              childAspectRatio: 0.62,
+              childAspectRatio: ProductGrid.aspectRatio(context),
             ),
             itemCount: products.length,
             itemBuilder: (context, index) {
