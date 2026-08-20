@@ -56,7 +56,7 @@ class ProductReviewsSection extends ConsumerWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.star, color: AppColors.primary, size: 18),
+                    const Icon(Icons.star, color: AppColors.gold, size: 18),
                     const SizedBox(width: 4),
                     Text('${averageRating.toStringAsFixed(1)} (${reviews.length} review${reviews.length == 1 ? '' : 's'})'),
                   ],

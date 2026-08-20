@@ -64,7 +64,7 @@ class _WriteReviewDialogState extends ConsumerState<WriteReviewDialog> {
               return IconButton(
                 icon: Icon(
                   starValue <= _rating ? Icons.star : Icons.star_border,
-                  color: AppColors.primary,
+                  color: AppColors.gold,
                 ),
                 tooltip: 'Rate $starValue star${starValue == 1 ? '' : 's'}',
                 onPressed: () => setState(() => _rating = starValue),

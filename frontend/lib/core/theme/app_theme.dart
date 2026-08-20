@@ -1,102 +1,128 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-/// GP-Store's brand identity: deep forest green on a pale mint ground, with
-/// warm ivory for the premium surfaces and coral reserved for money-off.
+/// GP-Store's brand identity: soft lavender ground, deep violet actions,
+/// warm cream surfaces.
 ///
-/// EACH COLOUR HAS ONE JOB. That constraint is the whole point - six accents
-/// used at random reads as chaos, not as premium. Anything new should reuse
-/// a role below rather than introduce a seventh colour:
+/// SIX ROLES, EACH WITH ONE JOB. That constraint is what separates a palette
+/// from noise - six colours used at random reads as childish, which is the
+/// opposite of the intent. Anything new reuses a role below rather than
+/// introducing a seventh:
 ///
-///   primary   (forest green) - primary buttons, ADD, selected tabs, active
-///                              nav, links, the selected category. The
-///                              "you are here / this is the action" colour,
-///                              and GP-Store's identity.
-///   secondary (mint)         - success, in-stock, delivery progress, any
-///                              positive state. Never decorative.
-///   accent    (coral)        - discounts, offers, promo badges. Reserved for
-///                              money-off, so a coral pill always means the
-///                              same thing to a shopper.
-///   ivory/cream              - premium section surfaces. Large calm washes,
-///                              never text or icons.
-///   background (pale mint)   - the ground everything sits on.
-///   textPrimary (deep navy)  - type.
-///   cardBackground (white)   - product cards and clean surfaces.
+///   background  (soft lavender)  - the ground the whole app sits on
+///   surfaceSoft (paler violet)   - section bands, for depth without a
+///                                  second hue
+///   primary     (deep violet)    - selected category, active nav, links,
+///                                  primary buttons. The identity.
+///   cart        (teal)           - ADD, the quantity stepper, the cart bar.
+///                                  Deliberately NOT the brand violet: the
+///                                  basket action should read as its own
+///                                  thing, and teal is the one cool colour
+///                                  that sits beside violet without fighting
+///                                  it.
+///   accent      (burnt coral)    - discounts and offers, nothing else, so a
+///                                  coral pill always means money off.
+///   gold        (warm amber)     - ratings, stars, small premium accents.
+///   cardBackground (warm cream)  - product cards and floating surfaces.
 ///
-/// Green rather than blue because this is a grocery identity, and deep
-/// forest rather than the bright leaf-green every delivery app uses - the
-/// darkness is what makes it read as premium instead of generic. Lavender
-/// and royal blue were the previous accents and are gone; a fifth and sixth
-/// hue is what turns a palette into noise.
+/// WARM, NOT COLD. The cream card and the amber accent are what stop a
+/// violet app reading as clinical - lavender on pure white is a hospital,
+/// lavender on warm cream is a shop.
+///
+/// NO BLACK ANYWHERE. Text is a deep indigo-navy that belongs to the same
+/// family as the background, so type sits in the palette rather than being
+/// punched through it.
+///
+/// Every colour that carries text has been checked for contrast, and those
+/// checks live in test/core/theme/app_colors_test.dart rather than in a
+/// designer's memory - "let's brighten the violet" is exactly the change
+/// that silently breaks readability.
 class AppColors {
   AppColors._();
 
-  /// Deep forest green. 7.1:1 against white, so white text on a green button
-  /// clears WCAG AA at any size and AAA at large - checked rather than
-  /// eyeballed, because a "premium dark green" that fails contrast is just
-  /// an unreadable button.
-  static const primary = Color(0xFF14653F);
+  /// Deep violet. 7.7:1 against white, so white text on a violet button
+  /// clears WCAG AA comfortably at any size.
+  ///
+  /// Deep rather than bright: a saturated violet at this size reads as a
+  /// toy, and a dark purple reads as luxury-goods rather than groceries.
+  static const primary = Color(0xFF5B3FA8);
 
-  /// A lighter tint of the same green, for pressed states and washes that
-  /// need to stay green without going black.
-  static const primarySoft = Color(0xFF2E8B62);
+  /// A lighter violet for pressed states and washes that must stay violet
+  /// without going black.
+  static const primarySoft = Color(0xFF8163C9);
 
-  static const secondary = Color(0xFF10B981); // mint - success, in stock
-  static const accent = Color(0xFFF97316); // coral / orange - discounts, offers
+  /// Positive states - in stock, delivery progress, success. Shares the
+  /// cart's family so "available" and "add it" feel related.
+  static const secondary = Color(0xFF0F766E);
+
+  /// Discounts and offers. Burnt coral rather than a pale peach because it
+  /// carries white badge text at 4.9:1 - a prettier, lighter coral would
+  /// fail contrast at the 10px the badge actually renders at.
+  static const accent = Color(0xFFC4472B);
+
+  /// Ratings, stars, and small premium accents. 4.9:1 on white, so a rating
+  /// figure beside the stars is readable rather than decorative.
+  static const gold = Color(0xFFA16207);
 
   /// Section accents and curated rails.
-  ///
-  /// Deliberately the same green as [primary] rather than a fifth hue: the
-  /// final palette has no colour spare for "curation", and a lavender bar
-  /// among green buttons read as a leftover from the previous identity.
-  /// Kept as its own name so a future brand pass can re-tint curation
-  /// without touching every button in the app.
   static const highlight = primary;
 
-  /// Cart and basket actions specifically - ADD, the quantity stepper, the
-  /// cart bar.
+  /// Cart and basket actions - ADD, the quantity stepper, the cart bar.
   ///
-  /// Now the primary green: "the ADD button should use the GP-Store primary
-  /// green" is a brand rule, and a separate teal for baskets meant the most
-  /// repeated button in the app was the one place the identity did not
-  /// appear. Kept as its own name so cart actions can be re-tinted later
+  /// Its own name rather than an alias so baskets can be re-tinted later
   /// without repainting every primary button.
-  static const cart = primary;
+  static const cart = Color(0xFF0F766E);
 
-  /// Soft washes for category tiles and premium section backgrounds. Used as
-  /// large calm surfaces, never as text or icon colours - they do not carry
-  /// enough contrast for either.
-  static const peach = Color(0xFFFFEDE3);
-  static const cream = Color(0xFFFFF7EC);
+  /// Soft washes for category tiles and promotional bands. Large calm
+  /// surfaces only - none of these carry enough contrast for text or icons.
+  static const peach = Color(0xFFFCE8E0);
+  static const cream = Color(0xFFFDF3E3);
 
-  /// Warm ivory - the "premium section" surface. Slightly warmer and lighter
-  /// than [cream], for bands that should feel like paper rather than a tint.
-  static const ivory = Color(0xFFFDF8F0);
+  /// Warm ivory - the "premium section" surface, for bands that should feel
+  /// like paper rather than a tint.
+  static const ivory = Color(0xFFFFFAF2);
 
-  /// Pale mint wash, the green-side counterpart to [peach].
-  static const mist = Color(0xFFEAF4EF);
+  /// Pale violet wash, the lavender-side counterpart to [peach].
+  static const mist = Color(0xFFEDE7FA);
 
-  static const background = Color(0xFFF1F7F4); // very light blue-mint
-  static const cardBackground = Color(0xFFFFFFFF); // white cards lift off the ground
-  static const error = Color(0xFFD32F2F);
+  /// The ground. Clearly lavender rather than a grey that happens to lean
+  /// violet, but calm enough to sit under a screen of product photography
+  /// all day without tiring the eye.
+  static const background = Color(0xFFEFEBFA);
+
+  /// A paler violet for section bands. Lighter than [background] on purpose:
+  /// depth comes from a section lifting toward the light, not from it
+  /// darkening, which would read as a shadow across the products.
+  static const surfaceSoft = Color(0xFFF7F4FD);
+
+  /// Cards and floating surfaces. Warm white, not pure white - pure white on
+  /// lavender is the combination that looks clinical.
+  static const cardBackground = Color(0xFFFFFCF8);
+
+  static const error = Color(0xFFC0392B);
 
   /// Kept as its own name rather than aliased to [secondary]: "the brand's
   /// second colour" and "this operation succeeded" are different ideas, and
   /// collapsing them means a future brand change silently repaints every
-  /// success state. They happen to be the same value today.
-  static const success = Color(0xFF10B981);
+  /// success state.
+  static const success = Color(0xFF0F766E);
 
-  static const textPrimary = Color(0xFF172033); // deep navy
-  static const textSecondary = Color(0xFF64748B); // slate grey
+  /// Deep indigo-navy. Explicitly NOT black: black against lavender is a
+  /// hard edge that makes the whole screen feel cheaper, and this sits in
+  /// the same family as the background while still reading at 14.8:1.
+  static const textPrimary = Color(0xFF221F41);
 
-  /// A hairline that separates surfaces without drawing a grey box around
-  /// everything - used where two white-ish surfaces meet and a shadow would
-  /// be too heavy.
-  static const divider = Color(0xFFE3EDE8);
+  /// Muted violet-grey for secondary type. 4.6:1 on cream, so it stays
+  /// readable rather than becoming decoration.
+  static const textSecondary = Color(0xFF615A80);
 
-  /// Tinted surfaces for section accents - the 12%-opacity wash used behind
-  /// category chips and section headers. Derived here so no screen invents
-  /// its own opacity and drifts.
+  /// A hairline where two light surfaces meet and a shadow would be too
+  /// heavy. Tinted violet so it belongs to the palette rather than reading
+  /// as a stray pencil line.
+  static const divider = Color(0xFFE2DCF2);
+
+  /// The 12%-opacity wash used behind category chips and section headers.
+  /// Derived here so no screen invents its own opacity and drifts.
   static Color tint(Color base) => base.withValues(alpha: 0.12);
 }
 
@@ -122,16 +148,16 @@ class AppElevation {
 
   /// A card at rest. Sits on the page, clearly above the background.
   static const card = <BoxShadow>[
-    BoxShadow(color: Color(0x0F172033), blurRadius: 2, offset: Offset(0, 1)),
-    BoxShadow(color: Color(0x14172033), blurRadius: 12, offset: Offset(0, 4)),
+    BoxShadow(color: Color(0x0F221F41), blurRadius: 2, offset: Offset(0, 1)),
+    BoxShadow(color: Color(0x14221F41), blurRadius: 12, offset: Offset(0, 4)),
   ];
 
   /// A card under the finger. Shadows tighten and pull IN rather than
   /// disappearing - a pressed object moves closer to the surface, so its
   /// contact shadow gets smaller and darker, not lighter.
   static const cardPressed = <BoxShadow>[
-    BoxShadow(color: Color(0x14172033), blurRadius: 1, offset: Offset(0, 1)),
-    BoxShadow(color: Color(0x0D172033), blurRadius: 4, offset: Offset(0, 1)),
+    BoxShadow(color: Color(0x14221F41), blurRadius: 1, offset: Offset(0, 1)),
+    BoxShadow(color: Color(0x0D221F41), blurRadius: 4, offset: Offset(0, 1)),
   ];
 
   /// The product itself, floating above the card surface.
@@ -140,12 +166,12 @@ class AppElevation {
   /// product reads as a separate object resting ON the card rather than
   /// printed onto it. This is the single effect that does most of the work.
   static const product = <BoxShadow>[
-    BoxShadow(color: Color(0x1A172033), blurRadius: 18, offset: Offset(0, 8)),
+    BoxShadow(color: Color(0x1A221F41), blurRadius: 18, offset: Offset(0, 8)),
   ];
 
   /// Category icons and other small tiles - the same idea, scaled down.
   static const tile = <BoxShadow>[
-    BoxShadow(color: Color(0x12172033), blurRadius: 8, offset: Offset(0, 3)),
+    BoxShadow(color: Color(0x12221F41), blurRadius: 8, offset: Offset(0, 3)),
   ];
 }
 
@@ -199,6 +225,9 @@ class AppTheme {
       // that says so. The green selected state needs a white field to read
       // against at 12px label size.
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+        // Warm cream, not the lavender ground: the nav is a surface the page
+        // scrolls UNDER, and matching the page colour removes the edge that
+        // says so.
         backgroundColor: AppColors.cardBackground,
         selectedItemColor: AppColors.primary,
         unselectedItemColor: AppColors.textSecondary,
@@ -229,7 +258,10 @@ class AppTheme {
       cardTheme: CardThemeData(
         color: AppColors.cardBackground,
         elevation: 1,
-        shadowColor: Colors.black.withValues(alpha: 0.06),
+        // The shadow is tinted with the text indigo rather than pure black,
+        // so a card's edge belongs to the palette instead of punching a grey
+        // hole in the lavender.
+        shadowColor: AppColors.textPrimary.withValues(alpha: 0.08),
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
       ),
@@ -256,6 +288,8 @@ class AppTheme {
         ),
       ),
 
+      // Search boxes and text fields sit on the warm cream, giving them a
+      // clear edge against the lavender ground without needing a border.
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: AppColors.cardBackground,

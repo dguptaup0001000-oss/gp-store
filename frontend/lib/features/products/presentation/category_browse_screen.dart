@@ -160,7 +160,7 @@ class _CategoryRail extends StatelessWidget {
   /// than a grey list. Fixed order, indexed by position, so a category keeps
   /// the same colour every time the screen opens instead of flickering to a
   /// new one on each build.
-  static const _washes = [AppColors.peach, AppColors.mist, AppColors.cream];
+  static const _washes = [AppColors.mist, AppColors.peach, AppColors.cream];
 
   @override
   Widget build(BuildContext context) {
@@ -171,7 +171,7 @@ class _CategoryRail extends StatelessWidget {
 
     return Container(
       width: railWidth,
-      color: AppColors.background,
+      color: AppColors.surfaceSoft,
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
         itemCount: categories.length,

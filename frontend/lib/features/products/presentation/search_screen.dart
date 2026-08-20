@@ -144,7 +144,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           autofocus: true,
           onChanged: _onQueryChanged,
           decoration: const InputDecoration(
-            hintText: 'Search for atta, milk, snacks...',
+            hintText: 'Search for atta, dal, milk, snacks...',
             border: InputBorder.none,
           ),
         ),

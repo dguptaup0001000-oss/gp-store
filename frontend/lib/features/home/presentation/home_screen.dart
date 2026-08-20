@@ -160,16 +160,20 @@ class HomeScreen extends ConsumerWidget {
                   MaterialPageRoute(builder: (_) => const SearchScreen()),
                 ),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
                     color: AppColors.cardBackground,
-                    borderRadius: BorderRadius.circular(10),
+                    // Fully rounded and lifted: the search box is the first
+                    // thing a customer looks for, and on a lavender ground a
+                    // flat cream rectangle recedes rather than inviting a tap.
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: AppElevation.card,
                   ),
                   child: const Row(
                     children: [
                       Icon(Icons.search, color: AppColors.textSecondary),
                       SizedBox(width: 8),
-                      Text('Search for atta, milk, snacks...', style: TextStyle(color: AppColors.textSecondary)),
+                      Text('Search for atta, dal, milk, snacks...', style: TextStyle(color: AppColors.textSecondary)),
                     ],
                   ),
                 ),

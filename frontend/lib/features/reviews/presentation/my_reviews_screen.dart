@@ -56,7 +56,7 @@ class MyReviewsScreen extends ConsumerWidget {
                           Row(
                             children: List.generate(
                               5,
-                              (i) => Icon(i < review.rating ? Icons.star : Icons.star_border, size: 14, color: AppColors.primary),
+                              (i) => Icon(i < review.rating ? Icons.star : Icons.star_border, size: 14, color: AppColors.gold),
                             ),
                           ),
                           if (review.comment != null) ...[
