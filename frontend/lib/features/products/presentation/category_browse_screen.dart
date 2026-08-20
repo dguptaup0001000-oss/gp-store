@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -217,16 +218,28 @@ class _CategoryRail extends StatelessWidget {
                             size: 20,
                             color: isSelected ? AppColors.primary : AppColors.textSecondary,
                           )
-                        : Image.network(
-                            category.imageUrl!,
+                        : CachedNetworkImage(
+                            imageUrl: category.imageUrl!,
                             fit: BoxFit.cover,
+                            // Cached, not Image.network: the rail rebuilds on
+                            // every category tap, and an uncached image
+                            // re-fetches the whole list from the network each
+                            // time somebody browses across categories.
+                            //
+                            // Decoded at 132px (44 logical px x 3 for the
+                            // densest phones) rather than at whatever size the
+                            // original happens to be - a rail of full-size
+                            // category photos is real memory pressure for
+                            // tiles this small.
+                            memCacheWidth: 132,
                             // A broken category image must not blank the rail
                             // and strand the customer with no navigation.
-                            errorBuilder: (_, __, ___) => Icon(
+                            errorWidget: (_, __, ___) => Icon(
                               Icons.category_outlined,
                               size: 20,
                               color: isSelected ? AppColors.primary : AppColors.textSecondary,
                             ),
+                            placeholder: (_, __) => const SizedBox.shrink(),
                           ),
                   ),
                   const SizedBox(height: 6),

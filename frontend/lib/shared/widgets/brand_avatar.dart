@@ -11,14 +11,22 @@ class BrandAvatar extends StatelessWidget {
   final String brandName;
   final double size;
 
+  /// Deep, desaturated tones drawn around the GP-Store identity rather than
+  /// the stock web-colour wheel this used before.
+  ///
+  /// A brand mark should read as a distinct object without shouting: the old
+  /// set (electric blue, purple, tomato red) was brighter than anything else
+  /// on the page, so a row of brand avatars pulled focus away from the
+  /// products. These are all dark enough to carry white type and muted
+  /// enough to sit inside the palette.
   static const _palette = [
-    Color(0xFF1DB954),
-    Color(0xFFE67E22),
-    Color(0xFF3498DB),
-    Color(0xFF9B59B6),
-    Color(0xFFE74C3C),
-    Color(0xFF16A085),
-    Color(0xFFF39C12),
+    Color(0xFF14653F), // forest - the house colour
+    Color(0xFF0F766E), // deep teal
+    Color(0xFFB45309), // burnt amber
+    Color(0xFF1E3A5F), // navy
+    Color(0xFF7C2D3E), // deep rose
+    Color(0xFF3F6212), // olive
+    Color(0xFF4C1D95), // deep violet
   ];
 
   @override

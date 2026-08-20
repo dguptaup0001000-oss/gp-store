@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -35,10 +36,17 @@ class FilteredProductBrowser extends ConsumerStatefulWidget {
     super.key,
     required this.searchHint,
     required this.fetchPage,
+    this.header,
   });
 
   final String searchHint;
   final ProductPageFetcher fetchPage;
+
+  /// Optional band shown above the search field - the brand storefront
+  /// header uses it. A slot rather than a second copy of this widget, so
+  /// brand and category browsing keep sharing one implementation and cannot
+  /// drift apart.
+  final Widget? header;
 
   @override
   ConsumerState<FilteredProductBrowser> createState() => _FilteredProductBrowserState();
@@ -131,6 +139,63 @@ class _FilteredProductBrowserState extends ConsumerState<FilteredProductBrowser>
     }
   }
 
+  /// Sort options as a bottom sheet rather than a dropdown menu.
+  ///
+  /// Eight options in a Material dropdown open as a cramped overlay pinned to
+  /// the field; on a phone a sheet gives each row a real tap target and shows
+  /// the current choice, which is what a shopper is actually checking when
+  /// they open it.
+  Future<void> _openSortSheet() async {
+    final selected = await showModalBottomSheet<Object?>(
+      context: context,
+      backgroundColor: AppColors.cardBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (sheetContext) {
+        Widget row(String label, BrandSortOption? value) {
+          final isSelected = _sort == value;
+          return ListTile(
+            title: Text(
+              label,
+              style: TextStyle(
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                color: isSelected ? AppColors.primary : AppColors.textPrimary,
+              ),
+            ),
+            trailing: isSelected ? const Icon(Icons.check, color: AppColors.primary, size: 20) : null,
+            // Wrapped in a one-element list because null is also a valid
+            // selection ("Default"), and popping null would be
+            // indistinguishable from the sheet being dismissed.
+            onTap: () => Navigator.of(sheetContext).pop(<BrandSortOption?>[value]),
+          );
+        }
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+                child: Text('Sort by', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+              ),
+              row('Default', null),
+              ...BrandSortOption.values.map((option) => row(option.label, option)),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected is! List<BrandSortOption?>) return; // dismissed
+    final value = selected.first;
+    if (value == _sort) return; // no refetch for a no-op choice
+    setState(() => _sort = value);
+    _loadPage(0);
+  }
+
   @override
   Widget build(BuildContext context) {
     // Watched (not just read) so hearts update live if toggled from here.
@@ -139,8 +204,9 @@ class _FilteredProductBrowserState extends ConsumerState<FilteredProductBrowser>
 
     return Column(
       children: [
+        if (widget.header != null) widget.header!,
         Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           child: Column(
             children: [
               TextField(
@@ -152,37 +218,30 @@ class _FilteredProductBrowserState extends ConsumerState<FilteredProductBrowser>
                 ),
               ),
               const SizedBox(height: 12),
+              // Two pills rather than a form dropdown beside a bare Switch.
+              // The old row was two different control languages side by side
+              // and cost ~72px of vertical space above every grid; these read
+              // as one set of filters and give that space back to products.
               Row(
                 children: [
                   Expanded(
-                    child: DropdownButtonFormField<BrandSortOption?>(
-                      initialValue: _sort,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Sort by'),
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('Default')),
-                        ...BrandSortOption.values.map(
-                          (option) => DropdownMenuItem(value: option, child: Text(option.label)),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        setState(() => _sort = value);
-                        _loadPage(0);
-                      },
+                    child: _FilterPill(
+                      icon: Icons.swap_vert,
+                      label: _sort?.label ?? 'Default',
+                      prefix: 'Sort by',
+                      isActive: _sort != null,
+                      onTap: _openSortSheet,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Column(
-                    children: [
-                      Switch(
-                        value: _inStockOnly,
-                        onChanged: (value) {
-                          setState(() => _inStockOnly = value);
-                          _loadPage(0);
-                        },
-                      ),
-                      const Text('In stock', style: TextStyle(fontSize: 11)),
-                    ],
+                  const SizedBox(width: 8),
+                  _FilterPill(
+                    icon: Icons.inventory_2_outlined,
+                    label: 'In stock',
+                    isActive: _inStockOnly,
+                    onTap: () {
+                      setState(() => _inStockOnly = !_inStockOnly);
+                      _loadPage(0);
+                    },
                   ),
                 ],
               ),
@@ -247,6 +306,92 @@ class _FilteredProductBrowserState extends ConsumerState<FilteredProductBrowser>
           onWishlistToggle: () => wishlistController.toggle(product.id),
         );
       },
+    );
+  }
+}
+
+/// A filter control as a single tappable pill.
+///
+/// Active state is carried by a green fill and weight rather than by a
+/// separate checkbox or switch, so the whole row reads as one language: a
+/// pill that is green is a filter that is on.
+class _FilterPill extends StatelessWidget {
+  const _FilterPill({
+    required this.icon,
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+    this.prefix,
+  });
+
+  final IconData icon;
+  final String label;
+
+  /// Small leading word ("Sort by") shown above the value, for the pill whose
+  /// label is a chosen value rather than a fixed name.
+  final String? prefix;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = isActive ? AppColors.primary : AppColors.textSecondary;
+
+    return Material(
+      color: isActive ? AppColors.tint(AppColors.primary) : AppColors.cardBackground,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        child: Container(
+          height: 46,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(
+              color: isActive ? AppColors.primary : AppColors.divider,
+              width: isActive ? 1.4 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: foreground),
+              const SizedBox(width: 8),
+              // Flexible, not Expanded: the "In stock" pill sizes to its own
+              // content, and Expanded inside a min-width Row would force it
+              // to claim the rest of the line.
+              Flexible(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (prefix != null)
+                      Text(
+                        prefix!,
+                        style: const TextStyle(fontSize: 10, color: AppColors.textSecondary, height: 1.1),
+                      ),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.2,
+                        fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
+                        color: isActive ? AppColors.primary : AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
