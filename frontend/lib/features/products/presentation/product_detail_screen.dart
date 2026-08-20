@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -10,6 +9,7 @@ import '../../cart/presentation/cart_providers.dart';
 import '../../reviews/presentation/product_reviews_section.dart';
 import '../domain/product_models.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
+import 'product_image_gallery.dart';
 import 'products_providers.dart';
 
 class ProductDetailScreen extends ConsumerStatefulWidget {
@@ -90,34 +90,30 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    AspectRatio(
-                      aspectRatio: 1,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.cardBackground,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: variant?.imageUrl != null
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: CachedNetworkImage(
-                                  imageUrl: variant!.imageUrl!,
-                                  fit: BoxFit.contain,
-                                  // The one full-width hero image on this screen - worth
-                                  // more resolution than a grid thumbnail, but still
-                                  // bounded so an oversized original doesn't decode at
-                                  // full size on a screen that's at most ~430 logical px
-                                  // wide.
-                                  memCacheWidth: 1000,
-                                  errorWidget: (context, url, error) => const Icon(
-                                    Icons.image_not_supported_outlined,
-                                    size: 48,
-                                    color: AppColors.textSecondary,
-                                  ),
-                                ),
-                              )
-                            : const Icon(Icons.shopping_basket_outlined, size: 48, color: AppColors.textSecondary),
-                      ),
+                    // Gallery, assembled from three sources in priority order
+                    // so the screen is never empty and never waits:
+                    //
+                    //   1. the product's own gallery, once the detail request
+                    //      lands (list screens do not carry one);
+                    //   2. the variant thumbnail the caller already had, shown
+                    //      immediately while that request is in flight and kept
+                    //      permanently for products with no gallery yet;
+                    //   3. a basket placeholder if there is no image at all.
+                    //
+                    // That ordering is what makes multi-image support additive:
+                    // an old single-image product looks exactly as it did.
+                    Consumer(
+                      builder: (context, ref, _) {
+                        final detail = ref.watch(productDetailProvider(product.id));
+                        final gallery = detail.valueOrNull?.images ?? const <String>[];
+                        final fallback = variant?.imageUrl;
+
+                        final urls = gallery.isNotEmpty
+                            ? gallery
+                            : (fallback != null ? <String>[fallback] : const <String>[]);
+
+                        return ProductImageGallery(imageUrls: urls);
+                      },
                     ),
                     const SizedBox(height: 16),
                     if (product.brand != null)
@@ -179,6 +175,33 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         MaterialPageRoute(builder: (_) => ProductDetailScreen(product: p)),
                       ),
                     ),
+                    // Same-category products, shown ALONGSIDE frequently-bought
+                    // rather than instead of it. Co-purchase data is empty for
+                    // most of a young catalogue, so that strip renders blank on
+                    // nearly every product; same-category always has something
+                    // and is genuinely "similar". Both are cheap - each is one
+                    // paged request, and HorizontalProductSection hides itself
+                    // when its list comes back empty.
+                    if (product.category != null)
+                      HorizontalProductSection(
+                        title: 'Similar products',
+                        provider: ref.watch(similarProductsProvider((
+                          categoryId: product.category!.id,
+                          excludeProductId: product.id,
+                        ))),
+                        onRetry: () => ref.invalidate(similarProductsProvider((
+                          categoryId: product.category!.id,
+                          excludeProductId: product.id,
+                        ))),
+                        // pushReplacement, not push: tapping through five
+                        // similar products in a row would otherwise stack five
+                        // detail screens, and Back would walk the customer
+                        // through every one of them instead of returning to
+                        // where they started browsing.
+                        onProductTap: (p) => Navigator.of(context).pushReplacement(
+                          MaterialPageRoute(builder: (_) => ProductDetailScreen(product: p)),
+                        ),
+                      ),
                     const SizedBox(height: 8),
                     ProductReviewsSection(productId: product.id),
                   ],
