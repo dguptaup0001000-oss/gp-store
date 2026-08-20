@@ -272,7 +272,12 @@ jobs:
           if ok_p95s:
               lines.append("| p95 latency, SUCCESSFUL responses (best shard) | %.0f ms |" % min(ok_p95s))
               lines.append("| p95 latency, SUCCESSFUL responses (WORST shard) | %.0f ms |" % max(ok_p95s))
-          lines.append("| Dropped iterations (generator could not keep up) | %d |" % dropped)
+          # Only arrival-rate executors emit dropped_iterations at all, so this
+          # reads 0 for a ramping-vus run whether or not the generator coped -
+          # absence of the metric is not evidence of a healthy generator. Say
+          # so, rather than letting a structural 0 read as a clean result.
+          lines.append("| Dropped iterations | %s |" % (
+              dropped if dropped else "0 (not emitted by ramping-vus; check 'interrupted iterations' per shard)"))
           lines.append("")
 
           error_pct = (total_failed / total_reqs * 100) if total_reqs else 0
