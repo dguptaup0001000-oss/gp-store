@@ -15,6 +15,7 @@ import 'admin_payments_screen.dart';
 import 'admin_printer_settings_screen.dart';
 import 'admin_product_list_screen.dart';
 import 'admin_reviews_screen.dart';
+import 'admin_voice_settings_screen.dart';
 
 /// Only reachable from ProfileScreen when the logged-in customer's role is
 /// ADMIN - see profile_screen.dart's role check.
@@ -152,6 +153,15 @@ class AdminHomeScreen extends StatelessWidget {
             subtitle: 'Connect a printer to auto-print new orders',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminPrinterSettingsScreen()),
+            ),
+          ),
+          _tile(
+            context,
+            icon: Icons.campaign_outlined,
+            title: 'Order Announcements',
+            subtitle: 'Speak new orders aloud, like a payment soundbox',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AdminVoiceSettingsScreen()),
             ),
           ),
         ],

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/notifications/push_notification_providers.dart';
 import 'core/notifications/push_notification_service.dart';
+import 'core/notifications/voice_announcement_providers.dart';
 import 'core/printing/printer_providers.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
@@ -85,6 +86,44 @@ class GpStoreApp extends ConsumerWidget {
     }
   }
 
+  /// Speaks a newly-arrived order aloud, soundbox style - the audible half of
+  /// the same notification the banner shows.
+  ///
+  /// Reads customerName and orderAmount from the push's DATA, not from the
+  /// notification title or body. The backend fills those fields from the
+  /// committed order (see NotificationService.notifyAdminsOfNewOrder), so the
+  /// spoken name and amount are the server's own, never the placing client's,
+  /// and never recovered by picking apart a display string.
+  ///
+  /// Shares the NEW_ORDER trigger with auto-print above rather than
+  /// introducing a second path, so the two can never disagree about which
+  /// order arrived. Both are best-effort: this is called without await and
+  /// swallows everything internally, so a mute phone or a missing TTS engine
+  /// cannot affect the order, the banner, or the receipt.
+  void _announceIfNewOrder(WidgetRef ref, RemoteMessage message) {
+    if (message.data['type'] != 'NEW_ORDER') return;
+
+    final orderId = message.data['orderId'];
+    final customerName = message.data['customerName'];
+    final orderAmount = message.data['orderAmount'];
+
+    // An older backend that predates these fields simply stays silent -
+    // the banner and the receipt still work exactly as before.
+    //
+    // orderId is required and not merely preferred: without it there is no
+    // way to tell a redelivered push from a genuine second order placed by
+    // the same customer for the same amount, and announcing on name+amount
+    // would either double-speak one order or swallow a real one. Silence is
+    // the correct behaviour for a push we cannot identify.
+    if (orderId == null || customerName == null || orderAmount == null) return;
+
+    ref.read(voiceAnnouncementServiceProvider).announceNewOrder(
+          orderId: orderId,
+          customerName: customerName,
+          rupees: orderAmount,
+        );
+  }
+
   void _showForegroundBanner(RemoteMessage message) {
     final title = message.notification?.title;
     final body = message.notification?.body;
@@ -117,6 +156,7 @@ class GpStoreApp extends ConsumerWidget {
               onForegroundMessage: (message) {
                 _showForegroundBanner(message);
                 _autoPrintIfNewOrder(ref, message);
+                _announceIfNewOrder(ref, message);
               },
               onNotificationTap: (message) => _handleNotificationTap(ref, message),
             );

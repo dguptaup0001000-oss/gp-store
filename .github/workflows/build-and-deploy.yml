@@ -72,6 +72,12 @@ jobs:
         # The build fails without this step running first.
         run: dart run build_runner build --delete-conflicting-outputs
 
+      - name: Run Flutter tests
+        # Before the APK, not after: a red test should stop the build rather
+        # than ship an artifact and report the failure alongside it. These are
+        # pure Dart unit tests (no device, no emulator), so they cost seconds.
+        run: flutter test
+
       - name: Decode google-services.json
         run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > android/app/google-services.json
 

@@ -1,24 +1,74 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../api/api_client.dart';
+import 'voice_announcement_service.dart';
 
 /// Runs when a push arrives while the app is fully backgrounded/terminated.
 /// Must be a top-level (or static) function - Firebase spins this up in its
 /// own isolate, so it can't be a class method or close over any app state.
 ///
-/// Deliberately does almost nothing: the system tray notification itself is
-/// already shown automatically by the OS because the backend sends a
-/// `notification` payload (see PushNotificationService.java), not just a
-/// silent `data` payload - this handler exists mainly so data-only messages
-/// (none exist yet) would still have somewhere to be processed, and because
-/// FlutterFire requires it to be registered before runApp() regardless.
+/// The visible notification does NOT depend on this handler: the OS shows it
+/// automatically because the backend sends a `notification` payload (see
+/// PushNotificationService.java), not a silent data-only one. That is what
+/// makes the shop see a new order with the app closed, and it keeps working
+/// whether or not anything below succeeds.
+///
+/// What this adds is the SPOKEN half for a new order, attempted from the
+/// background isolate.
+///
+/// BEST EFFORT, AND GENUINELY SO - worth being precise rather than implying
+/// a guarantee:
+///
+///   - Android gives a background isolate a short, unspecified window and
+///     may kill it before the engine finishes speaking.
+///   - Aggressive battery optimisation on many Indian OEM builds (Xiaomi,
+///     Oppo, Vivo, Samsung) restricts background execution further, and the
+///     shop may need to exempt the app for this to be dependable.
+///   - The device's own media/silent state still applies.
+///
+/// So the counter phone should be treated as reliably announcing while the
+/// app is OPEN, and often - not always - while it is backgrounded. The
+/// notification itself is unaffected either way.
 @pragma('vm:entry-point')
 Future<void> firebaseBackgroundMessageHandler(RemoteMessage message) async {
   debugPrint('Background push received: ${message.messageId}');
+
+  if (message.data['type'] != 'NEW_ORDER') return;
+
+  final orderId = message.data['orderId'];
+  final customerName = message.data['customerName'];
+  final orderAmount = message.data['orderAmount'];
+
+  // orderId is the deduplication key. It matters most on exactly this path:
+  // a push may be handled here in the background isolate and then, if the
+  // shop opens the app moments later, be handled again by the foreground
+  // listener. Both isolates claim against the same persisted log, so the
+  // order is spoken once - but only because both pass the same real id.
+  if (orderId == null || customerName == null || orderAmount == null) return;
+
+  try {
+    // Required before touching any plugin from a background isolate: this
+    // isolate did not run main(), so no plugins are registered in it and the
+    // TTS channel would otherwise not exist.
+    DartPluginRegistrant.ensureInitialized();
+
+    // A fresh service instance - the app's Riverpod-managed one lives in the
+    // main isolate and is unreachable from here.
+    await VoiceAnnouncementService().announceNewOrder(
+      orderId: orderId,
+      customerName: customerName,
+      rupees: orderAmount,
+    );
+  } catch (e) {
+    // The notification is already on screen and the order is already placed.
+    // Nothing here is allowed to matter beyond a log line.
+    debugPrint('Background voice announcement failed (notification unaffected): $e');
+  }
 }
 
 /// Wraps Firebase Cloud Messaging - requests permission, gets this device's

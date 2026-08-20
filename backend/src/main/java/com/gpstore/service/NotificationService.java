@@ -267,19 +267,100 @@ public class NotificationService {
             List<Customer> admins = customerRepository.findByRole(com.gpstore.entity.Role.ADMIN);
             if (admins.isEmpty()) return;
 
-            String title = "New Order Received";
-            String message = "Order " + order.getOrderNumber() + " - ₹"
-                    + order.getTotalAmount() + " (" + order.getOrderStatus() + ")";
+            // The shop counter cares about two things when an order lands:
+            // who it is for, and how much. Order number and status were what
+            // this used to lead with, and neither is what someone glancing at
+            // a phone across a counter needs.
+            String customerName = displayNameOf(order);
+            String amount = plainAmountOf(order);
+
+            String title = "New order received from " + customerName;
+            String message = "Order amount ₹" + amount;
+
+            // customerName and orderAmount are sent as their own data fields,
+            // NOT parsed back out of the title and body above. The shop app
+            // speaks this order aloud (see VoiceAnnouncementService), and
+            // recovering a name from a display string is exactly the kind of
+            // thing that breaks the day someone's name contains the word the
+            // parser splits on. The backend is the source of truth for both,
+            // so it states both.
+            //
+            // orderAmount carries no currency symbol and no grouping - it is
+            // a number for a machine to read, and the app is what turns it
+            // into "520 rupees". A ₹ in this field would be spoken literally.
+            Map<String, String> data = Map.of(
+                    "type", "NEW_ORDER",
+                    "orderId", String.valueOf(order.getId()),
+                    "customerName", customerName,
+                    "orderAmount", amount);
 
             for (Customer admin : admins) {
                 if (admin.getFcmToken() == null || admin.getFcmToken().isBlank()) continue;
-                pushNotificationService.sendPush(admin.getFcmToken(), title, message,
-                        Map.of("type", "NEW_ORDER", "orderId", String.valueOf(order.getId())));
+                pushNotificationService.sendPush(admin.getFcmToken(), title, message, data);
             }
         } catch (Exception ex) {
             auditLogService.log("ADMIN_NEW_ORDER_PUSH_FAILED", "Order", order != null ? order.getId() : null,
                     "Failed to notify admins of new order: " + ex.getMessage());
         }
+    }
+
+    /**
+     * The customer's name as the shop should see and hear it.
+     *
+     * Falls back to "a customer" rather than an empty string or a null: the
+     * announcement is spoken aloud, and "New order received from ." is worse
+     * than a generic word. An OTP-only account can legitimately have no name
+     * yet, so this is a real case rather than defensive padding.
+     *
+     * order.getCustomer() is safe to touch here without a session: this runs
+     * from placeOrder's after-commit callback, where the customer was
+     * assigned from a fully-loaded entity rather than a lazy proxy - see the
+     * comment on afterCommitWork in OrderService.
+     */
+    private String displayNameOf(Order order) {
+        Customer customer = order.getCustomer();
+        if (customer == null) {
+            return "a customer";
+        }
+        String name = customer.getFullName();
+        return (name == null || name.isBlank()) ? "a customer" : name.trim();
+    }
+
+    /**
+     * The final payable amount, as a plain number with no symbol.
+     *
+     * Trailing zeros are stripped so a whole-rupee order reads "520" rather
+     * than "520.00" - the app speaks this, and "five hundred and twenty point
+     * zero zero" is not how a shopkeeper hears a total. Genuine paise
+     * survive: 520.50 stays "520.50" for the app to voice as rupees and
+     * paise.
+     *
+     * This is the ORDER's own total as the backend computed it - discounts,
+     * delivery fee and tax already applied - never a client-supplied figure.
+     */
+    private String plainAmountOf(Order order) {
+        java.math.BigDecimal total = order.getTotalAmount();
+        if (total == null) {
+            return "0";
+        }
+        // Whole rupees lose the decimals entirely; anything with paise keeps
+        // exactly two.
+        //
+        // Not a plain stripTrailingZeros: that turns 780.50 into "780.5",
+        // which the notification body then shows as "₹780.5" - money is not
+        // written that way, and the same field feeds both the banner and the
+        // spoken line. Two decimals or none is the only pair of forms that
+        // reads correctly in both places.
+        //
+        // remainder rather than scale(): a BigDecimal of "520.00" has scale 2
+        // but no actual paise, and it should read "520".
+        if (total.stripTrailingZeros().scale() <= 0) {
+            // toBigInteger avoids the scientific notation stripTrailingZeros
+            // produces for round thousands (1000 becomes 1E+3), which would be
+            // both wrong on screen and unspeakable.
+            return total.toBigInteger().toString();
+        }
+        return total.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
     }
 
     /**

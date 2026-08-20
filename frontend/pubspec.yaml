@@ -52,6 +52,12 @@ dependencies:
   # foreground (Firebase alone stays silent in foreground on Android).
   flutter_local_notifications: ^18.0.1
 
+  # Speaks new orders aloud on the shop counter phone, soundbox-style.
+  # A plugin is unavoidable here - Flutter has no built-in text-to-speech,
+  # and this wraps the TTS engine already present on every Android device
+  # rather than shipping voice data of its own.
+  flutter_tts: ^4.2.0
+
   # Opens the real UPI deep link (upi://pay?...) in whatever UPI app the
   # customer has installed (GPay, PhonePe, Paytm) - needed to actually act on
   # the link the backend generates, not just display it as text.
