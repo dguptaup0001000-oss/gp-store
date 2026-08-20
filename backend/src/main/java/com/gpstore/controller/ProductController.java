@@ -6,6 +6,7 @@ import com.gpstore.dto.response.ProductResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -58,6 +59,30 @@ public class ProductController {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 50));
         return productService.searchInstant(keyword, pageable);
+    }
+
+    /**
+     * Endless home feed - every active product, one page at a time.
+     *
+     * Separate from the plain GET /api/products above rather than changing
+     * its shape, so nothing already calling that breaks. That endpoint stays
+     * a capped, unpaginated convenience list; this one is what the home
+     * screen scrolls through.
+     *
+     * size is capped at 50 for the same reason as every other paginated
+     * endpoint here: the page size is client-supplied, and without a cap a
+     * single request could ask for the entire catalogue and undo the point
+     * of paginating.
+     */
+    @GetMapping("/feed")
+    public Page<ProductResponse> feed(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        // Sort lives here, not in the client's hands: a client-chosen sort
+        // would let one caller destabilise its own pagination.
+        Pageable pageable = PageRequest.of(page, Math.min(size, 50), Sort.by(Sort.Direction.ASC, "id"));
+        return productService.browseAll(pageable);
     }
 
     // Category browsing - paginated, only active products.

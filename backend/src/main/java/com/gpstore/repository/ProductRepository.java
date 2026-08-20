@@ -77,6 +77,25 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @EntityGraph(attributePaths = {"category"})
     Page<Product> findByActiveTrueOrderByCreatedAtDesc(Pageable pageable);
 
+    /**
+     * Active products with the sort supplied by the CALLER, for the endless
+     * home feed.
+     *
+     * Deliberately not ...OrderByCreatedAtDesc like the method above.
+     * Infinite scroll needs a STABLE sort, and createdAt DESC is not one: a
+     * product added while a customer is scrolling shifts every subsequent
+     * page boundary by one, so they see an item twice or miss one entirely.
+     * The feed sorts by id ascending instead, where new products land at the
+     * end and every page already fetched keeps meaning the same thing.
+     *
+     * Category is eager-fetched here; variants are batched separately by
+     * ProductService.batchFetchWithVariants rather than joined, because
+     * fetching a collection alongside pagination makes Hibernate paginate in
+     * memory over the whole result set.
+     */
+    @EntityGraph(attributePaths = {"category"})
+    Page<Product> findByActiveTrue(Pageable pageable);
+
     // Admin management view's equivalent of the query above - includes
     // inactive/deactivated products too, still capped via Pageable.
     @EntityGraph(attributePaths = {"category"})
