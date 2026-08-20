@@ -34,6 +34,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -312,6 +313,55 @@ class IdempotencyFingerprintTest {
     // ---------- fixtures ----------
 
     private record Fixture(Long customerId, Long addressId, Long variantId, Long cartId) {
+    }
+
+    /**
+     * A replay returns the SAME payment information as the original.
+     *
+     * Not a cosmetic completeness check. checkout_screen.dart reads a null
+     * paymentStatus as "this backend does not create the payment with the
+     * order" and falls back to a second HTTP call, POST /payments. Because
+     * buildReplayResponse left both payment fields unset, the retry path -
+     * the one that exists precisely because the first attempt was slow or
+     * dropped - was the path that became two round trips and fired an
+     * initiatePayment at an order that already had a payment row.
+     */
+    @Test
+    void replayReturnsTheSamePaymentInformationAsTheOriginal() {
+        Fixture fixture = newCheckoutReadyCustomer(2);
+        String key = UUID.randomUUID().toString();
+
+        PlaceOrderResponse first = orderService.placeOrder(request(fixture), fixture.customerId, key);
+        PlaceOrderResponse replay = orderService.placeOrder(request(fixture), fixture.customerId, key);
+
+        assertEquals(first.getOrderId(), replay.getOrderId(), "A replay must be the same order");
+        assertNotNull(first.getPaymentStatus(), "Precondition: the first response carries a payment status");
+        assertNotNull(replay.getPaymentStatus(),
+                "A null paymentStatus on replay is exactly what triggers the client's second HTTP request");
+        assertEquals(first.getPaymentStatus(), replay.getPaymentStatus());
+        assertEquals(first.getUpiPaymentLink(), replay.getUpiPaymentLink());
+    }
+
+    /**
+     * Same guarantee for UPI, where the payment link is the field that
+     * actually matters - a replay that lost it would send the customer to a
+     * confirmation screen with no way to pay.
+     */
+    @Test
+    void upiReplayReturnsTheSamePaymentLink() {
+        Fixture fixture = newCheckoutReadyCustomer(2);
+        String key = UUID.randomUUID().toString();
+
+        PlaceOrderRequest upiRequest = request(fixture);
+        upiRequest.setPaymentMethod("UPI");
+
+        PlaceOrderResponse first = orderService.placeOrder(upiRequest, fixture.customerId, key);
+        PlaceOrderResponse replay = orderService.placeOrder(upiRequest, fixture.customerId, key);
+
+        assertNotNull(first.getUpiPaymentLink(), "Precondition: a UPI checkout returns a payment link");
+        assertEquals(first.getUpiPaymentLink(), replay.getUpiPaymentLink(),
+                "The link is derived from order number and amount, so a replay must reproduce it exactly");
+        assertEquals(first.getPaymentStatus(), replay.getPaymentStatus());
     }
 
     private PlaceOrderRequest request(Fixture fixture) {

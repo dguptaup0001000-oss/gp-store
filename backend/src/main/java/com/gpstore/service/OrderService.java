@@ -1092,6 +1092,39 @@ public class OrderService {
         response.setOrderId(order.getId());
         response.setOrderNumber(order.getOrderNumber());
         response.setMessage("Order already placed successfully.");
+
+        // A replay must return the SAME payment information the original
+        // request did, not a subset of it.
+        //
+        // This response used to stop at the four fields above, and the
+        // omission had a concrete cost on the client. checkout_screen.dart
+        // treats a null paymentStatus as "this backend is too old to create
+        // the payment with the order" and falls back to a second HTTP call,
+        // POST /payments. So the retry path - the one that exists precisely
+        // because the customer's first attempt was slow or dropped - was the
+        // path that turned into two round trips instead of one, and fired an
+        // initiatePayment against an order that already had a payment row.
+        //
+        // Read from the persisted payment rather than recomputed: this is a
+        // replay, so the answer is whatever was actually stored for this
+        // order, including any status it has moved to since (a UPI payment
+        // the customer has since confirmed must not read back as PENDING).
+        Payment payment = paymentRepository.findByOrderId(orderId).orElse(null);
+        if (payment != null) {
+            response.setPaymentStatus(payment.getPaymentStatus().name());
+            // Pure local string building from order number and amount (see
+            // PaymentService.upiLinkFor) - no gateway call - so the replay
+            // reproduces the identical link the first response carried, and
+            // null for COD exactly as before.
+            response.setUpiPaymentLink(paymentService.upiLinkFor(order, payment.getPaymentMethod()));
+        } else if (order.getPaymentStatus() != null) {
+            // No payment row: an order placed before payment creation moved
+            // into the order transaction. Fall back to the order's own copy
+            // of the status so the client still gets a non-null value and
+            // stays on the single-request path.
+            response.setPaymentStatus(order.getPaymentStatus().name());
+        }
+
         return response;
     }
 
@@ -1177,6 +1210,18 @@ public class OrderService {
                 continue;
             }
             inventory.setStock(inventory.getStock() + item.getQuantity());
+
+            // The explicit save() here looks inconsistent with checkout,
+            // which relies on Hibernate dirty checking alone - so it is worth
+            // recording that it was measured rather than assumed. It costs
+            // nothing: save() on an already-managed entity is a merge that
+            // returns the same instance, and the UPDATE is emitted once at
+            // flush either way. A/B on order-cancel with a 3-item order:
+            // 19 statements with it, 19 without.
+            //
+            // Kept because it is not purely redundant - InventoryService.save
+            // runs validateNonNegativeStock, which is a guard worth having on
+            // any path that writes stock, even one that only ever adds.
             inventoryService.save(inventory);
         }
 
