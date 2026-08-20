@@ -15,11 +15,26 @@ class ProductCard extends StatelessWidget {
     this.onAddPressed,
     this.isWishlisted = false,
     this.onWishlistToggle,
+    this.quantityInCart = 0,
+    this.onIncrement,
+    this.onDecrement,
   });
 
   final Product product;
   final VoidCallback? onTap;
   final VoidCallback? onAddPressed;
+
+  /// How many of this product's variant are already in the cart. Above zero,
+  /// the ADD button is replaced by a - / n / + stepper, so a customer buying
+  /// three of something never leaves the grid.
+  ///
+  /// Passed IN rather than read from Riverpod here, deliberately: this widget
+  /// stays presentational and testable, and callers keep owning cart state -
+  /// the same contract the wishlist props already follow. CartAwareProductCard
+  /// does the binding in one place so no screen repeats it.
+  final int quantityInCart;
+  final VoidCallback? onIncrement;
+  final VoidCallback? onDecrement;
 
   // Optional and presentational only - if onWishlistToggle is null, no heart
   // icon shows at all. Callers own the actual wishlist state/API calls
@@ -202,24 +217,34 @@ class ProductCard extends StatelessWidget {
                     // minimum for thumbs.
                     SizedBox(
                       height: 32,
-                      width: 64,
-                      child: OutlinedButton(
-                        // Stronger than the card/wishlist taps - this is the
-                        // primary "yes, add this" action, so it gets a more
-                        // deliberate thud instead of a light click.
-                        onPressed: !isInStock || onAddPressed == null
-                            ? null
-                            : () {
-                                HapticFeedback.mediumImpact();
-                                onAddPressed!();
-                              },
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.primary,
-                          side: const BorderSide(color: AppColors.primary),
-                          padding: EdgeInsets.zero,
-                        ),
-                        child: Text(isInStock ? 'ADD' : 'N/A', style: const TextStyle(fontSize: 12)),
-                      ),
+                      width: 72,
+                      child: quantityInCart > 0 && isInStock
+                          ? _QuantityStepper(
+                              quantity: quantityInCart,
+                              onIncrement: onIncrement,
+                              onDecrement: onDecrement,
+                            )
+                          : OutlinedButton(
+                              // Stronger than the card/wishlist taps - this is
+                              // the primary "yes, add this" action, so it gets
+                              // a more deliberate thud instead of a light click.
+                              onPressed: !isInStock || onAddPressed == null
+                                  ? null
+                                  : () {
+                                      HapticFeedback.mediumImpact();
+                                      onAddPressed!();
+                                    },
+                              style: OutlinedButton.styleFrom(
+                                // Teal, not blue: this is a basket action, and
+                                // the palette reserves teal for the cart so
+                                // "add to basket" looks the same everywhere it
+                                // appears.
+                                foregroundColor: AppColors.cart,
+                                side: const BorderSide(color: AppColors.cart),
+                                padding: EdgeInsets.zero,
+                              ),
+                              child: Text(isInStock ? 'ADD' : 'N/A', style: const TextStyle(fontSize: 12)),
+                            ),
                     ),
                   ],
                 ),
@@ -235,6 +260,68 @@ class ProductCard extends StatelessWidget {
     return quantity == quantity.roundToDouble()
         ? quantity.toStringAsFixed(0)
         : quantity.toStringAsFixed(1);
+  }
+}
+
+/// The - / n / + control shown once an item is in the cart.
+///
+/// Sized to match the ADD button it replaces so the card does not resize the
+/// moment something is added - a card that changes height on tap makes the
+/// whole grid jump under the customer's finger.
+class _QuantityStepper extends StatelessWidget {
+  const _QuantityStepper({required this.quantity, this.onIncrement, this.onDecrement});
+
+  final int quantity;
+  final VoidCallback? onIncrement;
+  final VoidCallback? onDecrement;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.cart,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _StepperButton(
+            icon: quantity == 1 ? Icons.delete_outline : Icons.remove,
+            onPressed: onDecrement,
+          ),
+          Text(
+            '$quantity',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
+          ),
+          _StepperButton(icon: Icons.add, onPressed: onIncrement),
+        ],
+      ),
+    );
+  }
+}
+
+class _StepperButton extends StatelessWidget {
+  const _StepperButton({required this.icon, this.onPressed});
+
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onPressed == null
+          ? null
+          : () {
+              HapticFeedback.lightImpact();
+              onPressed!();
+            },
+      // Padding rather than a smaller icon: the tap target stays finger-sized
+      // even though the glyph is small, which matters in a two-column grid.
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        child: Icon(icon, size: 16, color: Colors.white),
+      ),
+    );
   }
 }
 

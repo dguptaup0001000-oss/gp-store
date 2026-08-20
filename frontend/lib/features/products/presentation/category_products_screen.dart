@@ -1,33 +1,26 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../shared/widgets/cart_summary_bar.dart';
-import '../../../shared/widgets/filtered_product_browser.dart';
 import '../domain/product_models.dart';
-import 'products_providers.dart';
+import 'category_browse_screen.dart';
 
-class CategoryProductsScreen extends ConsumerWidget {
+/// Kept as the entry point every screen already navigates to, now delegating
+/// to the rail-based browser.
+///
+/// Four places push this - the home category row, the category tabs bar,
+/// bestsellers, and the categories screen. Retargeting each of them would be
+/// four chances to miss one and leave a single path on the old flat grid;
+/// delegating here means opening a category from ANYWHERE gets the sidebar,
+/// with no import churn and nothing else to keep in step.
+///
+/// This is not a wrapper for its own sake - it is the seam that lets the
+/// layout change without touching the callers.
+class CategoryProductsScreen extends StatelessWidget {
   const CategoryProductsScreen({super.key, required this.category});
 
   final Category category;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(
-      appBar: AppBar(title: Text(category.name)),
-      body: FilteredProductBrowser(
-        searchHint: 'Search within ${category.name}',
-        fetchPage: ({sort, inStockOnly = false, keyword, required page}) {
-          return ref.read(productsRepositoryProvider).browseByCategoryFiltered(
-                categoryId: category.id,
-                sort: sort,
-                inStockOnly: inStockOnly,
-                keyword: keyword,
-                page: page,
-              );
-        },
-      ),
-      bottomNavigationBar: const CartSummaryBar(),
-    );
+  Widget build(BuildContext context) {
+    return CategoryBrowseScreen(initialCategory: category);
   }
 }

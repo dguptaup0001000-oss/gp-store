@@ -30,6 +30,20 @@ class AppColors {
   static const accent = Color(0xFFF97316); // coral / orange - discounts, offers
   static const highlight = Color(0xFF8B5CF6); // lavender - categories, curation
 
+  /// Cart and basket actions specifically - ADD, the quantity stepper, the
+  /// cart bar. Given its own name rather than reusing [secondary] because
+  /// "this succeeded" and "this is a shopping action" are different ideas
+  /// that happen to share a hue family; separating them means the cart can
+  /// be re-tinted later without repainting every success state.
+  static const cart = Color(0xFF0D9488); // teal
+
+  /// Soft accent washes for category tiles and section backgrounds. Used as
+  /// large calm surfaces, never as text or icon colours - they do not carry
+  /// enough contrast for either.
+  static const peach = Color(0xFFFFEDE3);
+  static const cream = Color(0xFFFFF7EC);
+  static const mist = Color(0xFFEFF3FF);
+
   static const background = Color(0xFFF4F8FF); // very light cool blue-grey
   static const cardBackground = Color(0xFFFFFFFF); // white cards lift off the ground
   static const error = Color(0xFFD32F2F);

@@ -184,3 +184,20 @@ class CartController extends AsyncNotifier<CartModel> {
 }
 
 final cartControllerProvider = AsyncNotifierProvider<CartController, CartModel>(CartController.new);
+
+/// The cart line for a given variant, or null when it is not in the cart.
+///
+/// Product cards need two things the cart only exposes indirectly: how many
+/// of this variant are already in the basket, and the cartItemId needed to
+/// change or remove it. Deriving that inside each card would mean every card
+/// on screen re-scanning the whole cart on every cart change; a family
+/// provider computes it once per variant and only rebuilds the cards whose
+/// own line actually changed.
+final cartLineForVariantProvider = Provider.family<CartItemModel?, int>((ref, variantId) {
+  final cart = ref.watch(cartControllerProvider).valueOrNull;
+  if (cart == null) return null;
+  for (final item in cart.items) {
+    if (item.variantId == variantId) return item;
+  }
+  return null;
+});
