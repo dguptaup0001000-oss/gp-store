@@ -166,7 +166,13 @@ class CheckoutPerformanceTest {
         // deliberate and must not be optimised away) + 30 fixed. At
         // CART_SIZE=10 that is 40, comfortably above the current 33 but well
         // below the 63 the pre-fix code needed.
-        assertTrue(result.queryCount() <= CART_SIZE + 30,
+        // Measured: 63 -> 33 (fetch joins, bulk cart clear, dirty checking)
+        // -> 24 after OrderItem moved from IDENTITY to a sequence, which is
+        // what finally let the ten order_item INSERTs batch into one round
+        // trip. Budget = CART_SIZE (the per-item inventory lock, which is
+        // required and must not be optimised away) + 20 fixed = 30 at
+        // CART_SIZE=10, above the current 24 but well under the old 33.
+        assertTrue(result.queryCount() <= CART_SIZE + 20,
                 "Place order exceeded its query budget. Inventory locking is per-item by design; "
                         + "anything beyond that is avoidable work. Was: " + result);
     }
