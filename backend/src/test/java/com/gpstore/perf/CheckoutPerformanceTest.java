@@ -22,6 +22,7 @@ import com.gpstore.service.OrderService;
 
 import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -86,6 +87,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CheckoutPerformanceTest {
 
     private static final int CART_SIZE = 10;
+
+    // Spy, not mock: the real service still runs - this only counts how many
+    // times checkout asks the database for the cart. See
+    // placeOrderReadsTheCartExactlyOnce.
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private com.gpstore.service.CartItemService cartItemService;
 
     @Autowired private OrderService orderService;
     @Autowired private CartService cartService;
@@ -175,6 +182,38 @@ class CheckoutPerformanceTest {
         assertTrue(result.queryCount() <= CART_SIZE + 20,
                 "Place order exceeded its query budget. Inventory locking is per-item by design; "
                         + "anything beyond that is avoidable work. Was: " + result);
+    }
+
+    /**
+     * The cart is read ONCE per checkout.
+     *
+     * A query budget cannot catch this on its own - one extra cart read is a
+     * single statement inside a budget of thirty, so it hides comfortably.
+     * It is worth pinning by name because it was really there: the request
+     * fingerprint has to hash the basket, so computeRequestFingerprint loaded
+     * the cart, and then checkout loaded it again to build the order.
+     * Hibernate's first-level cache deduplicates the customer ROW across
+     * those two paths, but not the cart QUERY - a JPQL query always goes to
+     * the database - so every single checkout paid for a redundant JOIN
+     * across cart_items, product_variants and products.
+     *
+     * Counting the calls rather than the statements is the point: it says
+     * exactly which read came back, so a future change that reintroduces one
+     * fails with an intelligible reason instead of nudging a budget.
+     */
+    @Test
+    void placeOrderReadsTheCartExactlyOnce() {
+        Fixture fixture = newCustomerWithCart(CART_SIZE);
+
+        PlaceOrderRequest request = new PlaceOrderRequest();
+        request.setAddressId(fixture.addressId);
+        request.setPaymentMethod("COD");
+
+        Mockito.clearInvocations(cartItemService);
+        orderService.placeOrder(request, fixture.customerId, UUID.randomUUID().toString());
+
+        Mockito.verify(cartItemService, Mockito.times(1))
+                .getCartItemsForCheckout(Mockito.anyLong());
     }
 
     /** Adding to an existing cart must not re-read the whole cart repeatedly. */
