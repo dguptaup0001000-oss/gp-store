@@ -67,6 +67,18 @@ class ProductsRepository {
     return content.map((e) => Product.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  /// The full product, including its image gallery.
+  ///
+  /// A separate call rather than reusing the Product the list screen already
+  /// has: list responses carry no gallery by design, so opening a product
+  /// from a grid has no images to show beyond the variant thumbnail. This is
+  /// the "load the full gallery when the detail page opens" half of that
+  /// trade.
+  Future<Product> fetchProductDetail(int productId) async {
+    final response = await apiClient.dio.get('/api/products/$productId');
+    return Product.fromJson(response.data as Map<String, dynamic>);
+  }
+
   /// One page of the endless home feed.
   ///
   /// Returns [hasNext] rather than only the products, because without it the

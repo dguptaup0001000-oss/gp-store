@@ -45,6 +45,18 @@ class Product with _$Product {
     Category? category,
     @Default([]) List<ProductVariant> variants,
     @Default(true) bool active,
+
+    /// Gallery images for the detail page, in display order.
+    ///
+    /// Defaults to empty and STAYS empty for products fetched from list
+    /// endpoints - those deliberately return no gallery, because pulling five
+    /// URLs per card to render one thumbnail is bandwidth nobody sees. Only
+    /// the detail endpoint populates this.
+    ///
+    /// Empty is also the correct, non-broken state for a product that simply
+    /// has no gallery yet: the detail page falls back to the variant
+    /// thumbnail rather than showing an empty strip.
+    @Default([]) List<String> images,
   }) = _Product;
 
   const Product._();

@@ -22,12 +22,15 @@ import java.util.Map;
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final com.gpstore.repository.ProductImageRepository productImageRepository;
     private final ProductBrowseRepository productBrowseRepository;
 
     public ProductService(
             ProductRepository productRepository,
-            ProductBrowseRepository productBrowseRepository) {
+            ProductBrowseRepository productBrowseRepository,
+            com.gpstore.repository.ProductImageRepository productImageRepository) {
         this.productRepository = productRepository;
+        this.productImageRepository = productImageRepository;
         this.productBrowseRepository = productBrowseRepository;
     }
 
@@ -260,10 +263,38 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable("productDetail")
     public ProductResponse getProductById(Long id) {
-        return productRepository.findByIdIn(List.of(id)).stream()
+        ProductResponse product = productRepository.findByIdIn(List.of(id)).stream()
                 .findFirst()
                 .map(ProductResponse::from)
                 .orElse(null);
+
+        if (product == null) {
+            return null;
+        }
+
+        // The gallery is attached HERE and nowhere else, on purpose.
+        //
+        // Detail is the only screen that shows more than one image, so this
+        // is the only place worth the extra query. Attaching galleries to
+        // list responses would mean fetching up to five URLs for every card
+        // in a 20-product grid to render one thumbnail - bandwidth and
+        // serialization the user never sees, on every browse request, which
+        // is exactly the traffic that already saturates this instance.
+        //
+        // Listings continue to use ProductVariant.imageUrl, unchanged.
+        //
+        // One extra query per detail view, and it is cached with the rest of
+        // the response under "productDetail".
+        List<String> gallery = productImageRepository.findByProductIdOrderBySortOrderAsc(id).stream()
+                .map(com.gpstore.entity.ProductImage::getImageUrl)
+                .filter(url -> url != null && !url.isBlank())
+                .toList();
+
+        // No gallery rows means an existing product that predates this
+        // feature: return it exactly as before and let the client fall back
+        // to the variant thumbnail, rather than handing back an empty
+        // gallery the UI might render as a broken strip.
+        return gallery.isEmpty() ? product : product.withImages(gallery);
     }
 
     public Product getByIdOrThrow(Long id) {
