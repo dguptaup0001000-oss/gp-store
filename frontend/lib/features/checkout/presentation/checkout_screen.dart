@@ -176,10 +176,22 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         throw Exception(orderResult.message ?? 'Could not place order');
       }
 
-      final paymentResult = await repository.initiatePayment(
-        orderId: orderResult.orderId!,
-        paymentMethod: _paymentMethod,
-      );
+      // The backend now creates the payment inside the order transaction and
+      // returns its status (and the UPI link) with the order itself, so the
+      // second HTTP request is only needed for older backends that did not.
+      //
+      // This removes a full round trip - auth, rate limit, routing, TLS -
+      // from the moment the customer is staring at a spinner having already
+      // committed to buying. Kept as a fallback rather than deleted so the
+      // app still works if it is ever pointed at a backend predating this.
+      String? upiPaymentLink = orderResult.upiPaymentLink;
+      if (orderResult.paymentStatus == null) {
+        final paymentResult = await repository.initiatePayment(
+          orderId: orderResult.orderId!,
+          paymentMethod: _paymentMethod,
+        );
+        upiPaymentLink = paymentResult.upiPaymentLink;
+      }
 
       // Terminal success: this checkout is finished, so the key retires with
       // it. Anything the customer starts after this is a NEW logical
@@ -194,7 +206,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           builder: (_) => OrderConfirmationScreen(
             orderNumber: orderResult.orderNumber ?? '',
             paymentMethod: _paymentMethod,
-            upiPaymentLink: paymentResult.upiPaymentLink,
+            upiPaymentLink: upiPaymentLink,
           ),
         ),
       );

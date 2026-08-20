@@ -56,6 +56,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class IdempotencyFingerprintTest {
 
     @Autowired private OrderService orderService;
+    @Autowired private com.gpstore.service.PaymentService paymentService;
+    @Autowired private com.gpstore.repository.PaymentRepository paymentRepository;
     @Autowired private IdempotencyRecordRepository idempotencyRecordRepository;
     @Autowired private IdempotencyRetentionService retentionService;
     @Autowired private OrderRepository orderRepository;
@@ -228,6 +230,83 @@ class IdempotencyFingerprintTest {
                         + "would let a legitimate retry create a duplicate order");
         assertTrue(idempotencyRecordRepository.findById(wellPastWindow.getId()).isEmpty(),
                 "A record past the retention window must be deleted, or the table grows forever");
+    }
+
+
+    /**
+     * Payment is created WITH the order, in one request.
+     *
+     * Checkout used to be two sequential HTTP calls - place, wait, pay,
+     * wait - which cost a full extra round trip and left a real gap: an
+     * order could exist with NO payment at all if the second call never
+     * arrived (app killed, network dropped, process died between them).
+     * Asserting on stored state rather than the response, because the point
+     * is that the row exists.
+     */
+    @Test
+    void placingACodOrderCreatesItsPaymentInTheSameTransaction() {
+        Fixture fixture = newCheckoutReadyCustomer(2);
+
+        PlaceOrderResponse response = orderService.placeOrder(
+                request(fixture), fixture.customerId, UUID.randomUUID().toString());
+
+        com.gpstore.entity.Payment payment =
+                paymentRepository.findByOrderId(response.getOrderId()).orElseThrow(
+                        () -> new AssertionError("Placing an order must create its payment - "
+                                + "leaving it to a second request is what allowed orders with no payment"));
+
+        assertEquals(com.gpstore.enums.PaymentMethod.COD, payment.getPaymentMethod());
+        assertEquals(com.gpstore.enums.PaymentStatus.COD_PENDING, payment.getPaymentStatus());
+        assertEquals("COD_PENDING", response.getPaymentStatus(),
+                "The response must tell the client a payment already exists, or it will "
+                        + "make the now-redundant second request anyway");
+    }
+
+    /**
+     * The old two-request flow must keep working: older app builds still call
+     * POST /api/payments unconditionally, and now the payment already exists.
+     * Returning the existing one is correct - the caller's desired end state
+     * is already true. Rejecting it would break checkout for every client
+     * that has not been updated.
+     */
+    @Test
+    void initiatingPaymentAgainReturnsTheExistingOneInsteadOfConflicting() {
+        Fixture fixture = newCheckoutReadyCustomer(2);
+        PlaceOrderResponse order = orderService.placeOrder(
+                request(fixture), fixture.customerId, UUID.randomUUID().toString());
+
+        com.gpstore.dto.request.InitiatePaymentRequest second =
+                new com.gpstore.dto.request.InitiatePaymentRequest();
+        second.setOrderId(order.getOrderId());
+        second.setPaymentMethod("COD");
+
+        var result = paymentService.initiatePayment(second, fixture.customerId);
+
+        assertEquals("COD_PENDING", result.getPayment().getPaymentStatus());
+        assertEquals(1, paymentRepository.findAll().stream()
+                        .filter(p -> p.getOrder() != null && p.getOrder().getId().equals(order.getOrderId()))
+                        .count(),
+                "A repeat payment request must not create a SECOND payment for the order");
+    }
+
+    /**
+     * A mismatched method is a genuine disagreement about what the customer
+     * is doing, not a retry, so it must still conflict. Silently returning
+     * the COD payment to a caller asking for UPI would be worse than failing.
+     */
+    @Test
+    void initiatingPaymentWithADifferentMethodStillConflicts() {
+        Fixture fixture = newCheckoutReadyCustomer(2);
+        PlaceOrderResponse order = orderService.placeOrder(
+                request(fixture), fixture.customerId, UUID.randomUUID().toString());
+
+        com.gpstore.dto.request.InitiatePaymentRequest mismatched =
+                new com.gpstore.dto.request.InitiatePaymentRequest();
+        mismatched.setOrderId(order.getOrderId());
+        mismatched.setPaymentMethod("UPI");
+
+        assertThrows(ConflictException.class,
+                () -> paymentService.initiatePayment(mismatched, fixture.customerId));
     }
 
     // ---------- fixtures ----------

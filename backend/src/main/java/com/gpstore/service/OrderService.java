@@ -59,6 +59,10 @@ public class OrderService {
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
     private final java.util.concurrent.ExecutorService orderSideEffectsExecutor;
     private final com.gpstore.repository.OutboxEventRepository outboxEventRepository;
+    // @Lazy: PaymentService depends on OrderService already, so this pair is
+    // circular and would fail context startup without it - same reason
+    // DeliveryService above is lazy.
+    private final PaymentService paymentService;
     private final boolean requireIdempotencyKey;
 
     public OrderService(
@@ -86,6 +90,7 @@ public class OrderService {
             com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository,
             java.util.concurrent.ExecutorService orderSideEffectsExecutor,
             com.gpstore.repository.OutboxEventRepository outboxEventRepository,
+            @org.springframework.context.annotation.Lazy PaymentService paymentService,
             @org.springframework.beans.factory.annotation.Value("${orders.require-idempotency-key:true}")
             boolean requireIdempotencyKey) {
 
@@ -108,6 +113,7 @@ public class OrderService {
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.orderSideEffectsExecutor = orderSideEffectsExecutor;
         this.outboxEventRepository = outboxEventRepository;
+        this.paymentService = paymentService;
         this.requireIdempotencyKey = requireIdempotencyKey;
     }
 
@@ -473,7 +479,12 @@ public class OrderService {
         order.setAddress(address);
         order.setOrderDate(LocalDateTime.now());
 
-        if (request.getPaymentMethod().equalsIgnoreCase("COD")) {
+        // Validated up front, through the same parser PaymentService uses, so
+        // an unsupported method fails before any inventory is touched rather
+        // than after the order is half-built.
+        final PaymentMethod paymentMethod = paymentService.parsePaymentMethod(request.getPaymentMethod());
+
+        if (paymentMethod == PaymentMethod.COD) {
             order.setPaymentStatus(PaymentStatus.COD_PENDING);
             // COD has no separate payment-confirmation step to wait for -
             // cash isn't collected until delivery, so gating packing on
@@ -599,6 +610,24 @@ public class OrderService {
         outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
                 OutboxWorker.AGGREGATE_ORDER, order.getId(), OutboxWorker.EVENT_ORDER_PLACED));
 
+        // Payment row created HERE, inside the order transaction, instead of
+        // leaving the client to make a second HTTP request for it.
+        //
+        // Checkout was: POST /orders/place, wait, POST /payments, wait. The
+        // second request paid a full round trip - auth, rate limit, routing,
+        // TLS - for what is a single INSERT with no external dependency (UPI
+        // link generation is local string building, see
+        // PaymentService.upiLinkFor). Folding it in removes that entire round
+        // trip from the customer's critical path.
+        //
+        // It also closes a real correctness gap rather than only saving
+        // time: in the two-request flow an order could exist with NO payment
+        // at all if the second call never arrived (app killed, network lost,
+        // process died between them). Creating it in the same transaction
+        // means the two commit together or not at all.
+        final com.gpstore.entity.Payment newPayment =
+                paymentService.createPaymentForNewOrder(order, paymentMethod);
+
         // None of notification creation, the audit log entry, invoice
         // generation, or delivery auto-assignment need to block the
         // customer's "order placed" response, or run inside the same
@@ -700,6 +729,8 @@ public class OrderService {
         response.setOrderId(order.getId());
         response.setOrderNumber(order.getOrderNumber());
         response.setMessage("Order placed successfully.");
+        response.setPaymentStatus(newPayment.getPaymentStatus().name());
+        response.setUpiPaymentLink(paymentService.upiLinkFor(order, paymentMethod));
 
         return response;
     }
