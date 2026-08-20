@@ -79,6 +79,35 @@ class ProductsRepository {
     return Product.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// One page of the endless home feed.
+  ///
+  /// Returns [hasNext] rather than only the products, because without it the
+  /// client cannot tell "this page happened to be short" from "there is
+  /// nothing more" - and a client that cannot tell keeps requesting page
+  /// after empty page forever. Spring's Page JSON already carries `last`;
+  /// every other method in this file throws it away and returns a bare
+  /// List, which is exactly why none of them can drive infinite scroll.
+  Future<ProductPage> fetchFeed({int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/products/feed',
+      queryParameters: {'page': page, 'size': size},
+    );
+
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+
+    return ProductPage(
+      products: content.map((e) => Product.fromJson(e as Map<String, dynamic>)).toList(),
+      page: (data['number'] as int?) ?? page,
+      // Trust the server's own "is this the last page" flag rather than
+      // inferring it from a short page: a page can be short for other
+      // reasons, and inferring wrongly either stops early (products the
+      // customer never sees) or never stops at all.
+      hasNext: !((data['last'] as bool?) ?? true),
+      totalElements: (data['totalElements'] as int?) ?? content.length,
+    );
+  }
+
   Future<List<Product>> browseByCategory(int categoryId, {int page = 0, int size = 20}) async {
     final response = await apiClient.dio.get(
       '/api/products/category/$categoryId',
@@ -157,4 +186,20 @@ class ProductsRepository {
       totalPages: data['totalPages'] as int,
     );
   }
+}
+
+/// One page of products plus the two facts infinite scroll needs: which page
+/// this was, and whether another exists.
+class ProductPage {
+  const ProductPage({
+    required this.products,
+    required this.page,
+    required this.hasNext,
+    required this.totalElements,
+  });
+
+  final List<Product> products;
+  final int page;
+  final bool hasNext;
+  final int totalElements;
 }

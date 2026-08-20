@@ -10,7 +10,9 @@ import '../../products/domain/product_models.dart';
 import '../../products/presentation/brand_products_screen.dart';
 import '../../products/presentation/category_products_screen.dart';
 import '../../products/presentation/product_detail_screen.dart';
+import '../../products/presentation/product_feed_provider.dart';
 import '../../products/presentation/products_providers.dart';
+import 'home_feed_section.dart';
 import '../../products/presentation/search_screen.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../../shared/widgets/categories_row.dart';
@@ -103,9 +105,48 @@ class HomeScreen extends ConsumerWidget {
           ref.refresh(newArrivalsProvider.future),
           ref.refresh(trendingProvider.future),
           ref.refresh(recommendedForMeProvider.future),
+          // Pull-to-refresh restarts the feed at page 0 rather than leaving
+          // the customer's accumulated pages in place - otherwise "refresh"
+          // updates the carousels while the feed below still shows the
+          // catalogue as it was.
+          Future.sync(() => ref.invalidate(productFeedProvider)),
         ]),
-        child: ListView(
-          children: [
+        // CustomScrollView rather than ListView, because the endless product
+        // feed is appended below as SLIVERS. A GridView nested inside a
+        // ListView would need shrinkWrap, which builds every tile at once -
+        // with a catalogue of thousands that is the entire list in memory
+        // and a scroll that visibly stutters. Sharing one viewport means
+        // only what is on screen gets built, however long the feed grows.
+        // NotificationListener rather than a ScrollController: there is no
+        // controller to create, hold, or forget to dispose, and this widget
+        // does not otherwise need one. It fires on the scroll events the
+        // page is already producing.
+        child: NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            // Trigger a page BEFORE the customer hits the bottom, so the
+            // next products are usually already there by the time they
+            // arrive - waiting until extentAfter == 0 guarantees they see
+            // the spinner every single time.
+            //
+            // Only depth 0: a horizontal carousel inside the page also emits
+            // ScrollNotifications, and without this check flicking "Trending
+            // now" sideways would request another page of the vertical feed.
+            if (notification.depth == 0 &&
+                notification.metrics.axis == Axis.vertical &&
+                notification.metrics.extentAfter < 600) {
+              // loadMore is safe to call repeatedly - it no-ops while a page
+              // is in flight and once the server says there is no next page.
+              ref.read(productFeedProvider.notifier).loadMore();
+            }
+            // false: this listener observes, it does not consume. Returning
+            // true would swallow the notification and break anything else
+            // listening, including the refresh indicator.
+            return false;
+          },
+          child: CustomScrollView(
+            slivers: [
+            SliverList(
+              delegate: SliverChildListDelegate([
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: GestureDetector(
@@ -230,8 +271,15 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
 
-            const SizedBox(height: 24),
-          ],
+              const SizedBox(height: 8),
+            ]),
+            ),
+            // Everything above is the curated part of the home screen. This
+            // is where it stops ending after New Arrivals and keeps going
+            // through the whole catalogue, one page at a time.
+            ...HomeFeedSlivers.build(context, ref, onProductTap: openProduct),
+            ],
+          ),
         ),
       ),
     );

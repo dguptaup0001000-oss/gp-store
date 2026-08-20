@@ -36,7 +36,7 @@ public class ProductService {
 
     // Save Product - evicts the cached listing so a new/changed product shows
     // up immediately instead of customers seeing a stale catalog.
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed"}, allEntries = true)
     @Transactional
     public ProductResponse saveProduct(Product product) {
         return ProductResponse.from(productRepository.save(product));
@@ -109,6 +109,31 @@ public class ProductService {
             throw new BadRequestException("Search keyword is required");
         }
         return batchFetchWithVariants(productRepository.searchInstant(keyword.trim(), pageable));
+    }
+
+    /**
+     * The endless home feed: every active product, page by page.
+     *
+     * This is what lets the home screen keep going past New Arrivals instead
+     * of ending after three carousels. It is a genuine server-side page - the
+     * client asks for page N and gets 20 products plus whether more exist -
+     * so a catalogue of thousands is never loaded into memory at once, on
+     * either side.
+     *
+     * SORTED BY ID ASCENDING, and that matters more than it looks. Infinite
+     * scroll re-queries with an offset, so the sort has to be stable: with
+     * createdAt DESC, a product added mid-scroll shifts every later page and
+     * the customer sees a duplicate or skips an item. New ids land at the
+     * end, leaving already-fetched pages meaning exactly what they meant.
+     *
+     * Cached like the other browse paths. The cache key includes the
+     * Pageable, so each page is cached independently rather than the whole
+     * catalogue under one key.
+     */
+    @Transactional(readOnly = true)
+    @Cacheable("productFeed")
+    public Page<ProductResponse> browseAll(Pageable pageable) {
+        return batchFetchWithVariants(productRepository.findByActiveTrue(pageable));
     }
 
     /** Category browsing - the other half of product discovery alongside search. */
@@ -278,7 +303,7 @@ public class ProductService {
     }
 
     /** Didn't exist before - a product could be created but never edited afterward. */
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed"}, allEntries = true)
     @Transactional
     public ProductResponse update(Long id, Product updated) {
         Product existing = getByIdOrThrow(id);
@@ -297,7 +322,7 @@ public class ProductService {
      * product, or fail on the FK constraint. Deactivating just stops it
      * showing up to customers.
      */
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed"}, allEntries = true)
     public void deactivate(Long id) {
         Product product = getByIdOrThrow(id);
         product.setActive(false);
