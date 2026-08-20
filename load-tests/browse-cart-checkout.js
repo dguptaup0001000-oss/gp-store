@@ -89,29 +89,50 @@ export function setup() {
   return { categories };
 }
 
-export const options = {
-  scenarios: {
-    browse: {
-      executor: 'ramping-vus',
-      exec: 'browse',
-      startVUs: 0,
-      stages: [
-        { duration: RAMP_TIME, target: BROWSE_VUS },
-        { duration: HOLD_TIME, target: BROWSE_VUS },
-        { duration: RAMP_TIME, target: 0 },
-      ],
-    },
-    cart: {
-      executor: 'ramping-vus',
-      exec: 'cart',
-      startVUs: 0,
-      stages: [
-        { duration: RAMP_TIME, target: CART_VUS },
-        { duration: HOLD_TIME, target: CART_VUS },
-        { duration: RAMP_TIME, target: 0 },
-      ],
-    },
-    checkout: {
+/**
+ * Scenarios are assembled rather than declared as one literal, because a
+ * scenario set to zero VUs must be OMITTED, not included with a target of 0.
+ *
+ * k6 rejects the whole script - before sending a single request - with
+ * "scenario cart has configuration errors: either startVUs or one of the
+ * stages' target values must be greater than 0". So a browse-only run,
+ * which is the normal shape of a high-VU run because cart and checkout
+ * need seeded accounts, would fail at startup and measure nothing at all.
+ * The run still burns its full setup time first, so the failure looks like
+ * a load test that ran and died rather than one that never started.
+ *
+ * Zero therefore means "leave this scenario out", which is what anyone
+ * setting it to zero intends.
+ */
+function rampingScenario(exec, vus) {
+  return {
+    executor: 'ramping-vus',
+    exec,
+    startVUs: 0,
+    stages: [
+      { duration: RAMP_TIME, target: vus },
+      { duration: HOLD_TIME, target: vus },
+      { duration: RAMP_TIME, target: 0 },
+    ],
+  };
+}
+
+const scenarios = {};
+
+if (BROWSE_VUS > 0) {
+  scenarios.browse = rampingScenario('browse', BROWSE_VUS);
+}
+
+if (CART_VUS > 0) {
+  scenarios.cart = rampingScenario('cart', CART_VUS);
+}
+
+// Checkout rides on the seeded accounts the cart scenario needs, so it is
+// tied to the same switch: with no accounts there is nothing to check out
+// with, and every iteration would fail on authentication and report as a
+// backend failure when it is really a test-setup gap.
+if (CART_VUS > 0) {
+  scenarios.checkout = {
       executor: 'constant-arrival-rate',
       exec: 'checkout',
       // Paced against the backend's checkout rate limit, which CHANGED:
@@ -133,8 +154,17 @@ export const options = {
       duration: HOLD_TIME,
       preAllocatedVUs: 5,
       maxVUs: 10,
-    },
-  },
+  };
+}
+
+if (Object.keys(scenarios).length === 0) {
+  // Better to say so than to let k6 start with nothing to do and report a
+  // clean run that tested absolutely nothing.
+  throw new Error('No scenarios enabled - set BROWSE_VUS and/or CART_VUS above 0.');
+}
+
+export const options = {
+  scenarios,
   thresholds: {
     // Aspirational, not pass/fail gates for this exercise - the point of
     // Phase 2 is to find the REAL numbers, not assert ones in advance. Kept
