@@ -38,15 +38,17 @@ class PaymentServiceTest {
     void setUp() {
         // `self` is this bean's own Spring proxy in production, used only so
         // the expiry sweep's per-payment REQUIRES_NEW transaction actually
-        // applies (see PaymentService.self). Null here on purpose: none of
-        // the tests in this class go through the sweep, and a null that would
-        // NPE loudly is better than a self-reference that quietly pretends
-        // transaction boundaries exist in a plain-constructed instance where
-        // they cannot. The sweep's real behaviour is covered against a live
-        // database in InventoryRestorationConcurrencyTest instead.
+        // applies (see PaymentService.self). Null here on purpose, along
+        // with the outbox repository and notification service the sweep
+        // uses: none of the tests in this class go through the sweep, and a
+        // null that would NPE loudly is better than a stub that quietly
+        // pretends transaction boundaries exist in a plain-constructed
+        // instance where they cannot. The sweep's real behaviour is covered
+        // against a live database in UpiExpiryStateMachineTest and
+        // InventoryRestorationConcurrencyTest instead.
         paymentService = new PaymentService(
                 paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService,
-                null, 30, 100, 50);
+                null, null, null, 30, 100, 50);
     }
 
     @Test
