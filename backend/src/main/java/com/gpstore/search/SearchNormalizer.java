@@ -140,6 +140,68 @@ public final class SearchNormalizer {
         return result.length() < MIN_KEY_LENGTH ? "" : result;
     }
 
+    /**
+     * Levenshtein edit distance, bounded.
+     *
+     * <p>The phonetic key is deliberately lossy, which means it produces
+     * false friends: "britannia" and "bartan" both reduce to "brtn", and
+     * without a second opinion a real brand name would be translated to
+     * "dishwash". This is that second opinion - the key finds candidates
+     * cheaply, and this confirms they are actually the same word.
+     *
+     * <p>Bounded because the answer is only ever compared against a small
+     * threshold: once the distance exceeds [limit] the exact value does not
+     * matter, so the rest of the matrix is not worth computing.
+     */
+    public static int editDistance(String a, String b, int limit) {
+        String left = normalize(a);
+        String right = normalize(b);
+
+        if (left.equals(right)) return 0;
+        if (Math.abs(left.length() - right.length()) > limit) return limit + 1;
+
+        int[] previous = new int[right.length() + 1];
+        int[] current = new int[right.length() + 1];
+        for (int j = 0; j <= right.length(); j++) previous[j] = j;
+
+        for (int i = 1; i <= left.length(); i++) {
+            current[0] = i;
+            int bestInRow = current[0];
+
+            for (int j = 1; j <= right.length(); j++) {
+                int substitution = previous[j - 1] + (left.charAt(i - 1) == right.charAt(j - 1) ? 0 : 1);
+                current[j] = Math.min(Math.min(current[j - 1] + 1, previous[j] + 1), substitution);
+                bestInRow = Math.min(bestInRow, current[j]);
+            }
+
+            // Every remaining row can only increase the distance, so once an
+            // entire row is past the limit the answer is too.
+            if (bestInRow > limit) return limit + 1;
+
+            int[] swap = previous;
+            previous = current;
+            current = swap;
+        }
+
+        return previous[right.length()];
+    }
+
+    /**
+     * Whether two words are close enough to be the same word, given that
+     * their phonetic keys already agree.
+     *
+     * <p>Two edits covers the real variants - cheeni/chini, dudh/doodh,
+     * chaawal/chawal, saboon/sabun - while rejecting the key collisions that
+     * are simply different words. The allowance grows slowly for longer
+     * words, where more of the spelling can drift without changing which word
+     * is meant.
+     */
+    public static boolean areCloseEnough(String a, String b) {
+        int shorter = Math.min(normalize(a).length(), normalize(b).length());
+        int limit = Math.max(2, shorter / 3);
+        return editDistance(a, b, limit) <= limit;
+    }
+
     /** Phonetic keys for every token, skipping ones too short to be useful. */
     public static List<String> phoneticKeys(String raw) {
         List<String> keys = new ArrayList<>();

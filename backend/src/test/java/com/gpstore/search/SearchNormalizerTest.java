@@ -103,6 +103,39 @@ class SearchNormalizerTest {
     }
 
     @Test
+    @DisplayName("a shared phonetic key is not on its own proof of the same word")
+    void falseFriends() {
+        // The collision that made this necessary: a real brand and a Hindi
+        // word for dishwash both reduce to "brtn". Without a second opinion,
+        // searching "britannia" would have been translated to "dishwash".
+        assertThat(SearchNormalizer.phoneticKey("britannia"))
+                .isEqualTo(SearchNormalizer.phoneticKey("bartan"));
+        assertThat(SearchNormalizer.areCloseEnough("britannia", "bartan")).isFalse();
+    }
+
+    @Test
+    @DisplayName("real spelling variants are still close enough")
+    void realVariantsSurviveTheCheck() {
+        assertThat(SearchNormalizer.areCloseEnough("cheeni", "chini")).isTrue();
+        assertThat(SearchNormalizer.areCloseEnough("chinee", "chini")).isTrue();
+        assertThat(SearchNormalizer.areCloseEnough("dudh", "doodh")).isTrue();
+        assertThat(SearchNormalizer.areCloseEnough("chaawal", "chawal")).isTrue();
+        assertThat(SearchNormalizer.areCloseEnough("saboon", "sabun")).isTrue();
+        assertThat(SearchNormalizer.areCloseEnough("pyaaz", "pyaz")).isTrue();
+        assertThat(SearchNormalizer.areCloseEnough("haldhi", "haldi")).isTrue();
+    }
+
+    @Test
+    @DisplayName("edit distance stops counting once it passes the limit")
+    void editDistanceIsBounded() {
+        assertThat(SearchNormalizer.editDistance("sugar", "sugar", 2)).isZero();
+        assertThat(SearchNormalizer.editDistance("sugar", "sogar", 2)).isEqualTo(1);
+        // Beyond the limit the exact value is not computed, only that it is
+        // over - which is all the caller ever asks.
+        assertThat(SearchNormalizer.editDistance("sugar", "turmeric", 2)).isGreaterThan(2);
+    }
+
+    @Test
     @DisplayName("normalization strips punctuation, case and accents but keeps digits")
     void normalization() {
         assertThat(SearchNormalizer.normalize("  TATA   Salt!! ")).isEqualTo("tata salt");

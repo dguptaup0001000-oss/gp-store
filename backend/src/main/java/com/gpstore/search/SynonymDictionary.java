@@ -2,10 +2,17 @@ package com.gpstore.search;
 
 import com.gpstore.entity.SearchSynonym;
 import com.gpstore.repository.SearchSynonymRepository;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import org.springframework.core.io.ClassPathResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -39,14 +46,90 @@ public class SynonymDictionary {
     /** How often to pick up rows added by an admin. */
     private static final long REFRESH_MS = 10 * 60 * 1000L;
 
+    private static final String VOCABULARY_RESOURCE = "search-synonyms.csv";
+
     private final SearchSynonymRepository repository;
 
-    private final AtomicReference<Map<String, String>> byPhoneticKey =
+    /**
+     * Phonetic key -> the row that produced it. The stored TERM is kept
+     * alongside the canonical word because the key alone is not enough to
+     * confirm a match - see canonicalFor.
+     */
+    private record Entry(String term, String canonical) {
+    }
+
+    private final AtomicReference<Map<String, Entry>> byPhoneticKey =
             new AtomicReference<>(Map.of());
 
     public SynonymDictionary(SearchSynonymRepository repository) {
         this.repository = repository;
+        seedIfEmpty();
         refresh();
+    }
+
+    /**
+     * Loads the bundled vocabulary the first time this runs against a
+     * database that has none.
+     *
+     * <p>WHY THE APPLICATION SEEDS THIS RATHER THAN A MIGRATION. Seeding from
+     * V12 would tie Smart Search to migrations having been run. CI builds its
+     * schema from the JPA entities with Flyway disabled, so the table would
+     * exist and be empty there - search would quietly lose every Hindi word,
+     * and nothing would fail to say so. The same is true of any fresh
+     * developer database. Seeding here covers every environment from one
+     * source of truth.
+     *
+     * <p>ONLY EVER SEEDS AN EMPTY TABLE, so a shop's own edits and additions
+     * are never overwritten on restart.
+     */
+    private void seedIfEmpty() {
+        try {
+            if (repository.count() > 0) return;
+
+            List<SearchSynonym> defaults = readBundledVocabulary();
+            if (defaults.isEmpty()) return;
+
+            repository.saveAll(defaults);
+            log.info("Seeded {} search synonyms from the bundled vocabulary", defaults.size());
+        } catch (Exception e) {
+            // Two instances starting at once can both see an empty table and
+            // both insert; the unique constraint on term means the loser
+            // fails here, having lost a race whose winner did the work. That
+            // is not an error worth failing startup over - and neither is any
+            // other seeding problem, since search still runs without the
+            // dictionary.
+            log.warn("Could not seed the search vocabulary (it may already have been seeded): {}", e.getMessage());
+        }
+    }
+
+    private List<SearchSynonym> readBundledVocabulary() {
+        List<SearchSynonym> loaded = new ArrayList<>();
+
+        try (InputStream stream = new ClassPathResource(VOCABULARY_RESOURCE).getInputStream();
+             BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+
+                int comma = trimmed.indexOf(',');
+                if (comma <= 0 || comma == trimmed.length() - 1) {
+                    log.warn("Skipping malformed vocabulary line: {}", trimmed);
+                    continue;
+                }
+
+                SearchSynonym synonym = new SearchSynonym();
+                synonym.setTerm(trimmed.substring(0, comma).trim());
+                synonym.setCanonicalTerm(trimmed.substring(comma + 1).trim());
+                synonym.setActive(true);
+                loaded.add(synonym);
+            }
+        } catch (Exception e) {
+            log.warn("Could not read the bundled search vocabulary: {}", e.getMessage());
+        }
+
+        return loaded;
     }
 
     /**
@@ -60,8 +143,17 @@ public class SynonymDictionary {
         String key = SearchNormalizer.phoneticKey(token);
         if (key.isEmpty()) return Optional.empty();
 
-        String canonical = byPhoneticKey.get().get(key);
-        if (canonical == null) return Optional.empty();
+        Entry entry = byPhoneticKey.get().get(key);
+        if (entry == null) return Optional.empty();
+
+        // The key is deliberately lossy, so it produces false friends:
+        // "britannia" and "bartan" both reduce to "brtn". Confirming with an
+        // edit distance against the stored term is what stops a real brand
+        // name being translated into dishwash - the key finds candidates
+        // cheaply, this decides whether they are actually the same word.
+        if (!SearchNormalizer.areCloseEnough(token, entry.term())) return Optional.empty();
+
+        String canonical = entry.canonical();
 
         // A word that maps to itself ("ghee" -> "ghee", "masala" -> "masala")
         // is in the table so that its spellings unify, not to be substituted.
@@ -75,15 +167,16 @@ public class SynonymDictionary {
     @Scheduled(fixedDelay = REFRESH_MS)
     public final void refresh() {
         try {
-            Map<String, String> rebuilt = new HashMap<>();
+            Map<String, Entry> rebuilt = new HashMap<>();
             for (SearchSynonym synonym : repository.findByActiveTrue()) {
                 String key = SearchNormalizer.phoneticKey(synonym.getTerm());
                 if (key.isEmpty()) continue;
 
-                String existing = rebuilt.putIfAbsent(key, synonym.getCanonicalTerm());
-                if (existing != null && !existing.equals(synonym.getCanonicalTerm())) {
+                Entry entry = new Entry(synonym.getTerm(), synonym.getCanonicalTerm());
+                Entry existing = rebuilt.putIfAbsent(key, entry);
+                if (existing != null && !existing.canonical().equals(entry.canonical())) {
                     log.warn("Search synonym '{}' collides on phonetic key '{}' with '{}'; keeping '{}'",
-                            synonym.getTerm(), key, existing, existing);
+                            synonym.getTerm(), key, existing.term(), existing.term());
                 }
             }
             byPhoneticKey.set(Map.copyOf(rebuilt));

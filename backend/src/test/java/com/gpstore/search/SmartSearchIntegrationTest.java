@@ -40,6 +40,7 @@ import org.springframework.data.domain.PageRequest;
 class SmartSearchIntegrationTest {
 
     @Autowired private SmartSearchService smartSearch;
+    @Autowired private SynonymDictionary synonyms;
     @Autowired private ProductRepository productRepository;
     @Autowired private ProductVariantRepository variantRepository;
     @Autowired private CategoryRepository categoryRepository;
@@ -122,6 +123,34 @@ class SmartSearchIntegrationTest {
                 .as("searching '%s' should find a product named like '%s'", query, expectedWord)
                 .isNotEmpty()
                 .anySatisfy(p -> assertThat(p.getName().toLowerCase()).contains(expectedWord));
+    }
+
+    @Test
+    @DisplayName("the vocabulary is present without migrations having run")
+    void vocabularyIsSelfSeeding() {
+        // THE REGRESSION THIS EXISTS FOR. The vocabulary used to be seeded by
+        // the V12 migration alone, and CI builds its schema from the JPA
+        // entities with Flyway disabled - so the table existed and was empty
+        // there, every Hindi word silently stopped translating, and nothing
+        // failed loudly enough to say why. Seeding from the application
+        // covers every environment; this asserts it actually happened.
+        assertThat(synonyms.size())
+                .as("the bundled vocabulary should be loaded in any environment")
+                .isGreaterThan(50);
+
+        // Through the phonetic key, so this also covers spellings that are
+        // not in the file at all.
+        assertThat(synonyms.canonicalFor("cheeni")).contains("sugar");
+        assertThat(synonyms.canonicalFor("doodh")).contains("milk");
+    }
+
+    @Test
+    @DisplayName("a word the dictionary does not know is left alone")
+    void unknownWordsAreNotTranslated() {
+        // "no opinion" has to stay distinguishable from "translate this",
+        // otherwise every English product name would be rewritten.
+        assertThat(synonyms.canonicalFor("britannia")).isEmpty();
+        assertThat(synonyms.canonicalFor("zzzz")).isEmpty();
     }
 
     @Test

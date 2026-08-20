@@ -1,0 +1,125 @@
+# GP-Store Smart Search vocabulary: Hindi/Hinglish grocery word -> the
+# English word to search the catalogue for.
+#
+# THE SINGLE SOURCE OF TRUTH for this list. It is loaded into the
+# search_synonyms table on first startup (see SynonymDictionary.seedIfEmpty),
+# which is what makes Smart Search work in every environment rather than only
+# where database migrations have been run - CI deliberately runs with Flyway
+# disabled, and a seed that lived only in a migration left the table present
+# but empty there, so nothing translated.
+#
+# ONE ROW PER CONCEPT, NOT PER SPELLING. SearchNormalizer's phonetic key
+# generates the variants: "chini" here also matches "cheeni", "chinee" and
+# "chiny". Adding every spelling by hand is exactly what this design avoids.
+#
+# Editable afterwards in the database - rows added there are picked up on the
+# next refresh and are never overwritten by this file, which only ever seeds
+# an empty table.
+#
+# Format: term,canonical_term  (blank lines and #-comments ignored)
+
+chini,sugar
+shakkar,sugar
+namak,salt
+chawal,rice
+atta,flour
+maida,flour
+suji,semolina
+rava,semolina
+besan,gram flour
+daal,dal
+chana,chickpea
+rajma,kidney beans
+moong,mung
+masoor,lentil
+toor,pigeon pea
+arhar,pigeon pea
+urad,black gram
+poha,flattened rice
+sabudana,sago
+doodh,milk
+dahi,curd
+paneer,cottage cheese
+makhan,butter
+ghee,ghee
+malai,cream
+lassi,lassi
+chaas,buttermilk
+tel,oil
+sarson,mustard
+til,sesame
+nariyal,coconut
+moongphali,groundnut
+badam,almond
+kaju,cashew
+kishmish,raisin
+akhrot,walnut
+pista,pistachio
+haldi,turmeric
+mirch,chilli
+lal mirch,red chilli
+kali mirch,black pepper
+jeera,cumin
+dhania,coriander
+saunf,fennel
+methi,fenugreek
+elaichi,cardamom
+laung,clove
+dalchini,cinnamon
+tej patta,bay leaf
+hing,asafoetida
+ajwain,carom
+kalonji,nigella
+imli,tamarind
+masala,masala
+aloo,potato
+pyaz,onion
+pyaaz,onion
+tamatar,tomato
+lehsun,garlic
+adrak,ginger
+gajar,carrot
+matar,peas
+gobi,cauliflower
+bhindi,okra
+baingan,brinjal
+palak,spinach
+nimbu,lemon
+kheera,cucumber
+shimla mirch,capsicum
+mooli,radish
+kaddu,pumpkin
+dhaniya patta,coriander leaves
+kela,banana
+seb,apple
+aam,mango
+angoor,grapes
+anar,pomegranate
+santra,orange
+papita,papaya
+tarbooj,watermelon
+biscuit,biscuit
+namkeen,namkeen
+chai,tea
+patti,tea
+coffee,coffee
+anda,egg
+bread,bread
+sirka,vinegar
+shahad,honey
+murabba,preserve
+achar,pickle
+papad,papad
+sabun,soap
+saboon,soap
+shampoo,shampoo
+tel maalish,hair oil
+manjan,toothpaste
+brush,toothbrush
+jhadu,broom
+phenyl,floor cleaner
+detergent,detergent
+surf,detergent
+bartan,dishwash
+agarbatti,incense
+mombatti,candle

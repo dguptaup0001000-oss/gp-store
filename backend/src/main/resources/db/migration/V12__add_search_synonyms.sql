@@ -8,11 +8,20 @@
 --
 -- WHAT KEEPS IT SMALL. One row per CONCEPT, not per spelling. The phonetic
 -- key generates the variants: "chini" is stored once and "cheeni", "chinee"
--- and "chiny" all reach it. That is why this is ~90 rows rather than the
+-- and "chiny" all reach it. That is why this is ~100 rows rather than the
 -- thousands of hand-written variants the design deliberately avoids.
 --
 -- It is also DATA, not code: a shop that sells something regional adds a row
 -- and Smart Search picks it up on the next cache refresh, with no deploy.
+--
+-- THE VOCABULARY IS NOT SEEDED HERE. It lives in
+-- src/main/resources/search-synonyms.csv and is loaded by
+-- SynonymDictionary.seedIfEmpty on first startup. Seeding from this migration
+-- instead would tie the feature to migrations having been run: CI runs with
+-- Flyway disabled and the schema built from JPA entities, so the table would
+-- exist and be empty there, and search would silently lose every Hindi word
+-- with nothing failing to say so. Seeding from the application covers every
+-- environment, including a fresh developer database.
 CREATE TABLE IF NOT EXISTS search_synonyms (
     id             BIGSERIAL PRIMARY KEY,
     -- What a customer types. Stored as written so the table stays readable
@@ -28,119 +37,3 @@ CREATE TABLE IF NOT EXISTS search_synonyms (
 );
 
 CREATE INDEX IF NOT EXISTS idx_search_synonyms_active ON search_synonyms (active);
-
-INSERT INTO search_synonyms (term, canonical_term) VALUES
-    -- Staples
-    ('chini', 'sugar'),
-    ('shakkar', 'sugar'),
-    ('namak', 'salt'),
-    ('chawal', 'rice'),
-    ('atta', 'flour'),
-    ('maida', 'flour'),
-    ('suji', 'semolina'),
-    ('rava', 'semolina'),
-    ('besan', 'gram flour'),
-    ('daal', 'dal'),
-    ('chana', 'chickpea'),
-    ('rajma', 'kidney beans'),
-    ('moong', 'mung'),
-    ('masoor', 'lentil'),
-    ('toor', 'pigeon pea'),
-    ('arhar', 'pigeon pea'),
-    ('urad', 'black gram'),
-    ('poha', 'flattened rice'),
-    ('sabudana', 'sago'),
-    -- Dairy
-    ('doodh', 'milk'),
-    ('dahi', 'curd'),
-    ('paneer', 'cottage cheese'),
-    ('makhan', 'butter'),
-    ('ghee', 'ghee'),
-    ('malai', 'cream'),
-    ('lassi', 'lassi'),
-    ('chaas', 'buttermilk'),
-    -- Oils and fats
-    ('tel', 'oil'),
-    ('sarson', 'mustard'),
-    ('til', 'sesame'),
-    ('nariyal', 'coconut'),
-    ('moongphali', 'groundnut'),
-    ('badam', 'almond'),
-    ('kaju', 'cashew'),
-    ('kishmish', 'raisin'),
-    ('akhrot', 'walnut'),
-    ('pista', 'pistachio'),
-    -- Spices
-    ('haldi', 'turmeric'),
-    ('mirch', 'chilli'),
-    ('lal mirch', 'red chilli'),
-    ('kali mirch', 'black pepper'),
-    ('jeera', 'cumin'),
-    ('dhania', 'coriander'),
-    ('saunf', 'fennel'),
-    ('methi', 'fenugreek'),
-    ('elaichi', 'cardamom'),
-    ('laung', 'clove'),
-    ('dalchini', 'cinnamon'),
-    ('tej patta', 'bay leaf'),
-    ('hing', 'asafoetida'),
-    ('ajwain', 'carom'),
-    ('kalonji', 'nigella'),
-    ('imli', 'tamarind'),
-    ('masala', 'masala'),
-    -- Vegetables
-    ('aloo', 'potato'),
-    ('pyaz', 'onion'),
-    ('pyaaz', 'onion'),
-    ('tamatar', 'tomato'),
-    ('lehsun', 'garlic'),
-    ('adrak', 'ginger'),
-    ('gajar', 'carrot'),
-    ('matar', 'peas'),
-    ('gobi', 'cauliflower'),
-    ('bhindi', 'okra'),
-    ('baingan', 'brinjal'),
-    ('palak', 'spinach'),
-    ('nimbu', 'lemon'),
-    ('kheera', 'cucumber'),
-    ('shimla mirch', 'capsicum'),
-    ('mooli', 'radish'),
-    ('kaddu', 'pumpkin'),
-    ('dhaniya patta', 'coriander leaves'),
-    -- Fruit
-    ('kela', 'banana'),
-    ('seb', 'apple'),
-    ('aam', 'mango'),
-    ('angoor', 'grapes'),
-    ('anar', 'pomegranate'),
-    ('santra', 'orange'),
-    ('papita', 'papaya'),
-    ('tarbooj', 'watermelon'),
-    -- Bakery, packaged, beverages
-    ('biscuit', 'biscuit'),
-    ('namkeen', 'namkeen'),
-    ('chai', 'tea'),
-    ('patti', 'tea'),
-    ('coffee', 'coffee'),
-    ('anda', 'egg'),
-    ('bread', 'bread'),
-    ('sirka', 'vinegar'),
-    ('shahad', 'honey'),
-    ('murabba', 'preserve'),
-    ('achar', 'pickle'),
-    ('papad', 'papad'),
-    -- Household and personal care
-    ('sabun', 'soap'),
-    ('saboon', 'soap'),
-    ('shampoo', 'shampoo'),
-    ('tel maalish', 'hair oil'),
-    ('manjan', 'toothpaste'),
-    ('brush', 'toothbrush'),
-    ('jhadu', 'broom'),
-    ('phenyl', 'floor cleaner'),
-    ('detergent', 'detergent'),
-    ('surf', 'detergent'),
-    ('bartan', 'dishwash'),
-    ('agarbatti', 'incense'),
-    ('mombatti', 'candle')
-ON CONFLICT (term) DO NOTHING;
