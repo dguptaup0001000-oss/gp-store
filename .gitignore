@@ -50,6 +50,6 @@ firebase_base64.txt
 load-tests/accounts.json
 
 # Redis snapshot written by a locally-run redis-server during testing.
-# Build artifact, not source.
+# Build artifact, not source, and can be large.
 dump.rdb
 **/dump.rdb

@@ -25,6 +25,29 @@ final newArrivalsProvider = FutureProvider<List<Product>>((ref) {
   return ref.watch(productsRepositoryProvider).getNewArrivals();
 });
 
+/// Full product detail, including the image gallery.
+///
+/// autoDispose so a browsing session does not accumulate every product the
+/// customer looked at; family so each product is cached independently while
+/// its page is open.
+final productDetailProvider = FutureProvider.autoDispose.family<Product, int>((ref, productId) {
+  return ref.watch(productsRepositoryProvider).fetchProductDetail(productId);
+});
+
+/// Other products in the same category - the "Similar products" strip.
+///
+/// Category rather than frequently-bought-together: co-purchase data is
+/// empty for most of a young catalogue, so that strip would be blank on
+/// nearly every product. Same-category always has something to show and is
+/// genuinely "similar".
+final similarProductsProvider =
+    FutureProvider.autoDispose.family<List<Product>, ({int categoryId, int excludeProductId})>((ref, args) async {
+  final products = await ref
+      .watch(productsRepositoryProvider)
+      .browseByCategory(args.categoryId, page: 0, size: 12);
+  return products.where((p) => p.id != args.excludeProductId).toList();
+});
+
 final trendingProvider = FutureProvider<List<Product>>((ref) {
   return ref.watch(productsRepositoryProvider).getTrending();
 });

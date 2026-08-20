@@ -22,18 +22,21 @@ import java.util.Map;
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final com.gpstore.repository.ProductImageRepository productImageRepository;
     private final ProductBrowseRepository productBrowseRepository;
 
     public ProductService(
             ProductRepository productRepository,
-            ProductBrowseRepository productBrowseRepository) {
+            ProductBrowseRepository productBrowseRepository,
+            com.gpstore.repository.ProductImageRepository productImageRepository) {
         this.productRepository = productRepository;
+        this.productImageRepository = productImageRepository;
         this.productBrowseRepository = productBrowseRepository;
     }
 
     // Save Product - evicts the cached listing so a new/changed product shows
     // up immediately instead of customers seeing a stale catalog.
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed"}, allEntries = true)
     @Transactional
     public ProductResponse saveProduct(Product product) {
         return ProductResponse.from(productRepository.save(product));
@@ -106,6 +109,31 @@ public class ProductService {
             throw new BadRequestException("Search keyword is required");
         }
         return batchFetchWithVariants(productRepository.searchInstant(keyword.trim(), pageable));
+    }
+
+    /**
+     * The endless home feed: every active product, page by page.
+     *
+     * This is what lets the home screen keep going past New Arrivals instead
+     * of ending after three carousels. It is a genuine server-side page - the
+     * client asks for page N and gets 20 products plus whether more exist -
+     * so a catalogue of thousands is never loaded into memory at once, on
+     * either side.
+     *
+     * SORTED BY ID ASCENDING, and that matters more than it looks. Infinite
+     * scroll re-queries with an offset, so the sort has to be stable: with
+     * createdAt DESC, a product added mid-scroll shifts every later page and
+     * the customer sees a duplicate or skips an item. New ids land at the
+     * end, leaving already-fetched pages meaning exactly what they meant.
+     *
+     * Cached like the other browse paths. The cache key includes the
+     * Pageable, so each page is cached independently rather than the whole
+     * catalogue under one key.
+     */
+    @Transactional(readOnly = true)
+    @Cacheable("productFeed")
+    public Page<ProductResponse> browseAll(Pageable pageable) {
+        return batchFetchWithVariants(productRepository.findByActiveTrue(pageable));
     }
 
     /** Category browsing - the other half of product discovery alongside search. */
@@ -235,10 +263,38 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable("productDetail")
     public ProductResponse getProductById(Long id) {
-        return productRepository.findByIdIn(List.of(id)).stream()
+        ProductResponse product = productRepository.findByIdIn(List.of(id)).stream()
                 .findFirst()
                 .map(ProductResponse::from)
                 .orElse(null);
+
+        if (product == null) {
+            return null;
+        }
+
+        // The gallery is attached HERE and nowhere else, on purpose.
+        //
+        // Detail is the only screen that shows more than one image, so this
+        // is the only place worth the extra query. Attaching galleries to
+        // list responses would mean fetching up to five URLs for every card
+        // in a 20-product grid to render one thumbnail - bandwidth and
+        // serialization the user never sees, on every browse request, which
+        // is exactly the traffic that already saturates this instance.
+        //
+        // Listings continue to use ProductVariant.imageUrl, unchanged.
+        //
+        // One extra query per detail view, and it is cached with the rest of
+        // the response under "productDetail".
+        List<String> gallery = productImageRepository.findByProductIdOrderBySortOrderAsc(id).stream()
+                .map(com.gpstore.entity.ProductImage::getImageUrl)
+                .filter(url -> url != null && !url.isBlank())
+                .toList();
+
+        // No gallery rows means an existing product that predates this
+        // feature: return it exactly as before and let the client fall back
+        // to the variant thumbnail, rather than handing back an empty
+        // gallery the UI might render as a broken strip.
+        return gallery.isEmpty() ? product : product.withImages(gallery);
     }
 
     public Product getByIdOrThrow(Long id) {
@@ -247,7 +303,7 @@ public class ProductService {
     }
 
     /** Didn't exist before - a product could be created but never edited afterward. */
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed"}, allEntries = true)
     @Transactional
     public ProductResponse update(Long id, Product updated) {
         Product existing = getByIdOrThrow(id);
@@ -266,7 +322,7 @@ public class ProductService {
      * product, or fail on the FK constraint. Deactivating just stops it
      * showing up to customers.
      */
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed"}, allEntries = true)
     public void deactivate(Long id) {
         Product product = getByIdOrThrow(id);
         product.setActive(false);
