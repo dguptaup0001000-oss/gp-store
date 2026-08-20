@@ -1,0 +1,115 @@
+# GP-STORE production stack for a single ARM64 Ubuntu VPS.
+#
+# Deliberately small: one backend container, one Redis, one Caddy for TLS.
+# No orchestrator, no service mesh, no clustering - the audit found nothing
+# that needs them, and each one would add a failure mode a single kirana
+# store has no one on call to debug.
+#
+# Usage:
+#   cp deploy/.env.example deploy/.env    # then fill it in - never commit it
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d
+
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/dguptaup0001000-oss/gp-store:latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Sizing for the box. These are the ONLY two numbers that normally need
+      # to change when the VPS is resized - both are already env-driven in
+      # application.properties, so no rebuild is required.
+      #
+      # TOMCAT_MAX_THREADS was 40 on Render because 200 threads on 0.5 vCPU
+      # spend their time context-switching rather than working. That
+      # reasoning inverts on a multi-core box: see DEPLOY-ARM64.md for how to
+      # pick the number, and raise it deliberately rather than to 200.
+      TOMCAT_MAX_THREADS: ${TOMCAT_MAX_THREADS:-100}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-20}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      APP_PRODUCTION: "true"
+      # validate, not update: production schema changes belong to Flyway
+      # migrations, not to Hibernate inferring DDL from entities at boot.
+      DDL_AUTO: ${DDL_AUTO:-validate}
+      JAVA_OPTS: ${JAVA_OPTS:-}
+    # NOT published to the host. Only Caddy can reach the backend, over the
+    # compose network - so the app is not exposed on the VPS's public
+    # interface even if the firewall is misconfigured.
+    expose:
+      - "8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Must exceed server.shutdown's timeout-per-shutdown-phase (25s), or
+    # Docker SIGKILLs the JVM mid-drain and graceful shutdown does nothing.
+    stop_grace_period: 40s
+    deploy:
+      resources:
+        limits:
+          # The JVM reads this cgroup limit and sizes its heap to 70% of it
+          # (see Dockerfile). Set it BELOW the box's total RAM so Redis,
+          # Caddy, and the OS itself are not competing with the heap.
+          memory: ${BACKEND_MEMORY_LIMIT:-3g}
+    logging:
+      # Unbounded container logs are a real way to fill a small VPS disk and
+      # take the app down for a reason that has nothing to do with the app.
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Cache and rate-limiter state only - nothing here is a source of truth,
+    # so persistence is off and a restart simply means a cold cache.
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - allkeys-lru
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # The only two ports open to the internet.
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys. Without this volume Caddy
+      # re-requests a certificate on every restart and will hit Let's
+      # Encrypt's rate limit.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:

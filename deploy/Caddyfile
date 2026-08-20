@@ -1,0 +1,81 @@
+# GP-STORE reverse proxy.
+#
+# Caddy is chosen over nginx for one reason that matters at this scale:
+# certificates are automatic. It obtains and renews Let's Encrypt certs with
+# no cron job and no certbot, which removes the single most common way a
+# small deployment goes down - an expired certificate nobody was watching.
+
+{$APP_DOMAIN} {
+	# HTTP -> HTTPS is automatic in Caddy: a plain :80 request to a site
+	# defined with a domain name is redirected, no directive needed.
+
+	encode gzip zstd
+
+	# Security headers. HSTS is deliberately NOT set here - once a browser
+	# has seen it, that domain is HTTPS-only for max-age even if the
+	# certificate later fails, which is unrecoverable for a small shop that
+	# needs to be able to fall back. Add it once the setup has been stable
+	# for a while and you are confident in renewals.
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		# Never advertise the server software or version.
+		-Server
+	}
+
+	# Actuator is reachable from inside the compose network for the
+	# container health check, but /v1/actuator/health is the ONLY actuator
+	# path the internet may see. prometheus, metrics, env and the rest leak
+	# internal detail - SecurityConfig already requires ADMIN for them, and
+	# this is the second lock on the same door.
+	@internalActuator path /v1/actuator/*
+	handle @internalActuator {
+		@healthOnly path /v1/actuator/health /v1/actuator/health/*
+		handle @healthOnly {
+			reverse_proxy backend:8081
+		}
+		respond 404
+	}
+
+	reverse_proxy backend:8081 {
+		# Pass the real client IP through. The app's rate limiter is
+		# per-IP; without these every request would appear to come from
+		# Caddy's container address and the limit would apply to the whole
+		# world as one bucket.
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+
+		# Long enough for a slow checkout, short enough that a stuck
+		# upstream request is eventually released rather than held open.
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 30s
+		}
+
+		# Health-gated routing: Caddy stops sending traffic to the backend
+		# while it reports unhealthy, which is what makes a redeploy or a
+		# graceful shutdown invisible to customers rather than a burst of
+		# errors.
+		health_uri /v1/actuator/health
+		health_interval 10s
+		health_timeout 5s
+	}
+
+	# Cap request bodies. The API's largest legitimate payload is an order
+	# with its items; nothing here accepts a large upload, so a big body is
+	# either a mistake or an attempt to exhaust memory.
+	request_body {
+		max_size 2MB
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+		# Do not log the Authorization header or request bodies.
+		format json
+	}
+}
