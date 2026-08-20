@@ -48,3 +48,8 @@ firebase_base64.txt
 
 ### Load test output - holds real access tokens for seeded test accounts ###
 load-tests/accounts.json
+
+# Redis snapshot written by a locally-run redis-server during testing.
+# Not source, and can be large.
+dump.rdb
+**/dump.rdb
