@@ -194,6 +194,8 @@ jobs:
           total_reqs = 0
           total_failed = 0
           p95s = []
+          ok_p95s = []
+          dropped = 0
           shards = 0
 
           for path in files:
@@ -206,11 +208,51 @@ jobs:
 
               count = reqs.get("count", 0)
               total_reqs += count
-              # http_req_failed is a rate; convert back to an absolute count
-              # so shards of different sizes can be summed honestly.
-              total_failed += failed.get("rate", 0) * count
+
+              # http_req_failed is a RATE metric, and its JSON shape differs
+              # by k6 version. k6 v1.x exports {"passes","fails","value"} with
+              # NO "rate" key at all; older builds used "rate". Reading only
+              # "rate" with a default of 0 is what made a run where 99.98% of
+              # requests failed report an overall error rate of 0.00% - the
+              # single worst thing a load-test harness can do, because the
+              # result looks like a pass.
+              #
+              # So: try every known shape, and if none of them yields a
+              # number, ABORT rather than assume zero. An unreadable summary
+              # is a broken measurement, not a clean one.
+              rate = None
+              if "value" in failed:
+                  rate = failed["value"]
+              elif "rate" in failed:
+                  rate = failed["rate"]
+              elif "passes" in failed and "fails" in failed:
+                  denom = failed["passes"] + failed["fails"]
+                  rate = (failed["passes"] / denom) if denom else 0.0
+
+              if rate is None and count:
+                  raise SystemExit(
+                      "Cannot read http_req_failed from %s (keys: %s). Refusing to "
+                      "report a failure rate this run cannot substantiate." % (path, sorted(failed)))
+
+              total_failed += (rate or 0.0) * count
+
               if "p(95)" in duration:
                   p95s.append(duration["p(95)"])
+
+              # p95 over SUCCESSFUL responses only. The headline p95 mixes in
+              # failures, and failures are typically fast (a refused
+              # connection returns far quicker than real work), so a saturated
+              # backend can post a flattering overall p95 while every request
+              # that actually completed took ten seconds. This submetric is
+              # the number that describes the user's experience.
+              ok = metrics.get("http_req_duration{expected_response:true}", {})
+              if "p(95)" in ok:
+                  ok_p95s.append(ok["p(95)"])
+
+              # Generator health. If the runner could not keep up, the shard
+              # is describing itself rather than the target.
+              dropped += metrics.get("dropped_iterations", {}).get("count", 0)
+
               shards += 1
 
           lines = []
@@ -225,9 +267,26 @@ jobs:
               # Deliberately reported as a RANGE, not averaged: averaging
               # percentiles across shards is statistically meaningless, and
               # the worst shard is the number that matters.
-              lines.append("| p95 latency (best shard) | %.0f ms |" % min(p95s))
-              lines.append("| p95 latency (WORST shard) | %.0f ms |" % max(p95s))
+              lines.append("| p95 latency, all requests (best shard) | %.0f ms |" % min(p95s))
+              lines.append("| p95 latency, all requests (WORST shard) | %.0f ms |" % max(p95s))
+          if ok_p95s:
+              lines.append("| p95 latency, SUCCESSFUL responses (best shard) | %.0f ms |" % min(ok_p95s))
+              lines.append("| p95 latency, SUCCESSFUL responses (WORST shard) | %.0f ms |" % max(ok_p95s))
+          lines.append("| Dropped iterations (generator could not keep up) | %d |" % dropped)
           lines.append("")
+
+          error_pct = (total_failed / total_reqs * 100) if total_reqs else 0
+          if error_pct >= 5:
+              lines.append("**This run did not measure capacity - it measured saturation.** At this "
+                           "error rate the latency figures describe mostly-failed requests and cannot "
+                           "be read as response times. Reduce VUs until the error rate is low, then "
+                           "raise it until it climbs - that boundary is the actual capacity number.")
+              lines.append("")
+          if dropped:
+              lines.append("**Dropped iterations are non-zero**, so at least one generator was the "
+                           "bottleneck. Those shards describe the runner, not the target. Use more "
+                           "shards with fewer VUs each.")
+              lines.append("")
           lines.append("Per-shard percentiles are a range, not an average - averaging "
                        "percentiles across generators is not meaningful. Judge the run "
                        "by the worst shard.")
