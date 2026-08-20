@@ -7,7 +7,7 @@ import '../../features/products/domain/product_models.dart';
 
 /// Reusable across every horizontal section on the home screen, search
 /// results, and category browsing - one widget, one place to fix/improve it.
-class ProductCard extends StatelessWidget {
+class ProductCard extends StatefulWidget {
   const ProductCard({
     super.key,
     required this.product,
@@ -43,25 +43,80 @@ class ProductCard extends StatelessWidget {
   final VoidCallback? onWishlistToggle;
 
   @override
+  State<ProductCard> createState() => _ProductCardState();
+}
+
+class _ProductCardState extends State<ProductCard> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed == value) return;
+    setState(() => _pressed = value);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Locals for every prop, so the widget body below reads exactly as it did
+    // when this was a StatelessWidget - the split into State is for the press
+    // animation only, not a rewrite of the card.
+    final product = widget.product;
+    final onTap = widget.onTap;
+    final onAddPressed = widget.onAddPressed;
+    final isWishlisted = widget.isWishlisted;
+    final onWishlistToggle = widget.onWishlistToggle;
+    final quantityInCart = widget.quantityInCart;
+    final onIncrement = widget.onIncrement;
+    final onDecrement = widget.onDecrement;
+
     final variant = product.primaryVariant;
     final isInStock = variant?.available ?? false;
     final discount = product.discountPercent;
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-          // Fires the instant the tap registers, not after whatever screen
-          // this opens finishes loading - a physical response tied to the
-          // finger leaving the glass, same as every reference app (Blinkit
-          // etc.) does on every tap, not just ones that end in a network call.
-          onTap: onTap == null
-              ? null
-              : () {
-                  HapticFeedback.selectionClick();
-                  onTap!();
-                },
-          child: Padding(
+    // RepaintBoundary so the press animation repaints THIS card only. Without
+    // it, one finger-down marks the whole scrolling grid dirty and every
+    // visible card re-rasterises for the length of the animation.
+    return RepaintBoundary(
+      child: AnimatedScale(
+        // 0.97, not 0.9: the card should feel pressed, not launched. Anything
+        // larger reads as a game UI rather than a product sitting on a shelf.
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOut,
+        // Scale is a paint-time transform - no relayout, no saveLayer.
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 110),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            color: AppColors.cardBackground,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            // Two-layer shadow that tightens under the finger - see
+            // AppElevation for why a pressed object's shadow shrinks rather
+            // than fades.
+            boxShadow: _pressed ? AppElevation.cardPressed : AppElevation.card,
+          ),
+          // Deliberately NOT Clip.antiAlias, which the Material Card this
+          // replaces used: clipping forces a saveLayer per card per frame,
+          // and nothing here paints outside the rounded rect anyway.
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              onTapDown: (_) => _setPressed(true),
+              onTapUp: (_) => _setPressed(false),
+              // Cancel matters: a finger that slides off the card must not
+              // leave it stuck in the pressed state.
+              onTapCancel: () => _setPressed(false),
+              // Fires the instant the tap registers, not after whatever screen
+              // this opens finishes loading - a physical response tied to the
+              // finger leaving the glass, same as every reference app (Blinkit
+              // etc.) does on every tap, not just ones that end in a network call.
+              onTap: onTap == null
+                  ? null
+                  : () {
+                      HapticFeedback.selectionClick();
+                      onTap();
+                    },
+              child: Padding(
             padding: const EdgeInsets.all(8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -74,6 +129,21 @@ class ProductCard extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(8),
+                          // The product's own shadow, cast DOWN onto the card
+                          // beneath it. This is the single effect that sells
+                          // the whole thing: with the card carrying one shadow
+                          // and the product carrying another, offset further
+                          // and blurred wider, the product reads as an object
+                          // resting on the card rather than a picture printed
+                          // on it.
+                          //
+                          // Applied to the image's container rather than the
+                          // image itself on purpose - a shadow that traced the
+                          // product's silhouette would need an alpha-mask blur
+                          // (saveLayer per card per frame). A rounded-rect
+                          // shadow is one Skia draw call and, at this blur
+                          // radius, indistinguishable in a 150px tile.
+                          boxShadow: AppElevation.product,
                         ),
                         child: variant?.imageUrl != null
                             ? ClipRRect(
@@ -250,9 +320,12 @@ class ProductCard extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-        ),
-    );
+              ), // Padding
+            ), // InkWell
+          ), // Material
+        ), // AnimatedContainer
+      ), // AnimatedScale
+    ); // RepaintBoundary
   }
 
   // Avoids showing "1.0 kg" - shows "1 kg" for whole numbers, "0.5 kg" otherwise.
