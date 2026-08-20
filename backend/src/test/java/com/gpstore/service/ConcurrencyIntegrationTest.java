@@ -261,6 +261,7 @@ class ConcurrencyIntegrationTest {
         CountDownLatch done = new CountDownLatch(attackers);
         AtomicInteger successCount = new AtomicInteger();
         AtomicInteger rejectedCount = new AtomicInteger();
+        java.util.Set<Long> returnedPaymentIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
         for (int i = 0; i < attackers; i++) {
             pool.submit(() -> {
@@ -271,8 +272,9 @@ class ConcurrencyIntegrationTest {
                     InitiatePaymentRequest request = new InitiatePaymentRequest();
                     request.setOrderId(orderId);
                     request.setPaymentMethod("COD");
-                    paymentService.initiatePayment(request, customerId);
+                    var result = paymentService.initiatePayment(request, customerId);
                     successCount.incrementAndGet();
+                    returnedPaymentIds.add(result.getPayment().getId());
                 } catch (ConflictException expectedForEveryLoser) {
                     rejectedCount.incrementAndGet();
                 } catch (InterruptedException interrupted) {
@@ -288,11 +290,36 @@ class ConcurrencyIntegrationTest {
         assertTrue(done.await(30, TimeUnit.SECONDS), "All payment initiation attempts should finish within 30s");
         pool.shutdown();
 
-        assertEquals(1, successCount.get(), "Exactly one of the 10 concurrent initiatePayment calls for the same order may succeed");
-        assertEquals(9, rejectedCount.get(), "The other 9 must be rejected with a clean 409, not each create their own Payment row");
+        // initiatePayment is now IDEMPOTENT rather than throwing on a repeat:
+        // placeOrder creates the payment inside the order transaction, so by
+        // the time this endpoint is called the payment normally already
+        // exists, and older app builds still call it unconditionally.
+        // Rejecting that would break checkout for every un-updated client,
+        // for a request whose desired end state is already true.
+        //
+        // So the old "exactly 1 success, 9 conflicts" assertion no longer
+        // describes correct behaviour. What replaces it is STRICTER about the
+        // property that actually matters:
+        assertTrue(successCount.get() >= 1,
+                "At least one concurrent initiatePayment call must succeed");
+        assertEquals(attackers, successCount.get() + rejectedCount.get(),
+                "Every attempt must end in a definite outcome, not vanish");
 
-        long paymentRowsForOrder = paymentRepository.findByOrderId(orderId).isPresent() ? 1 : 0;
-        assertEquals(1, paymentRowsForOrder, "Only one Payment row should exist for this order, never two");
+        // 1. Every caller that succeeded got the SAME payment - proving they
+        //    observed one shared row rather than each creating their own.
+        //    This is the real idempotency guarantee, and the old assertion
+        //    could not express it at all.
+        assertEquals(1, returnedPaymentIds.size(),
+                "All successful callers must receive the SAME payment - more than one distinct "
+                        + "id means concurrent requests created separate payments for one order");
+
+        // 2. Exactly one payment row exists. Counted properly rather than via
+        //    findByOrderId().isPresent(), which collapses "one" and "many"
+        //    into the same answer and so could never have caught a duplicate.
+        long paymentRowsForOrder = paymentRepository.findAll().stream()
+                .filter(p -> p.getOrder() != null && p.getOrder().getId().equals(orderId))
+                .count();
+        assertEquals(1, paymentRowsForOrder, "Only one Payment row may exist for this order, never two");
     }
 
     /**

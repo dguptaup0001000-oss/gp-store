@@ -50,4 +50,19 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
     int deleteProcessedBatch(@Param("cutoff") LocalDateTime cutoff, @Param("batchSize") int batchSize);
 
     long countByStatus(OutboxEvent.Status status);
+
+    /**
+     * Age in seconds of the oldest event still waiting to be processed.
+     *
+     * This is the number that actually says whether the outbox is keeping up.
+     * A backlog COUNT can look alarming while everything is seconds old
+     * (a burst), and can look fine while one event has been stuck for a day
+     * (a real problem). Age answers "how far behind are we", which is the
+     * question worth alerting on.
+     *
+     * Returns null when nothing is pending.
+     */
+    @Query(value = "SELECT EXTRACT(EPOCH FROM (now() - MIN(created_at))) "
+            + "FROM outbox_events WHERE status = 'PENDING'", nativeQuery = true)
+    Double findOldestPendingAgeSeconds();
 }

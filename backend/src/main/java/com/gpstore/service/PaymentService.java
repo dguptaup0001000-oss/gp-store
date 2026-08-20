@@ -181,6 +181,73 @@ public class PaymentService {
                         + (restored ? "inventory restored" : "inventory already restored by another path"));
     }
 
+
+    /**
+     * Parses and validates a client-supplied payment method.
+     *
+     * Shared so placeOrder and initiatePayment cannot drift into accepting
+     * different sets of values - which would mean an order could be created
+     * with a method its own payment step then rejects.
+     */
+    public PaymentMethod parsePaymentMethod(String raw) {
+        PaymentMethod method;
+        try {
+            method = PaymentMethod.valueOf(raw.toUpperCase());
+        } catch (IllegalArgumentException | NullPointerException ex) {
+            throw new BadRequestException("Unknown payment method: " + raw);
+        }
+        if (method == PaymentMethod.ONLINE) {
+            throw new BadRequestException("Card/online gateway payment is not available yet - use UPI or COD");
+        }
+        return method;
+    }
+
+    /**
+     * The UPI deep link for an order, or null for COD.
+     *
+     * Worth being explicit about: this is pure local string building (see
+     * UpiPaymentService.generatePaymentLink) - no gateway, no network call,
+     * nothing that can block or fail. That is precisely why payment creation
+     * can be folded into the order transaction without dragging an external
+     * dependency into it. If a real gateway is ever introduced, THAT is the
+     * point at which this must move back out.
+     */
+    public String upiLinkFor(Order order, PaymentMethod method) {
+        return method == PaymentMethod.UPI
+                ? upiPaymentService.generatePaymentLink(order.getOrderNumber(), order.getTotalAmount())
+                : null;
+    }
+
+    /**
+     * Creates the payment row for a freshly-placed order, from inside that
+     * order's own transaction.
+     *
+     * Why this exists: checkout used to be two sequential HTTP requests -
+     * POST /orders/place, wait, POST /payments, wait - so the customer paid
+     * a full extra round trip (auth, rate-limit, routing and all) for what
+     * is a single INSERT with no external dependency. Creating it here
+     * removes that entire round trip from the critical path.
+     *
+     * Safe to put in the order transaction because it commits or rolls back
+     * WITH the order: there is no window where an order exists without its
+     * payment, which the two-request flow genuinely had (place succeeded,
+     * payment call never arrived). uq_payments_order_id remains the real
+     * guarantee of one payment per order.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public Payment createPaymentForNewOrder(Order order, PaymentMethod method) {
+        Payment payment = new Payment();
+        payment.setOrder(order);
+        payment.setAmount(order.getTotalAmount());
+        payment.setPaymentMethod(method);
+        payment.setPaymentDate(LocalDateTime.now());
+        payment.setActive(true);
+        payment.setPaymentStatus(method == PaymentMethod.COD
+                ? PaymentStatus.COD_PENDING
+                : PaymentStatus.PENDING);
+        return paymentRepository.save(payment);
+    }
+
     /**
      * Acquires this order's row lock and then its payment's, in that fixed
      * order, and returns the payment re-read under its lock.
@@ -244,19 +311,28 @@ public class PaymentService {
             throw new ResourceNotFoundException("Order not found");
         }
 
-        if (paymentRepository.findByOrderId(order.getId()).isPresent()) {
-            throw new ConflictException("A payment already exists for this order");
-        }
+        PaymentMethod method = parsePaymentMethod(request.getPaymentMethod());
 
-        PaymentMethod method;
-        try {
-            method = PaymentMethod.valueOf(request.getPaymentMethod().toUpperCase());
-        } catch (IllegalArgumentException ex) {
-            throw new BadRequestException("Unknown payment method: " + request.getPaymentMethod());
-        }
-
-        if (method == PaymentMethod.ONLINE) {
-            throw new BadRequestException("Card/online gateway payment is not available yet - use UPI or COD");
+        // IDEMPOTENT rather than an outright 409. placeOrder now creates the
+        // payment inside the order transaction, so by the time a client
+        // calls this endpoint the payment usually already exists - and older
+        // app builds still call it unconditionally. Rejecting that with a
+        // conflict would break checkout for every client that has not been
+        // updated, for a request whose desired end state is already true.
+        //
+        // A MISMATCHED method is still a conflict: asking for UPI on an
+        // order that already has a COD payment is a real disagreement about
+        // what the customer is doing, not a retry, and silently returning
+        // the wrong one would be worse than failing.
+        Optional<Payment> existing = paymentRepository.findByOrderId(order.getId());
+        if (existing.isPresent()) {
+            Payment current = existing.get();
+            if (current.getPaymentMethod() != method) {
+                throw new ConflictException(
+                        "This order already has a " + current.getPaymentMethod()
+                                + " payment - it cannot be changed to " + method + ".");
+            }
+            return new PaymentInitiationResponse(current, upiLinkFor(order, method));
         }
 
         Payment payment = new Payment();
@@ -282,11 +358,7 @@ public class PaymentService {
             throw new ConflictException("A payment already exists for this order");
         }
 
-        String upiLink = method == PaymentMethod.UPI
-                ? upiPaymentService.generatePaymentLink(order.getOrderNumber(), order.getTotalAmount())
-                : null;
-
-        return new PaymentInitiationResponse(saved, upiLink);
+        return new PaymentInitiationResponse(saved, upiLinkFor(order, method));
     }
 
     @Transactional(readOnly = true)

@@ -26,6 +26,16 @@ class PlaceOrderResult with _$PlaceOrderResult {
     int? orderId,
     String? orderNumber,
     String? message,
+    /// Present when the backend created the payment as part of placing the
+    /// order, which is now the normal path. When it is set, the client can
+    /// skip the separate POST /api/payments call - that second request is
+    /// what made checkout two sequential round trips.
+    String? paymentStatus,
+
+    /// UPI deep link, returned alongside the order when paying by UPI.
+    /// Generated locally server-side (no gateway call), which is why it can
+    /// come back with the order rather than needing its own request.
+    String? upiPaymentLink,
   }) = _PlaceOrderResult;
 
   factory PlaceOrderResult.fromJson(Map<String, dynamic> json) => _$PlaceOrderResultFromJson(json);
