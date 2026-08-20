@@ -17,8 +17,11 @@ import java.util.Map;
 public class ProductController {
 
     private final ProductService productService;
+    private final com.gpstore.search.SmartSearchService smartSearchService;
 
-    public ProductController(ProductService productService) {
+    public ProductController(ProductService productService,
+                             com.gpstore.search.SmartSearchService smartSearchService) {
+        this.smartSearchService = smartSearchService;
         this.productService = productService;
     }
 
@@ -94,6 +97,36 @@ public class ProductController {
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 50));
         return productService.browseByCategory(categoryId, pageable);
+    }
+
+    /**
+     * Smart Search: typo-tolerant, Hinglish-aware, and it says what it
+     * understood.
+     *
+     * <p>Additive - /search and /search/instant above are unchanged, so
+     * nothing already calling them is affected.
+     */
+    @GetMapping("/search/smart")
+    public Map<String, Object> searchSmart(
+            @RequestParam String keyword,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 50));
+        com.gpstore.search.SmartSearchResult result = smartSearchService.search(keyword, pageable);
+
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("query", result.getQuery());
+        // Nulls are included rather than omitted so the client can rely on
+        // the keys existing and does not have to distinguish "absent" from
+        // "no correction".
+        body.put("interpretedAs", result.getInterpretedAs());
+        body.put("didYouMean", result.getDidYouMean());
+        body.put("content", result.getResults().getContent());
+        body.put("totalElements", result.getResults().getTotalElements());
+        body.put("totalPages", result.getResults().getTotalPages());
+        body.put("number", result.getResults().getNumber());
+        return body;
     }
 
     // Sort/filter/search version - same 8 sort options as Shop by Brand:

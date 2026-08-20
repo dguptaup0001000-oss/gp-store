@@ -67,6 +67,34 @@ class ProductsRepository {
     return content.map((e) => Product.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  /// Smart Search: typo-tolerant, Hinglish-aware, and it reports what it
+  /// understood.
+  ///
+  /// [interpretedAs] is high confidence - the backend searched for this
+  /// instead of what was typed, and the UI should say so. [didYouMean] is low
+  /// confidence - the customer's own words were kept and this is offered as a
+  /// suggestion. Both null is the ordinary case of a search that worked as
+  /// typed, and the UI should stay quiet then.
+  Future<({List<Product> products, String? interpretedAs, String? didYouMean})> searchSmart(
+    String keyword, {
+    int page = 0,
+    int size = 20,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/products/search/smart',
+      queryParameters: {'keyword': keyword, 'page': page, 'size': size},
+    );
+
+    final data = response.data as Map<String, dynamic>;
+    final content = data['content'] as List;
+
+    return (
+      products: content.map((e) => Product.fromJson(e as Map<String, dynamic>)).toList(),
+      interpretedAs: data['interpretedAs'] as String?,
+      didYouMean: data['didYouMean'] as String?,
+    );
+  }
+
   /// The full product, including its image gallery.
   ///
   /// A separate call rather than reusing the Product the list screen already
