@@ -121,6 +121,13 @@ void main() {
       // Still within the next debounce window.
       type('sug');
       expect(first.isCancelled, isTrue);
+
+      // The assertion above is the test. This pump is bookkeeping: typing
+      // scheduled a live 50ms Timer, and testWidgets asserts !timersPending
+      // when the body returns - BEFORE tearDown gets to call dispose() - so
+      // leaving it armed fails the test for a reason that has nothing to do
+      // with what is being checked.
+      await tester.pump(const Duration(milliseconds: 100));
     });
 
     testWidgets('dispose cancels both the pending timer and the live request', (tester) async {

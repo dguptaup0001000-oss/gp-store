@@ -20,9 +20,16 @@ import '../../wishlist/presentation/wishlist_providers.dart';
 class HomeFeedSlivers {
   const HomeFeedSlivers._();
 
+  /// [ready] gates the first page request. The feed is the largest single
+  /// payload on the screen and sits at the very bottom of it, so it waits
+  /// for the above-the-fold wave to settle rather than competing with it -
+  /// see homeBelowFoldReadyProvider. Not watching the provider is what
+  /// actually withholds the request; rendering a spinner instead would only
+  /// hide it.
   static List<Widget> build(BuildContext context, WidgetRef ref,
-      {required void Function(Product product) onProductTap}) {
-    final feedAsync = ref.watch(productFeedProvider);
+      {required bool ready, required void Function(Product product) onProductTap}) {
+    final feedAsync =
+        ready ? ref.watch(productFeedProvider) : const AsyncValue<ProductFeedState>.loading();
 
     return [
       const SliverToBoxAdapter(child: _FeedHeader()),
