@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/images/product_image_url.dart';
+
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../address/domain/address_models.dart';
@@ -109,7 +111,7 @@ class _CartItemTile extends ConsumerWidget {
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: CachedNetworkImage(
-                      imageUrl: item.imageUrl!,
+                      imageUrl: ProductImageUrl.tile(item.imageUrl),
                       fit: BoxFit.contain,
                       // 56x56 tile - avoid decoding the full original.
                       memCacheWidth: 160,

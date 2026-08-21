@@ -4,6 +4,7 @@ import com.gpstore.entity.Product;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.repository.ProductBrowseRepository;
 import com.gpstore.repository.ProductRepository;
+import com.gpstore.dto.response.BestsellerTileResponse;
 import com.gpstore.dto.response.ProductResponse;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Service
@@ -36,7 +38,7 @@ public class ProductService {
 
     // Save Product - evicts the cached listing so a new/changed product shows
     // up immediately instead of customers seeing a stale catalog.
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles", "trending", "frequentlyBought"}, allEntries = true)
     @Transactional
     public ProductResponse saveProduct(Product product) {
         return ProductResponse.from(productRepository.save(product));
@@ -134,6 +136,54 @@ public class ProductService {
     @Cacheable("productFeed")
     public Page<ProductResponse> browseAll(Pageable pageable) {
         return batchFetchWithVariants(productRepository.findByActiveTrue(pageable));
+    }
+
+    /**
+     * The whole Bestsellers collage in one call.
+     *
+     * REPLACES SIX REQUESTS. The app was calling browseByCategory once per
+     * category tile on every cold home open - six HTTP round trips, six auth
+     * filter chains, six connection acquisitions - to render twenty-four
+     * thumbnails. This is one request backed by one SQL statement, and it
+     * stays one of each however many tiles the collage grows to.
+     *
+     * Both limits are bounded by the caller and clamped here, so a crafted
+     * query string cannot turn the collage endpoint into a full catalogue
+     * dump. perCategory defaults to what the UI actually draws - four - not
+     * to a page size of twenty.
+     *
+     * Cached. The collage changes only when the catalogue does, and it is
+     * requested by every customer who opens the app.
+     */
+    @Transactional(readOnly = true)
+    @Cacheable("bestsellerTiles")
+    public List<BestsellerTileResponse> getBestsellerTiles(int categoryLimit, int perCategory) {
+        int categories = clamp(categoryLimit, 1, MAX_BESTSELLER_CATEGORIES);
+        int products = clamp(perCategory, 1, MAX_BESTSELLER_PRODUCTS_PER_CATEGORY);
+
+        // LinkedHashMap: the query already returns rows grouped and ordered
+        // by category, and the collage should render them in that order
+        // rather than whatever a HashMap happens to iterate in.
+        Map<Long, BestsellerTileResponse> tiles = new LinkedHashMap<>();
+        for (ProductBrowseRepository.BestsellerRow row :
+                productBrowseRepository.findBestsellerTiles(null, categories, products)) {
+            BestsellerTileResponse tile = tiles.computeIfAbsent(
+                    row.categoryId(),
+                    id -> new BestsellerTileResponse(id, row.categoryName(), new ArrayList<>(), new ArrayList<>()));
+            tile.getProductIds().add(row.productId());
+            // Added even when null - see BestsellerTileResponse.imageUrls for
+            // why the slot is kept rather than skipped.
+            tile.getImageUrls().add(row.imageUrl());
+        }
+        return new ArrayList<>(tiles.values());
+    }
+
+    /** The collage is six tiles of four; these are the ceilings, not the defaults. */
+    private static final int MAX_BESTSELLER_CATEGORIES = 12;
+    private static final int MAX_BESTSELLER_PRODUCTS_PER_CATEGORY = 8;
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     /** Category browsing - the other half of product discovery alongside search. */
@@ -263,13 +313,22 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable("productDetail")
     public ProductResponse getProductById(Long id) {
-        ProductResponse product = productRepository.findByIdIn(List.of(id)).stream()
+        Product entity = productRepository.findByIdIn(List.of(id)).stream()
                 .findFirst()
-                .map(ProductResponse::from)
                 .orElse(null);
 
-        if (product == null) {
+        if (entity == null) {
             return null;
+        }
+
+        ProductResponse product = ProductResponse.from(entity);
+
+        // The 3D model, like the gallery below, is attached ONLY here.
+        // ProductResponse.from deliberately leaves it null so that no list
+        // response ever carries it - the field exists for one screen and
+        // should cost nothing on every other one.
+        if (entity.getModel3dUrl() != null && !entity.getModel3dUrl().isBlank()) {
+            product = product.withModel3dUrl(entity.getModel3dUrl());
         }
 
         // The gallery is attached HERE and nowhere else, on purpose.
@@ -303,7 +362,7 @@ public class ProductService {
     }
 
     /** Didn't exist before - a product could be created but never edited afterward. */
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles", "trending", "frequentlyBought"}, allEntries = true)
     @Transactional
     public ProductResponse update(Long id, Product updated) {
         Product existing = getByIdOrThrow(id);
@@ -322,7 +381,7 @@ public class ProductService {
      * product, or fail on the FK constraint. Deactivating just stops it
      * showing up to customers.
      */
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles", "trending", "frequentlyBought"}, allEntries = true)
     public void deactivate(Long id) {
         Product product = getByIdOrThrow(id);
         product.setActive(false);

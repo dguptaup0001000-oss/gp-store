@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../data/products_repository.dart';
+import '../domain/bestseller_models.dart';
 import '../domain/brand_models.dart';
 import '../domain/product_models.dart';
 
@@ -9,8 +10,31 @@ final productsRepositoryProvider = Provider<ProductsRepository>((ref) {
   return ProductsRepository(apiClient: ref.watch(apiClientProvider));
 });
 
-final categoriesProvider = FutureProvider<List<Category>>((ref) {
-  return ref.watch(productsRepositoryProvider).getCategories();
+/// The categories a CUSTOMER may see, in a stable order.
+///
+/// TWO BUGS, BOTH IN THE BACKEND'S findAll(). It returns every category
+/// including deactivated ones, and it has no ORDER BY.
+///
+/// Deactivated categories were reaching the home screen. category_browse
+/// already filtered them client-side, so one screen hid a deactivated
+/// category while the home rows, the tabs bar and the Bestsellers collage
+/// all still advertised it - the kind of inconsistency that reads as a
+/// caching bug and is not one.
+///
+/// And with no ORDER BY, "the first six categories" - which is exactly what
+/// the collage takes - meant whatever physical order Postgres felt like
+/// returning, so it could change after any update to any row.
+///
+/// Fixed here rather than in /api/categories because admin reads that same
+/// endpoint through its own repository and legitimately needs the inactive
+/// ones to manage them. Narrowing the shared endpoint would break the screen
+/// that turns a category back on.
+final categoriesProvider = FutureProvider<List<Category>>((ref) async {
+  final categories = await ref.watch(productsRepositoryProvider).getCategories();
+
+  final visible = categories.where((c) => c.active).toList()
+    ..sort((a, b) => a.id.compareTo(b.id));
+  return visible;
 });
 
 final brandsProvider = FutureProvider<List<BrandSummary>>((ref) {
@@ -46,6 +70,48 @@ final similarProductsProvider =
       .watch(productsRepositoryProvider)
       .browseByCategory(args.categoryId, page: 0, size: 12);
   return products.where((p) => p.id != args.excludeProductId).toList();
+});
+
+/// A few products from one category, for the Bestsellers collage.
+///
+/// A PROVIDER RATHER THAN AN INLINE FutureBuilder, and the difference is not
+/// stylistic. The collage previously built its future inside build():
+///
+///   FutureBuilder(future: repository.browseByCategory(id, size: 4), ...)
+///
+/// A future constructed during build is a NEW future on every build, so
+/// every rebuild of the home screen re-issued the request - once per
+/// category tile. Six categories meant six requests on open and six more on
+/// each rebuild, for a collage whose contents had not changed. That is the
+/// per-category request fan-out the load test showed.
+///
+/// Riverpod caches by argument, so each category is fetched once and shared.
+/// Not autoDispose: the home screen is the app's landing surface and is
+/// returned to constantly; dropping the cache on every navigation away would
+/// re-fetch all six on every return, which is the problem again in a
+/// different costume.
+final categoryPreviewProvider = FutureProvider.family<List<Product>, int>((ref, categoryId) {
+  return ref.watch(productsRepositoryProvider).browseByCategory(categoryId, size: 4);
+});
+
+/// The whole Bestsellers collage, in one request.
+///
+/// REPLACES SIX. categoryPreviewProvider above already fixed the collage
+/// re-requesting on every rebuild, but six tiles still meant six separate
+/// HTTP calls on every cold home open - the largest remaining avoidable
+/// multiplier on the screen, against a backend measured at 100% CPU under
+/// load. The backend now assembles the collage in a single SQL statement.
+///
+/// categoryPreviewProvider is deliberately left in place rather than
+/// deleted: it is a general "a few products from this category" lookup, and
+/// removing it to prove a point would be an unrelated change.
+///
+/// Not autoDispose, for the same reason as the provider above: home is the
+/// landing surface and is returned to constantly, so dropping the cache on
+/// every navigation away would re-fetch on every return - the same problem
+/// in a different costume.
+final bestsellerTilesProvider = FutureProvider<List<BestsellerTile>>((ref) {
+  return ref.watch(productsRepositoryProvider).getBestsellerTiles();
 });
 
 final trendingProvider = FutureProvider<List<Product>>((ref) {

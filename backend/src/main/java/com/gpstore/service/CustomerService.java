@@ -188,6 +188,31 @@ public class CustomerService {
     }
 
     /**
+     * Detaches this account from whatever device token it currently holds -
+     * called on logout, while the caller's own JWT is still valid.
+     *
+     * WHY LOGOUT HAS TO DO THIS. A device token identifies a PHONE, not an
+     * account, but it is stored per customer row. So when one person signs
+     * out of the shop phone and the next person signs in, the first account
+     * still holds that phone's token - and every targeted push for the first
+     * account keeps landing on a device somebody else is now using. Order
+     * pushes carry a customer name and an order amount, so that is other
+     * people's information arriving on the wrong screen, not merely a
+     * wasted send.
+     *
+     * The ALL_CUSTOMERS topic subscription is deliberately left in place:
+     * it is bound to the token rather than to an account and carries only
+     * store-wide announcements with nothing personal in them, so unsubscribing
+     * would cost a signed-out phone its store notifications for no privacy
+     * gain. Login re-registers the token and re-subscribes either way.
+     */
+    public void clearMyFcmToken(Long customerId) {
+        Customer customer = getOwnProfile(customerId);
+        customer.setFcmToken(null);
+        customerRepository.save(customer);
+    }
+
+    /**
      * Google Play's Account Deletion Requirement (user data policy) means
      * every app that supports account creation must offer a genuine
      * in-app self-service deletion path - see PLAY_STORE_CHECKLIST.md.

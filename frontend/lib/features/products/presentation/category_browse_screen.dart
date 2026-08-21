@@ -1,9 +1,10 @@
-import 'dart:async';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/images/product_image_url.dart';
+
+import '../../../core/search/search_debouncer.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/cart_aware_product_card.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
@@ -138,26 +139,42 @@ class _SearchBar extends StatefulWidget {
 
 class _SearchBarState extends State<_SearchBar> {
   final _controller = TextEditingController();
-  Timer? _debounce;
+
+  /// The shared rule rather than a third copy of it - see SearchDebouncer,
+  /// which was written because this screen, brand browse and global search
+  /// each carried their own Timer and their own 400ms literal. The minimum
+  /// length comes with it, so typing one character no longer sends the
+  /// backend looking for it.
+  final _search = SearchDebouncer();
 
   @override
   void dispose() {
-    _debounce?.cancel();
+    _search.dispose();
     _controller.dispose();
     super.dispose();
   }
 
   void _onChanged(String value) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), () {
-      widget.onChanged(value.trim());
-    });
+    // The token goes unused: this screen hands a keyword to its parent
+    // rather than making the request itself, so there is nothing here to
+    // abort. Debounce and minimum length are the whole benefit.
+    _search.onQueryChanged(
+      value,
+      onSearch: (query, _) => widget.onChanged(query),
+      onCleared: () => widget.onChanged(''),
+    );
   }
 
   void _clear() {
-    _debounce?.cancel();
     _controller.clear();
-    widget.onChanged('');
+    // An empty term cancels the pending debounce and reports the clear
+    // immediately - there is nothing to wait for, and leaving results on
+    // screen after the box is empty reads as the app being stuck.
+    _search.onQueryChanged(
+      '',
+      onSearch: (query, _) => widget.onChanged(query),
+      onCleared: () => widget.onChanged(''),
+    );
   }
 
   @override
@@ -287,7 +304,7 @@ class _CategoryRail extends StatelessWidget {
                             color: isSelected ? AppColors.primary : AppColors.textSecondary,
                           )
                         : CachedNetworkImage(
-                            imageUrl: category.imageUrl!,
+                            imageUrl: ProductImageUrl.tile(category.imageUrl),
                             fit: BoxFit.cover,
                             // Cached, not Image.network: the rail rebuilds on
                             // every category tap, and an uncached image

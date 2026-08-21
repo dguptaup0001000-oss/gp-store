@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/images/product_image_url.dart';
+
 import '../../core/theme/app_theme.dart';
 import '../../features/cart/domain/cart_models.dart';
 import '../../features/cart/presentation/cart_providers.dart';
@@ -123,7 +125,7 @@ class _ThumbnailStack extends StatelessWidget {
                 clipBehavior: Clip.antiAlias,
                 child: items[i].imageUrl != null
                     ? CachedNetworkImage(
-                        imageUrl: items[i].imageUrl!,
+                        imageUrl: ProductImageUrl.tile(items[i].imageUrl),
                         fit: BoxFit.contain,
                         // 34x34 avatar - avoid decoding the full original.
                         memCacheWidth: 100,

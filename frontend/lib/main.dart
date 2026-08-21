@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/lifecycle/session_refresh.dart';
+import 'core/monitoring/crash_reporter.dart';
 import 'core/notifications/push_notification_providers.dart';
 import 'core/notifications/push_notification_service.dart';
 import 'core/notifications/voice_announcement_providers.dart';
@@ -25,15 +27,25 @@ Future<void> main() async {
 
   try {
     await Firebase.initializeApp();
+
+    // FIRST, and before runApp: from here on a framework error or an
+    // uncaught async error is recorded instead of painting a grey box on a
+    // customer's phone that nobody ever hears about. It cannot run any
+    // earlier than this - Crashlytics needs the Firebase app - so a failure
+    // in initializeApp itself is still only a log line, which is the honest
+    // limit of this and is why it sits at the very top of the try.
+    await installCrashHandlers(const FirebaseCrashReporter());
+
     // Must be registered before runApp(), and must reference a top-level
     // function (see push_notification_service.dart's doc comment on why).
     FirebaseMessaging.onBackgroundMessage(firebaseBackgroundMessageHandler);
   } catch (e) {
     // No google-services.json yet, or no Firebase project configured -
     // this is expected until FIREBASE_SETUP.md's one-time setup is done.
-    // The app must still run and be fully usable without push in the
-    // meantime, so this is deliberately swallowed, not rethrown.
-    debugPrint('Firebase not configured yet - push notifications disabled: $e');
+    // The app must still run and be fully usable without push or crash
+    // reporting in the meantime, so this is deliberately swallowed, not
+    // rethrown.
+    debugPrint('Firebase not configured yet - push and crash reporting disabled: $e');
   }
 
   runApp(const ProviderScope(child: GpStoreApp()));
@@ -165,12 +177,14 @@ class GpStoreApp extends ConsumerWidget {
       }
     });
 
-    return MaterialApp.router(
-      title: 'GP-Store',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      routerConfig: router,
-      scaffoldMessengerKey: scaffoldMessengerKey,
+    return SessionRefresh(
+      child: MaterialApp.router(
+        title: 'GP-Store',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        routerConfig: router,
+        scaffoldMessengerKey: scaffoldMessengerKey,
+      ),
     );
   }
 }

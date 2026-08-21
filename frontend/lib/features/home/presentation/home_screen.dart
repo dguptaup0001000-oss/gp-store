@@ -13,6 +13,7 @@ import '../../products/presentation/product_detail_screen.dart';
 import '../../products/presentation/product_feed_provider.dart';
 import '../../products/presentation/products_providers.dart';
 import 'home_feed_section.dart';
+import 'home_load_stage.dart';
 import '../../products/presentation/search_screen.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../../shared/widgets/categories_row.dart';
@@ -34,9 +35,17 @@ class HomeScreen extends ConsumerWidget {
     final categoriesAsync = ref.watch(categoriesProvider);
     final brandsAsync = ref.watch(brandsProvider);
     final offersAsync = ref.watch(activeOffersProvider);
-    final newArrivalsAsync = ref.watch(newArrivalsProvider);
-    final trendingAsync = ref.watch(trendingProvider);
-    final recommendedAsync = ref.watch(recommendedForMeProvider);
+    // The FIRST WAVE. Categories, brands and offers are drawn at or just
+    // below the fold, so they have to be in flight the moment the screen
+    // opens. The three carousels and the endless feed are not, and they wait
+    // for this wave to settle - see homeBelowFoldReadyProvider.
+    final belowFoldReady = ref.watch(homeBelowFoldReadyProvider);
+    // Watched HERE rather than inside HomeFeedSlivers.build, which runs
+    // inside ScrollToTop's builder callback and so executes during
+    // ScrollToTop's build rather than this one.
+    final feedAsync = belowFoldReady
+        ? ref.watch(productFeedProvider)
+        : const AsyncValue<ProductFeedState>.loading();
     final isLoggedIn = ref.watch(authControllerProvider).status == AuthStatus.authenticated;
     final cartItemCount = ref.watch(cartControllerProvider).valueOrNull?.totalItems ?? 0;
 
@@ -103,9 +112,16 @@ class HomeScreen extends ConsumerWidget {
         onRefresh: () => Future.wait([
           ref.refresh(categoriesProvider.future),
           ref.refresh(activeOffersProvider.future),
-          ref.refresh(newArrivalsProvider.future),
-          ref.refresh(trendingProvider.future),
-          ref.refresh(recommendedForMeProvider.future),
+          // INVALIDATE, not refresh, for the gated sections.
+          // ref.refresh(p.future) READS the provider, which builds it and
+          // fires its request - so a pull-to-refresh arriving before the
+          // gate opened would put on the wire exactly the three requests the
+          // gate is holding back. invalidate only marks them stale: a
+          // section already loaded refetches, one still behind the gate
+          // stays unbuilt and costs nothing.
+          Future.sync(() => ref.invalidate(newArrivalsProvider)),
+          Future.sync(() => ref.invalidate(trendingProvider)),
+          Future.sync(() => ref.invalidate(recommendedForMeProvider)),
           // Pull-to-refresh restarts the feed at page 0 rather than leaving
           // the customer's accumulated pages in place - otherwise "refresh"
           // updates the carousels while the feed below still shows the
@@ -136,7 +152,11 @@ class HomeScreen extends ConsumerWidget {
             // Only depth 0: a horizontal carousel inside the page also emits
             // ScrollNotifications, and without this check flicking "Trending
             // now" sideways would request another page of the vertical feed.
-            if (notification.depth == 0 &&
+            // belowFoldReady as well: reading .notifier would BUILD the
+            // feed provider and fire its first page, which is the one thing
+            // the gate exists to hold back.
+            if (belowFoldReady &&
+                notification.depth == 0 &&
                 notification.metrics.axis == Axis.vertical &&
                 notification.metrics.extentAfter < 600) {
               // loadMore is safe to call repeatedly - it no-ops while a page
@@ -235,47 +255,70 @@ class HomeScreen extends ConsumerWidget {
               data: (brands) => BuyByBrandBanner(brands: brands),
             ),
 
+            // SECOND WAVE, from here down.
+            //
+            // Each carousel is a Consumer that watches its provider only
+            // once the gate is open - and a Riverpod watch inside a builder
+            // is genuinely conditional, so an unwatched provider is never
+            // built and never issues its request. Until then the section
+            // renders its own loading state, which is what it would be
+            // showing anyway while the request was in flight, so the page
+            // looks no different and nothing moves when the data lands.
+            //
+            // Watching these three at the top of HomeScreen.build instead -
+            // as this file did - put all three on the wire at open,
+            // competing with the categories, brands and offers calls for
+            // content the customer can actually see.
+            //
+            // The providers are not autoDispose, so once a section has
+            // loaded, scrolling past it and back does not refetch.
             if (isLoggedIn)
-              HorizontalProductSection(
-                title: 'Recommended for you',
-                provider: recommendedAsync,
-                onRetry: () => ref.invalidate(recommendedForMeProvider),
-                onProductTap: openProduct,
-                onSeeAllTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => SeeAllProductsScreen(
-                      title: 'Recommended for you',
-                      fetchProducts: () => ref.read(productsRepositoryProvider).getRecommendedForMe(limit: 50),
+              Consumer(
+                builder: (context, ref, _) => HorizontalProductSection(
+                  title: 'Recommended for you',
+                  provider: belowFoldReady ? ref.watch(recommendedForMeProvider) : const AsyncValue.loading(),
+                  onRetry: () => ref.invalidate(recommendedForMeProvider),
+                  onProductTap: openProduct,
+                  onSeeAllTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => SeeAllProductsScreen(
+                        title: 'Recommended for you',
+                        fetchProducts: () => ref.read(productsRepositoryProvider).getRecommendedForMe(limit: 50),
+                      ),
                     ),
                   ),
                 ),
               ),
 
-            HorizontalProductSection(
-              title: 'Trending now',
-              provider: trendingAsync,
-              onRetry: () => ref.invalidate(trendingProvider),
-              onProductTap: openProduct,
-              onSeeAllTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => SeeAllProductsScreen(
-                    title: 'Trending now',
-                    fetchProducts: () => ref.read(productsRepositoryProvider).getTrending(limit: 50),
+            Consumer(
+              builder: (context, ref, _) => HorizontalProductSection(
+                title: 'Trending now',
+                provider: belowFoldReady ? ref.watch(trendingProvider) : const AsyncValue.loading(),
+                onRetry: () => ref.invalidate(trendingProvider),
+                onProductTap: openProduct,
+                onSeeAllTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => SeeAllProductsScreen(
+                      title: 'Trending now',
+                      fetchProducts: () => ref.read(productsRepositoryProvider).getTrending(limit: 50),
+                    ),
                   ),
                 ),
               ),
             ),
 
-            HorizontalProductSection(
-              title: 'New Arrivals',
-              provider: newArrivalsAsync,
-              onRetry: () => ref.invalidate(newArrivalsProvider),
-              onProductTap: openProduct,
-              onSeeAllTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => SeeAllProductsScreen(
-                    title: 'New Arrivals',
-                    fetchProducts: () => ref.read(productsRepositoryProvider).getNewArrivals(size: 50),
+            Consumer(
+              builder: (context, ref, _) => HorizontalProductSection(
+                title: 'New Arrivals',
+                provider: belowFoldReady ? ref.watch(newArrivalsProvider) : const AsyncValue.loading(),
+                onRetry: () => ref.invalidate(newArrivalsProvider),
+                onProductTap: openProduct,
+                onSeeAllTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => SeeAllProductsScreen(
+                      title: 'New Arrivals',
+                      fetchProducts: () => ref.read(productsRepositoryProvider).getNewArrivals(size: 50),
+                    ),
                   ),
                 ),
               ),
@@ -287,7 +330,7 @@ class HomeScreen extends ConsumerWidget {
             // Everything above is the curated part of the home screen. This
             // is where it stops ending after New Arrivals and keeps going
             // through the whole catalogue, one page at a time.
-            ...HomeFeedSlivers.build(context, ref, onProductTap: openProduct),
+            ...HomeFeedSlivers.build(context, ref, feed: feedAsync, onProductTap: openProduct),
             ],
           ),
         ),

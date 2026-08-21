@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 
+import '../config/app_environment.dart';
 import '../storage/token_storage.dart';
+import 'retry_policy.dart';
 
 /// Matches the backend's ApiError shape exactly (see GlobalExceptionHandler /
 /// ApiError.java) so error messages shown to the user are the real backend
@@ -18,31 +20,28 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-/// The base URL is set at build/run time via --dart-define, NOT hardcoded -
-/// same principle as the backend's env-var-driven config. Point this at your
-/// real deployed API (Render URL) or a local backend during dev.
-///
-/// Example dev run:
-///   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8081/v1
-/// (10.0.2.2 is the special alias the Android emulator uses for your
-/// computer's own localhost - NOT a typo. Use your machine's real LAN IP
-/// instead if testing on a physical device.)
-const _defaultBaseUrl = 'http://10.0.2.2:8081/v1';
-
 class ApiClient {
-  ApiClient({required this.tokenStorage, this.onSessionExpired}) {
+  ApiClient({
+    required this.tokenStorage,
+    this.onSessionExpired,
+    AppEnvironment? environment,
+    RetryPolicy retryPolicy = const RetryPolicy(),
+  })  : environment = environment ?? AppEnvironment.current,
+        _retryPolicy = retryPolicy {
+    final env = this.environment;
+
     _dio = Dio(
       BaseOptions(
-        baseUrl: const String.fromEnvironment('API_BASE_URL', defaultValue: _defaultBaseUrl),
-        // 45s, not 15s - Render's free tier spins the backend down after
-        // ~15 min idle and takes 30-60s to cold-start on the next request
-        // (see backend/DEPLOYMENT.md). 15s was shorter than a full
-        // cold-start cycle, so the very first request after any idle period
-        // - often the app's own launch-time profile fetch - would time out
-        // and show a generic error even though the backend was simply still
-        // booting, not actually down.
-        connectTimeout: const Duration(seconds: 45),
-        receiveTimeout: const Duration(seconds: 45),
+        // One named environment decides the host - see AppEnvironment for why
+        // production still points at Render rather than at Oracle.
+        baseUrl: env.baseUrl,
+        connectTimeout: env.timeout,
+        receiveTimeout: env.timeout,
+        // sendTimeout was missing entirely. Without it an upload that stalls
+        // mid-body - a phone dropping to one bar while an admin posts a
+        // product image - hangs with no ceiling at all, because connect and
+        // receive timeouts do not cover the sending phase.
+        sendTimeout: env.timeout,
       ),
     );
 
@@ -53,6 +52,16 @@ class ApiClient {
       ),
     );
   }
+
+  /// Which deployment this client talks to.
+  final AppEnvironment environment;
+
+  final RetryPolicy _retryPolicy;
+
+  /// Counts retries per request. Keyed on the RequestOptions instance, which
+  /// is the same object across a retry chain, so a request cannot escape its
+  /// own attempt budget by looking like a new one.
+  static const _attemptKey = 'gpstore_retry_attempt';
 
   late final Dio _dio;
   final TokenStorage tokenStorage;
@@ -106,9 +115,40 @@ class ApiClient {
         await tokenStorage.clear();
         onSessionExpired?.call();
       }
+
+      // A 401 that could not be refreshed is a dead session, not a transient
+      // fault - fall through to the error rather than retrying it.
+      handler.next(_mapToApiException(error));
+      return;
     }
 
+    if (await _retryIfSafe(error, handler)) return;
+
     handler.next(_mapToApiException(error));
+  }
+
+  /// Retries the request if the policy allows, and reports whether it did.
+  ///
+  /// The attempt count rides on the RequestOptions' own extra map, so it
+  /// survives into the retried request and a failing endpoint cannot loop
+  /// forever by presenting each attempt as a fresh one.
+  Future<bool> _retryIfSafe(DioException error, ErrorInterceptorHandler handler) async {
+    final options = error.requestOptions;
+    final attempt = (options.extra[_attemptKey] as int? ?? 0) + 1;
+
+    if (!_retryPolicy.shouldRetry(error, attempt - 1)) return false;
+
+    await Future<void>.delayed(_retryPolicy.delayFor(attempt, error: error));
+
+    options.extra[_attemptKey] = attempt;
+    try {
+      handler.resolve(await _dio.fetch(options));
+    } on DioException catch (retryError) {
+      // Back through this same interceptor, so a second failure is judged by
+      // the same policy - and stops once the budget is spent.
+      handler.next(_mapToApiException(retryError));
+    }
+    return true;
   }
 
   Future<String?> _refreshAccessToken() async {
