@@ -48,6 +48,28 @@ final similarProductsProvider =
   return products.where((p) => p.id != args.excludeProductId).toList();
 });
 
+/// A few products from one category, for the Bestsellers collage.
+///
+/// A PROVIDER RATHER THAN AN INLINE FutureBuilder, and the difference is not
+/// stylistic. The collage previously built its future inside build():
+///
+///   FutureBuilder(future: repository.browseByCategory(id, size: 4), ...)
+///
+/// A future constructed during build is a NEW future on every build, so
+/// every rebuild of the home screen re-issued the request - once per
+/// category tile. Six categories meant six requests on open and six more on
+/// each rebuild, for a collage whose contents had not changed. That is the
+/// per-category request fan-out the load test showed.
+///
+/// Riverpod caches by argument, so each category is fetched once and shared.
+/// Not autoDispose: the home screen is the app's landing surface and is
+/// returned to constantly; dropping the cache on every navigation away would
+/// re-fetch all six on every return, which is the problem again in a
+/// different costume.
+final categoryPreviewProvider = FutureProvider.family<List<Product>, int>((ref, categoryId) {
+  return ref.watch(productsRepositoryProvider).browseByCategory(categoryId, size: 4);
+});
+
 final trendingProvider = FutureProvider<List<Product>>((ref) {
   return ref.watch(productsRepositoryProvider).getTrending();
 });

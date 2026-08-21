@@ -55,6 +55,11 @@ class _BestsellerTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // watch, not a future built in build(): see categoryPreviewProvider for
+    // why that distinction was costing six requests on every rebuild. Only
+    // this tile rebuilds when its own category resolves.
+    final products = ref.watch(categoryPreviewProvider(category.id)).valueOrNull ?? const <Product>[];
+
     return GestureDetector(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => CategoryProductsScreen(category: category)),
@@ -68,10 +73,8 @@ class _BestsellerTile extends ConsumerWidget {
         child: Column(
           children: [
             Expanded(
-              child: FutureBuilder<List<Product>>(
-                future: ref.read(productsRepositoryProvider).browseByCategory(category.id, size: 4),
-                builder: (context, snapshot) {
-                  final products = snapshot.data ?? const [];
+              child: Builder(
+                builder: (context) {
                   return GridView.count(
                     crossAxisCount: 2,
                     mainAxisSpacing: 2,
