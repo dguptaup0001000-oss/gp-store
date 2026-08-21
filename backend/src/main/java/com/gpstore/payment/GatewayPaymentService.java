@@ -80,6 +80,15 @@ public class GatewayPaymentService {
     private final ObjectMapper objectMapper;
     private final SecureRandom random = new SecureRandom();
 
+    /**
+     * Self, through the proxy. Calling prepareCheckout directly from
+     * startCheckout would bypass Spring's transaction interceptor entirely -
+     * the call never leaves the object, so no proxy is involved and
+     * @Transactional silently does nothing. Same pattern PaymentService
+     * already uses.
+     */
+    private final GatewayPaymentService self;
+
     public GatewayPaymentService(PaymentGateway gateway,
                                  CashfreeProperties properties,
                                  CashfreeSignatureVerifier signatureVerifier,
@@ -88,7 +97,8 @@ public class GatewayPaymentService {
                                  PaymentProviderEventRepository eventRepository,
                                  OrderService orderService,
                                  AuditLogService auditLogService,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper,
+                                 @org.springframework.context.annotation.Lazy GatewayPaymentService self) {
         this.gateway = gateway;
         this.properties = properties;
         this.signatureVerifier = signatureVerifier;
@@ -98,6 +108,7 @@ public class GatewayPaymentService {
         this.orderService = orderService;
         this.auditLogService = auditLogService;
         this.objectMapper = objectMapper;
+        this.self = self;
     }
 
     // ------------------------------------------------------------------
@@ -114,8 +125,65 @@ public class GatewayPaymentService {
      * variant prices, the delivery-fee formula and any validated coupon -
      * so a tampered cart cannot produce a tampered charge.
      */
-    @Transactional
+    /**
+     * NOT @Transactional, deliberately, and this is the whole reason
+     * startCheckout is split in two.
+     *
+     * Creating the gateway order is an outbound HTTPS call with a ten-second
+     * timeout. Making it inside a transaction would hold the order row lock,
+     * the payment row lock AND a Hikari connection for the whole of it - on
+     * a ten-connection pool and half a vCPU, a handful of simultaneous
+     * checkouts against a slow Cashfree would exhaust the pool and stall
+     * every other request in the application, including ones with nothing to
+     * do with payment.
+     *
+     * So: a short transaction validates and reserves, the lock is released,
+     * and only then does the network call happen.
+     */
     public GatewayCheckoutResponse startCheckout(Long orderId, Long callerCustomerId) {
+        CheckoutIntent intent = self.prepareCheckout(orderId, callerCustomerId);
+
+        PaymentGateway.GatewaySession session = gateway.createSession(
+                new PaymentGateway.GatewaySessionRequest(
+                        intent.providerOrderId(),
+                        intent.amount(),
+                        CURRENCY,
+                        // Stable and not a secret. Nothing beyond what the
+                        // gateway needs to reach the customer is sent.
+                        "cust_" + callerCustomerId,
+                        intent.customerPhone(),
+                        intent.customerName(),
+                        intent.customerEmail(),
+                        properties.getReturnUrl(),
+                        properties.getNotifyUrl()));
+
+        auditLogService.log("GATEWAY_CHECKOUT_STARTED", "Payment", intent.paymentId(),
+                "orderId=" + orderId + ", provider=CASHFREE, providerOrderId=" + intent.providerOrderId());
+
+        return new GatewayCheckoutResponse(
+                orderId,
+                intent.paymentId(),
+                PaymentProvider.CASHFREE.name(),
+                intent.providerOrderId(),
+                session.paymentSessionId(),
+                intent.amount(),
+                CURRENCY,
+                properties.isProduction() ? "production" : "sandbox");
+    }
+
+    /**
+     * Everything the gateway call needs, read under the lock and carried out
+     * of the transaction as plain values.
+     *
+     * Values rather than entities on purpose: touching a lazy association
+     * after the transaction closed is a LazyInitializationException, and the
+     * customer's name and phone are exactly the kind of field that would be.
+     */
+    public record CheckoutIntent(Long paymentId, String providerOrderId, BigDecimal amount,
+                                 String customerPhone, String customerName, String customerEmail) {}
+
+    @Transactional
+    public CheckoutIntent prepareCheckout(Long orderId, Long callerCustomerId) {
         // ORDER then PAYMENT, matching every other mutating payment path in
         // this codebase. Diverging here is how a deadlock gets introduced.
         Order order = orderRepository.findByIdForUpdate(orderId)
@@ -150,43 +218,29 @@ public class GatewayPaymentService {
             throw new BadRequestException("This order has no payable amount.");
         }
 
+        // Minted and PERSISTED before the gateway is called, under the lock.
+        // Two simultaneous taps of Pay both reach this line, but only one
+        // holds the row lock at a time and the second sees the first's
+        // committed state - so the id the app is handed is always the one on
+        // the payment row, never a second live session competing with it.
         String providerOrderId = mintProviderOrderId(orderId);
 
-        PaymentGateway.GatewaySession session = gateway.createSession(
-                new PaymentGateway.GatewaySessionRequest(
-                        providerOrderId,
-                        amount,
-                        CURRENCY,
-                        // Cashfree requires a customer id; ours is stable and
-                        // is not a secret. No email or address is sent beyond
-                        // what the gateway needs to reach the customer.
-                        "cust_" + callerCustomerId,
-                        order.getCustomer().getMobileNumber(),
-                        order.getCustomer().getFullName(),
-                        order.getCustomer().getEmail(),
-                        properties.getReturnUrl(),
-                        properties.getNotifyUrl()));
-
         payment.setProvider(PaymentProvider.CASHFREE);
-        payment.setProviderOrderId(session.providerOrderId());
+        payment.setProviderOrderId(providerOrderId);
         payment.setCurrency(CURRENCY);
         payment.setPaymentStatus(PaymentStatus.PENDING);
         payment.setFailureReason(null);
         payment.setUpdatedAt(LocalDateTime.now());
         paymentRepository.save(payment);
 
-        auditLogService.log("GATEWAY_CHECKOUT_STARTED", "Payment", payment.getId(),
-                "orderId=" + orderId + ", provider=CASHFREE, providerOrderId=" + session.providerOrderId());
-
-        return new GatewayCheckoutResponse(
-                orderId,
+        // Read here, inside the transaction, because these are lazy.
+        return new CheckoutIntent(
                 payment.getId(),
-                PaymentProvider.CASHFREE.name(),
-                session.providerOrderId(),
-                session.paymentSessionId(),
+                providerOrderId,
                 amount,
-                CURRENCY,
-                properties.isProduction() ? "production" : "sandbox");
+                order.getCustomer().getMobileNumber(),
+                order.getCustomer().getFullName(),
+                order.getCustomer().getEmail());
     }
 
     // ------------------------------------------------------------------
