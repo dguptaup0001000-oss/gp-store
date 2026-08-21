@@ -51,6 +51,19 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   // if it's still the latest call by the time the response arrives.
   int _searchSeq = 0;
 
+  /// Paging for the results list.
+  ///
+  /// A BUTTON, NOT INFINITE SCROLL, and that is deliberate. Search results
+  /// are already the most request-heavy screen in the app - every keystroke
+  /// past the debounce is a query - and hanging a scroll listener off them
+  /// would fetch pages the customer never asked for. A Load more they tap
+  /// costs exactly one request when they want one, and it does not have to
+  /// interact with the stale-response guard on every scroll frame.
+  String _lastQuery = '';
+  int _page = 0;
+  bool _hasMore = false;
+  bool _isLoadingMore = false;
+
   @override
   void initState() {
     super.initState();
@@ -80,6 +93,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         _errorMessage = null;
         _interpretedAs = null;
         _didYouMean = null;
+        _hasMore = false;
+        _page = 0;
+        _lastQuery = '';
       }),
     );
   }
@@ -91,6 +107,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       _isLoading = true;
       _errorMessage = null;
       _hasSearched = true;
+      // A new term is a new result set - never page 2 of the old one.
+      _lastQuery = query;
+      _page = 0;
+      _hasMore = false;
+      _isLoadingMore = false;
     });
 
     try {
@@ -103,6 +124,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         _results = result.products;
         _interpretedAs = result.interpretedAs;
         _didYouMean = result.didYouMean;
+        _hasMore = result.hasMore;
         _isLoading = false;
       });
 
@@ -129,6 +151,46 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         _errorMessage = extractErrorMessage(e);
         _isLoading = false;
       });
+    }
+  }
+
+  /// Fetches the next page and APPENDS it.
+  ///
+  /// Guarded by the same sequence number as _search: if the customer types
+  /// while this is in flight, the page that arrives belongs to a query they
+  /// have already replaced, and appending it would splice results for one
+  /// term into the list for another.
+  Future<void> _loadMore() async {
+    if (_isLoadingMore || !_hasMore || _lastQuery.isEmpty) return;
+
+    final seq = _searchSeq;
+    final nextPage = _page + 1;
+    setState(() => _isLoadingMore = true);
+
+    try {
+      final result = await ref.read(productsRepositoryProvider).searchSmart(
+            _lastQuery,
+            page: nextPage,
+          );
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _results = [..._results, ...result.products];
+        _page = nextPage;
+        _hasMore = result.hasMore;
+        _isLoadingMore = false;
+      });
+    } catch (e) {
+      if (!mounted || seq != _searchSeq) return;
+      // Deliberately does NOT replace the results with an error screen: the
+      // customer still has the matches they were reading, and losing those
+      // because page 2 failed would be a worse outcome than the failure.
+      setState(() => _isLoadingMore = false);
+      if (mounted) {
+        final message = extractErrorMessage(e);
+        if (message.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+        }
+      }
     }
   }
 
@@ -214,7 +276,37 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           onUseSuggestion: _runTerm,
         ),
         Expanded(child: _buildGrid()),
+        _buildLoadMore(),
       ],
+    );
+  }
+
+  /// A footer rather than a widget at the end of the grid: adding it to the
+  /// grid would mean rebuilding it as slivers, and a footer is reachable
+  /// without scrolling to the bottom of forty results first.
+  Widget _buildLoadMore() {
+    if (!_hasMore) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: SizedBox(
+        width: double.infinity,
+        child: _isLoadingMore
+            ? const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(8),
+                  child: SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              )
+            : OutlinedButton(
+                onPressed: _loadMore,
+                child: const Text('Show more results'),
+              ),
+      ),
     );
   }
 
@@ -231,6 +323,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       ),
       itemCount: _results.length,
       itemBuilder: (context, index) {
+        // Nothing scroll-driven here: paging is the explicit button below.
         final product = _results[index];
         final wishlistController = ref.read(wishlistControllerProvider.notifier);
         return ProductCard(

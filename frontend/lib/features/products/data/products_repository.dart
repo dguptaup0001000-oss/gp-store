@@ -98,7 +98,18 @@ class ProductsRepository {
   /// confidence - the customer's own words were kept and this is offered as a
   /// suggestion. Both null is the ordinary case of a search that worked as
   /// typed, and the UI should stay quiet then.
-  Future<({List<Product> products, String? interpretedAs, String? didYouMean})> searchSmart(
+  /// Returns the paging metadata as well as the products.
+  ///
+  /// The backend has always sent totalPages/number; this used to throw them
+  /// away, so the search screen showed the first 20 matches and had no way
+  /// to know - or to say - that there were more. A customer searching a
+  /// broad term like "atta" simply never saw result 21.
+  Future<({
+    List<Product> products,
+    String? interpretedAs,
+    String? didYouMean,
+    bool hasMore,
+  })> searchSmart(
     String keyword, {
     int page = 0,
     int size = 20,
@@ -116,10 +127,17 @@ class ProductsRepository {
     final data = response.data as Map<String, dynamic>;
     final content = data['content'] as List;
 
+    // Derived from the server's own totals rather than from "did this page
+    // come back full": a page can be short for other reasons, and guessing
+    // either hides results or offers a Load more that returns nothing.
+    final totalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
+    final currentPage = (data['number'] as num?)?.toInt() ?? page;
+
     return (
       products: content.map((e) => Product.fromJson(e as Map<String, dynamic>)).toList(),
       interpretedAs: data['interpretedAs'] as String?,
       didYouMean: data['didYouMean'] as String?,
+      hasMore: currentPage + 1 < totalPages,
     );
   }
 

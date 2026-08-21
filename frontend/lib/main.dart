@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/lifecycle/session_refresh.dart';
 import 'core/monitoring/crash_reporter.dart';
 import 'core/notifications/push_notification_providers.dart';
 import 'core/notifications/push_notification_service.dart';
@@ -176,12 +177,14 @@ class GpStoreApp extends ConsumerWidget {
       }
     });
 
-    return MaterialApp.router(
-      title: 'GP-Store',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      routerConfig: router,
-      scaffoldMessengerKey: scaffoldMessengerKey,
+    return SessionRefresh(
+      child: MaterialApp.router(
+        title: 'GP-Store',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        routerConfig: router,
+        scaffoldMessengerKey: scaffoldMessengerKey,
+      ),
     );
   }
 }
