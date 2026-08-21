@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,7 +13,6 @@ import '../../../shared/widgets/product_page_route.dart';
 import '../domain/product_models.dart';
 import 'product_detail_screen.dart';
 import 'products_providers.dart';
-import 'search_screen.dart';
 
 /// Category browsing with a persistent left rail.
 ///
@@ -43,6 +44,12 @@ class _CategoryBrowseScreenState extends ConsumerState<CategoryBrowseScreen> {
     _selected = widget.initialCategory;
   }
 
+  /// Search text, applied to the SELECTED category only.
+  ///
+  /// Held here rather than inside the grid so that switching category keeps
+  /// the customer's search - they are narrowing a shelf, not starting over.
+  String _keyword = '';
+
   @override
   Widget build(BuildContext context) {
     final categoriesAsync = ref.watch(categoriesProvider);
@@ -52,7 +59,13 @@ class _CategoryBrowseScreenState extends ConsumerState<CategoryBrowseScreen> {
       bottomNavigationBar: const CartSummaryBar(),
       body: Column(
         children: [
-          _SearchBar(categoryName: _selected.name),
+          _SearchBar(
+            categoryName: _selected.name,
+            onChanged: (value) {
+              if (value == _keyword) return;
+              setState(() => _keyword = value);
+            },
+          ),
           Expanded(
             child: categoriesAsync.when(
               loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -84,8 +97,13 @@ class _CategoryBrowseScreenState extends ConsumerState<CategoryBrowseScreen> {
                         // FRESH grid with its own paging state, rather than the
                         // previous category's products lingering while the new
                         // page loads.
-                        key: ValueKey<int>(_selected.id),
+                        // Keyed by category AND keyword. Reusing the existing
+                        // key-to-reset mechanism means a new search gets fresh
+                        // paging state for free, with no extra reset logic to
+                        // get wrong.
+                        key: ValueKey<String>('${_selected.id}:$_keyword'),
                         category: _selected,
+                        keyword: _keyword,
                       ),
                     ),
                   ],
@@ -99,44 +117,93 @@ class _CategoryBrowseScreenState extends ConsumerState<CategoryBrowseScreen> {
   }
 }
 
-class _SearchBar extends StatelessWidget {
-  const _SearchBar({required this.categoryName});
+/// Search within the selected category.
+///
+/// A real input, not a button. It used to push the GLOBAL search screen,
+/// which meant the label "Search in Masala & Spices" was untrue - the
+/// customer typed into what looked like a category filter and got results
+/// from the whole shop.
+///
+/// Debounced at 400ms, the same interval the other search fields use, so a
+/// five-letter word costs one request rather than five.
+class _SearchBar extends StatefulWidget {
+  const _SearchBar({required this.categoryName, required this.onChanged});
 
   final String categoryName;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_SearchBar> createState() => _SearchBarState();
+}
+
+class _SearchBarState extends State<_SearchBar> {
+  final _controller = TextEditingController();
+  Timer? _debounce;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      widget.onChanged(value.trim());
+    });
+  }
+
+  void _clear() {
+    _debounce?.cancel();
+    _controller.clear();
+    widget.onChanged('');
+  }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      child: GestureDetector(
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const SearchScreen()),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.cardBackground,
+          // Fully rounded and lifted, matching the home search pill, so the
+          // two read as the same control in the same app.
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: AppElevation.card,
         ),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: AppColors.cardBackground,
-            borderRadius: BorderRadius.circular(AppRadius.md),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.textPrimary.withValues(alpha: 0.05),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.search, color: AppColors.textSecondary, size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Search in $categoryName',
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: AppColors.textSecondary),
-                ),
-              ),
-            ],
+        child: TextField(
+          controller: _controller,
+          onChanged: _onChanged,
+          textInputAction: TextInputAction.search,
+          style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
+          decoration: InputDecoration(
+            isDense: true,
+            // The shared InputDecorationTheme fills and rounds every field;
+            // here the Container above already does both, so the field itself
+            // stays transparent and borderless rather than drawing a second
+            // shape inside the first.
+            filled: false,
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            prefixIcon: const Icon(Icons.search, color: AppColors.textSecondary, size: 20),
+            hintText: 'Search in ${widget.categoryName}',
+            hintStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
+            suffixIcon: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _controller,
+              builder: (context, value, child) {
+                // Only present when there is something to clear, so the field
+                // is not permanently carrying a dead button.
+                if (value.text.isEmpty) return const SizedBox.shrink();
+                return IconButton(
+                  icon: const Icon(Icons.close, size: 18, color: AppColors.textSecondary),
+                  onPressed: _clear,
+                  tooltip: 'Clear search',
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -160,7 +227,7 @@ class _CategoryRail extends StatelessWidget {
   /// than a grey list. Fixed order, indexed by position, so a category keeps
   /// the same colour every time the screen opens instead of flickering to a
   /// new one on each build.
-  static const _washes = [AppColors.peach, AppColors.mist, AppColors.cream];
+  static const _washes = [AppColors.mist, AppColors.peach, AppColors.cream];
 
   @override
   Widget build(BuildContext context) {
@@ -171,7 +238,7 @@ class _CategoryRail extends StatelessWidget {
 
     return Container(
       width: railWidth,
-      color: AppColors.background,
+      color: AppColors.surfaceSoft,
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
         itemCount: categories.length,
@@ -268,9 +335,13 @@ class _CategoryRail extends StatelessWidget {
 
 /// Paginated 2-column grid for the selected category.
 class _CategoryProductGrid extends ConsumerStatefulWidget {
-  const _CategoryProductGrid({super.key, required this.category});
+  const _CategoryProductGrid({super.key, required this.category, this.keyword = ''});
 
   final Category category;
+
+  /// Narrows the grid to this category's matching products. Empty means the
+  /// whole category.
+  final String keyword;
 
   @override
   ConsumerState<_CategoryProductGrid> createState() => _CategoryProductGridState();
@@ -304,11 +375,39 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
 
     try {
       final repository = ref.read(productsRepositoryProvider);
-      final fetched = await repository.browseByCategory(
-        widget.category.id,
-        page: _nextPage,
-        size: _pageSize,
-      );
+
+      // Two endpoints, one behaviour. browseByCategoryFiltered is what makes
+      // "Search in {category}" actually search inside the category - the box
+      // used to open GLOBAL search, so the label was a lie and results came
+      // back from shelves the customer had not asked about.
+      //
+      // The plain endpoint is kept for the unfiltered case rather than always
+      // using the filtered one: it is the path every category open takes, and
+      // it is already the cached, indexed one.
+      final List<Product> fetched;
+      final bool serverSaysMore;
+
+      if (widget.keyword.isEmpty) {
+        fetched = await repository.browseByCategory(
+          widget.category.id,
+          page: _nextPage,
+          size: _pageSize,
+        );
+        // browseByCategory returns a bare List, so "a short page means the
+        // end" is the only signal available here.
+        serverSaysMore = fetched.length >= _pageSize;
+      } else {
+        final result = await repository.browseByCategoryFiltered(
+          categoryId: widget.category.id,
+          keyword: widget.keyword,
+          page: _nextPage,
+          size: _pageSize,
+        );
+        fetched = result.products;
+        // This endpoint reports totalPages, which is a real answer rather
+        // than an inference from page length.
+        serverSaysMore = _nextPage + 1 < result.totalPages;
+      }
 
       // The widget is keyed by category id, so a stale response from a
       // previous category cannot land here - that widget is already gone.
@@ -320,10 +419,7 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
           if (_seenIds.add(product.id)) _products.add(product);
         }
         _nextPage += 1;
-        // browseByCategory returns a bare List, so "a short page means the
-        // end" is the only signal available here. Unlike the home feed, which
-        // gets an explicit hasNext from /feed.
-        _hasNext = fetched.length >= _pageSize;
+        _hasNext = serverSaysMore;
         _isLoading = false;
       });
     } catch (e) {
@@ -358,7 +454,11 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
     }
 
     return Container(
-      color: AppColors.cardBackground,
+      // The lavender ground, not a cream panel. Home is lavender with cream
+      // cards lifted off it; a solid cream grid here would make the category
+      // page read as a different app, which is precisely what the design
+      // brief rules out.
+      color: AppColors.background,
       // Wraps the grid rather than the whole screen, so the pill is centred
       // over the products rather than over the rail as well - and so that
       // switching category, which replaces this keyed widget, gets a fresh
