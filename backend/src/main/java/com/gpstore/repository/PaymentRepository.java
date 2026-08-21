@@ -38,6 +38,22 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     Optional<Payment> findByTransactionId(String transactionId);
 
     /**
+     * The gateway's order id is how a webhook finds its way back to one of
+     * our payments - it is the only identifier both sides agree on before a
+     * payment exists.
+     *
+     * FOR UPDATE, because this is called from the webhook handler, which
+     * races the client callback for the same row. Both paths take the lock,
+     * so the second one re-reads the state the first one committed rather
+     * than acting on what it saw before.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Payment p where p.providerOrderId = :providerOrderId")
+    Optional<Payment> findByProviderOrderIdForUpdate(@Param("providerOrderId") String providerOrderId);
+
+    Optional<Payment> findByProviderOrderId(String providerOrderId);
+
+    /**
      * Used to auto-expire UPI payments nobody ever confirmed - see
      * PaymentService.expireStalePendingUpiPayments.
      *

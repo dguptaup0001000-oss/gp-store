@@ -77,6 +77,14 @@ jobs:
         # test suite never sees - an unused import, a dead null-check, an
         # await that was forgotten - and does it in seconds.
         #
+        # The payments branch supplied the sharpest example of why it runs
+        # BEFORE the APK: checkout_screen.dart used a class it never
+        # imported, `flutter test` stayed green because the tests import the
+        # service and nothing imports the screen, and the mistake only
+        # surfaced ~4 minutes into `assembleRelease` - after an NDK install -
+        # as a kernel_snapshot failure. Dart compiles only what a test
+        # reaches; the analyzer compiles every library in lib/.
+        #
         # Not --fatal-infos: the project carries informational lints that are
         # style opinions rather than defects, and failing the build on those
         # trains everyone to ignore the step.

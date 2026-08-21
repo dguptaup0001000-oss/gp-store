@@ -171,6 +171,18 @@ public class SecurityConfig {
                 .requestMatchers("/api/orders/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/orders/customer/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/orders/*/status").hasRole("ADMIN")
+                // PUBLIC BY NECESSITY. Cashfree cannot present a JWT, so
+                // this path cannot require one - the HMAC signature check in
+                // PaymentWebhookController is what authenticates it instead.
+                // Declared BEFORE the broad /api/payments/** admin rule below,
+                // or that rule would shadow it and every webhook would 403.
+                .requestMatchers(HttpMethod.POST, "/api/payments/webhooks/**").permitAll()
+                // A customer starting or verifying their OWN order's payment.
+                // Ownership is enforced inside GatewayPaymentService, which
+                // returns not-found for someone else's order rather than
+                // forbidden - so order ids cannot be probed.
+                .requestMatchers(HttpMethod.POST, "/api/payments/order/*/checkout-session").hasAnyRole("ADMIN", "CUSTOMER")
+                .requestMatchers(HttpMethod.POST, "/api/payments/order/*/verify").hasAnyRole("ADMIN", "CUSTOMER")
                 .requestMatchers(HttpMethod.POST, "/api/payments").hasAnyRole("ADMIN", "CUSTOMER")
                 .requestMatchers(HttpMethod.GET, "/api/payments/**").hasRole("ADMIN")
                 .requestMatchers("/api/payments/order/*/refund/**").hasRole("ADMIN")

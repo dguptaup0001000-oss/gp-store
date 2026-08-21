@@ -25,8 +25,11 @@ public class PaymentController {
 
     private final PaymentService paymentService;
     private final CurrentUser currentUser;
+    private final com.gpstore.payment.GatewayPaymentService gatewayPaymentService;
 
-    public PaymentController(PaymentService paymentService, CurrentUser currentUser) {
+    public PaymentController(PaymentService paymentService, CurrentUser currentUser,
+                             com.gpstore.payment.GatewayPaymentService gatewayPaymentService) {
+        this.gatewayPaymentService = gatewayPaymentService;
         this.paymentService = paymentService;
         this.currentUser = currentUser;
     }
@@ -76,6 +79,37 @@ public class PaymentController {
     }
 
     // Admin only (enforced in SecurityConfig).
+    /**
+     * Starts a gateway checkout for an order this customer owns.
+     *
+     * TAKES NO AMOUNT, and that is the security property rather than an
+     * omission - there is no field on this request a client could use to
+     * influence what gets charged. The figure sent to Cashfree is read from
+     * the order row the backend itself computed.
+     *
+     * Safe to call twice: an already-paid order is refused with a conflict
+     * rather than issued a second session.
+     */
+    @PostMapping("/order/{orderId}/checkout-session")
+    public com.gpstore.dto.response.GatewayCheckoutResponse startCheckout(@PathVariable Long orderId) {
+        return gatewayPaymentService.startCheckout(orderId, currentUser.customerId());
+    }
+
+    /**
+     * Asks the gateway what really happened, and applies it.
+     *
+     * The recovery path. The app calls this when it returns from checkout -
+     * however it returns, including cancelled or after being killed - and
+     * whenever an order is opened later. It is what makes a lost webhook
+     * survivable, and what lets the app avoid polling: the answer comes from
+     * Cashfree's servers, so the client's opinion is never consulted.
+     */
+    @PostMapping("/order/{orderId}/verify")
+    public java.util.Map<String, String> verify(@PathVariable Long orderId) {
+        return java.util.Map.of(
+                "paymentStatus", gatewayPaymentService.reconcile(orderId, currentUser.customerId()).name());
+    }
+
     @PutMapping("/order/{orderId}/refund")
     public com.gpstore.dto.response.PaymentResponse refundPayment(@PathVariable Long orderId) {
         return paymentService.refundPayment(orderId);

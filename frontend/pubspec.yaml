@@ -56,6 +56,9 @@ dependencies:
   # inside a WebView, which is why it is reached only from its own route and
   # never from a list - see product_3d_view_screen.dart.
   model_viewer_plus: ^1.7.2
+  # Cashfree checkout. Native SDK - see android/app/proguard-rules.pro for
+  # the keep rules its reflective entry points need in a release build.
+  flutter_cashfree_pg_sdk: ^2.2.0
 
   # Shows the notification banner + plays sound while the app is in the
   # foreground (Firebase alone stays silent in foreground on Android).

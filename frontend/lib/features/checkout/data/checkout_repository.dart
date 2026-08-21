@@ -53,6 +53,36 @@ class CheckoutRepository {
   /// Real second step after placeOrder - the order doesn't automatically
   /// create a Payment record; this does, and for UPI returns the real
   /// deep link to open.
+  /// Asks the backend to start a gateway checkout for an order.
+  ///
+  /// SENDS NO AMOUNT, and there is no parameter here that could. The figure
+  /// charged is read server-side from the order the backend itself
+  /// computed - so nothing this app sends, and nothing a modified build
+  /// could send, changes what the customer pays.
+  Future<GatewayCheckout> startCheckoutSession({required int orderId}) async {
+    final response = await apiClient.dio.post('/api/payments/order/$orderId/checkout-session');
+    final data = response.data as Map<String, dynamic>;
+    return GatewayCheckout(
+      providerOrderId: data['providerOrderId'] as String,
+      paymentSessionId: data['paymentSessionId'] as String,
+      production: (data['environment'] as String?) == 'production',
+    );
+  }
+
+  /// Asks the backend what the payment's real state is.
+  ///
+  /// The backend re-checks with Cashfree over a credentialed connection and
+  /// returns its own verdict. This is the ONLY thing the app treats as the
+  /// answer - the SDK callback is a hint about when to ask, never the
+  /// answer itself.
+  ///
+  /// Safe to call repeatedly and at any time: on return from checkout,
+  /// after the app was killed mid-payment, or when an old order is opened.
+  Future<String> verifyPayment({required int orderId}) async {
+    final response = await apiClient.dio.post('/api/payments/order/$orderId/verify');
+    return (response.data as Map<String, dynamic>)['paymentStatus'] as String;
+  }
+
   Future<PaymentInitiationResult> initiatePayment({
     required int orderId,
     required String paymentMethod,
@@ -63,4 +93,21 @@ class CheckoutRepository {
     );
     return PaymentInitiationResult.fromJson(response.data as Map<String, dynamic>);
   }
+}
+
+/// What the app needs to open Cashfree, and nothing more.
+///
+/// No key, no secret, no signature. A payment session id is a short-lived
+/// token scoped to one order; it cannot be used to create a charge, query
+/// another order, or authenticate anything.
+class GatewayCheckout {
+  const GatewayCheckout({
+    required this.providerOrderId,
+    required this.paymentSessionId,
+    required this.production,
+  });
+
+  final String providerOrderId;
+  final String paymentSessionId;
+  final bool production;
 }
