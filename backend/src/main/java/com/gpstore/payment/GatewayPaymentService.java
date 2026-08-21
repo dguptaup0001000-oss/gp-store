@@ -137,8 +137,11 @@ public class GatewayPaymentService {
      * every other request in the application, including ones with nothing to
      * do with payment.
      *
-     * So: a short transaction validates and reserves, the lock is released,
-     * and only then does the network call happen.
+     * So: a short transaction validates the order and claims a provider
+     * order id, the lock is released, and only then does the network call
+     * happen. "Claims", not "reserves" - no stock is touched anywhere in
+     * this class. Inventory was already deducted at placeOrder, under its
+     * own lock, long before any of this runs.
      */
     public GatewayCheckoutResponse startCheckout(Long orderId, Long callerCustomerId) {
         CheckoutIntent intent = self.prepareCheckout(orderId, callerCustomerId);
@@ -476,22 +479,57 @@ public class GatewayPaymentService {
     }
 
     /**
-     * Finds the payment a webhook belongs to.
+     * Finds the payment a webhook belongs to, locking ORDER THEN PAYMENT.
      *
-     * Exact match first. Falling back to the internal id embedded in the
-     * prefix is what lets a LATE webhook for a superseded retry attempt
-     * still find its order - the payment row only ever carries the newest
-     * attempt's id, so attempt 1's webhook would otherwise look like an
-     * unknown order.
+     * THE LOCK ORDER IS THE WHOLE POINT OF THIS METHOD'S SHAPE, and it is
+     * why the payment is not simply looked up directly. prepareCheckout,
+     * reconcile and PaymentService.lockOrderThenPayment all take the order
+     * row first and the payment row second. A webhook that took the payment
+     * first and then reached the order - which is exactly what
+     * advanceOrderIfStillPending does a few frames later - would give two
+     * transactions the same two locks in opposite orders. Postgres would
+     * detect the cycle and kill one of them.
+     *
+     * It would have self-healed, because a killed webhook is a 500 and
+     * Cashfree redelivers, and the dedup makes redelivery safe. But the
+     * customer-visible half would not: /verify shares applyVerdict and would
+     * have surfaced the deadlock as a failed request while someone watched
+     * their payment screen.
+     *
+     * Which order to lock is derivable without reading anything, because we
+     * minted the id: GP-<orderId>-<random>. The unlocked read below is only
+     * the fallback for an id that is not ours in that shape, and it is used
+     * solely to learn WHICH order to lock - never to decide anything. The
+     * authoritative read happens after the lock is held.
+     *
+     * Exact match first, then the internal id. That fallback is what lets a
+     * LATE webhook for a superseded retry attempt still find its order - the
+     * payment row only ever carries the newest attempt's id, so attempt 1's
+     * webhook would otherwise look like an unknown order.
      */
     private Optional<Payment> locatePayment(String providerOrderId) {
-        Optional<Payment> exact = paymentRepository.findByProviderOrderIdForUpdate(providerOrderId);
-        if (exact.isPresent()) {
-            return exact;
-        }
         Long internalOrderId = internalOrderIdFrom(providerOrderId);
-        return internalOrderId == null
-                ? Optional.empty()
+
+        if (internalOrderId == null) {
+            internalOrderId = paymentRepository.findByProviderOrderId(providerOrderId)
+                    .map(Payment::getOrder)
+                    .map(Order::getId)
+                    .orElse(null);
+            if (internalOrderId == null) {
+                return Optional.empty();
+            }
+        }
+
+        // Lock A. Not dereferenced - taking it is the entire purpose. If the
+        // order has vanished there is nothing to apply a verdict to.
+        if (orderRepository.findByIdForUpdate(internalOrderId).isEmpty()) {
+            return Optional.empty();
+        }
+
+        // Lock B, always after A.
+        Optional<Payment> exact = paymentRepository.findByProviderOrderIdForUpdate(providerOrderId);
+        return exact.isPresent()
+                ? exact
                 : paymentRepository.findByOrderIdForUpdate(internalOrderId);
     }
 
