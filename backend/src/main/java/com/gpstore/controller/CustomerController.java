@@ -88,6 +88,17 @@ public class CustomerController {
         customerService.updateMyFcmToken(currentUser.customerId(), request.getFcmToken());
     }
 
+    // Called on logout, before the client discards its tokens - see
+    // CustomerService.clearMyFcmToken for why leaving the old one in place
+    // sends one account's order pushes to whoever signs in next on the same
+    // phone. Separate from PUT rather than "PUT with an empty body" because
+    // FcmTokenRequest is @NotBlank, and relaxing that would let a genuine
+    // registration silently store nothing.
+    @DeleteMapping("/me/fcm-token")
+    public void clearMyFcmToken() {
+        customerService.clearMyFcmToken(currentUser.customerId());
+    }
+
     // Google Play Account Deletion Requirement - see the doc comment on
     // CustomerService.deleteOwnAccount for what this actually does
     // (anonymize + end all sessions, not a literal row delete) and why.
