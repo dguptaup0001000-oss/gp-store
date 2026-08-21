@@ -72,6 +72,20 @@ jobs:
         # The build fails without this step running first.
         run: dart run build_runner build --delete-conflicting-outputs
 
+      - name: Analyze
+        # Ahead of the tests and a long way ahead of the APK, because this is
+        # the cheapest step that can catch a compile error. A missing import
+        # (CashfreeCheckoutService, first release build of the payments
+        # branch) is invisible to `flutter test` when no test imports the
+        # offending file, and only surfaced ~4 minutes into
+        # `assembleRelease` - after an NDK install - as a kernel_snapshot
+        # failure. The analyzer reports it in seconds.
+        #
+        # --no-fatal-infos deliberately: this gate exists to stop broken
+        # code, not to hold the build hostage to style lints. Warnings and
+        # errors still fail it.
+        run: flutter analyze --no-fatal-infos
+
       - name: Run Flutter tests
         # Before the APK, not after: a red test should stop the build rather
         # than ship an artifact and report the failure alongside it. These are
