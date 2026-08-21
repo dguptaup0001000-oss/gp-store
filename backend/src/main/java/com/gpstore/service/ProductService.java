@@ -38,7 +38,7 @@ public class ProductService {
 
     // Save Product - evicts the cached listing so a new/changed product shows
     // up immediately instead of customers seeing a stale catalog.
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles", "trending", "frequentlyBought"}, allEntries = true)
     @Transactional
     public ProductResponse saveProduct(Product product) {
         return ProductResponse.from(productRepository.save(product));
@@ -353,7 +353,7 @@ public class ProductService {
     }
 
     /** Didn't exist before - a product could be created but never edited afterward. */
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles", "trending", "frequentlyBought"}, allEntries = true)
     @Transactional
     public ProductResponse update(Long id, Product updated) {
         Product existing = getByIdOrThrow(id);
@@ -372,7 +372,7 @@ public class ProductService {
      * product, or fail on the FK constraint. Deactivating just stops it
      * showing up to customers.
      */
-    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles"}, allEntries = true)
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles", "trending", "frequentlyBought"}, allEntries = true)
     public void deactivate(Long id) {
         Product product = getByIdOrThrow(id);
         product.setActive(false);
