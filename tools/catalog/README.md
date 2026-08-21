@@ -13,22 +13,40 @@ testing**. Everything in it is assumed data.
 The seeder is an admin endpoint, so it works from a phone. All routes need an
 ADMIN token (enforced in `SecurityConfig`).
 
+**Every path is under `/v1`.** `application.properties` sets
+`server.servlet.context-path=/v1`, so the controller's `/api/admin/catalog/...`
+is served at `/v1/api/admin/catalog/...`. Omitting it gives a 404 that looks
+exactly like a missing endpoint. Note the SecurityConfig rules are written
+*without* the prefix - context-path is stripped before security matching.
+
+Get the token by logging in as a user whose `customers.role` is `ADMIN`:
+
+```bash
+curl -X POST https://gp-store.onrender.com/v1/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"email":"...","password":"..."}'
+```
+
+The `token` field of the response is the Bearer token. Nothing in the code
+grants ADMIN - registration hardcodes CUSTOMER - so the role has to be set
+once directly in the database.
+
 ```bash
 # 1. Seed / refresh the catalogue. Safe to run as many times as you like.
-curl -X POST https://gp-store.onrender.com/api/admin/catalog/seed \
+curl -X POST https://gp-store.onrender.com/v1/api/admin/catalog/seed \
      -H "Authorization: Bearer $ADMIN_TOKEN"
 
 # 2. Fetch real product images from Open Food Facts, in batches.
 #    Repeat until "considered" comes back smaller than the limit.
-curl -X POST "https://gp-store.onrender.com/api/admin/catalog/images/backfill?limit=100" \
+curl -X POST "https://gp-store.onrender.com/v1/api/admin/catalog/images/backfill?limit=100" \
      -H "Authorization: Bearer $ADMIN_TOKEN"
 
 # 3. Check the catalogue's health at any time.
-curl https://gp-store.onrender.com/api/admin/catalog/audit \
+curl https://gp-store.onrender.com/v1/api/admin/catalog/audit \
      -H "Authorization: Bearer $ADMIN_TOKEN"
 
 # 4. Before launch: remove every test product.
-curl -X DELETE "https://gp-store.onrender.com/api/admin/catalog/test-data?confirm=true" \
+curl -X DELETE "https://gp-store.onrender.com/v1/api/admin/catalog/test-data?confirm=true" \
      -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
