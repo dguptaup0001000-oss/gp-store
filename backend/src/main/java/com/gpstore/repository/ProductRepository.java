@@ -45,19 +45,40 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * ILIKE is included alongside the trigram operator because very short
      * search terms (2-3 letters) can fall under trigram's similarity
      * threshold even for a legitimate prefix match.
+     *
+     * SEARCH_KEYWORDS AND SUBCATEGORY ARE MATCHED BY ILIKE ONLY, deliberately,
+     * and are deliberately absent from the ORDER BY.
+     *
+     * They exist so that a customer can find "Fortune Sunlite Refined
+     * Sunflower Oil 1 l" by typing "cooking oil" or "1 litre" - words that
+     * appear nowhere in its name or brand. But keywords is a bag of loosely
+     * related terms, so letting it drive the RANKING would put every product
+     * carrying the word "oil" above the one actually called Sunflower Oil.
+     * Name and brand still decide the order; keywords only decide whether a
+     * product is in the running at all.
+     *
+     * Trigram similarity is not applied to them for the same reason and one
+     * more: a 500-character keyword bag has a low similarity score against
+     * any short query almost by definition, so "%" would match nearly
+     * everything or nearly nothing depending on the threshold. Substring
+     * matching is the honest operation for a keyword list.
      */
     @Query(
         value = "SELECT p.* FROM products p " +
                 "WHERE p.active = true " +
                 "AND (p.name % :keyword OR p.brand % :keyword " +
                 "     OR p.name ILIKE CONCAT('%', :keyword, '%') " +
-                "     OR p.brand ILIKE CONCAT('%', :keyword, '%')) " +
+                "     OR p.brand ILIKE CONCAT('%', :keyword, '%') " +
+                "     OR p.search_keywords ILIKE CONCAT('%', :keyword, '%') " +
+                "     OR p.subcategory ILIKE CONCAT('%', :keyword, '%')) " +
                 "ORDER BY GREATEST(similarity(p.name, :keyword), similarity(COALESCE(p.brand, ''), :keyword)) DESC",
         countQuery = "SELECT count(*) FROM products p " +
                 "WHERE p.active = true " +
                 "AND (p.name % :keyword OR p.brand % :keyword " +
                 "     OR p.name ILIKE CONCAT('%', :keyword, '%') " +
-                "     OR p.brand ILIKE CONCAT('%', :keyword, '%'))",
+                "     OR p.brand ILIKE CONCAT('%', :keyword, '%') " +
+                "     OR p.search_keywords ILIKE CONCAT('%', :keyword, '%') " +
+                "     OR p.subcategory ILIKE CONCAT('%', :keyword, '%'))",
         nativeQuery = true)
     Page<Product> searchInstant(@Param("keyword") String keyword, Pageable pageable);
 

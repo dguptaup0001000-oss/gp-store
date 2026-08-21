@@ -168,6 +168,12 @@ public class SecurityConfig {
                 .requestMatchers("/api/inventory/**").hasRole("ADMIN")
                 .requestMatchers("/api/uploads/**").hasRole("ADMIN")
                 .requestMatchers("/api/orders").hasRole("ADMIN")
+                // CATALOG ADMINISTRATION. Every route under here can insert a
+                // thousand products, make a thousand outbound requests, or
+                // delete every test product in the shop - so it is the
+                // narrowest possible grant, and it sits ABOVE the broader
+                // rules so nothing below can widen it by accident.
+                .requestMatchers("/api/admin/catalog/**").hasRole("ADMIN")
                 .requestMatchers("/api/orders/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/orders/customer/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/orders/*/status").hasRole("ADMIN")
