@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../data/products_repository.dart';
+import '../domain/bestseller_models.dart';
 import '../domain/brand_models.dart';
 import '../domain/product_models.dart';
 
@@ -68,6 +69,26 @@ final similarProductsProvider =
 /// different costume.
 final categoryPreviewProvider = FutureProvider.family<List<Product>, int>((ref, categoryId) {
   return ref.watch(productsRepositoryProvider).browseByCategory(categoryId, size: 4);
+});
+
+/// The whole Bestsellers collage, in one request.
+///
+/// REPLACES SIX. categoryPreviewProvider above already fixed the collage
+/// re-requesting on every rebuild, but six tiles still meant six separate
+/// HTTP calls on every cold home open - the largest remaining avoidable
+/// multiplier on the screen, against a backend measured at 100% CPU under
+/// load. The backend now assembles the collage in a single SQL statement.
+///
+/// categoryPreviewProvider is deliberately left in place rather than
+/// deleted: it is a general "a few products from this category" lookup, and
+/// removing it to prove a point would be an unrelated change.
+///
+/// Not autoDispose, for the same reason as the provider above: home is the
+/// landing surface and is returned to constantly, so dropping the cache on
+/// every navigation away would re-fetch on every return - the same problem
+/// in a different costume.
+final bestsellerTilesProvider = FutureProvider<List<BestsellerTile>>((ref) {
+  return ref.watch(productsRepositoryProvider).getBestsellerTiles();
 });
 
 final trendingProvider = FutureProvider<List<Product>>((ref) {

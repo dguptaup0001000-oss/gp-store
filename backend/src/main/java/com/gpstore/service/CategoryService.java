@@ -22,7 +22,10 @@ public class CategoryService {
         this.productRepository = productRepository;
     }
 
-    @CacheEvict(value = "categories", allEntries = true)
+    // bestsellerTiles too: the collage carries each category's name and is
+    // filtered on active, so renaming or deactivating one must not leave a
+    // stale tile on every customer's home screen.
+    @CacheEvict(value = {"categories", "bestsellerTiles"}, allEntries = true)
     public Category saveCategory(Category category) {
         if (category.getActive() == null) {
             category.setActive(true);
@@ -40,7 +43,10 @@ public class CategoryService {
                 .orElseThrow(() -> new ResourceNotFoundException("Category not found"));
     }
 
-    @CacheEvict(value = "categories", allEntries = true)
+    // bestsellerTiles too: the collage carries each category's name and is
+    // filtered on active, so renaming or deactivating one must not leave a
+    // stale tile on every customer's home screen.
+    @CacheEvict(value = {"categories", "bestsellerTiles"}, allEntries = true)
     public Category update(Long id, Category updated) {
         Category existing = getById(id);
 
@@ -59,14 +65,20 @@ public class CategoryService {
      * Products keep their category reference; the storefront just needs to
      * stop showing a deactivated category.
      */
-    @CacheEvict(value = "categories", allEntries = true)
+    // bestsellerTiles too: the collage carries each category's name and is
+    // filtered on active, so renaming or deactivating one must not leave a
+    // stale tile on every customer's home screen.
+    @CacheEvict(value = {"categories", "bestsellerTiles"}, allEntries = true)
     public void deactivate(Long id) {
         Category category = getById(id);
         category.setActive(false);
         categoryRepository.save(category);
     }
 
-    @CacheEvict(value = "categories", allEntries = true)
+    // bestsellerTiles too: the collage carries each category's name and is
+    // filtered on active, so renaming or deactivating one must not leave a
+    // stale tile on every customer's home screen.
+    @CacheEvict(value = {"categories", "bestsellerTiles"}, allEntries = true)
     public void hardDelete(Long id) {
         if (!productRepository.findByCategoryId(id).isEmpty()) {
             throw new ConflictException(

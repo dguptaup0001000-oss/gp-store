@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import '../../../core/api/api_client.dart';
+import '../domain/bestseller_models.dart';
 import '../domain/brand_models.dart';
 import '../domain/product_models.dart';
 
@@ -52,6 +53,27 @@ class ProductsRepository {
       queryParameters: {'limit': limit},
     );
     return (response.data as List).map((e) => Product.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// The whole Bestsellers collage in ONE request.
+  ///
+  /// This replaces six. The collage called browseByCategory once per tile,
+  /// so opening the app cost six HTTP round trips - six TLS handshakes, six
+  /// auth filter chains, six database connection acquisitions - to render
+  /// twenty-four thumbnails. The backend now assembles it in a single SQL
+  /// statement and returns only the fields the tile actually draws.
+  ///
+  /// The defaults are what the UI draws rather than a page size borrowed
+  /// from another screen: six tiles of four, not six pages of twenty.
+  Future<List<BestsellerTile>> getBestsellerTiles({int categories = 6, int perCategory = 4}) async {
+    final response = await apiClient.dio.get(
+      '/api/products/bestsellers',
+      queryParameters: {'categories': categories, 'perCategory': perCategory},
+    );
+    return (response.data as List)
+        .map((e) => BestsellerTile.fromJson(e as Map<String, dynamic>))
+        .where((tile) => tile.isRenderable)
+        .toList();
   }
 
   Future<List<Coupon>> getActiveOffers() async {

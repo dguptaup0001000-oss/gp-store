@@ -146,6 +146,24 @@ public class ProductController {
         return productService.browseByCategoryFiltered(categoryId, sort, inStockOnly, keyword, page, Math.min(size, 50));
     }
 
+    /**
+     * The home screen's Bestsellers collage, whole, in one request.
+     *
+     * This endpoint exists to delete five HTTP requests from every cold app
+     * open: the collage previously called /category/{id} once per tile. The
+     * defaults are what the UI actually draws - six tiles of four - rather
+     * than a page size chosen for a different screen, and both are clamped
+     * server-side so this cannot be widened into a catalogue dump from the
+     * query string.
+     */
+    @GetMapping("/bestsellers")
+    public List<com.gpstore.dto.response.BestsellerTileResponse> getBestsellers(
+            @RequestParam(defaultValue = "6") int categories,
+            @RequestParam(defaultValue = "4") int perCategory) {
+
+        return productService.getBestsellerTiles(categories, perCategory);
+    }
+
     // Real "New Arrivals" - sorted by actual product creation time.
     @GetMapping("/new-arrivals")
     public Page<ProductResponse> getNewArrivals(
