@@ -201,6 +201,12 @@ class _InventoryTile extends ConsumerWidget {
       ),
     );
 
+    // Disposed as soon as the dialog is gone. A TextEditingController is a
+    // ChangeNotifier; one created per dialog open and never released is a
+    // small leak that accumulates across a stock-take session, when this
+    // dialog is opened dozens of times in a row.
+    controller.dispose();
+
     if (quantity == null || quantity <= 0) return;
 
     try {
@@ -258,10 +264,18 @@ class _InventoryTile extends ConsumerWidget {
       ),
     );
 
-    if (confirmed != true) return;
-
+    // Values read BEFORE disposing - the controllers are still needed here,
+    // unlike the restock dialog above where the parse happens inside the
+    // action. Read, then release, then use.
     final stock = int.tryParse(stockController.text.trim());
     final minStock = int.tryParse(minController.text.trim());
+    final maxStockText = maxController.text.trim();
+
+    stockController.dispose();
+    minController.dispose();
+    maxController.dispose();
+
+    if (confirmed != true) return;
     if (stock == null || minStock == null) return;
 
     try {
@@ -269,7 +283,7 @@ class _InventoryTile extends ConsumerWidget {
             inventoryId: item.id,
             stock: stock,
             minimumStock: minStock,
-            maximumStock: int.tryParse(maxController.text.trim()),
+            maximumStock: int.tryParse(maxStockText),
             // Passed through unchanged - see updateInventory()'s doc comment
             // for why this must never be omitted.
             currentReservedStock: item.reservedStock,
