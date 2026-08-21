@@ -30,6 +30,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   bool _isLoadingPreview = false;
   bool _isPlacingOrder = false;
 
+  /// What the customer is currently waiting on, for the button label.
+  ///
+  /// Named for what is happening rather than for a payment result, because
+  /// none of these states IS a payment result - the backend decides that.
+  /// "Verifying" in particular is the honest word for the moment after
+  /// Cashfree returns and before this app has been told anything true.
+  _PayPhase _phase = _PayPhase.idle;
+
   /// Idempotency key for the checkout currently in progress. Held across
   /// retries on purpose (see _placeOrder) and cleared only once an order has
   /// actually been placed, so a retry of a failed attempt reuses it while a
@@ -200,6 +208,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       // finally{} precisely because a failure must KEEP the key for retry.
       _idempotencyKey = null;
 
+      // ONLINE runs the gateway before the confirmation screen, so the
+      // customer lands on a screen that already knows the real answer
+      // rather than one that says "confirmed" and is then contradicted.
+      String? verifiedPaymentStatus;
+      if (_paymentMethod == 'ONLINE') {
+        verifiedPaymentStatus = await _payOnline(orderResult.orderId!);
+      }
+
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -207,6 +223,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             orderNumber: orderResult.orderNumber ?? '',
             paymentMethod: _paymentMethod,
             upiPaymentLink: upiPaymentLink,
+            verifiedPaymentStatus: verifiedPaymentStatus,
           ),
         ),
       );
@@ -225,8 +242,51 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       // showing stale "you still have items" state after an attempt that
       // actually went through on the backend.
       ref.invalidate(cartControllerProvider);
-      if (mounted) setState(() => _isPlacingOrder = false);
+      if (mounted) {
+        setState(() {
+          _isPlacingOrder = false;
+          _phase = _PayPhase.idle;
+        });
+      }
     }
+  }
+
+  /// Runs the gateway checkout for an order that already exists.
+  ///
+  /// THE ORDER IS CREATED FIRST, then paid. That ordering is what makes
+  /// every recovery case survivable: whatever happens from here - the app is
+  /// killed, the network drops, the callback never arrives - there is a real
+  /// order on the server with a real payment row, and its state can be asked
+  /// for later. Creating the order only after a successful payment would
+  /// mean a paid customer with nothing to show for it.
+  ///
+  /// Returns the backend's verdict, never the SDK's.
+  Future<String> _payOnline(int orderId) async {
+    final repository = ref.read(checkoutRepositoryProvider);
+
+    setState(() => _phase = _PayPhase.preparing);
+    final checkout = await repository.startCheckoutSession(orderId: orderId);
+
+    setState(() => _phase = _PayPhase.atGateway);
+    final outcome = await CashfreeCheckoutService().open(
+      orderId: checkout.providerOrderId,
+      paymentSessionId: checkout.paymentSessionId,
+      production: checkout.production,
+    );
+
+    if (outcome == CheckoutOutcome.couldNotOpen) {
+      // Nothing was attempted, so this is not a failed payment and must not
+      // be described as one. The order stays pending and is retryable.
+      throw Exception('Could not open the payment screen. Please try again.');
+    }
+
+    // ASKED REGARDLESS OF WHAT THE SDK SAID, including when it reported the
+    // customer backed out. A cancelled-looking checkout can still have
+    // completed - the customer may have paid in their UPI app and returned
+    // before Cashfree updated the screen - and the only way to know is to
+    // ask the backend, which asks Cashfree.
+    setState(() => _phase = _PayPhase.verifying);
+    return repository.verifyPayment(orderId: orderId);
   }
 
   @override
@@ -309,6 +369,16 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     onChanged: (value) => setState(() => _paymentMethod = value!),
                     secondary: const Icon(Icons.qr_code_scanner_outlined, color: AppColors.primary),
                     title: const Text('UPI (GPay / PhonePe / Paytm)'),
+                    subtitle: const Text('Pay the shop directly, confirmed by the shop'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  RadioListTile<String>(
+                    value: 'ONLINE',
+                    groupValue: _paymentMethod,
+                    onChanged: (value) => setState(() => _paymentMethod = value!),
+                    secondary: const Icon(Icons.credit_card_outlined, color: AppColors.primary),
+                    title: const Text('Pay online'),
+                    subtitle: const Text('Card, UPI or netbanking, confirmed instantly'),
                     contentPadding: EdgeInsets.zero,
                   ),
 
@@ -335,8 +405,23 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                 padding: const EdgeInsets.all(16),
                 child: FilledButton(
                   onPressed: (_preview != null && _preview!.deliverable && !_isPlacingOrder) ? _confirmAndPlaceOrder : null,
+                  // The label follows the PHASE, so a customer who has just
+                  // come back from Cashfree sees "Verifying payment" rather
+                  // than a spinner that looks identical to the one before
+                  // they paid. That difference is the whole reason _PayPhase
+                  // exists.
                   child: _isPlacingOrder
-                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+                            const SizedBox(width: 10),
+                            Text(_phase.label),
+                          ],
+                        )
                       : Text(_preview != null ? 'Place Order - ₹${_preview!.estimatedTotal.toStringAsFixed(0)}' : 'Place Order'),
                 ),
               ),
@@ -414,4 +499,22 @@ class _PreviewSummary extends StatelessWidget {
       ),
     );
   }
+}
+
+/// What the customer is waiting on. Not a payment result - see _PayPhase's
+/// use in the button label.
+enum _PayPhase {
+  idle,
+  preparing,
+  atGateway,
+  verifying;
+
+  String get label => switch (this) {
+        _PayPhase.idle => 'Placing order...',
+        _PayPhase.preparing => 'Preparing payment...',
+        _PayPhase.atGateway => 'Opening payment...',
+        // The honest word. At this moment the customer may well have paid
+        // and this app has not yet been told anything true about it.
+        _PayPhase.verifying => 'Verifying payment...',
+      };
 }
