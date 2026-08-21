@@ -2,6 +2,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/images/product_image_url.dart';
+
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
@@ -67,7 +69,7 @@ class WishlistScreen extends ConsumerWidget {
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
                                 child: CachedNetworkImage(
-                                  imageUrl: variant!.imageUrl!,
+                                  imageUrl: ProductImageUrl.tile(variant.imageUrl),
                                   fit: BoxFit.contain,
                                   // 56x56 tile - avoid decoding the full original.
                                   memCacheWidth: 160,

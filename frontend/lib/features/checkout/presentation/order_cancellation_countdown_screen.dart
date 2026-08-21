@@ -4,6 +4,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/images/product_image_url.dart';
+
 import '../../../core/theme/app_theme.dart';
 import '../../cart/domain/cart_models.dart';
 import '../domain/checkout_models.dart';
@@ -199,7 +201,7 @@ class _ItemRow extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             child: item.imageUrl != null
                 ? CachedNetworkImage(
-                    imageUrl: item.imageUrl!,
+                    imageUrl: ProductImageUrl.tile(item.imageUrl),
                     width: 44,
                     height: 44,
                     // contain (not cover) - matches every other product

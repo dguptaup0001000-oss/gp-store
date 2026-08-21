@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/images/product_image_url.dart';
+
 import '../../../core/theme/app_theme.dart';
 import '../../products/domain/product_models.dart';
 import '../../products/presentation/category_products_screen.dart';
@@ -91,7 +93,7 @@ class _CategoryTile extends StatelessWidget {
             child: category.imageUrl != null
                 ? ClipOval(
                     child: CachedNetworkImage(
-                      imageUrl: category.imageUrl!,
+                      imageUrl: ProductImageUrl.tile(category.imageUrl),
                       fit: BoxFit.cover,
                       // 72x72 tile - avoid decoding the full original.
                       memCacheWidth: 200,

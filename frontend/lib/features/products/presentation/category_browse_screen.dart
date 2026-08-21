@@ -2,6 +2,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/images/product_image_url.dart';
+
 import '../../../core/search/search_debouncer.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/cart_aware_product_card.dart';
@@ -302,7 +304,7 @@ class _CategoryRail extends StatelessWidget {
                             color: isSelected ? AppColors.primary : AppColors.textSecondary,
                           )
                         : CachedNetworkImage(
-                            imageUrl: category.imageUrl!,
+                            imageUrl: ProductImageUrl.tile(category.imageUrl),
                             fit: BoxFit.cover,
                             // Cached, not Image.network: the rail rebuilds on
                             // every category tap, and an uncached image
