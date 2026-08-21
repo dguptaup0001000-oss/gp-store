@@ -289,11 +289,17 @@ public class GatewayPaymentService {
             return WebhookResult.accepted(Outcome.UNKNOWN_ORDER);
         }
 
-        // THE DEDUP, and it happens BEFORE anything is applied. Inserting
-        // the event id under a unique constraint inside this transaction
-        // means a retried delivery cannot get past this line - it fails the
-        // insert, the transaction rolls back, and nothing was applied twice.
-        // A check-then-act would let two simultaneous deliveries both pass.
+        // THE DEDUP is the unique insert in recordEvent below, and it is
+        // what makes a retried delivery safe. It runs AFTER applyVerdict
+        // rather than before - it needs the outcome to record - and that is
+        // fine precisely because both are inside THIS transaction: a
+        // colliding insert throws, the transaction rolls back, and the state
+        // change is undone as if it never happened.
+        //
+        // A check-then-act would let two simultaneous deliveries both pass;
+        // a unique constraint cannot. Note applyVerdict independently
+        // refuses to touch an already-SUCCESS payment, so a duplicate is
+        // stopped twice over.
         Payment payment = locatePayment(providerOrderId).orElse(null);
         if (payment == null) {
             recordEvent(eventId, eventType, null, providerOrderId, Outcome.UNKNOWN_ORDER,

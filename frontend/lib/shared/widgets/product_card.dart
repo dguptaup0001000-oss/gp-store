@@ -201,12 +201,10 @@ class _ProductCardState extends State<ProductCard> {
                         top: 2,
                         right: 2,
                         child: GestureDetector(
-                          onTap: onWishlistToggle == null
-                              ? null
-                              : () {
-                                  HapticFeedback.lightImpact();
-                                  onWishlistToggle!();
-                                },
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            onWishlistToggle();
+                          },
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
@@ -302,7 +300,7 @@ class _ProductCardState extends State<ProductCard> {
                                   ? null
                                   : () {
                                       HapticFeedback.mediumImpact();
-                                      onAddPressed!();
+                                      onAddPressed();
                                     },
                               style: OutlinedButton.styleFrom(
                                 // Teal, not blue: this is a basket action, and

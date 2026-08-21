@@ -8,7 +8,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
-import '../domain/live_tracking_model.dart';
 import '../domain/order_models.dart';
 import 'invoice_screen.dart';
 import 'orders_providers.dart';
