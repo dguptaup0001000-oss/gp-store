@@ -61,6 +61,24 @@
 # the real dependency - the suppression would then be hiding something.
 -dontwarn com.google.android.play.core.**
 
+# --- Cashfree payment gateway -----------------------------------------
+# The SDK resolves activities and result callbacks by name, and hands
+# control to Cashfree's hosted checkout and back. Nothing in this app's
+# Java references those entry points, so R8 is entitled to strip them.
+#
+# The failure mode is the worst one in this file: the build succeeds, the
+# app runs, and the checkout screen fails to open - or opens and never
+# returns a result - on a real customer trying to pay. Everything else
+# about the order still works, so it reads as "payments are flaky" rather
+# than as an obfuscation problem.
+#
+# Note the backend is unaffected either way: it asks Cashfree directly what
+# happened, so a broken client cannot mark an order paid. But a customer
+# who cannot open checkout cannot pay at all.
+-keep class com.cashfree.** { *; }
+-keep class com.cashfree.pg.** { *; }
+-dontwarn com.cashfree.**
+
 # --- 3D model viewer (WebView) ----------------------------------------
 # model_viewer_plus renders Google's <model-viewer> element inside an Android
 # WebView, and the bridge between the page and Dart is resolved by NAME at

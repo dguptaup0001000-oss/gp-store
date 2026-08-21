@@ -1,6 +1,7 @@
 package com.gpstore.entity;
 
 import com.gpstore.enums.PaymentMethod;
+import com.gpstore.enums.PaymentProvider;
 import com.gpstore.enums.PaymentStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -44,6 +45,50 @@ private PaymentStatus paymentStatus;
     private LocalDateTime paymentDate;
 
     private Boolean active;
+
+    // ---- Gateway fields. Null on every COD and direct-UPI payment, and
+    // that is the accurate state rather than a gap: those never touch a
+    // provider. See V14.
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 32)
+    private PaymentProvider provider;
+
+    /**
+     * The provider's id for the ORDER we asked it to collect - what we send.
+     *
+     * Unique at the database level (V14). Two of our orders can never share
+     * one Cashfree order, and the constraint is what enforces that rather
+     * than a check somewhere that a concurrent request could pass at the
+     * same moment.
+     */
+    @Column(name = "provider_order_id", length = 120, unique = true)
+    private String providerOrderId;
+
+    /**
+     * The provider's id for the actual PAYMENT - what comes back.
+     *
+     * Also unique. A single real payment at Cashfree can never be banked
+     * against two of our payments, however many times a webhook is retried
+     * or a client callback races it.
+     */
+    @Column(name = "provider_payment_id", length = 120, unique = true)
+    private String providerPaymentId;
+
+    /**
+     * Stored rather than assumed. Every gateway event echoes a currency, and
+     * one that does not match what we asked for is rejected - a payment
+     * settled in a currency nobody quoted is not this order being paid.
+     */
+    @Column(length = 3)
+    private String currency;
+
+    /** The provider's own words on why a payment failed, for support. */
+    @Column(name = "failure_reason", length = 255)
+    private String failureReason;
+
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
 
     public Payment() {
     }
@@ -107,4 +152,22 @@ public void setPaymentStatus(PaymentStatus paymentStatus) {
     public void setActive(Boolean active) {
         this.active = active;
     }
+
+    public PaymentProvider getProvider() { return provider; }
+    public void setProvider(PaymentProvider provider) { this.provider = provider; }
+
+    public String getProviderOrderId() { return providerOrderId; }
+    public void setProviderOrderId(String providerOrderId) { this.providerOrderId = providerOrderId; }
+
+    public String getProviderPaymentId() { return providerPaymentId; }
+    public void setProviderPaymentId(String providerPaymentId) { this.providerPaymentId = providerPaymentId; }
+
+    public String getCurrency() { return currency; }
+    public void setCurrency(String currency) { this.currency = currency; }
+
+    public String getFailureReason() { return failureReason; }
+    public void setFailureReason(String failureReason) { this.failureReason = failureReason; }
+
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }
