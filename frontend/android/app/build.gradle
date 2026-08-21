@@ -10,6 +10,9 @@ plugins {
     // the intended failure mode until you've done the one-time Firebase
     // setup.
     id "com.google.gms.google-services"
+    // Must come after google-services: it reads the Firebase app id from
+    // the same google-services.json to know where to send the mapping file.
+    id "com.google.firebase.crashlytics"
 }
 
 def localProperties = new Properties()

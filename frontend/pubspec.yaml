@@ -47,6 +47,11 @@ dependencies:
   # just silently doesn't fire until it is.
   firebase_core: ^3.6.0
   firebase_messaging: ^15.1.3
+  # Crash reporting. Deliberately the same Firebase project push already
+  # uses rather than a second vendor: no new account, no new secret in the
+  # app, and google-services.json is already wired up. See
+  # core/monitoring/crash_reporter.dart for what is and is not sent.
+  firebase_crashlytics: ^4.1.3
 
   # Shows the notification banner + plays sound while the app is in the
   # foreground (Firebase alone stays silent in foreground on Android).
