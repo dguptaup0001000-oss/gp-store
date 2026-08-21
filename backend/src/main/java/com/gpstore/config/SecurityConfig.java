@@ -51,7 +51,24 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of(allowedOrigins.split(",")));
+        // TRIMMED, and blanks dropped. CORS_ALLOWED_ORIGINS is typed by a
+        // human into a deployment console, and "https://a.com, https://b.com"
+        // is the natural way to write a list. Without trimming, the second
+        // origin is stored as " https://b.com" - with a leading space - which
+        // never matches any real Origin header. The failure is invisible
+        // server-side and shows up only as a browser CORS error on one of the
+        // two origins, which is a miserable thing to debug.
+        //
+        // Deliberately NOT a fallback to "*": an unparseable or empty list
+        // must end up allowing nothing, not everything. allowCredentials is
+        // true below, and a wildcard with credentials is exactly the
+        // combination that turns any site into a reader of authenticated
+        // responses.
+        configuration.setAllowedOrigins(
+                java.util.Arrays.stream(allowedOrigins.split(","))
+                        .map(String::trim)
+                        .filter(origin -> !origin.isEmpty())
+                        .toList());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         configuration.setAllowCredentials(true);
