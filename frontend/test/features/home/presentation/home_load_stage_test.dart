@@ -71,9 +71,18 @@ void main() {
 
   late RecordingRepository repository;
 
-  setUp(() => repository = RecordingRepository());
-
   Future<void> openHome(WidgetTester tester) async {
+    // CONSTRUCTED HERE, NOT IN setUp, and the reason is worth recording
+    // because it costs an afternoon to find. testWidgets runs its body
+    // inside a fake-async zone; setUp runs outside it. A Completer built in
+    // setUp belongs to that outer zone, and Dart schedules a future's
+    // completion microtask on the zone the future was CREATED in - so
+    // completing it from the test body queues the delivery on a real
+    // microtask queue that tester.pump() never flushes. The future then
+    // never appears to resolve, and every "...and then it loads" assertion
+    // fails while the code under test is perfectly correct.
+    repository = RecordingRepository();
+
     await tester.pumpWidget(
       ProviderScope(
         overrides: [productsRepositoryProvider.overrideWithValue(repository)],

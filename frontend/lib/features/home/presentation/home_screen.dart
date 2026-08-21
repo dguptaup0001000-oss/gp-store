@@ -40,6 +40,12 @@ class HomeScreen extends ConsumerWidget {
     // opens. The three carousels and the endless feed are not, and they wait
     // for this wave to settle - see homeBelowFoldReadyProvider.
     final belowFoldReady = ref.watch(homeBelowFoldReadyProvider);
+    // Watched HERE rather than inside HomeFeedSlivers.build, which runs
+    // inside ScrollToTop's builder callback and so executes during
+    // ScrollToTop's build rather than this one.
+    final feedAsync = belowFoldReady
+        ? ref.watch(productFeedProvider)
+        : const AsyncValue<ProductFeedState>.loading();
     final isLoggedIn = ref.watch(authControllerProvider).status == AuthStatus.authenticated;
     final cartItemCount = ref.watch(cartControllerProvider).valueOrNull?.totalItems ?? 0;
 
@@ -324,7 +330,7 @@ class HomeScreen extends ConsumerWidget {
             // Everything above is the curated part of the home screen. This
             // is where it stops ending after New Arrivals and keeps going
             // through the whole catalogue, one page at a time.
-            ...HomeFeedSlivers.build(context, ref, ready: belowFoldReady, onProductTap: openProduct),
+            ...HomeFeedSlivers.build(context, ref, feed: feedAsync, onProductTap: openProduct),
             ],
           ),
         ),
