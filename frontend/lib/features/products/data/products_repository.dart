@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import '../../../core/api/api_client.dart';
 import '../domain/brand_models.dart';
 import '../domain/product_models.dart';
@@ -79,10 +80,15 @@ class ProductsRepository {
     String keyword, {
     int page = 0,
     int size = 20,
+    CancelToken? cancelToken,
   }) async {
     final response = await apiClient.dio.get(
       '/api/products/search/smart',
       queryParameters: {'keyword': keyword, 'page': page, 'size': size},
+      // Passed through so a superseded search is actually aborted rather than
+      // merely having its answer discarded - the difference matters to the
+      // backend, which otherwise pays for every keystroke that got overtaken.
+      cancelToken: cancelToken,
     );
 
     final data = response.data as Map<String, dynamic>;

@@ -1,8 +1,9 @@
-import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/search/search_debouncer.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/product_card.dart';
@@ -24,7 +25,10 @@ class SearchScreen extends ConsumerStatefulWidget {
 
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _controller = TextEditingController();
-  Timer? _debounce;
+
+  /// Shared with brand and category search - one rule about when a query
+  /// reaches the network, in one place.
+  final _debouncer = SearchDebouncer();
 
   List<Product> _results = [];
   bool _isLoading = false;
@@ -61,32 +65,26 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   @override
   void dispose() {
-    _debounce?.cancel();
+    _debouncer.dispose();
     _controller.dispose();
     super.dispose();
   }
 
   void _onQueryChanged(String query) {
-    _debounce?.cancel();
-
-    if (query.trim().isEmpty) {
-      setState(() {
+    _debouncer.onQueryChanged(
+      query,
+      onSearch: _search,
+      onCleared: () => setState(() {
         _results = [];
         _hasSearched = false;
         _errorMessage = null;
         _interpretedAs = null;
         _didYouMean = null;
-      });
-      return;
-    }
-
-    // Debounced - avoids firing a real backend search request on every single
-    // keystroke, which would be wasteful and could visibly lag on a slow
-    // connection (village/tier-3 network conditions matter here).
-    _debounce = Timer(const Duration(milliseconds: 400), () => _search(query.trim()));
+      }),
+    );
   }
 
-  Future<void> _search(String query) async {
+  Future<void> _search(String query, CancelToken cancelToken) async {
     final seq = ++_searchSeq;
 
     setState(() {
@@ -96,7 +94,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     });
 
     try {
-      final result = await ref.read(productsRepositoryProvider).searchSmart(query);
+      final result = await ref.read(productsRepositoryProvider).searchSmart(
+            query,
+            cancelToken: cancelToken,
+          );
       if (!mounted || seq != _searchSeq) return;
       setState(() {
         _results = result.products;
@@ -112,6 +113,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         final terms = await _recent.remember(query);
         if (mounted) setState(() => _recentTerms = terms);
       }
+    } on DioException catch (e) {
+      // A cancelled request is this screen's own doing - the customer typed
+      // another character. Showing an error for it would turn ordinary typing
+      // into a screen full of failures.
+      if (e.type == DioExceptionType.cancel) return;
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _errorMessage = extractErrorMessage(e);
+        _isLoading = false;
+      });
     } catch (e) {
       if (!mounted || seq != _searchSeq) return;
       setState(() {
@@ -125,10 +136,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   /// suggestion. Sets the field too, so what is in the box always matches
   /// what is on screen.
   void _runTerm(String term) {
-    _debounce?.cancel();
     _controller.text = term;
     _controller.selection = TextSelection.collapsed(offset: term.length);
-    _search(term);
+    // Immediate: the customer chose this, so there is nothing to wait for.
+    _debouncer.searchNow(term, onSearch: _search);
   }
 
   @override
@@ -177,7 +188,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           children: [
             Text(_errorMessage!),
             TextButton(
-              onPressed: () => _search(_controller.text.trim()),
+              onPressed: () => _debouncer.searchNow(_controller.text, onSearch: _search),
               child: const Text('Retry'),
             ),
           ],
