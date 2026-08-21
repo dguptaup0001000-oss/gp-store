@@ -40,6 +40,27 @@
 # --- Secure storage ---------------------------------------------------
 -keep class com.it_nomads.fluttersecurestorage.** { *; }
 
+# --- Play Core / deferred components ----------------------------------
+# R8 FAILED THE FIRST RELEASE BUILD ON THIS, which is the entire reason the
+# step exists: nothing here can go wrong in a debug build.
+#
+# Flutter's embedding ships FlutterPlayStoreSplitApplication and
+# PlayStoreDeferredComponentManager, which reference Play Core's
+# split-install API. Play Core is NOT a dependency of this app, so R8 sees
+# a dozen unresolvable class references and refuses to complete.
+#
+# Suppressed rather than pulled in, and the distinction matters because a
+# blanket -dontwarn is normally how a genuinely missing class gets hidden.
+# These particular classes are unreachable here: deferred components are
+# opt-in, this project declares none in pubspec.yaml, and the manifest's
+# application is ${applicationName} - Flutter's ordinary one, not the
+# Play-Store split variant. Adding the Play Core library instead would ship
+# a dependency purely to satisfy code that never executes.
+#
+# If deferred components are ever adopted, this block must be replaced with
+# the real dependency - the suppression would then be hiding something.
+-dontwarn com.google.android.play.core.**
+
 # --- Keep annotations and generic signatures --------------------------
 # json_serializable emits plain constructors rather than reflection, so the
 # models themselves are safe; these keep the metadata that plugins and
