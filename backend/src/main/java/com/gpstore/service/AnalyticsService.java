@@ -67,25 +67,55 @@ public class AnalyticsService {
         return breakdown;
     }
 
-    /** Reuses the same trending query the customer-facing recommendations use - one source of truth. */
+    /**
+     * Reuses the same trending query the customer-facing recommendations use
+     * - one source of truth.
+     *
+     * TWO THINGS FIXED HERE, both the same shape as the customer path.
+     *
+     * The limit now goes to the DATABASE. This used to fetch the entire
+     * ranked leaderboard for the window and count to `limit` in a Java loop,
+     * so an admin asking for the top ten pulled back one row per distinct
+     * product ever ordered.
+     *
+     * And the product lookup was an N+1: findById inside the loop, one round
+     * trip per row. Batched into a single findByIdIn, which is what every
+     * other ranked list in this codebase already does.
+     *
+     * Unlike the customer-facing lists this deliberately does NOT filter on
+     * active - an admin looking at what sold last month needs to see a
+     * product they have since withdrawn, which is exactly the kind of thing
+     * they withdraw it for.
+     */
     public List<Map<String, Object>> getTopProducts(int days, int limit) {
         LocalDateTime since = LocalDateTime.now().minusDays(days);
-        List<Object[]> rows = orderItemRepository.findTrendingProductIds(since);
+        List<Object[]> rows = orderItemRepository.findTrendingProductIds(
+                since, org.springframework.data.domain.PageRequest.of(0, Math.max(1, limit)));
+
+        List<Long> productIds = new ArrayList<>(rows.size());
+        for (Object[] row : rows) {
+            productIds.add((Long) row[0]);
+        }
+        if (productIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, com.gpstore.entity.Product> byId = new HashMap<>();
+        for (com.gpstore.entity.Product product : productRepository.findByIdIn(productIds)) {
+            byId.put(product.getId(), product);
+        }
 
         List<Map<String, Object>> results = new ArrayList<>();
         for (Object[] row : rows) {
-            if (results.size() >= limit) break;
-
-            Long productId = (Long) row[0];
-            Long unitsSold = (Long) row[1];
-
-            productRepository.findById(productId).ifPresent(product -> {
-                Map<String, Object> entry = new HashMap<>();
-                entry.put("productId", product.getId());
-                entry.put("productName", product.getName());
-                entry.put("unitsSold", unitsSold);
-                results.add(entry);
-            });
+            com.gpstore.entity.Product product = byId.get((Long) row[0]);
+            if (product == null) {
+                continue;
+            }
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("productId", product.getId());
+            entry.put("productName", product.getName());
+            entry.put("unitsSold", row[1]);
+            results.add(entry);
         }
         return results;
     }
