@@ -61,6 +61,21 @@
 # the real dependency - the suppression would then be hiding something.
 -dontwarn com.google.android.play.core.**
 
+# --- 3D model viewer (WebView) ----------------------------------------
+# model_viewer_plus renders Google's <model-viewer> element inside an Android
+# WebView, and the bridge between the page and Dart is resolved by NAME at
+# runtime - @JavascriptInterface methods have no Java-visible caller, so R8
+# is entitled to conclude they are dead and strip them.
+#
+# The failure mode is the one this whole file exists for: the release build
+# compiles, the 3D screen opens, and the model never appears - with nothing
+# in the log that points at obfuscation.
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keep class io.flutter.plugins.webviewflutter.** { *; }
+-dontwarn android.webkit.**
+
 # --- Keep annotations and generic signatures --------------------------
 # json_serializable emits plain constructors rather than reflection, so the
 # models themselves are safe; these keep the metadata that plugins and
