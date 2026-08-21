@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
+import '../../core/images/product_image_url.dart';
 
 /// Reusable across every horizontal section on the home screen, search
 /// results, and category browsing - one widget, one place to fix/improve it.
@@ -149,7 +150,7 @@ class _ProductCardState extends State<ProductCard> {
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
                                 child: CachedNetworkImage(
-                                  imageUrl: variant!.imageUrl!,
+                                  imageUrl: ProductImageUrl.card(variant!.imageUrl),
                                   fit: BoxFit.contain,
                                   // Grid tiles render at ~150 logical px - without this,
                                   // cached_network_image decodes the full original

@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/images/product_image_url.dart';
 
 /// Swipeable product gallery with page dots.
 ///
@@ -73,7 +74,11 @@ class _ProductImageGalleryState extends State<ProductImageGallery> {
                   controller: _controller,
                   index: index,
                   child: CachedNetworkImage(
-                    imageUrl: urls[index],
+                    // Sized for the detail page rather than the original.
+                    // memCacheWidth below limits the DECODE; this limits what
+                    // is actually downloaded, which is the part a customer on
+                    // mobile data pays for.
+                    imageUrl: ProductImageUrl.detail(urls[index]),
                     fit: BoxFit.contain,
                   // Bounded decode: the hero deserves more resolution than a
                   // grid thumbnail, but an oversized original must not decode

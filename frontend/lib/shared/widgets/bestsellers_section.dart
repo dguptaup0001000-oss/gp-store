@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../features/products/presentation/category_products_screen.dart';
 import '../../features/products/presentation/products_providers.dart';
+import '../../core/images/product_image_url.dart';
 
 /// "Bestsellers" preview grid: for each of the first 6 categories, shows a
 /// 2x2 photo collage of a few in-stock products plus the category name.
@@ -88,7 +89,7 @@ class _BestsellerTile extends ConsumerWidget {
                           color: Colors.grey.shade200,
                           child: imageUrl != null
                               ? CachedNetworkImage(
-                                  imageUrl: imageUrl,
+                                  imageUrl: ProductImageUrl.tile(imageUrl),
                                   // contain (not cover) - matches every other
                                   // product image in the app. cover crops to
                                   // fill the tile, which was cutting off parts
