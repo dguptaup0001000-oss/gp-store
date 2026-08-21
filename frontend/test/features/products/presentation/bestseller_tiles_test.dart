@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/features/products/data/products_repository.dart';
 import 'package:gpstore/features/products/domain/bestseller_models.dart';
+import 'package:gpstore/features/products/domain/product_models.dart';
 import 'package:gpstore/features/products/presentation/products_providers.dart';
 
 class CountingRepository implements ProductsRepository {
@@ -20,7 +21,7 @@ class CountingRepository implements ProductsRepository {
   }
 
   @override
-  Future<List<dynamic>> browseByCategory(int categoryId, {int page = 0, int size = 20}) async {
+  Future<List<Product>> browseByCategory(int categoryId, {int page = 0, int size = 20}) async {
     browseCalls++;
     return const [];
   }
@@ -131,6 +132,8 @@ void main() {
     });
   });
 
+  group('which categories a customer may see', categoryVisibilityTests);
+
   group('when the backend is down', () {
     test('the failure surfaces as an error rather than an empty collage', () async {
       // An empty list and a failed request must not look the same: one is
@@ -156,4 +159,57 @@ class _FailingRepository implements ProductsRepository {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// Separate from the collage tests above: this is about which categories a
+/// customer is allowed to see at all.
+class _CategoryRepository implements ProductsRepository {
+  _CategoryRepository(this.categories);
+  final List<Category> categories;
+
+  @override
+  Future<List<Category>> getCategories() async => categories;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+Category _category(int id, String name, {bool active = true}) =>
+    Category(id: id, name: name, active: active);
+
+void categoryVisibilityTests() {
+  test('a deactivated category never reaches the customer', () async {
+    // The backend's findAll() returns inactive categories too. One screen
+    // filtered them client-side and the home rows did not, so turning a
+    // category off hid it in one place and left it advertised in three.
+    final container = ProviderContainer(overrides: [
+      productsRepositoryProvider.overrideWithValue(_CategoryRepository([
+        _category(1, 'Atta'),
+        _category(2, 'Discontinued', active: false),
+        _category(3, 'Dairy'),
+      ])),
+    ]);
+    addTearDown(container.dispose);
+
+    final visible = await container.read(categoriesProvider.future);
+
+    expect(visible.map((c) => c.name), ['Atta', 'Dairy']);
+  });
+
+  test('the order is stable, so "the first six" means something', () async {
+    // findAll() has no ORDER BY. The collage takes the first six, so
+    // without this the tiles could reshuffle after any unrelated update.
+    final container = ProviderContainer(overrides: [
+      productsRepositoryProvider.overrideWithValue(_CategoryRepository([
+        _category(9, 'Snacks'),
+        _category(2, 'Dairy'),
+        _category(5, 'Rice'),
+      ])),
+    ]);
+    addTearDown(container.dispose);
+
+    final visible = await container.read(categoriesProvider.future);
+
+    expect(visible.map((c) => c.id), [2, 5, 9]);
+  });
 }

@@ -10,8 +10,31 @@ final productsRepositoryProvider = Provider<ProductsRepository>((ref) {
   return ProductsRepository(apiClient: ref.watch(apiClientProvider));
 });
 
-final categoriesProvider = FutureProvider<List<Category>>((ref) {
-  return ref.watch(productsRepositoryProvider).getCategories();
+/// The categories a CUSTOMER may see, in a stable order.
+///
+/// TWO BUGS, BOTH IN THE BACKEND'S findAll(). It returns every category
+/// including deactivated ones, and it has no ORDER BY.
+///
+/// Deactivated categories were reaching the home screen. category_browse
+/// already filtered them client-side, so one screen hid a deactivated
+/// category while the home rows, the tabs bar and the Bestsellers collage
+/// all still advertised it - the kind of inconsistency that reads as a
+/// caching bug and is not one.
+///
+/// And with no ORDER BY, "the first six categories" - which is exactly what
+/// the collage takes - meant whatever physical order Postgres felt like
+/// returning, so it could change after any update to any row.
+///
+/// Fixed here rather than in /api/categories because admin reads that same
+/// endpoint through its own repository and legitimately needs the inactive
+/// ones to manage them. Narrowing the shared endpoint would break the screen
+/// that turns a category back on.
+final categoriesProvider = FutureProvider<List<Category>>((ref) async {
+  final categories = await ref.watch(productsRepositoryProvider).getCategories();
+
+  final visible = categories.where((c) => c.active).toList()
+    ..sort((a, b) => a.id.compareTo(b.id));
+  return visible;
 });
 
 final brandsProvider = FutureProvider<List<BrandSummary>>((ref) {
