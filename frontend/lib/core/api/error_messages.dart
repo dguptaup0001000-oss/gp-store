@@ -62,6 +62,14 @@ String _describeDioFailure(DioException error) {
     case DioExceptionType.badResponse:
       return _describeStatus(error.response?.statusCode);
 
+    case DioExceptionType.transformTimeout:
+      // Not a network failure at all: our own response transformer ran past
+      // its budget, which on a cheap phone means a large payload rather than
+      // anything the customer did. Deliberately NOT worded as a connection
+      // problem - blaming their network for our decoding would send them
+      // chasing the wrong fix.
+      return _unknown;
+
     case DioExceptionType.unknown:
       return _unknown;
   }
