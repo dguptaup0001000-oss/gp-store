@@ -313,13 +313,22 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable("productDetail")
     public ProductResponse getProductById(Long id) {
-        ProductResponse product = productRepository.findByIdIn(List.of(id)).stream()
+        Product entity = productRepository.findByIdIn(List.of(id)).stream()
                 .findFirst()
-                .map(ProductResponse::from)
                 .orElse(null);
 
-        if (product == null) {
+        if (entity == null) {
             return null;
+        }
+
+        ProductResponse product = ProductResponse.from(entity);
+
+        // The 3D model, like the gallery below, is attached ONLY here.
+        // ProductResponse.from deliberately leaves it null so that no list
+        // response ever carries it - the field exists for one screen and
+        // should cost nothing on every other one.
+        if (entity.getModel3dUrl() != null && !entity.getModel3dUrl().isBlank()) {
+            product = product.withModel3dUrl(entity.getModel3dUrl());
         }
 
         // The gallery is attached HERE and nowhere else, on purpose.
