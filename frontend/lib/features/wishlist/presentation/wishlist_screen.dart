@@ -69,7 +69,7 @@ class WishlistScreen extends ConsumerWidget {
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
                                 child: CachedNetworkImage(
-                                  imageUrl: ProductImageUrl.tile(variant.imageUrl),
+                                  imageUrl: ProductImageUrl.tile(variant!.imageUrl),
                                   fit: BoxFit.contain,
                                   // 56x56 tile - avoid decoding the full original.
                                   memCacheWidth: 160,

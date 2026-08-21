@@ -105,7 +105,10 @@ class RecommendationHygieneTest {
 
         var cache = cacheManager.getCache("trending");
         assertNotNull(cache, "the trending cache must be configured");
-        assertNotNull(cache.get(java.util.List.of(7, 10)),
+        // Spring's SimpleKeyGenerator wraps multiple @Cacheable arguments in a
+        // SimpleKey - NOT a List, which is what this asserted first time and
+        // is why it failed while the caching worked perfectly.
+        assertNotNull(cache.get(new org.springframework.cache.interceptor.SimpleKey(7, 10)),
                 "a trending result must be cached, keyed on its own arguments");
     }
 
