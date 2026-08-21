@@ -57,9 +57,29 @@ class Product with _$Product {
     /// has no gallery yet: the detail page falls back to the variant
     /// thumbnail rather than showing an empty strip.
     @Default([]) List<String> images,
+
+    /// URL of an optional GLB/GLTF model.
+    ///
+    /// Null for almost every product and that is the expected state, not a
+    /// gap - photographing a bag of atta is cheap, modelling one is not. It
+    /// is also null on every LIST response by design: the backend attaches
+    /// it on the detail endpoint only, so a feed page never carries a field
+    /// one screen reads.
+    ///
+    /// [has3dModel] below is the only thing the UI should test. Nothing about
+    /// 3D appears anywhere until a product actually has a model.
+    String? model3dUrl,
   }) = _Product;
 
   const Product._();
+
+  /// Whether this product has a 3D model worth offering.
+  ///
+  /// A getter rather than a null check at each call site so there is exactly
+  /// one definition of "has a model" - including rejecting a blank string,
+  /// which an admin form will produce sooner or later and which would
+  /// otherwise put a "View in 3D" button on a product with nothing to show.
+  bool get has3dModel => model3dUrl != null && model3dUrl!.trim().isNotEmpty;
 
   factory Product.fromJson(Map<String, dynamic> json) => _$ProductFromJson(json);
 

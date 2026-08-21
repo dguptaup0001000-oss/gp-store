@@ -288,6 +288,11 @@ class ProfileScreen extends ConsumerWidget {
         ],
       ),
     );
+    // The comparison happens inside the dialog action, so nothing needs this
+    // after the await. Released rather than left to the garbage collector's
+    // discretion - a TextEditingController is a ChangeNotifier.
+    typedController.dispose();
+
     if (confirmed != true) return;
 
     try {
@@ -347,13 +352,23 @@ class ProfileScreen extends ConsumerWidget {
       ),
     );
 
+    // Read first, then release, then use - these three are still needed
+    // below, so they cannot be disposed the moment the dialog closes.
+    final fullName = nameController.text.trim();
+    final mobileNumber = mobileController.text.trim();
+    final email = emailController.text.trim();
+
+    nameController.dispose();
+    mobileController.dispose();
+    emailController.dispose();
+
     if (saved != true) return;
 
     try {
       await ref.read(profileRepositoryProvider).updateProfile(
-            fullName: nameController.text.trim(),
-            mobileNumber: mobileController.text.trim(),
-            email: canSetEmail && emailController.text.trim().isNotEmpty ? emailController.text.trim() : null,
+            fullName: fullName,
+            mobileNumber: mobileNumber,
+            email: canSetEmail && email.isNotEmpty ? email : null,
           );
       ref.invalidate(myProfileProvider);
     } catch (e) {

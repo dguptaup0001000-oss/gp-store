@@ -72,6 +72,16 @@ jobs:
         # The build fails without this step running first.
         run: dart run build_runner build --delete-conflicting-outputs
 
+      - name: Analyze
+        # Static analysis, before the tests. Catches the class of mistake a
+        # test suite never sees - an unused import, a dead null-check, an
+        # await that was forgotten - and does it in seconds.
+        #
+        # Not --fatal-infos: the project carries informational lints that are
+        # style opinions rather than defects, and failing the build on those
+        # trains everyone to ignore the step.
+        run: flutter analyze --no-fatal-infos
+
       - name: Run Flutter tests
         # Before the APK, not after: a red test should stop the build rather
         # than ship an artifact and report the failure alongside it. These are
@@ -103,11 +113,37 @@ jobs:
             flutter build apk --release --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           fi
 
+      - name: Build App Bundle
+        # What Google Play actually wants. Play splits an .aab per device, so
+        # a phone downloads one ABI instead of all three - the APK above
+        # carries arm64, armv7 and x86_64 together because a raw APK cannot
+        # be split.
+        #
+        # Built alongside the APK rather than instead of it: the APK is what
+        # gets sideloaded for testing, and losing that would mean no way to
+        # try a build without going through Play.
+        #
+        # This step is also what verifies the R8 configuration. minifyEnabled
+        # only runs in release, so a missing ProGuard keep rule cannot fail
+        # any debug build - it fails here, or it fails on a customer's phone.
+        run: |
+          if [ -n "${{ vars.API_BASE_URL }}" ]; then
+            flutter build appbundle --release --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+          else
+            flutter build appbundle --release --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+          fi
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-release-apk
           path: frontend/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-release-aab
+          path: frontend/build/app/outputs/bundle/release/app-release.aab
 
   build-and-deploy-web:
     runs-on: ubuntu-latest

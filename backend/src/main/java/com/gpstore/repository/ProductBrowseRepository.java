@@ -7,6 +7,7 @@ import jakarta.persistence.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -124,5 +125,110 @@ public class ProductBrowseRepository {
         long totalElements = ((Number) countQuery.getSingleResult()).longValue();
 
         return new BrowseResult(products, totalElements);
+    }
+
+    /**
+     * One row per product that belongs in the Bestsellers collage:
+     * (categoryId, categoryName, productId, imageUrl).
+     *
+     * WHY THIS EXISTS. The collage is six category tiles, each showing four
+     * thumbnails, and the app was fetching it as SIX separate HTTP requests -
+     * one per category - on every cold home open. Six round trips, six auth
+     * filter chains, six connection acquisitions and six result sets, to
+     * render twenty-four small images. On a 0.5 vCPU instance measured at
+     * 131ms p95 under 750 concurrent browsers, that is the single largest
+     * avoidable multiplier on the home screen.
+     *
+     * ONE QUERY, AND IT STAYS ONE QUERY however many categories the collage
+     * grows to. ROW_NUMBER partitions by category so the per-category limit
+     * is applied inside the database rather than by fetching everything and
+     * trimming in Java, and DENSE_RANK caps how many categories come back -
+     * so the result set is bounded at categoryLimit x perCategory rows (24
+     * today) no matter how large the catalogue gets.
+     *
+     * A PROJECTION, NOT ENTITIES. The tile renders four image URLs and a
+     * category name and nothing else - no price, no description, no ratings,
+     * no variant list. Returning Product entities would hydrate all of that,
+     * pay Hibernate's mapping cost for it, and serialize it over mobile data
+     * to be thrown away. Selecting the four columns the UI actually uses is
+     * what keeps this response small rather than merely fewer.
+     *
+     * THE LATERAL JOIN picks each product's display variant using the same
+     * rule as Product.primaryVariant on the client: prefer an available
+     * variant, then the lowest displayOrder, with id as the tie-break so the
+     * choice is deterministic rather than whatever the planner returns. It
+     * is a LEFT JOIN LATERAL, so a product with no variants at all still
+     * appears - with a null image, which the tile already renders as a
+     * placeholder icon.
+     *
+     * Categories with no active products are excluded by the inner join: a
+     * Bestsellers tile showing four grey placeholders is not a bestseller.
+     */
+    public record BestsellerRow(Long categoryId, String categoryName, Long productId, String imageUrl) {}
+
+    /**
+     * [categoryIds] narrows which categories are considered; null or empty
+     * means "every active category", which is what the endpoint uses. The
+     * filter is not there for the endpoint - it is there because the service
+     * owns the "first N categories" policy while this owns the SQL, and a
+     * caller that already knows which categories it wants should not have to
+     * go through that policy to ask for them. It is also the only way to
+     * assert anything about specific seeded data against a shared test
+     * database, where freshly created categories never fall inside the first
+     * N by id.
+     */
+    public List<BestsellerRow> findBestsellerTiles(
+            Collection<Long> categoryIds, int categoryLimit, int perCategory) {
+
+        boolean filterByIds = categoryIds != null && !categoryIds.isEmpty();
+        String categoryFilter = filterByIds ? " AND c.id IN (:categoryIds)" : "";
+
+        Query query = entityManager.createNativeQuery("""
+                WITH ranked AS (
+                    SELECT c.id                                                      AS category_id,
+                           c.name                                                    AS category_name,
+                           p.id                                                      AS product_id,
+                           pv.image_url                                              AS image_url,
+                           ROW_NUMBER() OVER (PARTITION BY c.id ORDER BY p.id)       AS product_rank,
+                           DENSE_RANK() OVER (ORDER BY c.id)                         AS category_rank
+                    FROM categories c
+                    JOIN products p
+                      ON p.category_id = c.id
+                     AND p.active = true
+                    LEFT JOIN LATERAL (
+                        SELECT v.image_url
+                        FROM product_variants v
+                        WHERE v.product_id = p.id
+                        ORDER BY COALESCE(v.available, false) DESC,
+                                 COALESCE(v.display_order, 2147483647) ASC,
+                                 v.id ASC
+                        LIMIT 1
+                    ) pv ON true
+                    WHERE c.active = true""" + categoryFilter + """
+                )
+                SELECT category_id, category_name, product_id, image_url
+                FROM ranked
+                WHERE product_rank <= :perCategory
+                  AND category_rank <= :categoryLimit
+                ORDER BY category_id, product_rank
+                """);
+        query.setParameter("perCategory", perCategory);
+        query.setParameter("categoryLimit", categoryLimit);
+        if (filterByIds) {
+            query.setParameter("categoryIds", categoryIds);
+        }
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = query.getResultList();
+
+        List<BestsellerRow> result = new ArrayList<>(rows.size());
+        for (Object[] row : rows) {
+            result.add(new BestsellerRow(
+                    ((Number) row[0]).longValue(),
+                    (String) row[1],
+                    ((Number) row[2]).longValue(),
+                    (String) row[3]));
+        }
+        return result;
     }
 }

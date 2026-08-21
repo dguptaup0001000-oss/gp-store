@@ -5,10 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/images/product_image_url.dart';
+
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
-import '../domain/live_tracking_model.dart';
 import '../domain/order_models.dart';
 import 'invoice_screen.dart';
 import 'orders_providers.dart';
@@ -435,7 +436,7 @@ class _OrderItemTile extends StatelessWidget {
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: CachedNetworkImage(
-                      imageUrl: item.imageUrl!,
+                      imageUrl: ProductImageUrl.tile(item.imageUrl),
                       fit: BoxFit.contain,
                       // 44x44 tile - avoid decoding the full original.
                       memCacheWidth: 130,

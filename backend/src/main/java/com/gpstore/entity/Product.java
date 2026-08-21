@@ -27,6 +27,14 @@ public class Product {
 
     private String brand;
 
+    /**
+     * URL of an optional GLB/GLTF model, shown only if the customer asks for
+     * it on the detail screen. Null for almost every product, and that is
+     * the expected state rather than a gap to be backfilled - see V13.
+     */
+    @Column(name = "model_3d_url", length = 500)
+    private String model3dUrl;
+
     // Flipped to LAZY - ProductController now returns ProductResponse (see
         // com.gpstore.dto.response.ProductResponse) from every endpoint, and
         // the methods that convert to it are @Transactional(readOnly = true).

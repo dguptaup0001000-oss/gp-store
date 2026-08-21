@@ -32,6 +32,10 @@ plugins {
     // notifications) to work at all. apply false here, then actually
     // applied in app/build.gradle's own plugins block below.
     id "com.google.gms.google-services" version "4.4.2" apply false
+    // Uploads the R8 mapping file on every release build, which is what
+    // makes an obfuscated release stack trace readable in the Crashlytics
+    // console. Without it the reports still arrive and are close to useless.
+    id "com.google.firebase.crashlytics" version "3.0.2" apply false
 }
 
 include ":app"

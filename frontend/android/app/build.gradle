@@ -10,6 +10,9 @@ plugins {
     // the intended failure mode until you've done the one-time Firebase
     // setup.
     id "com.google.gms.google-services"
+    // Must come after google-services: it reads the Firebase app id from
+    // the same google-services.json to know where to send the mapping file.
+    id "com.google.firebase.crashlytics"
 }
 
 def localProperties = new Properties()
@@ -95,6 +98,21 @@ android {
             // signed with the debug fallback, so this MUST be real before
             // you actually submit, not just before you test locally.
             signingConfig hasRealSigningConfig ? signingConfigs.release : signingConfigs.debug
+
+            // R8: shrink and obfuscate the Java/Kotlin side of the app.
+            //
+            // Worth being honest about the size win: most of a Flutter app's
+            // bulk is libapp.so, which is AOT-compiled Dart that R8 never
+            // touches. What this shrinks is the plugin layer - Firebase,
+            // secure storage, the Bluetooth printer, image picker - which is
+            // real but measured in a few MB, not tens.
+            //
+            // The obfuscation is the more valuable half: without it, plugin
+            // class and method names sit in the APK in plain text for anyone
+            // who unzips it.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
 }

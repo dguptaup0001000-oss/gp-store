@@ -1,8 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/search/search_debouncer.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/brand_avatar.dart';
 import '../../../shared/widgets/cart_aware_product_card.dart';
@@ -35,7 +34,15 @@ class BrandProductsScreen extends ConsumerStatefulWidget {
 class _BrandProductsScreenState extends ConsumerState<BrandProductsScreen> {
   late final BrandFeedController _feed;
   final _searchController = TextEditingController();
-  Timer? _debounce;
+
+  /// The shared rule, not a fourth copy of it. SearchDebouncer exists
+  /// because this screen, category browse and global search each carried
+  /// their own Timer and their own 400ms literal - three places for one
+  /// rule to drift, and it had already drifted from what anyone would
+  /// choose deliberately. Migrating here also picks up the minimum length,
+  /// so a single character typed on a brand page no longer makes the
+  /// backend scan the brand to return something useless.
+  final _search = SearchDebouncer();
 
   @override
   void initState() {
@@ -63,7 +70,7 @@ class _BrandProductsScreenState extends ConsumerState<BrandProductsScreen> {
 
   @override
   void dispose() {
-    _debounce?.cancel();
+    _search.dispose();
     _searchController.dispose();
     _feed.removeListener(_onFeedChanged);
     _feed.dispose();
@@ -71,9 +78,16 @@ class _BrandProductsScreenState extends ConsumerState<BrandProductsScreen> {
   }
 
   void _onSearchChanged(String value) {
-    // Debounced so a five-letter word is one request, not five.
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), () => _feed.setKeyword(value));
+    // The CancelToken is deliberately unused here. Cancellation would have
+    // to be threaded through BrandFeedController's fetchPage down to the
+    // repository call, and widening that signature to abort a request the
+    // brand feed already ignores is not worth it - the debounce and the
+    // minimum length are where the saving on this screen actually is.
+    _search.onQueryChanged(
+      value,
+      onSearch: (query, _) => _feed.setKeyword(query),
+      onCleared: () => _feed.setKeyword(''),
+    );
   }
 
   bool _onScroll(ScrollNotification notification) {

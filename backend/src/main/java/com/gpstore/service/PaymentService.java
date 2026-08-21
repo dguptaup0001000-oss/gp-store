@@ -566,7 +566,22 @@ public class PaymentService {
 
         Payment saved;
         try {
-            saved = paymentRepository.save(payment);
+            // saveAndFlush, NOT save, and the difference is the whole reason
+            // this try/catch works at all.
+            //
+            // `payment` was loaded by lockOrderThenPayment inside THIS
+            // transaction, so it is a managed entity: save() on it does not
+            // issue SQL, it just returns. Hibernate defers the UPDATE to
+            // flush, which happens at COMMIT - after this method has already
+            // returned and the catch below has gone out of scope. So the
+            // unique-constraint violation escaped as a raw
+            // DataIntegrityViolationException and the admin confirming a
+            // duplicate transaction id got a generic failure instead of
+            // being told the id was already used.
+            //
+            // The constraint always did its job; only the diagnosis was
+            // lost. Flushing here puts the violation back inside the try.
+            saved = paymentRepository.saveAndFlush(payment);
         } catch (DataIntegrityViolationException ex) {
             // Almost always means this exact UPI transaction ID was already
             // used to confirm a different payment - a real duplicate/replay,

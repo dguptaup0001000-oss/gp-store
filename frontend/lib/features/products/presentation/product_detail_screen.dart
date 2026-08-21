@@ -9,6 +9,7 @@ import '../../cart/presentation/cart_providers.dart';
 import '../../reviews/presentation/product_reviews_section.dart';
 import '../domain/product_models.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
+import 'product_3d_view_screen.dart';
 import 'product_image_gallery.dart';
 import 'products_providers.dart';
 
@@ -114,6 +115,14 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
                         return ProductImageGallery(imageUrls: urls);
                       },
+                    ),
+                    // Directly under the gallery: this is an alternative way
+                    // to look at the same thing. Renders nothing at all when
+                    // the product has no model, which is almost every product
+                    // - see View3dButton for why that is the whole fallback.
+                    View3dButton(
+                      modelUrl: product.has3dModel ? product.model3dUrl : null,
+                      productName: product.name,
                     ),
                     const SizedBox(height: 16),
                     if (product.brand != null)

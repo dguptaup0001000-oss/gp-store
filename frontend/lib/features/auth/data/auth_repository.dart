@@ -44,6 +44,9 @@ class AuthRepository {
   /// Logs out of just this device - matches the backend's distinction
   /// between /logout (this session) and /logout-all (every session).
   Future<void> logout() async {
+    // BEFORE the session tokens go, because this call needs one.
+    await _releaseThisDevicesPushToken();
+
     final refreshToken = await tokenStorage.getRefreshToken();
     if (refreshToken != null) {
       try {
@@ -57,10 +60,39 @@ class AuthRepository {
     await tokenStorage.clear();
   }
 
+  /// Detaches this phone's push token from the account being signed out.
+  ///
+  /// A device token identifies a PHONE, but the backend stores it against a
+  /// customer. Sign out of the counter phone, hand it to someone else, and
+  /// they sign in - the first account still holds that phone's token, so its
+  /// order pushes keep arriving on a screen its owner no longer has. Those
+  /// pushes carry a customer name and an order amount, so this is other
+  /// people's information landing on the wrong device, not just a wasted
+  /// send.
+  ///
+  /// Ordering is the whole point: this runs while the access token is still
+  /// stored, because the endpoint is authenticated. Called from the two
+  /// logout paths rather than from the push service's own stop(), which the
+  /// auth listener only reaches after the session has already been cleared.
+  ///
+  /// Best-effort, like the logout call itself. Failing to reach the server
+  /// must never leave someone unable to sign out of their own phone.
+  Future<void> _releaseThisDevicesPushToken() async {
+    try {
+      await apiClient.dio.delete('/api/customers/me/fcm-token');
+    } catch (_) {
+      // Offline, or a session that had already expired. The next person to
+      // sign in on this device overwrites the token anyway; this only
+      // narrows the window.
+    }
+  }
+
   /// Logs out of EVERY device/session, not just this one - requires a valid
   /// access token (unlike the other auth endpoints), matching the backend's
   /// SecurityConfig rule for /api/auth/logout-all specifically.
   Future<void> logoutAllDevices() async {
+    await _releaseThisDevicesPushToken();
+
     try {
       await apiClient.dio.post('/api/auth/logout-all');
     } catch (_) {

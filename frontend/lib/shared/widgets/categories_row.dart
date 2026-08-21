@@ -2,6 +2,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/images/product_image_url.dart';
+
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
 
@@ -45,7 +47,7 @@ class CategoriesRow extends StatelessWidget {
                     child: category.imageUrl != null
                         ? ClipOval(
                             child: CachedNetworkImage(
-                              imageUrl: category.imageUrl!,
+                              imageUrl: ProductImageUrl.tile(category.imageUrl),
                               fit: BoxFit.cover,
                               // 56x56 tile - avoid decoding the full original.
                               memCacheWidth: 160,

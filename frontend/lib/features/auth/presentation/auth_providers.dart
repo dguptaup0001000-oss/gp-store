@@ -1,4 +1,3 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +5,16 @@ import '../../../core/api/api_client.dart';
 import '../../../core/storage/token_storage.dart';
 import '../data/auth_repository.dart';
 import '../domain/auth_models.dart';
+
+// extractErrorMessage lives in core/api/error_messages.dart now - it is used
+// by 45 files across the app and was never specific to auth. Re-exported
+// here so every existing import keeps working, rather than touching 45
+// files to move one function.
+// Imported as well as exported: `export` makes the symbol visible to files
+// that import THIS one, but does not bring it into this file's own scope -
+// and AuthController below calls it directly.
+import '../../../core/api/error_messages.dart';
+export '../../../core/api/error_messages.dart' show extractErrorMessage;
 
 final tokenStorageProvider = Provider<TokenStorage>((ref) => TokenStorage());
 
@@ -148,13 +157,3 @@ final StateNotifierProvider<AuthController, AuthState> authControllerProvider =
     StateNotifierProvider<AuthController, AuthState>((ref) {
   return AuthController(ref.watch(authRepositoryProvider));
 });
-
-/// Unwraps the REAL backend error message (set by ApiClient._mapToApiException)
-/// instead of showing a generic Dart exception description like
-/// "DioException [bad response]: ..." to the user.
-String extractErrorMessage(Object error) {
-  if (error is DioException && error.error is ApiException) {
-    return (error.error as ApiException).message;
-  }
-  return 'Something went wrong. Please try again.';
-}

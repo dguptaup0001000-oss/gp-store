@@ -20,9 +20,24 @@ import '../../wishlist/presentation/wishlist_providers.dart';
 class HomeFeedSlivers {
   const HomeFeedSlivers._();
 
+  /// Takes the feed state rather than watching it, and that is deliberate on
+  /// two counts.
+  ///
+  /// The gate: the feed is the largest single payload on the screen and sits
+  /// at the very bottom of it, so it waits for the above-the-fold wave to
+  /// settle rather than competing with it (see homeBelowFoldReadyProvider).
+  /// NOT watching the provider is what withholds the request; rendering a
+  /// spinner over a watch that already fired would only hide it.
+  ///
+  /// And the watch itself belongs to the caller. This function runs inside
+  /// ScrollToTop's builder callback, which the framework invokes during
+  /// ScrollToTop's build - not during HomeScreen's - so a ref.watch here
+  /// would be registering a dependency on an element that has already
+  /// finished building. HomeScreen watches, and passes the value down.
   static List<Widget> build(BuildContext context, WidgetRef ref,
-      {required void Function(Product product) onProductTap}) {
-    final feedAsync = ref.watch(productFeedProvider);
+      {required AsyncValue<ProductFeedState> feed,
+      required void Function(Product product) onProductTap}) {
+    final feedAsync = feed;
 
     return [
       const SliverToBoxAdapter(child: _FeedHeader()),

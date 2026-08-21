@@ -66,17 +66,26 @@ public class ProductResponse implements Serializable {
     private final List<String> images;
 
     /**
+     * Null on every LIST response, populated only on product detail - the
+     * same treatment as `images` above and for the same reason. A field that
+     * only the detail screen reads has no business being serialized into
+     * every card of every feed page, on a phone that may be on mobile data.
+     */
+    private final String model3dUrl;
+
+    /**
      * Kept so existing callers - and existing cached entries - constructed
      * without a gallery keep compiling and behaving identically. Delegates
      * with an empty gallery rather than null.
      */
     public ProductResponse(Long id, String name, String brand, CategoryResponse category,
                             List<VariantResponse> variants, Boolean active) {
-        this(id, name, brand, category, variants, active, List.of());
+        this(id, name, brand, category, variants, active, List.of(), null);
     }
 
     public ProductResponse(Long id, String name, String brand, CategoryResponse category,
-                            List<VariantResponse> variants, Boolean active, List<String> images) {
+                            List<VariantResponse> variants, Boolean active, List<String> images,
+                            String model3dUrl) {
         this.id = id;
         this.name = name;
         this.brand = brand;
@@ -84,6 +93,7 @@ public class ProductResponse implements Serializable {
         this.variants = variants;
         this.active = active;
         this.images = images == null ? List.of() : images;
+        this.model3dUrl = model3dUrl;
     }
 
     /**
@@ -94,7 +104,15 @@ public class ProductResponse implements Serializable {
      * holds the reference.
      */
     public ProductResponse withImages(List<String> galleryUrls) {
-        return new ProductResponse(id, name, brand, category, variants, active, galleryUrls);
+        return new ProductResponse(id, name, brand, category, variants, active, galleryUrls, model3dUrl);
+    }
+
+    /**
+     * Same product, told that it has a 3D model. Detail-only, like
+     * withImages - a list response deliberately never carries this.
+     */
+    public ProductResponse withModel3dUrl(String url) {
+        return new ProductResponse(id, name, brand, category, variants, active, images, url);
     }
 
     public static ProductResponse from(Product product) {
@@ -126,4 +144,7 @@ public class ProductResponse implements Serializable {
 
     /** Never null - empty when the product has no gallery images. */
     public List<String> getImages() { return images; }
+
+    /** Null unless this came from the product detail endpoint AND the product has a model. */
+    public String getModel3dUrl() { return model3dUrl; }
 }
