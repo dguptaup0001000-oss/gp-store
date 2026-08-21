@@ -42,6 +42,7 @@ class CatalogSeedIntegrationTest {
     @Autowired private CatalogAuditService auditService;
     @Autowired private ProductRepository productRepository;
     @Autowired private ProductVariantRepository variantRepository;
+    @Autowired private jakarta.persistence.EntityManager entityManager;
 
     @Test
     @DisplayName("seeding twice produces one catalogue, not two")
@@ -127,7 +128,26 @@ class CatalogSeedIntegrationTest {
 
         CatalogAuditService.CatalogAudit audit = auditService.audit();
 
-        assertEquals(List.of(), audit.problems(), "audit reported problems");
+        // Asserted problem-by-problem rather than as an empty list, because
+        // the audit deliberately counts the WHOLE products table - it is a
+        // production tool, and a product with five images is worth flagging
+        // whoever created it. This suite shares one database, so other tests'
+        // fixtures show up in that total: ProductGalleryTest creates a
+        // product with more than four images precisely to exercise the cap.
+        //
+        // Asserting an empty list made this test pass on a fresh database and
+        // fail on a shared one, which is not a property worth having. These
+        // are the problems the SEEDER could actually cause.
+        for (String problem : audit.problems()) {
+            assertFalse(problem.contains("duplicate SKU"), problem);
+            assertFalse(problem.contains("priced above MRP"), problem);
+            assertFalse(problem.contains("negative price"), problem);
+            assertFalse(problem.contains("without a name"), problem);
+            assertFalse(problem.contains("without a brand"), problem);
+            assertFalse(problem.contains("not attached to a category"), problem);
+            assertFalse(problem.contains("differ only by case"), problem);
+            assertFalse(problem.contains("duplicated image URL"), problem);
+        }
         assertTrue(audit.testProducts() > 900, "expected ~1000 test products");
         // Every test product must be price-unverified. Stated as ">=" rather
         // than "==" because pre-existing real products are unverified too -
@@ -150,9 +170,17 @@ class CatalogSeedIntegrationTest {
     void seederWritesNoImages() {
         seedService.seed();
 
-        CatalogAuditService.CatalogAudit audit = auditService.audit();
-        assertEquals(0, audit.withOneImage() + audit.withTwoImages()
-                        + audit.withThreeImages() + audit.withFourImages(),
+        // Scoped to seeded products, NOT the whole table. The audit's
+        // histogram covers everything, including products other tests in this
+        // shared database created with images of their own - which is right
+        // for the audit and wrong for this assertion.
+        Number images = (Number) entityManager.createNativeQuery("""
+                SELECT COUNT(*) FROM product_images pi
+                JOIN products p ON p.id = pi.product_id
+                WHERE p.is_test_data = TRUE
+                """).getSingleResult();
+
+        assertEquals(0L, images.longValue(),
                 "the seeder must not create images - only the verified backfill may");
     }
 
