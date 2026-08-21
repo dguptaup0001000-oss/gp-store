@@ -10,6 +10,10 @@ import '../domain/auth_models.dart';
 // by 45 files across the app and was never specific to auth. Re-exported
 // here so every existing import keeps working, rather than touching 45
 // files to move one function.
+// Imported as well as exported: `export` makes the symbol visible to files
+// that import THIS one, but does not bring it into this file's own scope -
+// and AuthController below calls it directly.
+import '../../../core/api/error_messages.dart';
 export '../../../core/api/error_messages.dart' show extractErrorMessage;
 
 final tokenStorageProvider = Provider<TokenStorage>((ref) => TokenStorage());
