@@ -132,7 +132,24 @@ public class RecommendationService {
         // Trimmed AFTER the active filter, not before, or a deactivated
         // product would take a slot and leave the row one short.
         List<ProductResponse> ranked = fetchInRankedOrder(orderedIds);
-        return ranked.size() > limit ? ranked.subList(0, limit) : ranked;
+        if (ranked.size() <= limit) {
+            return ranked;
+        }
+        // List.copyOf, NOT the subList itself, and this is not tidiness.
+        //
+        // ArrayList.subList returns an ArrayList$SubList - a VIEW, and one
+        // that does not implement Serializable. Both callers of this method
+        // are @Cacheable against Redis, whose default serializer is plain
+        // JDK serialization, so handing back a subList made every cache PUT
+        // throw SerializationException. CacheConfig's error handler then
+        // swallowed it as a WARN by design, so the request still returned
+        // the right answer and nothing looked broken - while the cache
+        // never held a single entry and the GROUP BY this caching exists to
+        // avoid ran on every home-screen open exactly as before.
+        //
+        // It only bit when the result was actually trimmed, which is the
+        // normal case, and never when it was short enough to return whole.
+        return List.copyOf(ranked.subList(0, limit));
     }
 
     /**

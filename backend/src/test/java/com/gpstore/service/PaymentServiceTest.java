@@ -58,7 +58,14 @@ class PaymentServiceTest {
 
         when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(payment.getOrder()));
         when(paymentRepository.findByOrderIdForUpdate(1L)).thenReturn(Optional.of(payment));
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
+        // saveAndFlush, not save - matching what confirmUpiPayment actually
+        // calls. It flushes deliberately, so that a duplicate transaction id
+        // surfaces as a ConflictException inside the method rather than as a
+        // raw DataIntegrityViolationException at commit (see the comment on
+        // that call). Stubbing save() here left saveAndFlush unstubbed and
+        // returning null, which is a mock-shaped NPE rather than anything
+        // wrong with the code under test.
+        when(paymentRepository.saveAndFlush(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PaymentResponse result = paymentService.confirmUpiPayment(1L, "TXN123");
 

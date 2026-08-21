@@ -101,7 +101,29 @@ class RecommendationHygieneTest {
         // per home-screen open. The assertion is on the cache entry rather
         // than on timing, which would be flaky.
         clearCaches();
-        recommendationService.trending(7, 10);
+        List<ProductResponse> result = recommendationService.trending(7, 10);
+
+        // THE INVARIANT, asserted directly rather than inferred from the
+        // cache entry below.
+        //
+        // The cache is Redis with plain JDK serialization, so a value that
+        // cannot be serialised cannot be cached - and CacheConfig's error
+        // handler swallows that failure by design, so the only visible
+        // symptom is a cache that stays permanently empty while every
+        // response still looks correct. That is exactly the bug this
+        // caught: resolveTopProducts returned ArrayList.subList's view,
+        // which is not Serializable.
+        //
+        // Asserting on the entry alone makes this test data-dependent - it
+        // only trips when there are more trending products than the limit,
+        // so the same code passed locally on a small dataset and failed in
+        // CI on a fuller one. Serialising what was actually returned states
+        // the property itself.
+        assertDoesNotThrow(() -> {
+            try (var sink = new java.io.ObjectOutputStream(new java.io.ByteArrayOutputStream())) {
+                sink.writeObject(result);
+            }
+        }, "a cached recommendation list must survive JDK serialisation or it can never be cached");
 
         var cache = cacheManager.getCache("trending");
         assertNotNull(cache, "the trending cache must be configured");
