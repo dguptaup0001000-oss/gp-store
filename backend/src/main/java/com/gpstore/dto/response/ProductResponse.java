@@ -66,6 +66,29 @@ public class ProductResponse implements Serializable {
     private final List<String> images;
 
     /**
+     * Catalog metadata, all additive and all safe to be absent.
+     *
+     * An older app build ignores unknown JSON keys, and a newer build reading
+     * an older cached entry sees null - which every one of these is written
+     * to tolerate. That is also why serialVersionUID above stays 1L: Java's
+     * rules make ADDING fields compatible once it is pinned, so entries
+     * already sitting in Redis keep deserialising instead of throwing
+     * InvalidClassException on every browse request until the TTL drains.
+     */
+    private final String subcategory;
+    private final Boolean bestseller;
+    private final Boolean featured;
+
+    /**
+     * True when the price shown is assumed test data rather than a checked
+     * shelf price. Exposed rather than hidden ON PURPOSE: the shop's own
+     * admin screens need to be able to see which products still need
+     * verifying, and a flag that only exists in the database is a flag
+     * nobody acts on.
+     */
+    private final Boolean testData;
+
+    /**
      * Null on every LIST response, populated only on product detail - the
      * same treatment as `images` above and for the same reason. A field that
      * only the detail screen reads has no business being serialized into
@@ -83,9 +106,21 @@ public class ProductResponse implements Serializable {
         this(id, name, brand, category, variants, active, List.of(), null);
     }
 
+    /**
+     * Kept at this arity so every existing caller and every cached entry
+     * written before the catalog fields existed keeps working unchanged.
+     */
     public ProductResponse(Long id, String name, String brand, CategoryResponse category,
                             List<VariantResponse> variants, Boolean active, List<String> images,
                             String model3dUrl) {
+        this(id, name, brand, category, variants, active, images, model3dUrl,
+             null, null, null, null);
+    }
+
+    public ProductResponse(Long id, String name, String brand, CategoryResponse category,
+                            List<VariantResponse> variants, Boolean active, List<String> images,
+                            String model3dUrl, String subcategory, Boolean bestseller,
+                            Boolean featured, Boolean testData) {
         this.id = id;
         this.name = name;
         this.brand = brand;
@@ -94,6 +129,10 @@ public class ProductResponse implements Serializable {
         this.active = active;
         this.images = images == null ? List.of() : images;
         this.model3dUrl = model3dUrl;
+        this.subcategory = subcategory;
+        this.bestseller = bestseller;
+        this.featured = featured;
+        this.testData = testData;
     }
 
     /**
@@ -104,7 +143,8 @@ public class ProductResponse implements Serializable {
      * holds the reference.
      */
     public ProductResponse withImages(List<String> galleryUrls) {
-        return new ProductResponse(id, name, brand, category, variants, active, galleryUrls, model3dUrl);
+        return new ProductResponse(id, name, brand, category, variants, active, galleryUrls,
+                model3dUrl, subcategory, bestseller, featured, testData);
     }
 
     /**
@@ -112,7 +152,8 @@ public class ProductResponse implements Serializable {
      * withImages - a list response deliberately never carries this.
      */
     public ProductResponse withModel3dUrl(String url) {
-        return new ProductResponse(id, name, brand, category, variants, active, images, url);
+        return new ProductResponse(id, name, brand, category, variants, active, images,
+                url, subcategory, bestseller, featured, testData);
     }
 
     public static ProductResponse from(Product product) {
@@ -131,7 +172,17 @@ public class ProductResponse implements Serializable {
                 product.getBrand(),
                 CategoryResponse.from(product.getCategory()),
                 variants,
-                product.getActive()
+                product.getActive(),
+                List.of(),
+                // null, NOT product.getModel3dUrl(). from() is what every LIST
+                // endpoint maps through, and the 3D url is detail-only by
+                // design - it arrives via withModel3dUrl(). Populating it here
+                // would put a field one screen reads onto every feed page.
+                null,
+                product.getSubcategory(),
+                product.getBestseller(),
+                product.getFeatured(),
+                product.getIsTestData()
         );
     }
 
@@ -144,6 +195,11 @@ public class ProductResponse implements Serializable {
 
     /** Never null - empty when the product has no gallery images. */
     public List<String> getImages() { return images; }
+
+    public String getSubcategory() { return subcategory; }
+    public Boolean getBestseller() { return bestseller; }
+    public Boolean getFeatured() { return featured; }
+    public Boolean getTestData() { return testData; }
 
     /** Null unless this came from the product detail endpoint AND the product has a model. */
     public String getModel3dUrl() { return model3dUrl; }

@@ -69,6 +69,26 @@ class Product with _$Product {
     /// [has3dModel] below is the only thing the UI should test. Nothing about
     /// 3D appears anywhere until a product actually has a model.
     String? model3dUrl,
+
+    /// Grouping within a category ("Atta" inside "Atta, Rice & Dal").
+    ///
+    /// Null on every product the shop entered by hand before the catalog
+    /// work, and that is fine - nothing renders it as a required field.
+    String? subcategory,
+
+    /// Curated flags from the catalog. Absent on older backends, so both
+    /// default to false rather than being required.
+    @Default(false) bool bestseller,
+    @Default(false) bool featured,
+
+    /// True when this product's price is seeded test data that nobody has
+    /// checked against a shelf.
+    ///
+    /// Read by the admin screens only. It is deliberately NOT surfaced to
+    /// customers: a shopper does not need to be told the shop is still
+    /// setting itself up, and a badge saying so on a live listing would do
+    /// more harm than the information is worth.
+    @Default(false) bool testData,
   }) = _Product;
 
   const Product._();

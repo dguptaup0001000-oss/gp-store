@@ -49,6 +49,59 @@ private List<ProductVariant> variants;
 
     private Boolean active;
 
+    // ---------------------------------------------------------------
+    // Catalog metadata (V15). All nullable/defaulted - see the migration
+    // on why nothing here may be NOT NULL without a default.
+    // ---------------------------------------------------------------
+
+    @Column(length = 1000)
+    private String description;
+
+    /**
+     * Grouping WITHIN a category, as a column rather than a second category
+     * row: "Atta, Rice & Dal" > "Atta". categories is flat and the home
+     * screen lists it directly, so child rows there would put "Atta" on the
+     * home screen beside its own parent.
+     */
+    @Column(length = 100)
+    private String subcategory;
+
+    /** Space-separated terms the customer might type. Feeds search only. */
+    @Column(name = "search_keywords", length = 500)
+    private String searchKeywords;
+
+    private Boolean bestseller;
+
+    private Boolean featured;
+
+    /**
+     * Seeded test data, and the flag the pre-launch cleanup keys on.
+     *
+     * Defaults FALSE in the database precisely so that anything a human adds
+     * through the admin screens is never swept up by that cleanup. A product
+     * has to be deliberately marked to be deletable by it.
+     */
+    @Column(name = "is_test_data")
+    private Boolean isTestData;
+
+    /**
+     * Separate from isTestData on purpose: someone can confirm a product is
+     * genuinely stocked long before anyone checks its price against a shelf.
+     * Collapsing the two would let a half-checked product read as verified.
+     */
+    @Column(name = "price_verified")
+    private Boolean priceVerified;
+
+    @Column(name = "data_source", length = 60)
+    private String dataSource;
+
+    /** Where the gallery images came from, e.g. "openfoodfacts". */
+    @Column(name = "image_source", length = 60)
+    private String imageSource;
+
+    @Column(name = "updated_at")
+    private java.time.LocalDateTime updatedAt;
+
     // Auto-set on creation (@PrePersist below) - never client-supplied.
     // This is what "New Arrivals" actually sorts by.
     private java.time.LocalDateTime createdAt;
