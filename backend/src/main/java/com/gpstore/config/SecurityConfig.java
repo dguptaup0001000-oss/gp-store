@@ -122,13 +122,42 @@ public class SecurityConfig {
             // still exists at that point every time) surfaced as a dead-end
             // "couldn't load your account" error instead of transparently
             // refreshing. Returning a real 401 here restores that path.
-            .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, authException) -> {
-                response.setStatus(jakarta.servlet.http.HttpServletResponse.SC_UNAUTHORIZED);
-                response.setContentType("application/json");
-                response.getWriter().write(
-                        "{\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Authentication required\",\"path\":\""
-                                + request.getRequestURI() + "\"}");
-            }))
+            //
+            // THE ACCESS-DENIED HANDLER BELOW IS NOT OPTIONAL, and its absence
+            // silently undid the paragraph above. Without it, an
+            // AccessDeniedException - a LOGGED-IN customer touching an
+            // admin-only route - is not written by Spring Security at all. It
+            // propagates, the container forwards to /error, that forward
+            // re-enters this filter chain, /error matches no permitAll rule,
+            // and the entry point above answers it: 401, with
+            // "path":"/error" rather than the path the caller asked for.
+            //
+            // So every 403 in this application reached the app as a 401, and
+            // ApiClient._handleError treats 401 as "access token expired":
+            // refresh (which succeeds, the token was never the problem),
+            // retry, get 401 again, refresh again. The 401 branch carries no
+            // attempt counter, unlike _retryIfSafe, so that is unbounded - and
+            // each pass rotates the refresh token.
+            //
+            // MockMvc cannot see this. It does not run the container's ERROR
+            // dispatch, so the authorization tests observe the 403 Spring
+            // Security raises and pass, while the real server returns 401.
+            // AccessDeniedStatusTest drives a real port for exactly that reason.
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint((request, response, authException) -> {
+                    response.setStatus(jakarta.servlet.http.HttpServletResponse.SC_UNAUTHORIZED);
+                    response.setContentType("application/json");
+                    response.getWriter().write(
+                            "{\"status\":401,\"error\":\"Unauthorized\",\"message\":\"Authentication required\",\"path\":\""
+                                    + request.getRequestURI() + "\"}");
+                })
+                .accessDeniedHandler((request, response, accessDeniedException) -> {
+                    response.setStatus(jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN);
+                    response.setContentType("application/json");
+                    response.getWriter().write(
+                            "{\"status\":403,\"error\":\"Forbidden\",\"message\":\"You don't have permission to do that.\",\"path\":\""
+                                    + request.getRequestURI() + "\"}");
+                }))
             .authorizeHttpRequests(auth -> auth
                 // Public: auth endpoints and read-only catalog browsing
                 .requestMatchers(HttpMethod.POST, "/api/auth/logout-all").authenticated()
