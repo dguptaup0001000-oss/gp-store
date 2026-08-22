@@ -177,3 +177,15 @@ head and shoulders,Head & Shoulders
 clinic plus,Clinic Plus
 sunsilk,Sunsilk
 dove,Dove
+
+# Words the vocabulary was missing, found by testing the phrases customers
+# actually say rather than by reading the list. "sarso tel" and "gehu ka atta"
+# each failed on ONE missing word while the other half translated fine -
+# per-token translation means a single gap breaks a whole phrase.
+gehu,wheat
+gehun,wheat
+sarso,mustard
+narial,coconut
+kaju,cashew
+sooji,semolina
+maida,refined flour

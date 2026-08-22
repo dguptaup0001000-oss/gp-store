@@ -51,6 +51,13 @@ public class SynonymDictionary {
 
     private static final String VOCABULARY_RESOURCE = "search-synonyms.csv";
 
+    /**
+     * Ceiling for the distance comparison between colliding candidates.
+     * areCloseEnough has already decided acceptability; this only needs to be
+     * large enough to rank the survivors against each other.
+     */
+    private static final int MAX_CONFIRM_DISTANCE = 6;
+
     private final SearchSynonymRepository repository;
 
     /**
@@ -61,7 +68,19 @@ public class SynonymDictionary {
     private record Entry(String term, String canonical) {
     }
 
-    private final AtomicReference<Map<String, Entry>> byPhoneticKey =
+    /**
+     * Phonetic key -> EVERY row that produced it.
+     *
+     * <p>A list, not a single entry, and that is a bug fix rather than a
+     * generalisation. The key is deliberately lossy: "chana" and "chini" both
+     * reduce to "cn". Keeping only the first row loaded meant the second word
+     * was not merely unavailable - it resolved to the FIRST one's meaning,
+     * because the edit-distance confirmation was generous enough to accept
+     * it. A customer asking for chana got sugar.
+     *
+     * <p>The key finds candidates; the distance decides between them.
+     */
+    private final AtomicReference<Map<String, List<Entry>>> byPhoneticKey =
             new AtomicReference<>(Map.of());
 
     public SynonymDictionary(SearchSynonymRepository repository) {
@@ -173,17 +192,31 @@ public class SynonymDictionary {
         String key = SearchNormalizer.phoneticKey(token);
         if (key.isEmpty()) return Optional.empty();
 
-        Entry entry = byPhoneticKey.get().get(key);
-        if (entry == null) return Optional.empty();
+        List<Entry> candidates = byPhoneticKey.get().get(key);
+        if (candidates == null || candidates.isEmpty()) return Optional.empty();
 
         // The key is deliberately lossy, so it produces false friends:
         // "britannia" and "bartan" both reduce to "brtn". Confirming with an
         // edit distance against the stored term is what stops a real brand
         // name being translated into dishwash - the key finds candidates
         // cheaply, this decides whether they are actually the same word.
-        if (!SearchNormalizer.areCloseEnough(token, entry.term())) return Optional.empty();
+        //
+        // The CLOSEST candidate wins, not the first. With one entry per key
+        // this changes nothing; where two real words collide it is the whole
+        // difference between chana meaning chickpea and chana meaning sugar.
+        Entry best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (Entry candidate : candidates) {
+            if (!SearchNormalizer.areCloseEnough(token, candidate.term())) continue;
+            int distance = SearchNormalizer.editDistance(token, candidate.term(), MAX_CONFIRM_DISTANCE);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = candidate;
+            }
+        }
+        if (best == null) return Optional.empty();
 
-        String canonical = entry.canonical();
+        String canonical = best.canonical();
 
         // A word that maps to itself ("ghee" -> "ghee", "masala" -> "masala")
         // is in the table so that its spellings unify, not to be substituted.
@@ -197,20 +230,25 @@ public class SynonymDictionary {
     @Scheduled(fixedDelay = REFRESH_MS)
     public final void refresh() {
         try {
-            Map<String, Entry> rebuilt = new HashMap<>();
+            Map<String, List<Entry>> rebuilt = new HashMap<>();
+            int rows = 0;
             for (SearchSynonym synonym : repository.findByActiveTrue()) {
                 String key = SearchNormalizer.phoneticKey(synonym.getTerm());
                 if (key.isEmpty()) continue;
 
-                Entry entry = new Entry(synonym.getTerm(), synonym.getCanonicalTerm());
-                Entry existing = rebuilt.putIfAbsent(key, entry);
-                if (existing != null && !existing.canonical().equals(entry.canonical())) {
-                    log.warn("Search synonym '{}' collides on phonetic key '{}' with '{}'; keeping '{}'",
-                            synonym.getTerm(), key, existing.term(), existing.term());
-                }
+                // KEPT, not discarded. A colliding row used to be dropped and
+                // logged, which is why "chana" resolved to sugar: the row that
+                // would have said chickpea was never in the map at all.
+                rebuilt.computeIfAbsent(key, k -> new ArrayList<>())
+                        .add(new Entry(synonym.getTerm(), synonym.getCanonicalTerm()));
+                rows++;
             }
-            byPhoneticKey.set(Map.copyOf(rebuilt));
-            log.debug("Loaded {} search synonyms", rebuilt.size());
+
+            Map<String, List<Entry>> frozen = new HashMap<>(rebuilt.size());
+            rebuilt.forEach((key, entries) -> frozen.put(key, List.copyOf(entries)));
+
+            byPhoneticKey.set(Map.copyOf(frozen));
+            log.debug("Loaded {} search synonyms across {} phonetic keys", rows, frozen.size());
         } catch (Exception e) {
             // Search must keep working without the dictionary - it simply
             // loses Hindi/Hinglish translation and falls back to the
@@ -219,7 +257,11 @@ public class SynonymDictionary {
         }
     }
 
-    /** For tests and diagnostics. */
+    /**
+     * How many phonetic KEYS are loaded. Fewer than the number of rows
+     * whenever two words sound alike - both are kept, and canonicalFor picks
+     * between them by edit distance.
+     */
     public int size() {
         return byPhoneticKey.get().size();
     }
