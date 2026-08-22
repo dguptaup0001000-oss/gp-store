@@ -1,4 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
+// show, not a bare import: foundation also exports a Category annotation
+// class that would collide with the domain model used all over this file.
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 

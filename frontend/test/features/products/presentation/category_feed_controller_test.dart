@@ -168,7 +168,7 @@ void main() {
               categoryId: categoryId, page: page, size: size);
           // Force an overlap: category 2 returns one of category 1's products.
           if (categoryId == 2 && page == 0 && products.isNotEmpty) {
-            return [Product(id: 100000, name: 'shared'), ...products];
+            return [const Product(id: 100000, name: 'shared'), ...products];
           }
           return products;
         }),

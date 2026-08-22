@@ -1,4 +1,6 @@
-import 'package:flutter/foundation.dart';
+// hide Category: foundation exports an annotation class of the same name,
+// which would make every Category here ambiguous with the domain model.
+import 'package:flutter/foundation.dart' hide Category;
 
 import '../domain/product_models.dart';
 

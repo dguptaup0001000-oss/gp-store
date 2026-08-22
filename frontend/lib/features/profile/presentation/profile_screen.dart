@@ -281,7 +281,7 @@ class ProfileScreen extends ConsumerWidget {
           'addresses, wishlist, and cart. You will be signed out on every '
           'device immediately and cannot undo this.\n\n'
           "Your past order and invoice history is kept (shown as \"Deleted "
-          'User\") since Indian tax law requires retaining invoice records '
+          'User") since Indian tax law requires retaining invoice records '
           "regardless of account deletion - it will no longer be linked to "
           'your name, phone, or email.',
         ),
