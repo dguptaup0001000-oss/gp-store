@@ -62,6 +62,22 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * any short query almost by definition, so "%" would match nearly
      * everything or nearly nothing depending on the threshold. Substring
      * matching is the honest operation for a keyword list.
+     *
+     * <p>BRAND SIMILARITY IS NOT IN THE ORDER BY ON ITS OWN, and taking it
+     * out is the fix for the worst search result this catalogue produced.
+     * Ranking on GREATEST(name, brand) meant every product of a brand scored
+     * identically the moment the brand matched: for "tata salt", similarity
+     * against the brand "Tata" is 0.500 for Tata Salt, for Tata Tea Gold and
+     * for Tata Besan alike, so all of them tied and the winner was whichever
+     * row Postgres happened to return first. Asking for salt gave tea.
+     *
+     * <p>Comparing against brand and name TOGETHER keeps the brand's
+     * contribution while letting the product word break the tie -
+     * "Tata Tata Salt Lite 1 kg" scores 0.500 against "tata salt" where
+     * "Tata Tata Besan" scores 0.313. A brand-only query still ranks
+     * sensibly, because the brand is part of the string being compared.
+     * The brand stays in the WHERE clause either way: it decides whether a
+     * product is in the running, just no longer where it places.
      */
     @Query(
         value = "SELECT p.* FROM products p " +
@@ -71,7 +87,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                 "     OR p.brand ILIKE CONCAT('%', :keyword, '%') " +
                 "     OR p.search_keywords ILIKE CONCAT('%', :keyword, '%') " +
                 "     OR p.subcategory ILIKE CONCAT('%', :keyword, '%')) " +
-                "ORDER BY GREATEST(similarity(p.name, :keyword), similarity(COALESCE(p.brand, ''), :keyword)) DESC",
+                "ORDER BY GREATEST(similarity(p.name, :keyword), "
+                + "                  similarity(CONCAT(COALESCE(p.brand, ''), ' ', p.name), :keyword)) DESC",
         countQuery = "SELECT count(*) FROM products p " +
                 "WHERE p.active = true " +
                 "AND (p.name % :keyword OR p.brand % :keyword " +

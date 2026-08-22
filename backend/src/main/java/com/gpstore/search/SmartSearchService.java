@@ -64,9 +64,28 @@ public class SmartSearchService {
 
         String query = rawQuery.trim();
 
+        // The romanised form is computed UP FRONT because two different
+        // layers need it, and the second one is the reason "तेल" used to
+        // return Nutella.
+        //
+        // search_synonyms holds no Devanagari rows - the vocabulary is
+        // written in the Latin spellings people actually type - so
+        // translate() on Hindi script always came back empty. "तेल" could
+        // therefore never reach "oil", even though "tel" -> "oil" is right
+        // there in the dictionary and typing "tel" works perfectly. The
+        // romanised form is what the dictionary can actually read, so it is
+        // offered to translate() as a fallback below.
+        String romanised = SearchNormalizer.containsDevanagari(query)
+                ? SearchNormalizer.transliterate(query).trim()
+                : "";
+        boolean hasRomanised = !romanised.isEmpty() && !romanised.equalsIgnoreCase(query);
+
         // LAYER 1 - as typed.
         Page<ProductResponse> asTyped = productService.searchInstant(query, pageable);
         Optional<String> translated = translate(query);
+        if (translated.isEmpty() && hasRomanised) {
+            translated = translate(romanised);
+        }
 
         if (asTyped.hasContent() && answersWholeQuery(query, asTyped.getContent())) {
             // The results are right, but the customer may still have
@@ -91,13 +110,21 @@ public class SmartSearchService {
         // "आशीर्वाद" is in no dictionary and never will be - brands are
         // catalogue data, not vocabulary - so romanising is the only route
         // from Hindi script to it.
-        if (SearchNormalizer.containsDevanagari(query)) {
-            String romanised = SearchNormalizer.transliterate(query).trim();
-            if (!romanised.isEmpty() && !romanised.equalsIgnoreCase(query)) {
-                Page<ProductResponse> results = productService.searchInstant(romanised, pageable);
-                if (results.hasContent()) {
-                    return SmartSearchResult.interpreted(query, romanised, results);
-                }
+        //
+        // GATED THE SAME WAY LAYER 1 IS, and it was not before. This layer
+        // accepted any non-empty result, so trigram noise won outright:
+        // "तेल" romanises to "tel", which is three characters and similar
+        // enough to "Nutella" to return it, and "आटा" romanises to "ata",
+        // which matches "Tata". Both answered confidently with the wrong
+        // product while the dictionary sat one layer below holding the right
+        // one. Requiring the results to actually account for the words
+        // searched sends those two down to translation instead, which is
+        // where "tel" -> "oil" lives.
+        Page<ProductResponse> romanisedResults = null;
+        if (hasRomanised) {
+            romanisedResults = productService.searchInstant(romanised, pageable);
+            if (romanisedResults.hasContent() && answersWholeQuery(romanised, romanisedResults.getContent())) {
+                return SmartSearchResult.interpreted(query, romanised, romanisedResults);
             }
         }
 
@@ -125,6 +152,14 @@ public class SmartSearchService {
         // kept rather than discarded just because translation found no more.
         if (asTyped.hasContent()) {
             return SmartSearchResult.matched(query, deriveCorrection(query, asTyped.getContent()), asTyped);
+        }
+
+        // Same reasoning for the romanised attempt: it did not answer the
+        // whole query, which is why it did not win above, but a Hindi-script
+        // search that reaches this point has nothing else at all. Offered as
+        // a suggestion rather than applied, because it is the weaker match.
+        if (romanisedResults != null && romanisedResults.hasContent()) {
+            return SmartSearchResult.suggested(query, romanised, romanisedResults);
         }
 
         // LAYER 3 - narrowed, longest token first.
