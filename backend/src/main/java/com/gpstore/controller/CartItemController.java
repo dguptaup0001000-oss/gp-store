@@ -32,10 +32,11 @@ public void removeItem(@PathVariable Long id) {
 public void clearCart(@PathVariable Long cartId) {
     service.clearCart(cartId);
 }
-    @GetMapping
-    public List<CartItem> getAll() {
-        return service.getAll();
-    }
+    // GET /api/cart-items IS GONE, for the same reason as
+    // GET /api/order-items - see OrderItemController. It returned every cart
+    // item in the shop as a raw entity, which Jackson cannot serialise
+    // through a Hibernate lazy proxy, so it answered 500 every time. A
+    // customer's cart reaches them through CartResponse (GET /api/carts/mine).
 
     @GetMapping("/cart/{cartId}")
     public List<CartItem> getCartItems(@PathVariable Long cartId) {
