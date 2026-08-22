@@ -58,6 +58,39 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(body);
     }
 
+    /**
+     * A database constraint said no. That is a 409, not a 500.
+     *
+     * Without this, a duplicate email at registration, a repeated
+     * idempotency key or a colliding SKU all landed in the catch-all below
+     * and were reported as "An unexpected error occurred" with status 500.
+     * Three things were wrong with that:
+     *
+     *   - It tells the customer the shop is broken when in fact their
+     *     request conflicted with something that already exists, which is
+     *     information they can act on.
+     *   - It buries real bugs. If genuine 500s and routine duplicate
+     *     registrations arrive in the same bucket, the bucket stops being
+     *     worth reading.
+     *   - 5xx invites retries from clients and proxies that treat 4xx as
+     *     final. Retrying a request that violated a unique constraint can
+     *     never succeed.
+     *
+     * THE MESSAGE IS DELIBERATELY GENERIC. ex.getMessage() on a Postgres
+     * constraint violation contains the constraint name, the table, the
+     * column and the conflicting VALUE - so returning it would leak both the
+     * schema and, for a duplicate-email check, confirm that a given address
+     * is already registered. Logged at WARN for diagnosis, never returned.
+     */
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<ApiError> handleDataIntegrity(
+            org.springframework.dao.DataIntegrityViolationException ex, HttpServletRequest req) {
+        log.warn("Constraint violation on {} {}: {}",
+                req.getMethod(), req.getRequestURI(), ex.getMostSpecificCause().getMessage());
+        return build(HttpStatus.CONFLICT,
+                "That conflicts with something that already exists. Please check and try again.", req);
+    }
+
     // Catch-all: never leak internal exception messages/stack traces to the client,
     // but this is the only handler for genuinely unanticipated failures, so it must
     // log the real exception - otherwise a bug that lands here leaves no trace

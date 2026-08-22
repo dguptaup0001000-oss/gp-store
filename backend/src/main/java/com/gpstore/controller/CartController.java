@@ -20,10 +20,20 @@ public class CartController {
     }
 
     // Admin only - e.g. cart-abandonment analytics.
+    /**
+     * Admin cart-abandonment listing. Paged with a server-side cap of 100,
+     * matching OrderController. .map() on the Page keeps the pagination
+     * metadata intact while converting each entity to its DTO.
+     */
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
-    public java.util.List<CartResponse> getAllCarts() {
-        return cartService.getAllCarts().stream().map(CartResponse::from).toList();
+    public org.springframework.data.domain.Page<CartResponse> getAllCarts(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "0") int page,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20") int size) {
+        return cartService.getAllCarts(org.springframework.data.domain.PageRequest.of(
+                        Math.max(page, 0), Math.min(Math.max(size, 1), 100),
+                        org.springframework.data.domain.Sort.by("id")))
+                .map(CartResponse::from);
     }
 
     // Returns only the logged-in customer's cart, with real product

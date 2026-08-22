@@ -56,6 +56,22 @@ public class CashfreeGateway implements PaymentGateway {
     public GatewaySession createSession(GatewaySessionRequest request) {
         requireConfigured();
 
+        JsonNode response = send("POST", "/orders", buildOrderBody(request).toString());
+        return readSession(response, request.providerOrderId());
+    }
+
+    /**
+     * The exact JSON sent to Cashfree, built separately from the call that
+     * sends it.
+     *
+     * EXTRACTED SO IT CAN BE TESTED WITHOUT A NETWORK. Every field name here
+     * has to match Cashfree's schema exactly, and the first thing that tells
+     * you otherwise is a rejected live transaction - by which point a real
+     * customer is looking at a failure. Package-private rather than public:
+     * nothing outside this package needs to build a Cashfree order, and the
+     * test lives in this package.
+     */
+    ObjectNode buildOrderBody(GatewaySessionRequest request) {
         ObjectNode body = objectMapper.createObjectNode();
         body.put("order_id", request.providerOrderId());
         // Scale 2 explicitly. Cashfree compares the amount it settles against
@@ -83,8 +99,10 @@ public class CashfreeGateway implements PaymentGateway {
             meta.put("notify_url", request.notifyUrl());
         }
 
-        JsonNode response = send("POST", "/orders", body.toString());
+        return body;
+    }
 
+    private GatewaySession readSession(JsonNode response, String requestedOrderId) {
         String sessionId = text(response, "payment_session_id");
         String orderId = text(response, "order_id");
         if (sessionId == null || sessionId.isBlank()) {
@@ -94,7 +112,7 @@ public class CashfreeGateway implements PaymentGateway {
             throw new BadRequestException("Payment could not be started. Please try again.");
         }
 
-        return new GatewaySession(orderId != null ? orderId : request.providerOrderId(), sessionId);
+        return new GatewaySession(orderId != null ? orderId : requestedOrderId, sessionId);
     }
 
     @Override

@@ -6,6 +6,7 @@ import com.gpstore.service.AddressService;
 import com.gpstore.service.CustomerService;
 import com.gpstore.service.DeliveryEstimateService;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -35,10 +36,19 @@ public class AddressController {
         return addressService.save(address);
     }
 
+    /**
+     * Admin listing. Paged, and the page size is capped SERVER-SIDE at 100 -
+     * a client asking for size=1000000 gets 100, because a cap the caller
+     * chooses is not a cap. Same convention as OrderController.
+     */
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
-    public List<Address> getAllAddresses() {
-        return addressService.getAll();
+    public org.springframework.data.domain.Page<Address> getAllAddresses(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return addressService.getAll(org.springframework.data.domain.PageRequest.of(
+                Math.max(page, 0), Math.min(Math.max(size, 1), 100),
+                org.springframework.data.domain.Sort.by("id")));
     }
 
     // Returns only the addresses of the logged-in customer.
