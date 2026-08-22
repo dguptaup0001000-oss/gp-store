@@ -23,6 +23,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -252,31 +253,66 @@ public class CatalogImageBackfillService {
     /**
      * Brand must match, and the names must share real words.
      *
-     * Two significant words is the threshold because one is far too loose -
-     * "Tata Salt" and "Tata Tea Gold" share "tata", and a shopper who opens
-     * salt and sees a photograph of tea will not trust the next photograph
-     * either.
+     * <p>WHY THE THRESHOLD DEPENDS ON THE BRAND. The original rule demanded
+     * two significant words from the product name, on the reasoning that one
+     * is too loose: "Tata Salt" and "Tata Tea Gold" share "tata", and a
+     * shopper who opens salt and sees a photograph of tea will not trust the
+     * next photograph either.
+     *
+     * <p>That reasoning was right about the risk and wrong about this
+     * catalogue. It assumed product names CONTAIN their brand. GP-Store keeps
+     * brand in its own column, so a name is a short descriptor - "Vanaspati",
+     * "Cow Ghee", "Milk". Those carry one significant word, or none, which
+     * made the threshold unreachable: single-word products could never match
+     * whatever Open Food Facts returned. A backfill run over twenty of them
+     * matched exactly zero, and looked like Open Food Facts simply having no
+     * Indian groceries.
+     *
+     * <p>The fix keeps the false positive out rather than trading it away.
+     * "tata" only counted in the first place BECAUSE it was the brand, and
+     * the brand is already checked separately above - so counting it again
+     * was double-counting one piece of evidence. Brand words are now excluded
+     * from the tally, and a confirmed brand is worth the second signal. On
+     * the original example: brand "tata" matches, and "salt" is absent from
+     * "tata tea gold", so the tally is zero and it is still rejected. On
+     * "Fortune Vanaspati": brand matches, "vanaspati" matches, accepted.
      */
-    private boolean isPlausibleMatch(JsonNode candidate, String brand, String name) {
+    // Package-private, and static because it reads nothing but its arguments.
+    // Widened so the matching RULE can be tested directly - the alternative
+    // is asserting it through a live Open Food Facts call, which makes the
+    // test both slow and dependent on somebody else's catalogue.
+    static boolean isPlausibleMatch(JsonNode candidate, String brand, String name) {
         String candidateBrands = lower(text(candidate, "brands"));
         String candidateName = lower(text(candidate, "product_name"));
         if (candidateName == null || candidateName.isBlank()) {
             return false;
         }
+        boolean brandConfirmed = false;
+        Set<String> brandWords = new HashSet<>();
         if (brand != null && !brand.isBlank()) {
             String wanted = lower(brand);
             if (candidateBrands == null || !candidateBrands.contains(firstWord(wanted))) {
                 return false;
             }
+            brandConfirmed = true;
+            for (String word : wanted.split("[^a-z0-9]+")) {
+                if (!word.isEmpty()) brandWords.add(word);
+            }
         }
 
         int shared = 0;
         for (String word : lower(stripPackSize(name)).split("[^a-z0-9]+")) {
-            if (word.length() >= 4 && candidateName.contains(word)) {
+            // Brand words are not evidence here - they were already spent on
+            // the brand check above, and counting them twice is what made
+            // "Tata Tea Gold" look like a plausible photograph of salt.
+            if (word.length() >= 4 && !brandWords.contains(word) && candidateName.contains(word)) {
                 shared++;
             }
         }
-        return shared >= 2;
+
+        // A confirmed brand is itself a signal, so one matching word is enough
+        // beside it. Without a brand to lean on, two words are still required.
+        return shared >= (brandConfirmed ? 1 : 2);
     }
 
     /**
