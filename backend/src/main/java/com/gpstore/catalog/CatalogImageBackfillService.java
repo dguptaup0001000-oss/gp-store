@@ -65,7 +65,8 @@ public class CatalogImageBackfillService {
 
     private static final Logger log = LoggerFactory.getLogger(CatalogImageBackfillService.class);
 
-    private static final String SEARCH_BASE = "https://world.openfoodfacts.org/cgi/search.pl";
+    static final String OPEN_FOOD_FACTS_SEARCH =
+            "https://world.openfoodfacts.org/cgi/search.pl";
     private static final int MAX_IMAGES = 4;
 
     /**
@@ -88,6 +89,16 @@ public class CatalogImageBackfillService {
     @Value("${catalog.image-backfill.timeout-seconds:15}")
     private int timeoutSeconds;
 
+    /**
+     * Where to look. Overridable so the failure modes below can be tested
+     * against a local server that returns 429, 403, 500, garbage or nothing
+     * at all - none of which can be provoked reliably from the real service,
+     * and one of which (the refusal) is the reason a whole afternoon went
+     * into reading a matching rule that had never run.
+     */
+    @Value("${catalog.image-backfill.search-url:" + OPEN_FOOD_FACTS_SEARCH + "}")
+    private String searchUrl;
+
     public CatalogImageBackfillService(ProductRepository productRepository,
                                        ProductVariantRepository variantRepository,
                                        ProductImageRepository productImageRepository,
@@ -108,14 +119,35 @@ public class CatalogImageBackfillService {
     public record BackfillResult(int considered, int matched, int imagesWritten,
                                  int alreadyHadImages, int noMatch, List<String> problems) {}
 
-    /** The image source refused the request - not the same as having no photograph. */
-    static final class ImageSourceUnavailable extends RuntimeException {
-        private static final long serialVersionUID = 1L;
-        final int status;
+    /**
+     * What a lookup actually established.
+     *
+     * <p>The distinction that matters is the last two. "The database does not
+     * have this product" and "the database would not talk to us" are opposite
+     * facts, and collapsing them into one empty list is what let a run where
+     * every request was refused report twenty products confidently absent.
+     */
+    enum LookupOutcome {
+        /** Images found and confirmed to resolve. */
+        FOUND,
+        /** The source answered, and has no plausible match for this product. */
+        NO_PRODUCT_FOUND,
+        /** The source did not answer usefully: refused, rate-limited, timed
+         *  out, broken, or unparseable. Says NOTHING about the product. */
+        EXTERNAL_SOURCE_FAILURE
+    }
 
-        ImageSourceUnavailable(int status) {
-            super("Image source returned HTTP " + status);
-            this.status = status;
+    record ImageLookup(LookupOutcome outcome, List<String> urls, String detail) {
+        static ImageLookup found(List<String> urls) {
+            return new ImageLookup(LookupOutcome.FOUND, List.copyOf(urls), null);
+        }
+
+        static ImageLookup notFound() {
+            return new ImageLookup(LookupOutcome.NO_PRODUCT_FOUND, List.of(), null);
+        }
+
+        static ImageLookup failed(String detail) {
+            return new ImageLookup(LookupOutcome.EXTERNAL_SOURCE_FAILURE, List.of(), detail);
         }
     }
 
@@ -126,16 +158,20 @@ public class CatalogImageBackfillService {
      * neither and cost real time chasing a matching rule that was never
      * consulted.
      */
-    static String describeUnavailable(int status, int consideredSoFar) {
-        String reason = switch (status) {
-            case 403 -> "refused the request (403) - it blocks anonymous bulk callers";
+    static String describeUnavailable(String detail, int consideredSoFar) {
+        return "Image lookup source " + detail
+                + ". Stopped after " + consideredSoFar + " product(s); no existing image was "
+                + "changed. This is NOT 'no photograph found' - the search never ran.";
+    }
+
+    /** Turns an HTTP status into something an operator can act on. */
+    static String describeStatus(int status) {
+        return switch (status) {
+            case 401, 403 -> "refused the request (" + status + ") - it blocks anonymous bulk callers";
             case 429 -> "rate-limited the request (429)";
-            case 503, 502, 504 -> "is temporarily unavailable (" + status + ")";
+            case 500, 502, 503, 504 -> "is temporarily unavailable (" + status + ")";
             default -> "returned HTTP " + status;
         };
-        return "Open Food Facts " + reason
-                + ". Stopped after " + consideredSoFar + " product(s); nothing was written. "
-                + "This is NOT 'no photograph found' - the search never ran.";
     }
 
     /**
@@ -157,6 +193,7 @@ public class CatalogImageBackfillService {
         // needed images were never examined. See the query's own comment.
         List<ProductVariant> variants = variantRepository.findVariantsWithoutRealImages();
         int considered = 0, matched = 0, written = 0, already = 0, noMatch = 0;
+        boolean aborted = false;
         List<String> problems = new ArrayList<>();
 
         for (ProductVariant variant : variants) {
@@ -179,26 +216,39 @@ public class CatalogImageBackfillService {
                 continue;
             }
 
+            ImageLookup lookup;
             try {
-                List<String> urls = findImages(product.getBrand(), product.getName());
-                if (urls.isEmpty()) {
-                    noMatch++;
-                    continue;
-                }
-                matched++;
-                written += self.storeImages(product.getId(), variant.getId(), urls);
-            } catch (ImageSourceUnavailable e) {
-                // STOP, do not carry on. The source has told us it is not
-                // serving us; nineteen more requests would be nineteen more
-                // refusals, slower, and rude to a free service that asks bots
-                // not to do exactly this.
-                problems.add(describeUnavailable(e.status, considered));
-                log.warn("Image backfill stopped: Open Food Facts returned HTTP {}", e.status);
-                break;
+                lookup = lookupImages(product.getBrand(), product.getName());
             } catch (Exception e) {
-                problems.add(product.getName() + ": " + e.getClass().getSimpleName());
-                log.warn("Image backfill failed for product {}: {}",
-                        product.getId(), e.getClass().getSimpleName());
+                // Anything lookupImages did not already classify. Still a
+                // SOURCE failure, never a statement about the product.
+                lookup = ImageLookup.failed("failed unexpectedly (" + e.getClass().getSimpleName() + ")");
+            }
+
+            switch (lookup.outcome()) {
+                case FOUND -> {
+                    matched++;
+                    written += self.storeImages(product.getId(), variant.getId(), lookup.urls());
+                }
+                // The source answered and has nothing. The product keeps
+                // whatever image it already had - this loop never clears one.
+                case NO_PRODUCT_FOUND -> noMatch++;
+                case EXTERNAL_SOURCE_FAILURE -> {
+                    // STOP, do not carry on. The source has told us it is not
+                    // serving us; nineteen more requests would be nineteen
+                    // more refusals, slower, and rude to a free service that
+                    // asks bots not to do exactly this.
+                    //
+                    // Nothing is written on this path, which is the guarantee
+                    // that matters: a failed lookup can never be the reason a
+                    // product loses the image it already had.
+                    problems.add(describeUnavailable(lookup.detail(), considered));
+                    log.warn("Image backfill stopped: source {}", lookup.detail());
+                    aborted = true;
+                }
+            }
+            if (aborted) {
+                break;
             }
 
             pause();
@@ -249,9 +299,9 @@ public class CatalogImageBackfillService {
      * Order matches the brief's priority: front of pack first, then
      * ingredients, then nutrition, then packaging.
      */
-    List<String> findImages(String brand, String name) throws Exception {
+    ImageLookup lookupImages(String brand, String name) {
         String query = URLEncoder.encode(stripPackSize(name), StandardCharsets.UTF_8);
-        URI uri = URI.create(SEARCH_BASE
+        URI uri = URI.create(searchUrl
                 + "?search_terms=" + query
                 + "&search_simple=1&action=process&json=1&page_size=5"
                 + "&fields=product_name,brands,image_front_url,image_ingredients_url,"
@@ -263,20 +313,36 @@ public class CatalogImageBackfillService {
                 .GET()
                 .build();
 
-        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200) {
-            // NOT an empty list. Returning one here made a REFUSAL look
-            // exactly like "this product is not in the database": a run where
-            // Open Food Facts blocked every single request reported
-            // noMatch=20, problems=[], and read as a clean run against a
-            // source that simply had nothing. That is the worst kind of
-            // wrong - confident, quiet, and it sends you looking in the wrong
-            // place. Open Food Facts rejects anonymous bulk callers with an
-            // HTML page and a non-200, which is exactly this path.
-            throw new ImageSourceUnavailable(response.statusCode());
+        HttpResponse<String> response;
+        try {
+            response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (java.net.http.HttpTimeoutException e) {
+            return ImageLookup.failed("timed out");
+        } catch (java.io.IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return ImageLookup.failed("could not be reached (" + e.getClass().getSimpleName() + ")");
         }
 
-        JsonNode products = objectMapper.readTree(response.body()).path("products");
+        if (response.statusCode() != 200) {
+            // NOT "no product found". Returning an empty list here made a
+            // REFUSAL look exactly like "this product is not in the database":
+            // a run where every single request was blocked reported
+            // noMatch=20, problems=[], and read as a clean run against a
+            // source that simply had nothing.
+            return ImageLookup.failed(describeStatus(response.statusCode()));
+        }
+
+        JsonNode products;
+        try {
+            products = objectMapper.readTree(response.body()).path("products");
+        } catch (Exception e) {
+            // A 200 carrying HTML, truncated JSON or anything else we cannot
+            // read is the source failing, not the product being absent.
+            return ImageLookup.failed("returned a response that could not be parsed");
+        }
+
         for (JsonNode candidate : products) {
             if (!isPlausibleMatch(candidate, brand, name)) {
                 continue;
@@ -290,10 +356,12 @@ public class CatalogImageBackfillService {
                 }
             }
             if (!urls.isEmpty()) {
-                return new ArrayList<>(urls);
+                return ImageLookup.found(new ArrayList<>(urls));
             }
         }
-        return List.of();
+        // The source answered and had nothing for this product. This is the
+        // only path that may honestly be called "no photograph found".
+        return ImageLookup.notFound();
     }
 
     /**
