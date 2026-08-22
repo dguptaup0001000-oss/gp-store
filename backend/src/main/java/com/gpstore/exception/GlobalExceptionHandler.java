@@ -91,6 +91,57 @@ public class GlobalExceptionHandler {
                 "That conflicts with something that already exists. Please check and try again.", req);
     }
 
+    /**
+     * A route that does not exist is a 404. It reached this class at all only
+     * because the catch-all below was swallowing Spring's own
+     * NoResourceFoundException and relabelling it a server fault.
+     *
+     * THIS COST SOMEBODY AN EVENING. A call to GET /v1/api/catalog/products -
+     * a path this application has never had - answered:
+     *
+     *     500 {"message":"An unexpected error occurred"}
+     *
+     * which reads as "the server is broken, not your fault, try later". The
+     * reasonable next step is to go looking for the stack trace in the
+     * production logs. There was no stack trace. There was no exception.
+     * There was a typo in a URL, and the error handler had disguised it as an
+     * outage.
+     *
+     * 404 says "that address does not exist, check it" - which is both true
+     * and immediately actionable.
+     *
+     * The path is echoed back because it is the single most useful thing to
+     * know here, and it contains nothing sensitive: the caller just sent it.
+     * No message from the exception is used - NoResourceFoundException's text
+     * names internal resource resolution details that are of no use to a
+     * client.
+     *
+     * Logged at DEBUG, not WARN: a 404 is routine traffic. Logging every
+     * scan of /wp-login.php at WARN would bury real problems.
+     */
+    @ExceptionHandler({
+            org.springframework.web.servlet.resource.NoResourceFoundException.class,
+            org.springframework.web.servlet.NoHandlerFoundException.class
+    })
+    public ResponseEntity<ApiError> handleNoHandler(Exception ex, HttpServletRequest req) {
+        log.debug("No handler for {} {}", req.getMethod(), req.getRequestURI());
+        return build(HttpStatus.NOT_FOUND,
+                "No endpoint exists at " + req.getRequestURI(), req);
+    }
+
+    /**
+     * The wrong HTTP verb on a real path is a 405, not a 500 - and the
+     * distinction is the same kind of useful. POST to a GET-only endpoint
+     * should say so rather than implying the server fell over.
+     */
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMethodNotSupported(
+            org.springframework.web.HttpRequestMethodNotSupportedException ex, HttpServletRequest req) {
+        log.debug("Method {} not supported for {}", req.getMethod(), req.getRequestURI());
+        return build(HttpStatus.METHOD_NOT_ALLOWED,
+                req.getMethod() + " is not supported for this endpoint", req);
+    }
+
     // Catch-all: never leak internal exception messages/stack traces to the client,
     // but this is the only handler for genuinely unanticipated failures, so it must
     // log the real exception - otherwise a bug that lands here leaves no trace
