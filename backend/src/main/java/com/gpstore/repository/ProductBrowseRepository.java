@@ -164,7 +164,18 @@ public class ProductBrowseRepository {
      * Categories with no active products are excluded by the inner join: a
      * Bestsellers tile showing four grey placeholders is not a bestseller.
      */
-    public record BestsellerRow(Long categoryId, String categoryName, Long productId, String imageUrl) {}
+    /**
+     * categoryTotal is how many active products the category holds ALTOGETHER,
+     * not how many came back in this row set - it is what the tile's "+N more"
+     * counts. Repeated identically on every row of a category, because a
+     * window function is the cheapest place to get it: the CTE has already
+     * scanned those rows to rank them, so COUNT(*) OVER the same partition
+     * costs no extra scan and no second query. Counting in Java would instead
+     * count the four rows that survived the rank filter and cheerfully report
+     * "+0 more" for a category of two hundred.
+     */
+    public record BestsellerRow(Long categoryId, String categoryName, Long productId,
+                                String imageUrl, long categoryTotal) {}
 
     /**
      * [categoryIds] narrows which categories are considered; null or empty
@@ -190,6 +201,7 @@ public class ProductBrowseRepository {
                            p.id                                                      AS product_id,
                            pv.image_url                                              AS image_url,
                            ROW_NUMBER() OVER (PARTITION BY c.id ORDER BY p.id)       AS product_rank,
+                           COUNT(*)     OVER (PARTITION BY c.id)                     AS category_total,
                            DENSE_RANK() OVER (ORDER BY c.id)                         AS category_rank
                     FROM categories c
                     JOIN products p
@@ -206,7 +218,7 @@ public class ProductBrowseRepository {
                     ) pv ON true
                     WHERE c.active = true""" + categoryFilter + """
                 )
-                SELECT category_id, category_name, product_id, image_url
+                SELECT category_id, category_name, product_id, image_url, category_total
                 FROM ranked
                 WHERE product_rank <= :perCategory
                   AND category_rank <= :categoryLimit
@@ -227,7 +239,8 @@ public class ProductBrowseRepository {
                     ((Number) row[0]).longValue(),
                     (String) row[1],
                     ((Number) row[2]).longValue(),
-                    (String) row[3]));
+                    (String) row[3],
+                    ((Number) row[4]).longValue()));
         }
         return result;
     }

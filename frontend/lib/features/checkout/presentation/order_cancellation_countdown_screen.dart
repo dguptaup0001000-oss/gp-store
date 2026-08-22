@@ -1,14 +1,12 @@
 import 'dart:async';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-import '../../../core/images/product_image_url.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../cart/domain/cart_models.dart';
 import '../domain/checkout_models.dart';
+import '../../../core/images/gp_network_image.dart';
 
 /// The 10-second pause between tapping "Place Order" and the order/payment
 /// actually being created. Shows the full price breakdown and product list
@@ -197,21 +195,16 @@ class _ItemRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: item.imageUrl != null
-                ? CachedNetworkImage(
-                    imageUrl: ProductImageUrl.tile(item.imageUrl),
-                    width: 44,
-                    height: 44,
-                    // contain (not cover) - matches every other product
-                    // image in the app, doesn't crop.
-                    fit: BoxFit.contain,
-                    // 44x44 tile - avoid decoding the full original.
-                    memCacheWidth: 130,
-                    errorWidget: (_, __, ___) => _placeholderIcon(),
-                  )
-                : _placeholderIcon(),
+          SizedBox(
+            width: 44,
+            height: 44,
+            child: GpNetworkImage(
+              url: item.imageUrl,
+              renderWidth: 44,
+              borderRadius: BorderRadius.circular(8),
+              fallbackIcon: Icons.shopping_bag_outlined,
+              fallbackIconSize: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -243,10 +236,4 @@ class _ItemRow extends StatelessWidget {
     );
   }
 
-  Widget _placeholderIcon() => Container(
-        width: 44,
-        height: 44,
-        color: AppColors.cardBackground,
-        child: const Icon(Icons.shopping_bag_outlined, size: 20),
-      );
 }

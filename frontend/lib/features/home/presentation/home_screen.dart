@@ -193,7 +193,7 @@ class HomeScreen extends ConsumerWidget {
                     children: [
                       Icon(Icons.search, color: AppColors.textSecondary),
                       SizedBox(width: 8),
-                      Text('Search for atta, dal, milk, snacks...', style: TextStyle(color: AppColors.textSecondary)),
+                      Text('Search for atta, dal, coke and more', style: TextStyle(color: AppColors.textSecondary)),
                     ],
                   ),
                 ),
@@ -210,7 +210,12 @@ class HomeScreen extends ConsumerWidget {
             ),
 
             categoriesAsync.when(
-              loading: () => const SizedBox(height: 96, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
+              // Reserves the shelf's real height, so the sections below do
+              // not jump down the page when the categories land.
+              loading: () => const SizedBox(
+                height: CategoriesRow.shelfHeight,
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
               error: (e, s) => const SizedBox.shrink(),
               data: (categories) => Padding(
                 padding: const EdgeInsets.only(top: 12),

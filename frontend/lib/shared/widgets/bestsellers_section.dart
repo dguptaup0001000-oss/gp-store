@@ -1,13 +1,12 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/images/product_image_url.dart';
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/bestseller_models.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../features/products/presentation/category_products_screen.dart';
 import '../../features/products/presentation/products_providers.dart';
+import '../../core/images/gp_network_image.dart';
 
 /// "Bestsellers" preview grid: a 2x2 photo collage per category, tapping a
 /// tile opens the full category listing.
@@ -63,7 +62,11 @@ class BestsellersSection extends ConsumerWidget {
             crossAxisCount: 3,
             mainAxisSpacing: 12,
             crossAxisSpacing: 12,
-            childAspectRatio: 0.78,
+            // Slightly taller than it was, to make room for the "+N more"
+            // line under the name. The collage sits in an Expanded, so it
+            // gives up the height rather than overflowing - but a tile that
+            // tight leaves nothing for a customer running large text.
+            childAspectRatio: 0.72,
           ),
           itemCount: navigable.length,
           itemBuilder: (context, index) => _BestsellerTile(
@@ -87,6 +90,7 @@ class _BestsellerTile extends StatelessWidget {
     // Stateless now: the images arrived with the collage, so there is
     // nothing left for this tile to fetch or watch.
     final imageUrls = tile.imageUrls;
+    final extra = tile.additionalProductCount;
 
     return GestureDetector(
       onTap: () => Navigator.of(context).push(
@@ -101,41 +105,26 @@ class _BestsellerTile extends StatelessWidget {
         child: Column(
           children: [
             Expanded(
-              child: Builder(
-                builder: (context) {
-                  return GridView.count(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 2,
-                    crossAxisSpacing: 2,
-                    physics: const NeverScrollableScrollPhysics(),
-                    children: List.generate(4, (i) {
-                      final imageUrl = i < imageUrls.length ? imageUrls[i] : null;
-                      return ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: Container(
-                          color: Colors.grey.shade200,
-                          child: imageUrl != null
-                              ? CachedNetworkImage(
-                                  imageUrl: ProductImageUrl.tile(imageUrl),
-                                  // contain (not cover) - matches every other
-                                  // product image in the app. cover crops to
-                                  // fill the tile, which was cutting off parts
-                                  // of product photos in this 2x2 collage.
-                                  fit: BoxFit.contain,
-                                  // A 2x2 collage tile - tiny on screen.
-                                  memCacheWidth: 200,
-                                  errorWidget: (c, url, e) => const Icon(
-                                    Icons.image_outlined,
-                                    size: 16,
-                                    color: AppColors.textSecondary,
-                                  ),
-                                )
-                              : const Icon(Icons.image_outlined, size: 16, color: AppColors.textSecondary),
-                        ),
-                      );
-                    }),
+              // The Builder that used to wrap this went with the per-tile
+              // fetch it existed for - the images now arrive with the
+              // collage, so there is nothing here that needs its own context.
+              child: GridView.count(
+                crossAxisCount: 2,
+                mainAxisSpacing: 2,
+                crossAxisSpacing: 2,
+                physics: const NeverScrollableScrollPhysics(),
+                children: List.generate(4, (i) {
+                  final imageUrl = i < imageUrls.length ? imageUrls[i] : null;
+                  // contain, not cover: cover crops to fill the square,
+                  // which was cutting the tops off packet shots in a
+                  // collage this small.
+                  return GpNetworkImage.fill(
+                    url: imageUrl,
+                    borderRadius: BorderRadius.circular(6),
+                    fallbackIcon: Icons.image_outlined,
+                    fallbackIconSize: 16,
                   );
-                },
+                }),
               ),
             ),
             const SizedBox(height: 6),
@@ -146,6 +135,22 @@ class _BestsellerTile extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
             ),
+            // Only when there is genuinely more behind the four thumbnails.
+            // A real count from the database, not products.length - the tile
+            // always draws four, so counting what it drew would tell every
+            // customer the same thing about a shelf of six and a shelf of
+            // six hundred.
+            if (extra != null)
+              Text(
+                '+$extra more',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
           ],
         ),
       ),

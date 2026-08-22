@@ -169,7 +169,12 @@ public class ProductService {
                 productBrowseRepository.findBestsellerTiles(null, categories, products)) {
             BestsellerTileResponse tile = tiles.computeIfAbsent(
                     row.categoryId(),
-                    id -> new BestsellerTileResponse(id, row.categoryName(), new ArrayList<>(), new ArrayList<>()));
+                    id -> new BestsellerTileResponse(
+                            id, row.categoryName(), new ArrayList<>(), new ArrayList<>(),
+                            // Identical on every row of this category - taking
+                            // it from the first is not a shortcut, it is the
+                            // only row that creates the tile.
+                            row.categoryTotal()));
             tile.getProductIds().add(row.productId());
             // Added even when null - see BestsellerTileResponse.imageUrls for
             // why the slot is kept rather than skipped.

@@ -1,8 +1,7 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../../core/images/product_image_url.dart';
+import '../../../core/images/gp_network_image.dart';
 
 /// Swipeable product gallery with page dots.
 ///
@@ -17,7 +16,7 @@ import '../../../core/images/product_image_url.dart';
 /// LOADING IS LAZY BY CONSTRUCTION. PageView.builder only builds the pages
 /// adjacent to the current one, so opening a product downloads the first
 /// image, not all five. Swiping fetches the next on demand, and
-/// CachedNetworkImage keeps it for the rest of the session.
+/// GpNetworkImage's cache keeps it for the rest of the session.
 class ProductImageGallery extends StatefulWidget {
   const ProductImageGallery({super.key, required this.imageUrls});
 
@@ -73,32 +72,12 @@ class _ProductImageGalleryState extends State<ProductImageGallery> {
                 itemBuilder: (context, index) => _ParallaxPage(
                   controller: _controller,
                   index: index,
-                  child: CachedNetworkImage(
-                    // Sized for the detail page rather than the original.
-                    // memCacheWidth below limits the DECODE; this limits what
-                    // is actually downloaded, which is the part a customer on
-                    // mobile data pays for.
-                    imageUrl: ProductImageUrl.detail(urls[index]),
-                    fit: BoxFit.contain,
-                  // Bounded decode: the hero deserves more resolution than a
-                  // grid thumbnail, but an oversized original must not decode
-                  // at full size on a screen that is at most ~430 logical px
-                  // wide. Without this a 4000px product photo costs tens of
-                  // megabytes of bitmap per image.
-                  memCacheWidth: 1000,
-                  placeholder: (context, url) => const Center(
-                    child: SizedBox(
-                      height: 24,
-                      width: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-                  // One broken URL must cost one blank page, not the gallery.
-                    errorWidget: (context, url, error) => const Center(
-                      child: Icon(Icons.image_not_supported_outlined,
-                          size: 40, color: AppColors.textSecondary),
-                    ),
-                  ),
+                  // The hero deserves more resolution than a grid thumbnail,
+                  // but the page is at most ~430 logical px wide - passing
+                  // that real width is what stops a 4000px product photo
+                  // being downloaded and decoded at full size. One broken URL
+                  // costs one blank page, not the gallery.
+                  child: GpNetworkImage.fill(url: urls[index]),
                 ),
               ),
             ),
@@ -129,7 +108,7 @@ class _ProductImageGalleryState extends State<ProductImageGallery> {
 /// AnimatedBuilder on the PageController rebuilds only this subtree during a
 /// swipe, and the effect is two Transforms: paint-time only, no relayout, no
 /// saveLayer, no image filters. The child is passed through AnimatedBuilder's
-/// `child` slot so the CachedNetworkImage is built ONCE and merely
+/// `child` slot so the image is built ONCE and merely
 /// re-positioned each frame, rather than rebuilt sixty times a second.
 class _ParallaxPage extends StatelessWidget {
   const _ParallaxPage({required this.controller, required this.index, required this.child});

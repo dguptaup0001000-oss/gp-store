@@ -1,15 +1,13 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../../core/images/product_image_url.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../products/domain/product_models.dart';
 import '../../products/presentation/category_products_screen.dart';
 import '../../products/presentation/products_providers.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
+import '../../../core/images/gp_network_image.dart';
 
 /// Full grid of all store categories, reachable from the bottom nav bar.
 /// Complements the compact CategoriesRow shown on the home screen —
@@ -90,18 +88,14 @@ class _CategoryTile extends StatelessWidget {
               color: AppColors.cardBackground,
               shape: BoxShape.circle,
             ),
-            child: category.imageUrl != null
-                ? ClipOval(
-                    child: CachedNetworkImage(
-                      imageUrl: ProductImageUrl.tile(category.imageUrl),
-                      fit: BoxFit.cover,
-                      // 72x72 tile - avoid decoding the full original.
-                      memCacheWidth: 200,
-                      errorWidget: (context, url, error) =>
-                          const Icon(Icons.category_outlined, color: AppColors.textSecondary),
-                    ),
-                  )
-                : const Icon(Icons.category_outlined, color: AppColors.textSecondary),
+            child: ClipOval(
+              child: GpNetworkImage(
+                url: category.imageUrl,
+                renderWidth: 72,
+                fit: BoxFit.cover,
+                fallbackIcon: Icons.category_outlined,
+              ),
+            ),
           ),
           const SizedBox(height: 8),
           Text(

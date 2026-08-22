@@ -1,10 +1,9 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
-import '../../core/images/product_image_url.dart';
+import '../../core/images/gp_network_image.dart';
 
 /// Reusable across every horizontal section on the home screen, search
 /// results, and category browsing - one widget, one place to fix/improve it.
@@ -146,36 +145,15 @@ class _ProductCardState extends State<ProductCard> {
                           // radius, indistinguishable in a 150px tile.
                           boxShadow: AppElevation.product,
                         ),
-                        child: variant?.imageUrl != null
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: CachedNetworkImage(
-                                  imageUrl: ProductImageUrl.card(variant!.imageUrl),
-                                  fit: BoxFit.contain,
-                                  // Grid tiles render at ~150 logical px - without this,
-                                  // cached_network_image decodes the full original
-                                  // (often several thousand px) into memory for every
-                                  // single card on screen, which is real memory/CPU
-                                  // pressure across a long scroll. 400 covers up to ~2.5x
-                                  // device pixel ratio at this tile size with headroom.
-                                  memCacheWidth: 400,
-                                  // Explicit error/loading handling per spec
-                                  // ("Images: support lazy loading, caching,
-                                  // placeholder, error widget") - a broken
-                                  // image URL should never show a Flutter
-                                  // red-screen crash icon to a customer.
-                                  errorWidget: (context, url, error) =>
-                                      const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary),
-                                  placeholder: (context, url) => const Center(
-                                    child: SizedBox(
-                                      height: 20,
-                                      width: 20,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    ),
-                                  ),
-                                ),
-                              )
-                            : const Icon(Icons.shopping_basket_outlined, color: AppColors.textSecondary),
+                        // The single most important picture in the shop. It
+                        // is the reason GpNetworkImage defaults to contain:
+                        // an atta bag cropped to fill a square stops being
+                        // recognisable, which is the one job it has.
+                        child: GpNetworkImage.fill(
+                          url: variant?.imageUrl,
+                          borderRadius: BorderRadius.circular(8),
+                          fallbackIcon: Icons.shopping_basket_outlined,
+                        ),
                       ),
                     ),
                     if (discount != null)
