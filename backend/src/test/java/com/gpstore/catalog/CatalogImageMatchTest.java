@@ -118,10 +118,12 @@ class CatalogImageMatchTest {
         // and the run reported noMatch=20, problems=[]. That reads as a clean
         // run against a source with nothing in it, and it sent a real
         // afternoon looking at a matching rule that had never been consulted.
-        String message = CatalogImageBackfillService.describeUnavailable(403, 20);
+        String message = CatalogImageBackfillService.describeUnavailable(
+                CatalogImageBackfillService.describeStatus(403), 20);
 
         assertThat(message)
                 .contains("403")
+                .contains("refused")
                 .contains("Stopped after 20")
                 .contains("NOT 'no photograph found'");
     }
@@ -129,7 +131,8 @@ class CatalogImageMatchTest {
     @Test
     @DisplayName("Rate limiting reads differently from a block")
     void rateLimitIsNamed() {
-        assertThat(CatalogImageBackfillService.describeUnavailable(429, 3))
+        assertThat(CatalogImageBackfillService.describeUnavailable(
+                CatalogImageBackfillService.describeStatus(429), 3))
                 .contains("rate-limited")
                 .contains("Stopped after 3");
     }
@@ -137,7 +140,8 @@ class CatalogImageMatchTest {
     @Test
     @DisplayName("An unexpected status still says what it was")
     void unknownStatusIsNamed() {
-        assertThat(CatalogImageBackfillService.describeUnavailable(418, 1))
+        assertThat(CatalogImageBackfillService.describeUnavailable(
+                CatalogImageBackfillService.describeStatus(418), 1))
                 .contains("418");
     }
 }
