@@ -20,8 +20,23 @@ public class AddressService {
         return repository.save(address);
     }
 
-    public List<Address> getAll() {
-        return repository.findAll();
+    /**
+     * Admin listing, PAGED and sorted - never findAll().
+     *
+     * The unbounded version loaded every address in the shop into memory to
+     * serialise them all in one response. At a hundred thousand customers
+     * that is an OutOfMemoryError on a 512 MB instance, triggered by one
+     * admin clicking once, and it takes the whole application down with it -
+     * customers browsing and checking out included.
+     *
+     * Sorted by id because an unsorted paged query has no defined order in
+     * Postgres: page 2 can repeat rows from page 1 and skip others entirely.
+     * id is the primary key, so this needs no new index - it uses the one
+     * every table already has.
+     */
+    public org.springframework.data.domain.Page<Address> getAll(
+            org.springframework.data.domain.Pageable pageable) {
+        return repository.findAll(pageable);
     }
 
     public List<Address> getCustomerAddresses(Long customerId) {

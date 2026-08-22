@@ -43,8 +43,17 @@ public class CartService {
         return cartRepository.save(cart);
     }
 
-    public List<Cart> getAllCarts() {
-        return cartRepository.findAll();
+    /**
+     * Admin cart-abandonment listing, PAGED - never findAll().
+     *
+     * Same reasoning as AddressService.getAll: every cart in the shop in one
+     * response is an unbounded query whose cost grows with the customer base,
+     * and carts are worse than addresses because each one drags its items
+     * along. Sorted by id so paging is stable.
+     */
+    public org.springframework.data.domain.Page<Cart> getAllCarts(
+            org.springframework.data.domain.Pageable pageable) {
+        return cartRepository.findAll(pageable);
     }
 
     public Cart getCustomerCart(Long customerId) {
