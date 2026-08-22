@@ -59,12 +59,14 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * A database constraint said no. That is a 409, not a 500.
+     * A database constraint said no. That is a 4xx, not a 500 - but WHICH 4xx,
+     * and whether it is the caller's fault at all, depends entirely on which
+     * constraint fired.
      *
-     * Without this, a duplicate email at registration, a repeated
-     * idempotency key or a colliding SKU all landed in the catch-all below
-     * and were reported as "An unexpected error occurred" with status 500.
-     * Three things were wrong with that:
+     * Without this, a duplicate email at registration, a repeated idempotency
+     * key or a colliding SKU all landed in the catch-all below and were
+     * reported as "An unexpected error occurred" with status 500. Three things
+     * were wrong with that:
      *
      *   - It tells the customer the shop is broken when in fact their
      *     request conflicted with something that already exists, which is
@@ -76,19 +78,121 @@ public class GlobalExceptionHandler {
      *     final. Retrying a request that violated a unique constraint can
      *     never succeed.
      *
-     * THE MESSAGE IS DELIBERATELY GENERIC. ex.getMessage() on a Postgres
-     * constraint violation contains the constraint name, the table, the
-     * column and the conflicting VALUE - so returning it would leak both the
-     * schema and, for a duplicate-email check, confirm that a given address
-     * is already registered. Logged at WARN for diagnosis, never returned.
+     * WHY THIS IS NO LONGER ONE ANSWER FOR ALL OF THEM. Collapsing every
+     * DataIntegrityViolationException into "that conflicts with something that
+     * already exists" cost a working day. Admin "Add Product" returned that
+     * message for every product, including brand-new names - and there is no
+     * unique constraint on products.name at all. The real conflict was on
+     * products_pkey: the identity sequence had fallen behind the table (see
+     * V16__resync_identity_sequences.sql and IdentitySequenceGuard), so the
+     * application was generating an id a row already held. A server-side
+     * defect was being reported as bad input, and the message sent whoever
+     * read it looking for a duplicate product that never existed.
+     *
+     * DataIntegrityViolationException is not a synonym for "duplicate". It
+     * also covers NOT NULL, foreign key and CHECK violations, which are three
+     * different problems with three different fixes, and a primary-key
+     * collision on a generated id, which is not the caller's problem at all.
+     *
+     * THE MESSAGES STAY GENERIC ABOUT VALUES. getMostSpecificCause() on a
+     * Postgres constraint violation contains the constraint name, the table,
+     * the column and the conflicting VALUE - so returning it would leak both
+     * the schema and, for a duplicate-email check, confirm that a given
+     * address is already registered. Logged for diagnosis, never returned.
      */
     @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
     public ResponseEntity<ApiError> handleDataIntegrity(
             org.springframework.dao.DataIntegrityViolationException ex, HttpServletRequest req) {
-        log.warn("Constraint violation on {} {}: {}",
-                req.getMethod(), req.getRequestURI(), ex.getMostSpecificCause().getMessage());
+
+        String sqlState = sqlStateOf(ex);
+        String constraint = constraintNameOf(ex);
+        String cause = ex.getMostSpecificCause().getMessage();
+
+        // A primary-key collision. Nothing in this application ever sets an id
+        // - every @Id is @GeneratedValue - so the id in the failing INSERT came
+        // from the database's own sequence, and the sequence handed out one
+        // that was already taken. That is ours, not the caller's, and it must
+        // not be logged at WARN alongside routine duplicate registrations.
+        if (UNIQUE_VIOLATION.equals(sqlState) && isPrimaryKey(constraint, cause)) {
+            log.error("PRIMARY KEY COLLISION on {} {}: {}. The id came from the database's own identity sequence, so "
+                    + "that sequence has fallen behind its table - rows were inserted with explicit ids at some "
+                    + "point (a restored dump, a CSV import, or an INSERT typed into a SQL console). Every insert "
+                    + "into this table keeps failing until it is re-synced. IdentitySequenceGuard repairs this on "
+                    + "the next restart; V16__resync_identity_sequences.sql repairs it on the next deploy.",
+                    req.getMethod(), req.getRequestURI(), cause);
+            return build(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "We couldn't assign an id to that record. This is a fault on our side, not a problem with what "
+                            + "you entered - please try again, and tell an administrator if it keeps happening.", req);
+        }
+
+        log.warn("Constraint violation on {} {} (sqlState={}, constraint={}): {}",
+                req.getMethod(), req.getRequestURI(), sqlState, constraint, cause);
+
+        if (NOT_NULL_VIOLATION.equals(sqlState)) {
+            return build(HttpStatus.BAD_REQUEST,
+                    "A required field was missing. Please fill in everything the form asks for and try again.", req);
+        }
+        if (FOREIGN_KEY_VIOLATION.equals(sqlState)) {
+            return build(HttpStatus.BAD_REQUEST,
+                    "That refers to something that no longer exists. Please refresh and try again.", req);
+        }
+        if (CHECK_VIOLATION.equals(sqlState)) {
+            return build(HttpStatus.BAD_REQUEST,
+                    "One of those values isn't allowed. Please check them and try again.", req);
+        }
+
         return build(HttpStatus.CONFLICT,
                 "That conflicts with something that already exists. Please check and try again.", req);
+    }
+
+    // Postgres SQLSTATE class 23 - integrity constraint violation.
+    private static final String UNIQUE_VIOLATION = "23505";
+    private static final String NOT_NULL_VIOLATION = "23502";
+    private static final String FOREIGN_KEY_VIOLATION = "23503";
+    private static final String CHECK_VIOLATION = "23514";
+
+    /**
+     * SQLSTATE off the first SQLException in the cause chain. Walked rather
+     * than read off getMostSpecificCause() directly, because the most specific
+     * cause is not guaranteed to be the SQLException - Hibernate wraps it, and
+     * some drivers wrap it again.
+     */
+    private static String sqlStateOf(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            if (t instanceof java.sql.SQLException sql && sql.getSQLState() != null) {
+                return sql.getSQLState();
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return null;
+    }
+
+    /** Hibernate knows the constraint name; the raw driver message only spells it. */
+    private static String constraintNameOf(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            if (t instanceof org.hibernate.exception.ConstraintViolationException cve) {
+                return cve.getConstraintName();
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Postgres names a primary key constraint "&lt;table&gt;_pkey" by default,
+     * and every table here took that default. The message is checked too
+     * because getConstraintName() comes back null often enough that relying on
+     * it alone would silently misclassify the very case this exists to catch.
+     */
+    private static boolean isPrimaryKey(String constraint, String causeMessage) {
+        if (constraint != null && constraint.endsWith("_pkey")) {
+            return true;
+        }
+        return causeMessage != null && causeMessage.contains("_pkey");
     }
 
     /**
