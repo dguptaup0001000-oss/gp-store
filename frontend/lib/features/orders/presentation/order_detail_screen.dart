@@ -1,11 +1,8 @@
 import 'dart:async';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-
-import '../../../core/images/product_image_url.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -13,6 +10,7 @@ import '../../cart/presentation/cart_providers.dart';
 import '../domain/order_models.dart';
 import 'invoice_screen.dart';
 import 'orders_providers.dart';
+import '../../../core/images/gp_network_image.dart';
 
 class OrderDetailScreen extends ConsumerWidget {
   const OrderDetailScreen({super.key, required this.orderId});
@@ -432,19 +430,13 @@ class _OrderItemTile extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(8)),
-            child: item.imageUrl != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: CachedNetworkImage(
-                      imageUrl: ProductImageUrl.tile(item.imageUrl),
-                      fit: BoxFit.contain,
-                      // 44x44 tile - avoid decoding the full original.
-                      memCacheWidth: 130,
-                      errorWidget: (context, url, error) =>
-                          const Icon(Icons.image_not_supported_outlined, size: 18, color: AppColors.textSecondary),
-                    ),
-                  )
-                : const Icon(Icons.shopping_basket_outlined, size: 18, color: AppColors.textSecondary),
+            child: GpNetworkImage(
+              url: item.imageUrl,
+              renderWidth: 44,
+              borderRadius: BorderRadius.circular(8),
+              fallbackIcon: Icons.shopping_basket_outlined,
+              fallbackIconSize: 18,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(

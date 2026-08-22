@@ -254,6 +254,78 @@ class BestsellerCollageTest {
         });
     }
 
+    @Test
+    @DisplayName("The tile's count is the whole category, not the four thumbnails on it")
+    void countIsTheCategoryTotalNotTheRowsReturned() {
+        Category category = newCategory("Bestseller Count");
+        // Seven products, four thumbnails. This is the entire point: a count
+        // taken from the returned rows would say four - the same thing it
+        // would say about a category of four hundred - and "+0 more" under a
+        // shelf of seven is a number that is confidently wrong.
+        for (int i = 0; i < 7; i++) {
+            newProduct(category, "count-" + i + ".jpg", true, i);
+        }
+
+        List<ProductBrowseRepository.BestsellerRow> rows =
+                browseRepository.findBestsellerTiles(List.of(category.getId()), 6, 4);
+
+        assertEquals(4, rows.size(), "The collage still returns only what it draws");
+        for (ProductBrowseRepository.BestsellerRow row : rows) {
+            assertEquals(7L, row.categoryTotal(),
+                    "Every row of a category carries that category's full count");
+        }
+    }
+
+    @Test
+    @DisplayName("An inactive product is not counted, because it is not shoppable")
+    void inactiveProductsAreExcludedFromTheCount() {
+        Category category = newCategory("Bestseller Count Inactive");
+        newProduct(category, "live-a.jpg", true, 0);
+        newProduct(category, "live-b.jpg", true, 1);
+
+        Product hidden = newProduct(category, "hidden.jpg", true, 2);
+        hidden.setActive(false);
+        productRepository.saveAndFlush(hidden);
+
+        List<ProductBrowseRepository.BestsellerRow> rows =
+                browseRepository.findBestsellerTiles(List.of(category.getId()), 6, 4);
+
+        assertFalse(rows.isEmpty());
+        assertEquals(2L, rows.get(0).categoryTotal(),
+                "Deactivating a product must remove it from '+N more' as well as from the shelf - "
+                        + "a count that includes hidden products promises stock that cannot be bought");
+    }
+
+    @Test
+    @DisplayName("The count survives the trip into the response the app parses")
+    void countReachesTheTileResponse() {
+        Category category = newCategory("Bestseller Count Response");
+        for (int i = 0; i < 5; i++) {
+            newProduct(category, "resp-" + i + ".jpg", true, i);
+        }
+
+        // Through the repository, then assembled the way the service does, so
+        // this covers the mapping rather than only the SQL.
+        List<ProductBrowseRepository.BestsellerRow> rows =
+                browseRepository.findBestsellerTiles(List.of(category.getId()), 6, 4);
+        assertFalse(rows.isEmpty());
+
+        BestsellerTileResponse tile = new BestsellerTileResponse(
+                rows.get(0).categoryId(),
+                rows.get(0).categoryName(),
+                new ArrayList<>(),
+                new ArrayList<>(),
+                rows.get(0).categoryTotal());
+        for (ProductBrowseRepository.BestsellerRow row : rows) {
+            tile.getProductIds().add(row.productId());
+            tile.getImageUrls().add(row.imageUrl());
+        }
+
+        assertEquals(4, tile.getProductIds().size());
+        assertEquals(5L, tile.getProductCount(),
+                "productCount and productIds.size() are different numbers and must stay that way");
+    }
+
     private Category newCategory(String label) {
         Category category = new Category();
         category.setName(label + " " + System.nanoTime());

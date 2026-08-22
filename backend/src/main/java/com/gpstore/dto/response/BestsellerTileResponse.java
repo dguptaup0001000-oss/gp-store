@@ -39,15 +39,28 @@ public class BestsellerTileResponse implements Serializable {
      */
     private List<String> imageUrls;
 
+    /**
+     * How many active products the category holds altogether - what the tile
+     * renders as "+N more" under the collage.
+     *
+     * NOT productIds.size(). That is four, always, because four is how many
+     * thumbnails the collage draws. A shopper looking at a tile wants to know
+     * whether tapping it opens a shelf of six or of six hundred, and the only
+     * honest answer to that is a real count from the database.
+     */
+    private long productCount;
+
     public BestsellerTileResponse() {
     }
 
     public BestsellerTileResponse(Long categoryId, String categoryName,
-                                  List<Long> productIds, List<String> imageUrls) {
+                                  List<Long> productIds, List<String> imageUrls,
+                                  long productCount) {
         this.categoryId = categoryId;
         this.categoryName = categoryName;
         this.productIds = productIds;
         this.imageUrls = imageUrls;
+        this.productCount = productCount;
     }
 
     public Long getCategoryId() { return categoryId; }
@@ -61,4 +74,7 @@ public class BestsellerTileResponse implements Serializable {
 
     public List<String> getImageUrls() { return imageUrls; }
     public void setImageUrls(List<String> imageUrls) { this.imageUrls = imageUrls; }
+
+    public long getProductCount() { return productCount; }
+    public void setProductCount(long productCount) { this.productCount = productCount; }
 }

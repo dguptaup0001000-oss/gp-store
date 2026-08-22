@@ -1,11 +1,8 @@
-import 'package:cached_network_image/cached_network_image.dart';
 // show, not a bare import: foundation also exports a Category annotation
 // class that would collide with the domain model used all over this file.
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../../core/images/product_image_url.dart';
 
 import '../../../core/search/search_debouncer.dart';
 import '../../../core/util/app_haptics.dart';
@@ -19,6 +16,7 @@ import '../domain/product_models.dart';
 import 'category_feed_controller.dart';
 import 'product_detail_screen.dart';
 import 'products_providers.dart';
+import '../../../core/images/gp_network_image.dart';
 
 /// Category browsing with a persistent left rail.
 ///
@@ -439,35 +437,17 @@ class _CategoryRailState extends State<_CategoryRail> {
                         boxShadow: isSelected ? AppElevation.tile : null,
                       ),
                       clipBehavior: Clip.antiAlias,
-                      child: category.imageUrl == null
-                          ? Icon(
-                              Icons.category_outlined,
-                              size: 20,
-                              color: isSelected ? AppColors.primary : AppColors.textSecondary,
-                            )
-                          : CachedNetworkImage(
-                              imageUrl: ProductImageUrl.tile(category.imageUrl),
-                              fit: BoxFit.cover,
-                              // Cached, not Image.network: the rail rebuilds on
-                              // every category tap, and an uncached image
-                              // re-fetches the whole list from the network each
-                              // time somebody browses across categories.
-                              //
-                              // Decoded at 132px (44 logical px x 3 for the
-                              // densest phones) rather than at whatever size the
-                              // original happens to be - a rail of full-size
-                              // category photos is real memory pressure for
-                              // tiles this small.
-                              memCacheWidth: 132,
-                              // A broken category image must not blank the rail
-                              // and strand the customer with no navigation.
-                              errorWidget: (_, __, ___) => Icon(
-                                Icons.category_outlined,
-                                size: 20,
-                                color: isSelected ? AppColors.primary : AppColors.textSecondary,
-                              ),
-                              placeholder: (_, __) => const SizedBox.shrink(),
-                            ),
+                      // A broken category image must not blank the rail and
+                      // strand the customer with no way to navigate - which
+                      // is exactly what GpNetworkImage guarantees, here and
+                      // on every other surface.
+                      child: GpNetworkImage(
+                        url: category.imageUrl,
+                        renderWidth: 44,
+                        fit: BoxFit.cover,
+                        fallbackIcon: Icons.category_outlined,
+                        fallbackIconSize: 20,
+                      ),
                     ),
                     const SizedBox(height: 6),
                     Text(

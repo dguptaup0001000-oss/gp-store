@@ -1,14 +1,12 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../../core/images/product_image_url.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../products/presentation/product_detail_screen.dart';
 import 'wishlist_providers.dart';
+import '../../../core/images/gp_network_image.dart';
 
 class WishlistScreen extends ConsumerWidget {
   const WishlistScreen({super.key});
@@ -65,19 +63,12 @@ class WishlistScreen extends ConsumerWidget {
                         width: 56,
                         height: 56,
                         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
-                        child: variant?.imageUrl != null
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: CachedNetworkImage(
-                                  imageUrl: ProductImageUrl.tile(variant!.imageUrl),
-                                  fit: BoxFit.contain,
-                                  // 56x56 tile - avoid decoding the full original.
-                                  memCacheWidth: 160,
-                                  errorWidget: (context, url, error) =>
-                                      const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary),
-                                ),
-                              )
-                            : const Icon(Icons.shopping_basket_outlined, color: AppColors.textSecondary),
+                        child: GpNetworkImage(
+                          url: variant?.imageUrl,
+                          renderWidth: 56,
+                          borderRadius: BorderRadius.circular(8),
+                          fallbackIcon: Icons.shopping_basket_outlined,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(

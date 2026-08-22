@@ -1,14 +1,12 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../core/images/product_image_url.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../features/cart/domain/cart_models.dart';
 import '../../features/cart/presentation/cart_providers.dart';
 import '../../features/cart/presentation/cart_screen.dart';
+import '../../core/images/gp_network_image.dart';
 
 /// The floating "N items · View cart" bar - drop this in as any screen's
 /// Scaffold.bottomNavigationBar. Self-contained (reads the cart itself via
@@ -123,16 +121,12 @@ class _ThumbnailStack extends StatelessWidget {
                   border: Border.all(color: AppColors.primary, width: 2),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: items[i].imageUrl != null
-                    ? CachedNetworkImage(
-                        imageUrl: ProductImageUrl.tile(items[i].imageUrl),
-                        fit: BoxFit.contain,
-                        // 34x34 avatar - avoid decoding the full original.
-                        memCacheWidth: 100,
-                        errorWidget: (context, url, error) =>
-                            const Icon(Icons.shopping_bag_outlined, color: AppColors.primary, size: 16),
-                      )
-                    : const Icon(Icons.shopping_bag_outlined, color: AppColors.primary, size: 16),
+                child: GpNetworkImage(
+                  url: items[i].imageUrl,
+                  renderWidth: _size,
+                  fallbackIcon: Icons.shopping_bag_outlined,
+                  fallbackIconSize: 16,
+                ),
               ),
             ),
         ],
