@@ -53,6 +53,34 @@ class SearchNormalizerTest {
     }
 
     @Test
+    @DisplayName("The inherent vowel is written out, and dropped at the end of a word")
+    void inherentVowel() {
+        // The one a customer found. नमक has no vowel signs at all - both "a"s
+        // are implicit - and skipping them produced "nmk", which barely
+        // resembles "namak" to a trigram index. Searching टाटा नमक ranked Tata
+        // TEA above Tata SALT, and the customer was shown "results for tata
+        // nmk" and could reasonably think the app was broken.
+        assertThat(SearchNormalizer.transliterate("नमक")).isEqualTo("namak");
+        assertThat(SearchNormalizer.transliterate("टाटा नमक")).isEqualTo("tata namak");
+
+        // Word-final schwa is dropped, because Hindi drops it - namak, not
+        // namaka. A matra or a virama means there was never a schwa to drop.
+        assertThat(SearchNormalizer.transliterate("दाल")).isEqualTo("dal");
+        assertThat(SearchNormalizer.transliterate("चावल")).isEqualTo("chaval");
+        assertThat(SearchNormalizer.transliterate("गेहूं")).isEqualTo("gehun");
+    }
+
+    @Test
+    @DisplayName("Now that नमक romanises properly, the vocabulary can reach it")
+    void inherentVowelReachesTheDictionary() {
+        // The payoff: "namak" keys the same as the stored row, so टाटा नमक is
+        // translated to "tata salt" rather than searched as consonants.
+        assertThat(SearchNormalizer.phoneticKey("नमक"))
+                .isEqualTo(SearchNormalizer.phoneticKey("namak"))
+                .isNotEmpty();
+    }
+
+    @Test
     @DisplayName("Devanagari digits survive as digits")
     void devanagariDigits() {
         // A size spoken in Hindi is still a size, and "5 kg" is what the
