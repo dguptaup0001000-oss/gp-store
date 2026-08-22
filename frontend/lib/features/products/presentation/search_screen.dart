@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/search/search_debouncer.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/util/app_haptics.dart';
+import '../../../core/voice/voice_query_parser.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/product_card.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -14,10 +16,18 @@ import '../domain/product_models.dart';
 import 'product_detail_screen.dart';
 import 'products_providers.dart';
 import 'recent_searches.dart';
+import 'voice_search_sheet.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
-  const SearchScreen({super.key});
+  const SearchScreen({super.key, this.openVoice = false});
+
+  /// Opens straight into the listening sheet.
+  ///
+  /// Set by the microphone on the home screen's search pill, so tapping it
+  /// there is one gesture rather than two - the alternative was landing on
+  /// this screen with a keyboard up and having to find the microphone again.
+  final bool openVoice;
 
   @override
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
@@ -64,10 +74,62 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   bool _hasMore = false;
   bool _isLoadingMore = false;
 
+  /// What the customer said, and the extra shopping intents in it.
+  ///
+  /// Only ever set by voice. A typed search leaves both null and this screen
+  /// behaves exactly as it did before voice existed.
+  String? _spokenAs;
+  List<VoiceIntent> _otherIntents = const [];
+
   @override
   void initState() {
     super.initState();
     _loadRecent();
+
+    if (widget.openVoice) {
+      // After the first frame: the sheet needs a mounted Navigator, and the
+      // screen should be visibly on screen before the microphone opens over
+      // it.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _startVoice());
+    }
+  }
+
+  /// Listen, then search - the whole of the voice path from this screen's
+  /// point of view.
+  ///
+  /// Everything downstream is the ORDINARY search. The transcript becomes a
+  /// query string and goes through _runTerm like a tapped recent search, so
+  /// voice results are the same products, ranked the same way, in the same
+  /// cards, with the same paging. There is no second search system here and
+  /// deliberately no way for one to grow.
+  Future<void> _startVoice() async {
+    final query = await VoiceSearchSheet.show(context);
+    if (!mounted || query == null) return;
+
+    final primary = query.primary;
+    if (primary == null) return;
+
+    setState(() {
+      _spokenAs = query.transcript;
+      // Everything after the first - "do kilo chini AUR ek litre tel" is two
+      // shopping trips, and the second must not be silently dropped just
+      // because only one can be on screen.
+      _otherIntents = query.intents.skip(1).toList();
+    });
+
+    _runTerm(primary.searchPhrase);
+  }
+
+  /// Runs one of the other things the customer asked for in the same breath.
+  void _runOtherIntent(VoiceIntent intent) {
+    AppHaptics.selection();
+    setState(() {
+      _otherIntents = [
+        for (final other in _otherIntents)
+          if (other != intent) other,
+      ];
+    });
+    _runTerm(intent.searchPhrase);
   }
 
   Future<void> _loadRecent() async {
@@ -90,6 +152,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       onCleared: () => setState(() {
         _results = [];
         _hasSearched = false;
+        // Typing is a new question - the previous utterance stops being the
+        // explanation for what is on screen.
+        _spokenAs = null;
+        _otherIntents = const [];
         _errorMessage = null;
         _interpretedAs = null;
         _didYouMean = null;
@@ -214,11 +280,25 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       appBar: AppBar(
         title: TextField(
           controller: _controller,
-          autofocus: true,
+          // Not when arriving by voice: a keyboard springing up behind the
+          // listening sheet is both wrong and, on a small phone, in the way.
+          autofocus: !widget.openVoice,
           onChanged: _onQueryChanged,
-          decoration: const InputDecoration(
-            hintText: 'Search for atta, dal, milk, snacks...',
+          decoration: InputDecoration(
+            hintText: 'Search for atta, dal, coke and more',
             border: InputBorder.none,
+            // In the field itself rather than an AppBar action, so it reads
+            // as part of the search box - and so its 48dp tap target sits
+            // where a thumb already is.
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.mic_none_rounded),
+              color: AppColors.primary,
+              tooltip: 'Search by voice',
+              onPressed: () {
+                AppHaptics.selection();
+                _startVoice();
+              },
+            ),
           ),
         ),
       ),
@@ -273,8 +353,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           query: _controller.text.trim(),
           interpretedAs: _interpretedAs,
           didYouMean: _didYouMean,
+          spokenAs: _spokenAs,
           onUseSuggestion: _runTerm,
         ),
+        if (_otherIntents.isNotEmpty)
+          _AlsoHeard(intents: _otherIntents, onTap: _runOtherIntent),
         Expanded(child: _buildGrid()),
         _buildLoadMore(),
       ],
@@ -375,20 +458,33 @@ class _SearchInterpretation extends StatelessWidget {
     required this.query,
     required this.interpretedAs,
     required this.didYouMean,
+    required this.spokenAs,
     required this.onUseSuggestion,
   });
 
   final String query;
   final String? interpretedAs;
   final String? didYouMean;
+
+  /// The raw transcript, when this search came from the microphone.
+  ///
+  /// Shown because a customer cannot correct a mishearing they never see. If
+  /// the recogniser turns "Aashirvaad" into "ashirbad", the results are
+  /// baffling, and the transcript is the only thing on screen that explains
+  /// them.
+  final String? spokenAs;
+
   final ValueChanged<String> onUseSuggestion;
 
   @override
   Widget build(BuildContext context) {
     final corrected = interpretedAs;
     final suggestion = didYouMean;
+    final heard = spokenAs;
 
-    if (corrected == null && suggestion == null) return const SizedBox.shrink();
+    if (corrected == null && suggestion == null && heard == null) {
+      return const SizedBox.shrink();
+    }
 
     return Container(
       width: double.infinity,
@@ -397,7 +493,40 @@ class _SearchInterpretation extends StatelessWidget {
         color: AppColors.ivory,
         border: Border(bottom: BorderSide(color: AppColors.divider)),
       ),
-      child: corrected != null
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (heard != null) ...[
+            Row(
+              children: [
+                const Icon(Icons.mic_none_rounded, size: 14, color: AppColors.textSecondary),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    'You said "$heard"',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+                  ),
+                ),
+              ],
+            ),
+            if (corrected != null || suggestion != null) const SizedBox(height: 6),
+          ],
+          _understanding(corrected, suggestion),
+        ],
+      ),
+    );
+  }
+
+  /// What the SEARCH understood, as opposed to what the microphone heard.
+  /// Unchanged from before voice existed - a typed search still renders
+  /// exactly this and nothing above it.
+  Widget _understanding(String? corrected, String? suggestion) {
+    if (corrected == null && suggestion == null) return const SizedBox.shrink();
+
+    return corrected != null
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -445,8 +574,68 @@ class _SearchInterpretation extends StatelessWidget {
                   ],
                 ),
               ),
-            ),
+            );
+  }
+}
+
+/// The other things the customer asked for in the same breath.
+///
+/// "do kilo chini aur ek litre tel" is two shopping trips and only one can be
+/// on screen, so the rest become chips rather than being silently dropped.
+///
+/// CHIPS, NOT AN AUTOMATIC ADD-TO-CART. The brief allows adding them
+/// automatically "if the existing cart architecture supports it safely", and
+/// the honest answer is that a speech recogniser's second-best guess is not
+/// evidence enough to put something in somebody's basket. A tap costs the
+/// customer nothing and cannot be wrong.
+class _AlsoHeard extends StatelessWidget {
+  const _AlsoHeard({required this.intents, required this.onTap});
+
+  final List<VoiceIntent> intents;
+  final ValueChanged<VoiceIntent> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (intents.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.divider)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'You also asked for',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              for (final intent in intents)
+                ActionChip(
+                  label: Text(_label(intent)),
+                  labelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                  backgroundColor: AppColors.tint(AppColors.primary),
+                  side: BorderSide.none,
+                  onPressed: () => onTap(intent),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
+  }
+
+  /// The quantity is shown but never searched for - see VoiceIntent.quantity.
+  static String _label(VoiceIntent intent) {
+    final count = intent.quantity;
+    return count == null ? intent.searchPhrase : '$count x ${intent.searchPhrase}';
   }
 }
 

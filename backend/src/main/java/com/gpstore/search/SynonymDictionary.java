@@ -8,9 +8,12 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.core.io.ClassPathResource;
 import org.slf4j.Logger;
@@ -63,7 +66,7 @@ public class SynonymDictionary {
 
     public SynonymDictionary(SearchSynonymRepository repository) {
         this.repository = repository;
-        seedIfEmpty();
+        seedMissing();
         refresh();
     }
 
@@ -79,25 +82,52 @@ public class SynonymDictionary {
      * developer database. Seeding here covers every environment from one
      * source of truth.
      *
-     * <p>ONLY EVER SEEDS AN EMPTY TABLE, so a shop's own edits and additions
-     * are never overwritten on restart.
+     * <p>ONLY EVER INSERTS TERMS THAT ARE ABSENT, so a shop's own edits and
+     * additions are never overwritten on restart - while a word added to the
+     * bundled file still reaches a database that was seeded long ago.
      */
-    private void seedIfEmpty() {
+    private void seedMissing() {
         try {
-            if (repository.count() > 0) return;
-
             List<SearchSynonym> defaults = readBundledVocabulary();
             if (defaults.isEmpty()) return;
 
-            repository.saveAll(defaults);
-            log.info("Seeded {} search synonyms from the bundled vocabulary", defaults.size());
+            // ADDS WHAT IS MISSING, rather than only filling an empty table.
+            //
+            // The original guard was `if (count() > 0) return`, which was
+            // correct for the day it was written and quietly wrong for every
+            // day after: once a shop's database had been seeded, a word added
+            // to the bundled file could NEVER reach it. The vocabulary would
+            // ship, deploy, and silently do nothing - the failure mode being
+            // that search simply stayed as dumb as it was, with nothing in
+            // any log to say why.
+            //
+            // The guarantee that mattered is kept exactly. Existing rows are
+            // never read, never updated and never deleted, so a shop's own
+            // edits and its corrections to these defaults still survive every
+            // restart. Only terms that are absent are inserted.
+            Set<String> existing = new HashSet<>();
+            for (SearchSynonym row : repository.findAll()) {
+                if (row.getTerm() != null) existing.add(row.getTerm().toLowerCase(Locale.ROOT));
+            }
+
+            List<SearchSynonym> missing = new ArrayList<>();
+            for (SearchSynonym candidate : defaults) {
+                if (existing.add(candidate.getTerm().toLowerCase(Locale.ROOT))) {
+                    missing.add(candidate);
+                }
+            }
+
+            if (missing.isEmpty()) return;
+
+            repository.saveAll(missing);
+            log.info("Added {} search synonyms from the bundled vocabulary", missing.size());
         } catch (Exception e) {
-            // Two instances starting at once can both see an empty table and
-            // both insert; the unique constraint on term means the loser
-            // fails here, having lost a race whose winner did the work. That
-            // is not an error worth failing startup over - and neither is any
-            // other seeding problem, since search still runs without the
-            // dictionary.
+            // Two instances starting at once can both see the same term
+            // missing and both insert it; the unique constraint on term means
+            // the loser fails here, having lost a race whose winner did the
+            // work. That is not an error worth failing startup over - and
+            // neither is any other seeding problem, since search still runs
+            // without the dictionary.
             log.warn("Could not seed the search vocabulary (it may already have been seeded): {}", e.getMessage());
         }
     }

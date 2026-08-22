@@ -11,6 +11,13 @@
          Not a runtime permission - it is install-time and prompts nobody. -->
     <uses-permission android:name="android.permission.VIBRATE"/>
 
+    <!--
+      Voice search. RECORD_AUDIO is what the on-device recogniser needs to
+      hear the customer; nothing in this app records, stores or uploads audio
+      of its own - see SpeechService.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
     <!-- Needed for the "use my current location" button when adding an
          address (see AddAddressScreen / geolocator package) - without
          these, Geolocator.getCurrentPosition() fails at runtime even if
@@ -41,6 +48,20 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"/>
+
+    <!--
+      Android 11 (API 30) hides every other installed app from this one
+      unless it is declared here. Without this the speech plugin reports
+      "recognition unavailable" on a phone that has a perfectly good
+      recogniser installed - no error, no exception, just a microphone that
+      never works. It is the single most commonly missed line in a voice
+      feature.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
+        </intent>
+    </queries>
 
     <application
         android:label="GP-Store"

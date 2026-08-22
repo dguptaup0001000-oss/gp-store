@@ -230,6 +230,75 @@ class SmartSearchIntegrationTest {
                 .containsIgnoringCase("sugar");
     }
 
+    // ------------------------------------------------------------ Devanagari
+    //
+    // Voice made these load-bearing. An Android recogniser set to hi-IN
+    // returns Hindi script for everything, so a customer speaking Hindi
+    // produces a query that, before transliteration, could not have matched a
+    // single product in a catalogue written in Latin.
+    //
+    // NOTE ON THE MISSING MARKER. Every other test here appends a unique
+    // marker so it only ever asserts about products it created. These
+    // deliberately do not: the marker is Latin, and searching "आटा MARKER"
+    // would match all seven fixtures on the marker alone - the test would
+    // pass whether or not the Devanagari half did anything at all. Searching
+    // the Hindi word by itself is the only way to prove the script reached
+    // the catalogue.
+
+    @Test
+    @DisplayName("a brand spoken in Hindi script reaches the brand in the catalogue")
+    void devanagariBrandIsFound() {
+        // The case the dictionary cannot help with, and the reason the
+        // romanised layer exists at all. "आशीर्वाद" is in no vocabulary and
+        // never will be - brands are catalogue data, not words - so the only
+        // route from Hindi script to this product is transliteration.
+        clearSearchCache();
+        List<ProductResponse> results =
+                smartSearch.search("आशीर्वाद", PageRequest.of(0, 20)).getResults().getContent();
+
+        assertThat(results)
+                .as("searching the brand in Hindi script must find the brand")
+                .isNotEmpty()
+                .anySatisfy(product -> assertThat(
+                        (product.getName() + " " + product.getBrand()).toLowerCase())
+                        .contains("aashirvaad"));
+    }
+
+    @Test
+    @DisplayName("a Hindi-script search says what it searched for instead")
+    void devanagariIsReported() {
+        clearSearchCache();
+        SmartSearchResult result = smartSearch.search("आशीर्वाद", PageRequest.of(0, 20));
+
+        assertThat(result.getInterpretedAs())
+                .as("a customer who spoke Hindi must be able to see what the shop searched for - "
+                        + "results they cannot explain are results they cannot correct")
+                .isNotNull()
+                // The consonant core, not a chosen vowel spelling: what the
+                // customer must see is that the shop searched for their
+                // brand, and "shirvad" is the part of that no transliteration
+                // scheme can move.
+                .containsIgnoringCase("shirvad");
+    }
+
+    @Test
+    @DisplayName("a Hindi grocery word still goes through the vocabulary, not the romaniser")
+    void devanagariWordUsesTheDictionary() {
+        // The other half. "चीनी" IS in the vocabulary, and the right answer is
+        // Sugar - not a romanised "cheenee", which matches nothing. This
+        // passes only because normalize() now transliterates before building
+        // the phonetic key; before that, the Hindi spelling produced a key of
+        // Devanagari characters that could never equal the key of "chini".
+        assertThat(SearchNormalizer.phoneticKey("चीनी"))
+                .as("Hindi and Hinglish spellings of the same word must key alike")
+                .isEqualTo(SearchNormalizer.phoneticKey("chini"))
+                .isNotEmpty();
+
+        assertThat(synonyms.canonicalFor("चीनी"))
+                .as("चीनी must resolve to the same canonical word as chini")
+                .isEqualTo(synonyms.canonicalFor("chini"));
+    }
+
     @Test
     @DisplayName("nonsense returns nothing rather than unrelated products")
     void nonsenseFindsNothing() {

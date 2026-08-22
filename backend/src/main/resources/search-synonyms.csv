@@ -2,7 +2,7 @@
 # English word to search the catalogue for.
 #
 # THE SINGLE SOURCE OF TRUTH for this list. It is loaded into the
-# search_synonyms table on first startup (see SynonymDictionary.seedIfEmpty),
+# search_synonyms table on startup (see SynonymDictionary.seedMissing),
 # which is what makes Smart Search work in every environment rather than only
 # where database migrations have been run - CI deliberately runs with Flyway
 # disabled, and a seed that lived only in a migration left the table present
@@ -13,8 +13,9 @@
 # "chiny". Adding every spelling by hand is exactly what this design avoids.
 #
 # Editable afterwards in the database - rows added there are picked up on the
-# next refresh and are never overwritten by this file, which only ever seeds
-# an empty table.
+# next refresh and are never overwritten by this file, which only ever INSERTS
+# terms the table does not already have. A shop's own corrections survive; a
+# word added here still reaches a database that was seeded months ago.
 #
 # Format: term,canonical_term  (blank lines and #-comments ignored)
 
@@ -123,3 +124,56 @@ surf,detergent
 bartan,dishwash
 agarbatti,incense
 mombatti,candle
+
+# ---------------------------------------------------------------------------
+# BRAND NICKNAMES. What customers actually say out loud, mapped to what the
+# catalogue calls it. These matter far more for VOICE than for typing: a
+# recogniser transcribes the sound it heard, so "parle ji" arrives spelled
+# that way however the packet is printed.
+#
+# The phonetic key covers the spelling variants on its own - "aashirwad"
+# below also matches "ashirvad", "aashirvaad" and "ashirwaad" - so this stays
+# one row per brand rather than one per pronunciation.
+parle ji,Parle-G
+parleji,Parle-G
+parle g,Parle-G
+aashirwad,Aashirvaad
+ashirwad,Aashirvaad
+surf,Surf Excel
+lays,Lay's
+maggie,Maggi
+kurkure,Kurkure
+bourbon,Bourbon
+marie,Marie
+bisleri,Bisleri
+coke,Coca-Cola
+cola,Coca-Cola
+thums up,Thums Up
+frooti,Frooti
+horlicks,Horlicks
+bournvita,Bournvita
+tata namak,Tata Salt
+fortune,Fortune
+saffola,Saffola
+dhara,Dhara
+patanjali,Patanjali
+amul,Amul
+mother dairy,Mother Dairy
+britannia,Britannia
+colgate,Colgate
+pepsodent,Pepsodent
+closeup,Close Up
+lux,Lux
+lifebuoy,Lifebuoy
+dettol,Dettol
+santoor,Santoor
+vim,Vim
+harpic,Harpic
+rin,Rin
+tide,Tide
+ariel,Ariel
+nirma,Nirma
+head and shoulders,Head & Shoulders
+clinic plus,Clinic Plus
+sunsilk,Sunsilk
+dove,Dove

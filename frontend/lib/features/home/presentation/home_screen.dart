@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/util/app_haptics.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../cart/presentation/cart_screen.dart';
@@ -189,11 +190,40 @@ class HomeScreen extends ConsumerWidget {
                     borderRadius: BorderRadius.circular(28),
                     boxShadow: AppElevation.card,
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
-                      Icon(Icons.search, color: AppColors.textSecondary),
-                      SizedBox(width: 8),
-                      Text('Search for atta, dal, coke and more', style: TextStyle(color: AppColors.textSecondary)),
+                      const Icon(Icons.search, color: AppColors.textSecondary),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Search for atta, dal, coke and more',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: AppColors.textSecondary),
+                        ),
+                      ),
+                      // Opens the search screen ALREADY LISTENING, so the
+                      // microphone here is one gesture rather than two. The
+                      // pill's own tap still opens search with a keyboard,
+                      // which is what somebody who wants to type expects.
+                      GestureDetector(
+                        onTap: () {
+                          AppHaptics.selection();
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const SearchScreen(openVoice: true)),
+                          );
+                        },
+                        // Opaque, so the taps land here rather than falling
+                        // through to the pill behind and opening a keyboard.
+                        behavior: HitTestBehavior.opaque,
+                        child: const Padding(
+                          // Padding rather than a bigger icon: the target is
+                          // a comfortable 48dp for a thumb while the icon
+                          // stays the same visual weight as the search glass.
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          child: Icon(Icons.mic_none_rounded, color: AppColors.primary),
+                        ),
+                      ),
                     ],
                   ),
                 ),
