@@ -50,10 +50,27 @@ class LegacyOrderNullStatusTest {
     private Long legacyOrderId;
     private Long customerId;
 
-    /** An order exactly as the pre-payment-tracking code left it. */
+    /**
+     * An order exactly as the pre-payment-tracking code left it.
+     *
+     * CREATES ITS OWN CUSTOMER rather than reusing whatever is in the table.
+     * The first version read min(id) from customers and passed only because
+     * other test classes happened to run first and leave rows behind - on a
+     * fresh CI database, with a different class order, it failed with "test
+     * database has no customers". A test that depends on another test's
+     * leftovers is not a test, it is a coincidence.
+     */
     private void insertLegacyOrder() {
-        customerId = jdbc.queryForObject("SELECT min(id) FROM customers", Long.class);
-        assertNotNull(customerId, "test database has no customers");
+        jdbc.update("""
+                INSERT INTO customers (full_name, email, mobile_number, password, role, active)
+                VALUES ('Legacy Order Fixture', ?, ?, 'not-a-real-hash', 'CUSTOMER', true)
+                """,
+                "legacy-fixture-" + System.nanoTime() + "@example.com",
+                "9" + (100000000 + (int) (Math.random() * 899999999)));
+        customerId = jdbc.queryForObject(
+                "SELECT id FROM customers WHERE full_name = 'Legacy Order Fixture' ORDER BY id DESC LIMIT 1",
+                Long.class);
+        assertNotNull(customerId, "failed to create the fixture customer");
 
         jdbc.update("""
                 INSERT INTO orders (customer_id, order_number, total_amount, order_status,
@@ -70,6 +87,9 @@ class LegacyOrderNullStatusTest {
     void removeLegacyOrder() {
         if (legacyOrderId != null) {
             jdbc.update("DELETE FROM orders WHERE id = ?", legacyOrderId);
+        }
+        if (customerId != null) {
+            jdbc.update("DELETE FROM customers WHERE id = ?", customerId);
         }
     }
 

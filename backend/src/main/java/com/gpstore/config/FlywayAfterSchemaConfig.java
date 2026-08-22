@@ -53,7 +53,20 @@ import org.springframework.context.annotation.Configuration;
  * default ordering back.
  */
 @Configuration
-@ConditionalOnProperty(name = "app.flyway-after-schema.enabled", havingValue = "true", matchIfMissing = true)
+// BOTH properties must be true, and spring.flyway.enabled is not optional
+// here: with Flyway disabled there is no Flyway bean at all, and this class
+// asks for one. CI sets FLYWAY_ENABLED=false, so without this condition every
+// @SpringBootTest fails to start with
+//
+//     No qualifying bean of type 'org.flywaydb.core.Flyway' available
+//
+// which is exactly what happened - the missing CI coverage this class exists
+// to talk about is the same gap that let the first version through green
+// locally, where Flyway is always on.
+@ConditionalOnProperty(
+        name = {"app.flyway-after-schema.enabled", "spring.flyway.enabled"},
+        havingValue = "true",
+        matchIfMissing = true)
 public class FlywayAfterSchemaConfig {
 
     private static final Logger log = LoggerFactory.getLogger(FlywayAfterSchemaConfig.class);
