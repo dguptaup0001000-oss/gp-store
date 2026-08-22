@@ -120,7 +120,11 @@ public class CatalogImageBackfillService {
      *              off, because products that already have images are skipped.
      */
     public BackfillResult backfill(int limit) {
-        List<ProductVariant> variants = variantRepository.findSeededVariants();
+        // NOT findSeededVariants(). That asked for isTestData = true, which
+        // excluded every product in a shop's live catalogue - the run
+        // reported considered=0 and looked clean while the products that
+        // needed images were never examined. See the query's own comment.
+        List<ProductVariant> variants = variantRepository.findVariantsWithoutRealImages();
         int considered = 0, matched = 0, written = 0, already = 0, noMatch = 0;
         List<String> problems = new ArrayList<>();
 
@@ -134,6 +138,11 @@ public class CatalogImageBackfillService {
             }
             considered++;
 
+            // A gallery row is evidence of a real previous run - the backfill
+            // only ever writes verified photographs, so this is the resume
+            // point. The variant's own imageUrl is deliberately NOT the test:
+            // a placeholder URL resolves and returns 200, so "has a URL"
+            // would count a picture of the product's name as a photograph.
             if (productImageRepository.countByProductId(product.getId()) > 0) {
                 already++;
                 continue;
