@@ -756,7 +756,7 @@ public class OrderService {
         response.setOrderId(order.getId());
         response.setOrderNumber(order.getOrderNumber());
         response.setMessage("Order placed successfully.");
-        response.setPaymentStatus(newPayment.getPaymentStatus().name());
+        response.setPaymentStatus(nameOf(newPayment.getPaymentStatus()));
         response.setUpiPaymentLink(paymentService.upiLinkFor(order, paymentMethod));
 
         return response;
@@ -797,14 +797,45 @@ public class OrderService {
                 .map(order -> toOrderResponse(order, false));
     }
 
+    /**
+     * Enum name, or null for a null enum.
+     *
+     * Every status column these read from is nullable in the schema, so
+     * calling .name() on one directly is a 500 waiting for the right row.
+     * See setPaymentStatus in toOrderResponse for the one that actually
+     * happened.
+     */
+    private static String nameOf(Enum<?> value) {
+        return value == null ? null : value.name();
+    }
+
     private OrderResponse toOrderResponse(Order order, boolean includeCustomerName) {
         OrderResponse response = new OrderResponse();
 
         response.setOrderId(order.getId());
         response.setOrderNumber(order.getOrderNumber());
         response.setTotalAmount(order.getTotalAmount());
-        response.setOrderStatus(order.getOrderStatus().name());
-        response.setPaymentStatus(order.getPaymentStatus().name());
+        response.setOrderStatus(nameOf(order.getOrderStatus()));
+        // NULLABLE, and 500ing on it took out three endpoints at once.
+        //
+        // orders.payment_status has no NOT NULL constraint and no default,
+        // and order creation only started setting it (COD_PENDING/PENDING,
+        // see placeOrder) after orders already existed. Every order older
+        // than that code still holds NULL, and nothing ever backfilled them.
+        //
+        // This mapper backs the admin order list, the admin per-customer
+        // order list AND the customer's own order history, so a single
+        // legacy row made all three answer 500 - the admin could not open
+        // the orders screen at all. Found by probing a running instance
+        // against a database with real orders in it; no test caught it,
+        // because the orders the tests create are all made by placeOrder
+        // and therefore all have a status.
+        //
+        // Reported as null rather than defaulted to a value: which status a
+        // pre-payment-tracking order "really" had is not knowable here, and
+        // inventing PENDING for a delivered COD order would be a lie the
+        // admin screen then shows as fact.
+        response.setPaymentStatus(nameOf(order.getPaymentStatus()));
         response.setOrderDate(order.getOrderDate());
 
         if (includeCustomerName) {
@@ -1111,7 +1142,7 @@ public class OrderService {
         // the customer has since confirmed must not read back as PENDING).
         Payment payment = paymentRepository.findByOrderId(orderId).orElse(null);
         if (payment != null) {
-            response.setPaymentStatus(payment.getPaymentStatus().name());
+            response.setPaymentStatus(nameOf(payment.getPaymentStatus()));
             // Pure local string building from order number and amount (see
             // PaymentService.upiLinkFor) - no gateway call - so the replay
             // reproduces the identical link the first response carried, and
@@ -1122,7 +1153,7 @@ public class OrderService {
             // into the order transaction. Fall back to the order's own copy
             // of the status so the client still gets a non-null value and
             // stays on the single-request path.
-            response.setPaymentStatus(order.getPaymentStatus().name());
+            response.setPaymentStatus(nameOf(order.getPaymentStatus()));
         }
 
         return response;

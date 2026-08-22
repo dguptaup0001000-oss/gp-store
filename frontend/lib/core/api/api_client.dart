@@ -62,6 +62,9 @@ class ApiClient {
   /// is the same object across a retry chain, so a request cannot escape its
   /// own attempt budget by looking like a new one.
   static const _attemptKey = 'gpstore_retry_attempt';
+  // Marks a request that has already been retried once after a token
+  // refresh, so a persistently-401 endpoint cannot refresh in a loop.
+  static const _refreshedKey = 'gpstore_refreshed_once';
 
   late final Dio _dio;
   final TokenStorage tokenStorage;
@@ -96,13 +99,31 @@ class ApiClient {
   Future<void> _handleError(DioException error, ErrorInterceptorHandler handler) async {
     final response = error.response;
 
-    if (response?.statusCode == 401 && error.requestOptions.path != '/api/auth/refresh') {
+    // The refresh-once guard is load-bearing, not defensive tidying. The
+    // retry below goes back through this same interceptor, so a request that
+    // keeps answering 401 would refresh, retry, 401, refresh again - with no
+    // attempt counter of its own, unlike _retryIfSafe - and rotate the
+    // refresh token on every pass. That is not hypothetical: the backend
+    // answered 401 to every genuine 403 until an accessDeniedHandler was
+    // added (see SecurityConfig), so any customer touching an admin-only
+    // route landed in exactly this loop.
+    //
+    // Fixing the backend closes the case that was actually happening. This
+    // bounds the class: any endpoint that keeps returning 401 after a
+    // successful refresh - a revoked session, a role change mid-session - is
+    // a dead session, not a stale token, and one refresh is enough to know it.
+    final alreadyRefreshed = error.requestOptions.extra[_refreshedKey] == true;
+
+    if (response?.statusCode == 401 &&
+        error.requestOptions.path != '/api/auth/refresh' &&
+        !alreadyRefreshed) {
       final newAccessToken = await _refreshAccessToken();
 
       if (newAccessToken != null) {
         // Retry the original request once, with the new token.
         final retryOptions = error.requestOptions;
         retryOptions.headers['Authorization'] = 'Bearer $newAccessToken';
+        retryOptions.extra[_refreshedKey] = true;
         try {
           final retryResponse = await _dio.fetch(retryOptions);
           handler.resolve(retryResponse);
