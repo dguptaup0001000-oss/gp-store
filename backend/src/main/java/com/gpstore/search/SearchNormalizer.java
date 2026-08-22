@@ -216,15 +216,24 @@ public final class SearchNormalizer {
      * two unrelated strings. Voice makes this urgent rather than theoretical:
      * an Android recogniser set to hi-IN returns Devanagari for everything.
      *
-     * <p>CHARACTER BY CHARACTER, AND NO INHERENT VOWEL. A faithful
-     * transliteration would insert the implicit "a" that every Devanagari
-     * consonant carries - "कल" is "kal", not "kl". This deliberately does
-     * not, because the only consumer is a pipeline that strips vowels
-     * anyway: phoneticKey reduces both "kal" and "kl" to "kl". Adding the
-     * rule would be more code, more edge cases around the virama, and
-     * exactly zero difference to any key. The one place the vowels do matter
-     * is trigram similarity against a product name, and there the vowels a
-     * matra produces - the "aa" of आटा - are the ones that carry the sound.
+     * <p>THE INHERENT VOWEL IS WRITTEN OUT. Every Devanagari consonant carries
+     * an implicit "a" unless a matra or a virama says otherwise, so नमक is
+     * "namak" - three consonants, two vowels that appear nowhere on the page.
+     *
+     * <p>This class used to skip that, on the reasoning that the only consumer
+     * strips vowels anyway - phoneticKey reduces "kal" and "kl" alike. That
+     * was wrong twice over, and a customer found it. The romanised form is
+     * ALSO handed to the product search, where trigram similarity is almost
+     * entirely about vowels: "nmk" barely resembles "namak", so a search for
+     * टाटा नमक ranked Tata TEA above Tata SALT. And it is shown to the
+     * customer, who read "Showing results for tata nmk" and could reasonably
+     * conclude the app was broken.
+     *
+     * <p>Word-final schwa is dropped, because Hindi drops it: नमक is namak,
+     * not namaka. Medial schwa is kept - सरसों becomes "sarason" rather than
+     * "sarson" - which is one edit away and well inside what areCloseEnough
+     * and pg_trgm both forgive. Getting that fully right needs a pronunciation
+     * dictionary, and the last edit of distance is not worth one.
      *
      * <p>Returns the input unchanged when it holds no Devanagari, which is
      * almost every query, so the common path costs one scan and no
@@ -235,6 +244,10 @@ public final class SearchNormalizer {
         if (!containsDevanagari(raw)) return raw;
 
         StringBuilder out = new StringBuilder(raw.length() * 2);
+        // Where an inherent vowel was last written, so it can be removed
+        // again if the word turns out to end there.
+        int schwaAt = -1;
+
         for (int i = 0; i < raw.length(); i++) {
             char c = raw.charAt(i);
 
@@ -248,6 +261,7 @@ public final class SearchNormalizer {
                 String nuktaForm = NUKTA_FORMS.get(c);
                 if (nuktaForm != null) {
                     out.append(nuktaForm);
+                    schwaAt = appendInherentVowel(out, raw, i);
                     i++; // the dot itself is consumed with the consonant
                     continue;
                 }
@@ -256,6 +270,11 @@ public final class SearchNormalizer {
             String mapped = DEVANAGARI.get(c);
             if (mapped != null) {
                 out.append(mapped);
+                if (CONSONANTS.contains(c)) {
+                    schwaAt = appendInherentVowel(out, raw, i);
+                } else {
+                    schwaAt = -1;
+                }
             } else if (c >= DEVANAGARI_START && c <= DEVANAGARI_END) {
                 // An unmapped Devanagari character - a rare sign or a
                 // combining mark. Dropped rather than passed through, because
@@ -263,10 +282,47 @@ public final class SearchNormalizer {
                 // no Latin spelling can ever produce.
                 continue;
             } else {
+                // Leaving Devanagari - a space, or Latin text in a mixed
+                // query. Any schwa sitting at the end of the word just
+                // finished is dropped here, which is what makes नमक "namak"
+                // rather than "namaka".
+                schwaAt = dropTrailingSchwa(out, schwaAt);
                 out.append(c);
             }
         }
+
+        dropTrailingSchwa(out, schwaAt);
         return out.toString();
+    }
+
+    /**
+     * Appends the implicit "a" unless the next character supplies its own
+     * vowel or suppresses it.
+     *
+     * @return where the schwa was written, or -1 if none was
+     */
+    private static int appendInherentVowel(StringBuilder out, String raw, int consonantAt) {
+        int next = consonantAt + 1;
+        // A nukta belongs to the consonant just written; the vowel decision
+        // is made by whatever follows IT.
+        if (next < raw.length() && raw.charAt(next) == NUKTA) next++;
+
+        if (next < raw.length()) {
+            char following = raw.charAt(next);
+            // A matra writes the vowel itself, and a virama removes it.
+            if (following == VIRAMA || MATRAS.contains(following)) return -1;
+        }
+
+        out.append('a');
+        return out.length() - 1;
+    }
+
+    /** Removes a schwa that ended up at the end of a word. */
+    private static int dropTrailingSchwa(StringBuilder out, int schwaAt) {
+        if (schwaAt >= 0 && schwaAt == out.length() - 1) {
+            out.deleteCharAt(schwaAt);
+        }
+        return -1;
     }
 
     /** Whether a query is written in Hindi script at all. */
@@ -284,6 +340,23 @@ public final class SearchNormalizer {
 
     /** The combining dot that turns a consonant into its borrowed-sound form. */
     private static final char NUKTA = '\u093C';
+
+    /** Suppresses the inherent vowel - the half-letter of a conjunct. */
+    private static final char VIRAMA = '\u094D';
+
+    /** Dependent vowel signs. A consonant followed by one needs no schwa. */
+    private static final Set<Character> MATRAS = Set.of(
+            'ा', 'ि', 'ी', 'ु', 'ू', 'ृ', 'े', 'ै', 'ो', 'ौ', 'ॉ', 'ॅ');
+
+    /** Consonants, which are the only characters that carry an inherent vowel. */
+    private static final Set<Character> CONSONANTS = Set.of(
+            'क', 'ख', 'ग', 'घ', 'ङ',
+            'च', 'छ', 'ज', 'झ', 'ञ',
+            'ट', 'ठ', 'ड', 'ढ', 'ण',
+            'त', 'थ', 'द', 'ध', 'न',
+            'प', 'फ', 'ब', 'भ', 'म',
+            'य', 'र', 'ल', 'व', 'ळ',
+            'श', 'ष', 'स', 'ह');
 
     /** Base consonant -> the sound it makes when a nukta follows it. */
     private static final Map<Character, String> NUKTA_FORMS = Map.of(
