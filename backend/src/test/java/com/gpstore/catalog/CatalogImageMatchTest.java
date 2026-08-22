@@ -108,4 +108,36 @@ class CatalogImageMatchTest {
                 candidate("Fortune", "Fortune Refined Palmolein"), "Fortune", "Vanaspati 1 L"))
                 .isFalse();
     }
+
+    // ------------------------------------------------- refusal is not absence
+
+    @Test
+    @DisplayName("A refusal is reported as a refusal, never as 'no photograph found'")
+    void refusalIsNamed() {
+        // The bug this replaces: Open Food Facts blocked all twenty requests
+        // and the run reported noMatch=20, problems=[]. That reads as a clean
+        // run against a source with nothing in it, and it sent a real
+        // afternoon looking at a matching rule that had never been consulted.
+        String message = CatalogImageBackfillService.describeUnavailable(403, 20);
+
+        assertThat(message)
+                .contains("403")
+                .contains("Stopped after 20")
+                .contains("NOT 'no photograph found'");
+    }
+
+    @Test
+    @DisplayName("Rate limiting reads differently from a block")
+    void rateLimitIsNamed() {
+        assertThat(CatalogImageBackfillService.describeUnavailable(429, 3))
+                .contains("rate-limited")
+                .contains("Stopped after 3");
+    }
+
+    @Test
+    @DisplayName("An unexpected status still says what it was")
+    void unknownStatusIsNamed() {
+        assertThat(CatalogImageBackfillService.describeUnavailable(418, 1))
+                .contains("418");
+    }
 }

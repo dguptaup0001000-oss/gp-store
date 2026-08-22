@@ -108,6 +108,36 @@ public class CatalogImageBackfillService {
     public record BackfillResult(int considered, int matched, int imagesWritten,
                                  int alreadyHadImages, int noMatch, List<String> problems) {}
 
+    /** The image source refused the request - not the same as having no photograph. */
+    static final class ImageSourceUnavailable extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        final int status;
+
+        ImageSourceUnavailable(int status) {
+            super("Image source returned HTTP " + status);
+            this.status = status;
+        }
+    }
+
+    /**
+     * What to tell the operator when the source turns us away.
+     *
+     * <p>Names the status and how far the run got, because "noMatch" said
+     * neither and cost real time chasing a matching rule that was never
+     * consulted.
+     */
+    static String describeUnavailable(int status, int consideredSoFar) {
+        String reason = switch (status) {
+            case 403 -> "refused the request (403) - it blocks anonymous bulk callers";
+            case 429 -> "rate-limited the request (429)";
+            case 503, 502, 504 -> "is temporarily unavailable (" + status + ")";
+            default -> "returned HTTP " + status;
+        };
+        return "Open Food Facts " + reason
+                + ". Stopped after " + consideredSoFar + " product(s); nothing was written. "
+                + "This is NOT 'no photograph found' - the search never ran.";
+    }
+
     /**
      * NOT @Transactional. It makes one slow outbound call per product; holding
      * a database transaction across a thousand of them would pin a connection
@@ -157,6 +187,14 @@ public class CatalogImageBackfillService {
                 }
                 matched++;
                 written += self.storeImages(product.getId(), variant.getId(), urls);
+            } catch (ImageSourceUnavailable e) {
+                // STOP, do not carry on. The source has told us it is not
+                // serving us; nineteen more requests would be nineteen more
+                // refusals, slower, and rude to a free service that asks bots
+                // not to do exactly this.
+                problems.add(describeUnavailable(e.status, considered));
+                log.warn("Image backfill stopped: Open Food Facts returned HTTP {}", e.status);
+                break;
             } catch (Exception e) {
                 problems.add(product.getName() + ": " + e.getClass().getSimpleName());
                 log.warn("Image backfill failed for product {}: {}",
@@ -227,7 +265,15 @@ public class CatalogImageBackfillService {
 
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
-            return List.of();
+            // NOT an empty list. Returning one here made a REFUSAL look
+            // exactly like "this product is not in the database": a run where
+            // Open Food Facts blocked every single request reported
+            // noMatch=20, problems=[], and read as a clean run against a
+            // source that simply had nothing. That is the worst kind of
+            // wrong - confident, quiet, and it sends you looking in the wrong
+            // place. Open Food Facts rejects anonymous bulk callers with an
+            // HTML page and a non-200, which is exactly this path.
+            throw new ImageSourceUnavailable(response.statusCode());
         }
 
         JsonNode products = objectMapper.readTree(response.body()).path("products");
