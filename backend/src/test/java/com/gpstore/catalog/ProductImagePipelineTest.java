@@ -117,6 +117,55 @@ class ProductImagePipelineTest {
         assertThat(variant.getImageUrl()).isNull();
     }
 
+    // ------------------------------------------------------- the worklist
+    //
+    // These are about WHICH products the image backfill can see. The bug they
+    // pin cost the whole feature: a live catalogue's products carry
+    // isTestData = false, so the original query excluded every one of them
+    // and the backfill reported a clean run having examined nothing.
+
+    @Test
+    @DisplayName("A live product with no photograph is on the backfill's worklist")
+    void liveProductWithoutImageIsFound() {
+        Category category = newCategory();
+        newProduct(category, null);
+
+        assertThat(variantRepository.findVariantsWithoutRealImages())
+                .as("a shop's own products are not test data, and they are exactly "
+                        + "the ones that need photographs")
+                .anySatisfy(v -> assertThat(v.getProduct().getCategory().getId())
+                        .isEqualTo(category.getId()));
+    }
+
+    @Test
+    @DisplayName("A placeholder URL counts as needing an image, not as having one")
+    void placeholderCountsAsMissing() {
+        Category category = newCategory();
+        // The exact shape found in production: a text-rendering service asked
+        // to draw the product's own name on a coloured square. It resolves,
+        // returns 200, and is not a photograph of anything.
+        newProduct(category, "https://placehold.co/400x400/FFE9C7/8A4B08/png?text=Gemini%0AVanaspati");
+
+        assertThat(variantRepository.findVariantsWithoutRealImages())
+                .as("a URL that renders the product's name is a picture of some words - "
+                        + "every check that only asks 'is there a URL' is answered yes "
+                        + "while the customer sees no product")
+                .anySatisfy(v -> assertThat(v.getProduct().getCategory().getId())
+                        .isEqualTo(category.getId()));
+    }
+
+    @Test
+    @DisplayName("A real photograph is NOT on the worklist")
+    void realImageIsLeftAlone() {
+        Category category = newCategory();
+        newProduct(category, IMAGE);
+
+        assertThat(variantRepository.findVariantsWithoutRealImages())
+                .as("re-running the backfill must not replace photographs it already found")
+                .noneSatisfy(v -> assertThat(v.getProduct().getCategory().getId())
+                        .isEqualTo(category.getId()));
+    }
+
     private Category newCategory() {
         Category category = new Category();
         category.setName("Image Pipeline " + System.nanoTime());
