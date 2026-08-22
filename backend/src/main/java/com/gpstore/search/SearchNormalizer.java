@@ -3,8 +3,10 @@ package com.gpstore.search;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -63,7 +65,7 @@ public final class SearchNormalizer {
     public static String normalize(String raw) {
         if (raw == null) return "";
 
-        String decomposed = Normalizer.normalize(raw, Normalizer.Form.NFD)
+        String decomposed = Normalizer.normalize(transliterate(raw), Normalizer.Form.NFD)
                 .replaceAll("\\p{M}+", "");
 
         StringBuilder out = new StringBuilder(decomposed.length());
@@ -200,6 +202,162 @@ public final class SearchNormalizer {
         int shorter = Math.min(normalize(a).length(), normalize(b).length());
         int limit = Math.max(2, shorter / 3);
         return editDistance(a, b, limit) <= limit;
+    }
+
+    /**
+     * Devanagari to Latin, so Hindi script reaches the same vocabulary as
+     * Hinglish typing.
+     *
+     * <p>WHY THIS IS NEEDED AT ALL. normalize() kept Devanagari happily -
+     * those characters are letters, so they survived - but phoneticKey folds
+     * LATIN consonants. A word written in Hindi therefore produced a key made
+     * of Devanagari characters, which could never equal the key of the same
+     * word typed in Hinglish. "आटा" and "atta" are the same order and were
+     * two unrelated strings. Voice makes this urgent rather than theoretical:
+     * an Android recogniser set to hi-IN returns Devanagari for everything.
+     *
+     * <p>CHARACTER BY CHARACTER, AND NO INHERENT VOWEL. A faithful
+     * transliteration would insert the implicit "a" that every Devanagari
+     * consonant carries - "कल" is "kal", not "kl". This deliberately does
+     * not, because the only consumer is a pipeline that strips vowels
+     * anyway: phoneticKey reduces both "kal" and "kl" to "kl". Adding the
+     * rule would be more code, more edge cases around the virama, and
+     * exactly zero difference to any key. The one place the vowels do matter
+     * is trigram similarity against a product name, and there the vowels a
+     * matra produces - the "aa" of आटा - are the ones that carry the sound.
+     *
+     * <p>Returns the input unchanged when it holds no Devanagari, which is
+     * almost every query, so the common path costs one scan and no
+     * allocation.
+     */
+    public static String transliterate(String raw) {
+        if (raw == null) return "";
+        if (!containsDevanagari(raw)) return raw;
+
+        StringBuilder out = new StringBuilder(raw.length() * 2);
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+
+            // NUKTA LOOKAHEAD. The borrowed sounds of Urdu and English
+            // loanwords - the z of "ज़", the f of "फ़" - are written as a base
+            // consonant followed by a combining dot, U+093C. They are two
+            // code points, not one, so they cannot be a Java char literal and
+            // have to be recognised as a pair. Skipping this would spell
+            // Fortune as "phorchyoon" and zyada as "jyada".
+            if (i + 1 < raw.length() && raw.charAt(i + 1) == NUKTA) {
+                String nuktaForm = NUKTA_FORMS.get(c);
+                if (nuktaForm != null) {
+                    out.append(nuktaForm);
+                    i++; // the dot itself is consumed with the consonant
+                    continue;
+                }
+            }
+
+            String mapped = DEVANAGARI.get(c);
+            if (mapped != null) {
+                out.append(mapped);
+            } else if (c >= DEVANAGARI_START && c <= DEVANAGARI_END) {
+                // An unmapped Devanagari character - a rare sign or a
+                // combining mark. Dropped rather than passed through, because
+                // passing it through would put a character into the key that
+                // no Latin spelling can ever produce.
+                continue;
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    /** Whether a query is written in Hindi script at all. */
+    public static boolean containsDevanagari(String raw) {
+        if (raw == null) return false;
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c >= DEVANAGARI_START && c <= DEVANAGARI_END) return true;
+        }
+        return false;
+    }
+
+    private static final char DEVANAGARI_START = '\u0900';
+    private static final char DEVANAGARI_END = '\u097F';
+
+    /** The combining dot that turns a consonant into its borrowed-sound form. */
+    private static final char NUKTA = '\u093C';
+
+    /** Base consonant -> the sound it makes when a nukta follows it. */
+    private static final Map<Character, String> NUKTA_FORMS = Map.of(
+            'क', "q",
+            'ख', "kh",
+            'ग', "g",
+            'ज', "z",
+            'ड', "r",
+            'ढ', "rh",
+            'फ', "f",
+            'य', "y");
+
+    private static final Map<Character, String> DEVANAGARI = buildDevanagari();
+
+    private static Map<Character, String> buildDevanagari() {
+        Map<Character, String> m = new HashMap<>();
+
+        // Independent vowels.
+        //
+        // SHORT LATIN VOWELS, INCLUDING FOR THE LONG DEVANAGARI ONES. A
+        // faithful scheme writes ी as "ee" and ू as "oo", and doing that here
+        // was a real bug: "चीनी" became "cheenee", which is four edits from
+        // the "chini" the vocabulary stores - past areCloseEnough's threshold,
+        // so the word resolved to nothing and Hindi sugar found no sugar.
+        //
+        // Mapping them short instead lands on the spelling Indians actually
+        // type: चीनी -> "chini", साबुन -> "sabun", तेल -> "tel", दूध -> "dudh"
+        // are exact, and आटा -> "ata" is one edit from "atta". The vowel
+        // length is lost, which costs nothing at all - phoneticKey discards
+        // vowels entirely, and trigram similarity against a product name is
+        // helped rather than hurt by the shorter form.
+        m.put('अ', "a");   m.put('आ', "a");   m.put('इ', "i");   m.put('ई', "i");
+        m.put('उ', "u");   m.put('ऊ', "u");   m.put('ऋ', "ri");  m.put('ए', "e");
+        m.put('ऐ', "ai");  m.put('ओ', "o");   m.put('औ', "au");  m.put('ऑ', "o");
+        m.put('ऍ', "e");
+
+        // Dependent vowel signs (matras) - the same sounds, attached to a
+        // consonant. Mapped identically to the independent forms above, which
+        // is what makes "आटा" one word rather than two halves.
+        m.put('ा', "a");   m.put('ि', "i");   m.put('ी', "i");   m.put('ु', "u");
+        m.put('ू', "u");   m.put('ृ', "ri");  m.put('े', "e");   m.put('ै', "ai");
+        m.put('ो', "o");   m.put('ौ', "au");  m.put('ॉ', "o");   m.put('ॅ', "e");
+
+        // Consonants.
+        m.put('क', "k");   m.put('ख', "kh");  m.put('ग', "g");   m.put('घ', "gh");
+        m.put('ङ', "ng");
+        m.put('च', "ch");  m.put('छ', "chh"); m.put('ज', "j");   m.put('झ', "jh");
+        m.put('ञ', "ny");
+        m.put('ट', "t");   m.put('ठ', "th");  m.put('ड', "d");   m.put('ढ', "dh");
+        m.put('ण', "n");
+        m.put('त', "t");   m.put('थ', "th");  m.put('द', "d");   m.put('ध', "dh");
+        m.put('न', "n");
+        m.put('प', "p");   m.put('फ', "ph");  m.put('ब', "b");   m.put('भ', "bh");
+        m.put('म', "m");
+        m.put('य', "y");   m.put('र', "r");   m.put('ल', "l");   m.put('व', "v");
+        m.put('श', "sh");  m.put('ष', "sh");  m.put('स', "s");   m.put('ह', "h");
+        m.put('ळ', "l");
+
+        // Signs. The virama suppresses a vowel and the nukta is handled by
+        // the lookahead in transliterate() - neither is a sound of its own
+        // here. Anusvara and chandrabindu are nasals.
+        m.put('्', "");    m.put('़', "");    m.put('ऽ', "");
+        m.put('ं', "n");   m.put('ँ', "n");   m.put('ः', "h");
+
+        // Devanagari digits - a size spoken in Hindi is still a size.
+        m.put('०', "0");   m.put('१', "1");   m.put('२', "2");   m.put('३', "3");
+        m.put('४', "4");   m.put('५', "5");   m.put('६', "6");   m.put('७', "7");
+        m.put('८', "8");   m.put('९', "9");
+
+        // Sentence punctuation, which normalize() would turn into a space
+        // anyway - said explicitly so it never reaches a key.
+        m.put('।', " ");   m.put('॥', " ");
+
+        return Map.copyOf(m);
     }
 
     /** Phonetic keys for every token, skipping ones too short to be useful. */

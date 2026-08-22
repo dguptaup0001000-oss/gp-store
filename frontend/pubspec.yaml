@@ -117,6 +117,20 @@ dependencies:
   # guess. 12.0.3 predates that Android module restructuring.
   permission_handler: ^12.0.3
 
+  # Voice search. Wraps Android's OWN speech recogniser - the one already on
+  # the device behind the keyboard's microphone key - rather than shipping a
+  # model or calling a paid cloud API. That is what makes Hindi, Hinglish and
+  # Indian-accented English work without this project owning any of it, and
+  # what keeps the audio on the phone: the plugin returns text, and nothing
+  # here records, stores or uploads a recording.
+  #
+  # Pinned below 7.5.0 deliberately, exactly like print_bluetooth_thermal
+  # above. 7.5.0 raises its floor to Flutter >=3.44.0, newer than the 3.35.7
+  # this project and CI build against, so a caret range would let a future
+  # `pub upgrade` pick a version that cannot compile here. The Android API
+  # this app uses is unchanged across the 7.x line.
+  speech_to_text: ">=7.4.0 <7.5.0"
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

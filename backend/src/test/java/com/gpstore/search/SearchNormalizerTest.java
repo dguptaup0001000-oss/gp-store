@@ -13,6 +13,85 @@ import org.junit.jupiter.api.Test;
  */
 class SearchNormalizerTest {
 
+    // ------------------------------------------------------------ Devanagari
+    //
+    // An Android recogniser set to hi-IN returns Hindi script for everything,
+    // so these stopped being a nicety the moment voice search existed. Before
+    // transliteration, a word typed in Devanagari produced a key made of
+    // Devanagari characters - it could never equal the key of the same word
+    // typed in Hinglish, and no amount of vocabulary would have helped.
+
+    @Test
+    @DisplayName("Hindi script and Hinglish reach the same key")
+    void devanagariAgreesWithHinglish() {
+        allAgree("आटा", "atta", "aata");
+        allAgree("चीनी", "chini", "cheeni");
+        allAgree("दूध", "doodh", "dudh");
+        allAgree("तेल", "tel");
+        allAgree("साबुन", "sabun", "saboon");
+        allAgree("चावल", "chawal", "chaval");
+    }
+
+    @Test
+    @DisplayName("A Hindi brand name romanises close enough to match")
+    void devanagariBrandRomanises() {
+        // Not key equality - a brand is matched against the catalogue by
+        // trigram similarity, so what matters is that the romanised form is
+        // recognisably the same word rather than identical to a chosen
+        // spelling.
+        assertThat(SearchNormalizer.areCloseEnough(
+                SearchNormalizer.transliterate("आशीर्वाद"), "aashirvaad"))
+                .as("आशीर्वाद should romanise close to aashirvaad")
+                .isTrue();
+
+        // The exact ones. Short Latin vowels land on the spelling Indians
+        // actually type, which is what lets these reach the vocabulary at all.
+        assertThat(SearchNormalizer.transliterate("चीनी")).isEqualTo("chini");
+        assertThat(SearchNormalizer.transliterate("तेल")).isEqualTo("tel");
+        assertThat(SearchNormalizer.transliterate("साबुन")).isEqualTo("sabun");
+        assertThat(SearchNormalizer.transliterate("दूध")).isEqualTo("dudh");
+    }
+
+    @Test
+    @DisplayName("Devanagari digits survive as digits")
+    void devanagariDigits() {
+        // A size spoken in Hindi is still a size, and "5 kg" is what the
+        // catalogue says.
+        assertThat(SearchNormalizer.transliterate("५ किलो")).startsWith("5");
+    }
+
+    @Test
+    @DisplayName("A query with no Hindi script is returned untouched")
+    void latinIsUntouched() {
+        // The common path. Returning the same instance keeps the cost of this
+        // feature at one scan for the queries that do not need it.
+        String plain = "aashirvaad atta 5 kg";
+        assertThat(SearchNormalizer.transliterate(plain)).isSameAs(plain);
+        assertThat(SearchNormalizer.containsDevanagari(plain)).isFalse();
+    }
+
+    @Test
+    @DisplayName("Devanagari is detected only when it is actually there")
+    void detectsScript() {
+        assertThat(SearchNormalizer.containsDevanagari("चीनी")).isTrue();
+        assertThat(SearchNormalizer.containsDevanagari("do kilo चीनी")).isTrue();
+        assertThat(SearchNormalizer.containsDevanagari("")).isFalse();
+        assertThat(SearchNormalizer.containsDevanagari(null)).isFalse();
+    }
+
+    @Test
+    @DisplayName("Mixed Hindi and English in one query keeps both halves")
+    void mixedScript() {
+        String out = SearchNormalizer.transliterate("amul दूध 1 litre");
+        assertThat(out).contains("amul").contains("litre").doesNotContain("दूध");
+    }
+
+    @Test
+    @DisplayName("A null query transliterates to empty rather than throwing")
+    void nullIsSafe() {
+        assertThat(SearchNormalizer.transliterate(null)).isEmpty();
+    }
+
     private void allAgree(String... spellings) {
         String expected = SearchNormalizer.phoneticKey(spellings[0]);
         assertThat(expected)

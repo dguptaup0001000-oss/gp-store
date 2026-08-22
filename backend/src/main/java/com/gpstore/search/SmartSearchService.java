@@ -78,6 +78,29 @@ public class SmartSearchService {
             return SmartSearchResult.matched(query, correction, asTyped);
         }
 
+        // LAYER 1b - romanised.
+        //
+        // Only for Hindi script, and BEFORE translation on purpose. "आटा"
+        // has a dictionary row, so translating it would search for "flour" -
+        // but the product is called "Aashirvaad Select Sharbati Atta", and
+        // "flour" only reaches it through the keyword bag. The romanised
+        // "aataa" reaches it through the product's own name, by trigram
+        // similarity, which is both likelier and better ranked.
+        //
+        // It also covers what translation cannot: a BRAND written in Hindi.
+        // "आशीर्वाद" is in no dictionary and never will be - brands are
+        // catalogue data, not vocabulary - so romanising is the only route
+        // from Hindi script to it.
+        if (SearchNormalizer.containsDevanagari(query)) {
+            String romanised = SearchNormalizer.transliterate(query).trim();
+            if (!romanised.isEmpty() && !romanised.equalsIgnoreCase(query)) {
+                Page<ProductResponse> results = productService.searchInstant(romanised, pageable);
+                if (results.hasContent()) {
+                    return SmartSearchResult.interpreted(query, romanised, results);
+                }
+            }
+        }
+
         // LAYER 2 - translated.
         //
         // Reached when the query found nothing AND when it found something
