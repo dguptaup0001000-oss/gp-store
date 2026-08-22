@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/util/app_haptics.dart';
 import '../../address/presentation/address_list_screen.dart';
 import '../../admin/presentation/admin_home_screen.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -163,6 +164,9 @@ class ProfileScreen extends ConsumerWidget {
               context,
               icon: Icons.logout,
               label: 'Log out',
+              // Heavy, not selection: this one takes effect on the tap itself,
+              // with no confirmation step in between.
+              haptic: AppHaptics.heavy,
               onTap: () => ref.read(authControllerProvider.notifier).logout(),
             ),
             _menuTile(
@@ -192,8 +196,21 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
+  /// Every action on this screen goes through here, which is why the haptic
+  /// lives here rather than at each call site.
+  ///
+  /// ONE PLACE MEANS EXACTLY ONE BUZZ PER TAP. Adding it to each onTap
+  /// instead would have been four edits today and a forgotten fifth tomorrow -
+  /// and the moment a tile both fires its own haptic and calls something that
+  /// fires another, one tap feels like two, which reads as a stuck button
+  /// rather than a responsive one.
+  ///
+  /// [haptic] defaults to a light selection tick because most tiles just
+  /// navigate. The destructive ones pass AppHaptics.heavy explicitly - see
+  /// their call sites.
   Widget _menuTile(BuildContext context,
-      {required IconData icon, required String label, required VoidCallback onTap, bool isDestructive = false, int badgeCount = 0}) {
+      {required IconData icon, required String label, required VoidCallback onTap, bool isDestructive = false, int badgeCount = 0,
+       void Function()? haptic}) {
     return ListTile(
       leading: Icon(icon, color: isDestructive ? AppColors.error : AppColors.textPrimary),
       title: Text(label, style: TextStyle(color: isDestructive ? AppColors.error : AppColors.textPrimary)),
@@ -213,7 +230,10 @@ class ProfileScreen extends ConsumerWidget {
           const Icon(Icons.chevron_right, color: AppColors.textSecondary),
         ],
       ),
-      onTap: onTap,
+      onTap: () {
+        (haptic ?? AppHaptics.selection)();
+        onTap();
+      },
     );
   }
 
@@ -225,7 +245,16 @@ class ProfileScreen extends ConsumerWidget {
         content: const Text('This will sign you out on all your devices, not just this one.'),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Log out everywhere')),
+          TextButton(
+            // Heavy here rather than on the tile that opened this dialog:
+            // opening a confirmation does nothing, confirming it signs every
+            // other device out. Feedback belongs on the irreversible half.
+            onPressed: () {
+              AppHaptics.heavy();
+              Navigator.of(context).pop(true);
+            },
+            child: const Text('Log out everywhere'),
+          ),
         ],
       ),
     );
@@ -282,7 +311,15 @@ class ProfileScreen extends ConsumerWidget {
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            onPressed: () => Navigator.of(context).pop(typedController.text.trim() == 'DELETE'),
+            onPressed: () {
+              final typedCorrectly = typedController.text.trim() == 'DELETE';
+              // ONLY when the confirmation actually passes. Buzzing on a
+              // rejected tap tells the hand something happened when nothing
+              // did, which is precisely the "haptic on a disabled action"
+              // case that makes feedback untrustworthy.
+              if (typedCorrectly) AppHaptics.heavy();
+              Navigator.of(context).pop(typedCorrectly);
+            },
             child: const Text('Delete My Account'),
           ),
         ],

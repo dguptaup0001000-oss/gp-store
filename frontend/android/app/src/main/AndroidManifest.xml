@@ -1,6 +1,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Every screen in this app talks to the backend API. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Haptic feedback. lightImpact/selectionClick route through
+         View.performHapticFeedback and do not strictly require this, but
+         HapticFeedback.vibrate() does - and without the permission it fails
+         SILENTLY, which is the worst way for feedback to be missing: nothing
+         logs, nothing throws, the phone just never buzzes. Declared so every
+         path behaves the same on every device.
+
+         Not a runtime permission - it is install-time and prompts nobody. -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
 
     <!-- Needed for the "use my current location" button when adding an
          address (see AddAddressScreen / geolocator package) - without
