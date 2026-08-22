@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/app_haptics.dart';
@@ -186,6 +187,9 @@ class _VoiceSearchSheetState extends State<VoiceSearchSheet> {
 
   List<Widget> _problemView() {
     final problem = _problem;
+    final retryable = VoiceResult(problem ?? VoiceOutcome.failed).isRetryable;
+    final needsSettings = problem == VoiceOutcome.permissionPermanentlyDenied;
+
     return [
       Icon(_problemIcon(problem), size: 40, color: AppColors.textSecondary),
       const SizedBox(height: 14),
@@ -211,9 +215,18 @@ class _VoiceSearchSheetState extends State<VoiceSearchSheet> {
             child: const Text('Type instead'),
           ),
           const SizedBox(width: 8),
-          // Retrying is pointless when the device has no recogniser or the
-          // permission is refused - offering it would just fail again.
-          if (problem == VoiceOutcome.noSpeech || problem == VoiceOutcome.failed)
+          // Only ONE of these, and only when it can actually work. A retry
+          // that cannot succeed - no recogniser, permission refused for good -
+          // teaches people the button is a lie.
+          if (needsSettings)
+            FilledButton(
+              onPressed: () {
+                AppHaptics.selection();
+                openAppSettings();
+              },
+              child: const Text('Open settings'),
+            )
+          else if (retryable)
             FilledButton(onPressed: _listen, child: const Text('Try again')),
         ],
       ),
@@ -221,23 +234,43 @@ class _VoiceSearchSheetState extends State<VoiceSearchSheet> {
   }
 
   IconData _problemIcon(VoiceOutcome? problem) => switch (problem) {
-        VoiceOutcome.permissionDenied => Icons.mic_off_outlined,
-        VoiceOutcome.unavailable => Icons.mic_none_outlined,
+        VoiceOutcome.permissionDenied ||
+        VoiceOutcome.permissionPermanentlyDenied =>
+          Icons.mic_off_outlined,
+        VoiceOutcome.recognizerUnavailable => Icons.mic_none_outlined,
+        VoiceOutcome.networkUnavailable => Icons.wifi_off_rounded,
+        VoiceOutcome.busy => Icons.phonelink_erase_outlined,
         _ => Icons.hearing_disabled_outlined,
       };
 
   String _problemTitle(VoiceOutcome? problem) => switch (problem) {
         VoiceOutcome.permissionDenied => 'Microphone permission needed',
-        VoiceOutcome.unavailable => "Voice search isn't available right now",
+        VoiceOutcome.permissionPermanentlyDenied => 'Microphone is blocked',
+        VoiceOutcome.recognizerUnavailable => 'Voice search needs Google speech services',
+        VoiceOutcome.networkUnavailable => 'No internet for voice',
+        VoiceOutcome.busy => 'The microphone is in use',
         VoiceOutcome.noSpeech => "I didn't catch that",
         _ => "Voice search isn't available right now",
       };
 
+  /// Every one of these names a DIFFERENT thing the customer can do. A single
+  /// message for all of them - which is what this screen used to show - tells
+  /// somebody whose microphone is simply switched off to go and look for a
+  /// fault that is not there.
   String _problemDetail(VoiceOutcome? problem) => switch (problem) {
         VoiceOutcome.permissionDenied =>
-          'Allow microphone access in Settings to search by voice. You can still type your search.',
-        VoiceOutcome.unavailable =>
-          "This phone doesn't have a speech recogniser set up. Typing works as usual.",
+          'GP-Store needs the microphone to hear your search. Tap the mic again to allow it, '
+              'or type instead.',
+        VoiceOutcome.permissionPermanentlyDenied =>
+          'Microphone access is turned off for GP-Store. Turn it on in Settings to search by '
+              'voice - typing works either way.',
+        VoiceOutcome.recognizerUnavailable =>
+          "This phone has no speech recogniser switched on. It usually comes from the Google "
+              'app - check that it is installed and enabled. Typing works as usual.',
+        VoiceOutcome.networkUnavailable =>
+          'Speech recognition needs a connection. Your products are still searchable by typing.',
+        VoiceOutcome.busy =>
+          'Another app is using the microphone. Close it and try again.',
         VoiceOutcome.noSpeech =>
           'Try again a little closer to the phone - for example, "aashirvaad atta paanch kilo".',
         _ => 'Something went wrong listening. You can try again or type your search.',
