@@ -83,4 +83,62 @@ void main() {
       expect(ProductImageUrl.card(odd), odd);
     });
   });
+
+  group('URLs somebody else already transformed', () {
+    // The bug this group exists for: the guard used to look only for the four
+    // parameters this class itself writes, so a URL transformed by anyone
+    // else was not recognised as transformed and had a SECOND set prepended
+    // in front of the first. Chained transformations still render, which is
+    // exactly why nobody noticed.
+
+    const base = 'https://res.cloudinary.com/demo/image/upload';
+
+    void leftAlone(String path) {
+      final url = '$base/$path';
+      expect(ProductImageUrl.card(url), url,
+          reason: '$path is already a transformation - sizing it again stacks '
+              'a second set in front of it');
+    }
+
+    test('a text overlay is left alone', () {
+      leftAlone('b_rgb:FCE8E0,l_text:Arial_60:Atta,co_rgb:8B4513/v1/gp/a.jpg');
+    });
+
+    test('an aspect ratio and crop are left alone', () {
+      leftAlone('ar_1:1,c_fill,g_auto/v1/gp/a.jpg');
+    });
+
+    test('an effect is left alone', () {
+      leftAlone('e_blur:300/v1/gp/a.jpg');
+    });
+
+    test('a device pixel ratio is left alone', () {
+      leftAlone('dpr_2.0,w_600/v1/gp/a.jpg');
+    });
+
+    test('a height-only transformation is left alone', () {
+      leftAlone('h_600/v1/gp/a.jpg');
+    });
+
+    test('a folder containing an underscore is NOT mistaken for one', () {
+      // The false positive the explicit key list prevents. This URL has no
+      // transformation, so it must still be sized - silently skipping it
+      // would send the full original over mobile data.
+      const url = '$base/gp_store/products/atta.jpg';
+      expect(ProductImageUrl.card(url), contains('w_400,c_limit,f_auto,q_auto'));
+    });
+
+    test('a version segment is not a transformation', () {
+      const url = '$base/v1712345678/gp/atta.jpg';
+      final sized = ProductImageUrl.card(url);
+      expect(sized, contains('w_400,c_limit,f_auto,q_auto'));
+      expect(sized, contains('v1712345678'),
+          reason: 'the version must survive - dropping it breaks the URL');
+    });
+
+    test('a bare public id with no path after it is not a transformation', () {
+      const url = '$base/atta.jpg';
+      expect(ProductImageUrl.card(url), contains('w_400,c_limit,f_auto,q_auto'));
+    });
+  });
 }

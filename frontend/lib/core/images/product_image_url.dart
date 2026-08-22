@@ -64,13 +64,49 @@ class ProductImageUrl {
     // Already carries transformations: leave it alone rather than stacking a
     // second set, which would silently fight whatever was asked for.
     final remainder = url.substring(insertAt);
-    if (remainder.startsWith('w_') ||
-        remainder.startsWith('c_') ||
-        remainder.startsWith('f_') ||
-        remainder.startsWith('q_')) {
-      return url;
-    }
+    if (_hasTransformations(remainder)) return url;
 
     return '${url.substring(0, insertAt)}w_$width,c_limit,f_auto,q_auto/$remainder';
   }
+
+  /// Whether the path after /image/upload/ already begins with a Cloudinary
+  /// transformation segment.
+  ///
+  /// WHY THIS IS NOT FOUR startsWith CHECKS ANY MORE. It used to look for
+  /// w_, c_, f_ and q_ - the four this class itself writes - which quietly
+  /// meant that a URL transformed by anyone ELSE was not recognised as
+  /// transformed. Cloudinary has some thirty parameters, and a URL beginning
+  /// b_rgb:, l_text:, e_blur, g_face, ar_1:1 or dpr_2.0 sailed past all four
+  /// checks and had a second transformation set prepended in front of the
+  /// one already there. Chained transformations do still render, so nothing
+  /// looked broken - it just stopped doing what the guard was written to do,
+  /// which is the kind of bug that survives precisely because it is invisible.
+  ///
+  /// The grammar is the test rather than a list of prefixes we happen to use:
+  /// a transformation segment is comma-separated key_value pairs, and EVERY
+  /// part must be one. A folder or public id is not.
+  static bool _hasTransformations(String remainder) {
+    final slash = remainder.indexOf('/');
+    // No slash means there is no segment after this one - so this is the
+    // public id itself, not a transformation.
+    if (slash <= 0) return false;
+
+    final parts = remainder.substring(0, slash).split(',');
+    return parts.every((part) {
+      final underscore = part.indexOf('_');
+      if (underscore <= 0 || underscore == part.length - 1) return false;
+      return _transformationKeys.contains(part.substring(0, underscore));
+    });
+  }
+
+  /// Cloudinary's transformation parameter keys.
+  ///
+  /// Listed explicitly rather than accepting any short prefix, so a real
+  /// folder that happens to contain an underscore - gp_store/products/... -
+  /// is not mistaken for a transformation and left unsized.
+  static const Set<String> _transformationKeys = {
+    'a', 'ar', 'b', 'bo', 'c', 'co', 'cs', 'd', 'dl', 'dn', 'dpr', 'du',
+    'e', 'eo', 'f', 'fl', 'fn', 'g', 'h', 'if', 'ki', 'l', 'o', 'pg', 'q',
+    'r', 'so', 't', 'u', 'vc', 'w', 'x', 'y', 'z',
+  };
 }
