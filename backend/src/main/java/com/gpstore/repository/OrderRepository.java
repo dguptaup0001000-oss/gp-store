@@ -16,6 +16,16 @@ import java.util.Optional;
 
 public interface OrderRepository extends JpaRepository<Order, Long> {
 
+    /**
+     * The scan's ONLY way in.
+     *
+     * A worker's app sends a token, never an order id - an endpoint that
+     * accepts an order id is an endpoint whose ids can be walked, and the
+     * whole point of the QR token is that it is random and unguessable.
+     */
+    java.util.Optional<com.gpstore.entity.Order> findByQrToken(String qrToken);
+
+
     List<Order> findByCustomerId(Long customerId);
 
     /**

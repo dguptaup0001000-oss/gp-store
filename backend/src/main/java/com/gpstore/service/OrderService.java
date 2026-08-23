@@ -50,6 +50,7 @@ public class OrderService {
     private final CouponService couponService;
     private final DeliveryEstimateService deliveryEstimateService;
     private final DeliveryFeeService deliveryFeeService;
+    private final com.gpstore.pricing.DeliveryPricingService deliveryPricingService;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
     private final InvoiceService invoiceService;
@@ -76,6 +77,7 @@ public class OrderService {
             CouponService couponService,
             DeliveryEstimateService deliveryEstimateService,
             DeliveryFeeService deliveryFeeService,
+            com.gpstore.pricing.DeliveryPricingService deliveryPricingService,
             NotificationService notificationService,
             AuditLogService auditLogService,
             InvoiceService invoiceService,
@@ -104,6 +106,7 @@ public class OrderService {
         this.couponService = couponService;
         this.deliveryEstimateService = deliveryEstimateService;
         this.deliveryFeeService = deliveryFeeService;
+        this.deliveryPricingService = deliveryPricingService;
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
         this.invoiceService = invoiceService;
@@ -266,14 +269,22 @@ public class OrderService {
         Integer estimatedMinutes = null;
 
         if (deliverable) {
-            double distanceKm = deliveryEstimateService.distanceFromStoreKm(address.getLatitude(), address.getLongitude());
-            deliveryFee = deliveryFeeService.calculateDeliveryFee(distanceKm);
-            BigDecimal grossProfit = deliveryFeeService.calculateGrossProfit(cartItems);
-            freeDeliveryApplied = deliveryFeeService.isFreeDeliveryEligible(grossProfit, deliveryFee);
+            // ONE CALL, ONE PRICE. The distance tiers, the weight surcharge and
+            // the margin subsidy are all decided together in
+            // DeliveryPricingService - the preview and the real order below
+            // both go through it, so the number a customer is shown at
+            // checkout is produced by the same code that charges them.
+            com.gpstore.pricing.DeliveryQuote quote =
+                    deliveryPricingService.quoteForCart(cartItems, address);
+            deliveryFee = quote.finalCharge();
+            freeDeliveryApplied = quote.freeDelivery();
             estimatedMinutes = deliveryEstimateService.estimateMinutes(address.getLatitude(), address.getLongitude());
         }
 
-        BigDecimal effectiveDeliveryFee = freeDeliveryApplied ? BigDecimal.ZERO : deliveryFee;
+        // finalCharge is already zero when delivery is free - the quote applies
+        // the rule, rather than the caller re-deciding it and risking the two
+        // disagreeing.
+        BigDecimal effectiveDeliveryFee = deliveryFee;
         BigDecimal estimatedTotal = subtotal.subtract(discountAmount).add(effectiveDeliveryFee);
 
         return new com.gpstore.dto.response.CheckoutPreviewResponse(
@@ -560,15 +571,28 @@ public class OrderService {
         // Delivery fee: distance-based, with a profit-gated free-delivery rule.
         // We already know the address has valid coordinates - the radius check
         // above would have thrown otherwise.
-        double distanceKm = deliveryEstimateService.distanceFromStoreKm(address.getLatitude(), address.getLongitude());
-        BigDecimal deliveryFee = deliveryFeeService.calculateDeliveryFee(distanceKm);
-        BigDecimal grossProfit = deliveryFeeService.calculateGrossProfit(cartItems);
-        boolean freeDeliveryApplied = deliveryFeeService.isFreeDeliveryEligible(grossProfit, deliveryFee);
+        com.gpstore.pricing.DeliveryQuote quote =
+                deliveryPricingService.quoteForCart(cartItems, address);
+        BigDecimal deliveryFee = quote.finalCharge();
+        boolean freeDeliveryApplied = quote.freeDelivery();
 
-        order.setDeliveryFee(freeDeliveryApplied ? BigDecimal.ZERO : deliveryFee);
+        order.setDeliveryFee(deliveryFee);
         order.setFreeDeliveryApplied(freeDeliveryApplied);
 
-        if (!freeDeliveryApplied) {
+        // The whole working, kept. An admin screen that recalculated this
+        // later would show a different number - settings get edited, costs get
+        // corrected - and the customer was charged what they were charged.
+        order.setDeliveryDistanceKm(quote.distanceKm());
+        order.setDeliveryWeightKg(quote.totalWeightKg());
+        order.setDeliveryDistanceCharge(quote.distanceCharge());
+        order.setDeliveryWeightCharge(quote.weightCharge());
+        order.setDeliveryNormalCharge(quote.normalCharge());
+        order.setDeliveryOrderProfit(quote.orderProfit());
+        order.setDeliverySubsidy(quote.subsidy());
+        order.setDeliveryPricingNotes(quote.hasWarnings()
+                ? truncate(String.join(" | ", quote.warnings()), 1000) : null);
+
+        if (deliveryFee.signum() > 0) {
             order.setTotalAmount(order.getTotalAmount().add(deliveryFee));
         }
 
@@ -879,6 +903,17 @@ public class OrderService {
                         || (currentStatus == OrderStatus.CONFIRMED && status == OrderStatus.PACKING)
                         || (currentStatus == OrderStatus.PACKING && status == OrderStatus.READY_TO_DISPATCH)
                         || (currentStatus == OrderStatus.READY_TO_DISPATCH && status == OrderStatus.OUT_FOR_DELIVERY)
+                        // PACKED is what a worker's QR scan writes. It sits
+                        // beside READY_TO_DISPATCH rather than replacing it:
+                        // the older state is still reachable from the admin
+                        // status dropdown and still on live orders, and
+                        // deleting a state that production rows hold is how a
+                        // deployment breaks every order mid-flight.
+                        || (currentStatus == OrderStatus.CONFIRMED && status == OrderStatus.PACKED)
+                        || (currentStatus == OrderStatus.PACKING && status == OrderStatus.PACKED)
+                        || (currentStatus == OrderStatus.READY_TO_DISPATCH && status == OrderStatus.PACKED)
+                        || (currentStatus == OrderStatus.PACKED && status == OrderStatus.OUT_FOR_DELIVERY)
+                        || (currentStatus == OrderStatus.PACKED && status == OrderStatus.READY_TO_DISPATCH)
                         || (currentStatus == OrderStatus.OUT_FOR_DELIVERY && status == OrderStatus.DELIVERED);
 
         if (!validTransition) {
@@ -1268,5 +1303,15 @@ public class OrderService {
         // it again for a zero-item order is still pointless work.
         order.setInventoryRestored(true);
         return true;
+    }
+
+    /**
+     * Keeps a note inside its column. Truncated rather than dropped: a
+     * shortened warning still tells an admin something was odd about this
+     * order, and a silently discarded one tells them nothing.
+     */
+    private static String truncate(String value, int max) {
+        if (value == null) return null;
+        return value.length() <= max ? value : value.substring(0, max - 3) + "...";
     }
 }

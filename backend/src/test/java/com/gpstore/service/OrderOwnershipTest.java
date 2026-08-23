@@ -46,6 +46,7 @@ class OrderOwnershipTest {
     @Mock private CouponService couponServiceUnused;
     @Mock private DeliveryEstimateService deliveryEstimateServiceUnused;
     @Mock private DeliveryFeeService deliveryFeeServiceUnused;
+    @Mock private com.gpstore.pricing.DeliveryPricingService deliveryPricingServiceUnused;
     @Mock private NotificationService notificationServiceUnused;
     @Mock private AuditLogService auditLogServiceUnused;
     @Mock private InvoiceService invoiceServiceUnused;
@@ -68,7 +69,12 @@ class OrderOwnershipTest {
         orderService = new OrderService(
                 repository, orderItemRepositoryUnused, customerServiceUnused, addressServiceUnused,
                 cartItemServiceUnused, inventoryServiceUnused, paymentRepositoryUnused, couponServiceUnused,
-                deliveryEstimateServiceUnused, deliveryFeeServiceUnused, notificationServiceUnused,
+                deliveryEstimateServiceUnused, deliveryFeeServiceUnused,
+                // Unused here for the same reason as the rest: these tests
+                // cover cancellation and ownership, never a path that prices
+                // a delivery.
+                deliveryPricingServiceUnused,
+                notificationServiceUnused,
                 auditLogServiceUnused, invoiceServiceUnused, taxServiceUnused, deliveryRepository,
                 deliveryServiceUnused, idempotencyRecordRepositoryUnused, orderSideEffectsExecutorUnused,
                 outboxEventRepositoryUnused,

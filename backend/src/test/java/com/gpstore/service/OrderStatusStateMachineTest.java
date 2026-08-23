@@ -134,7 +134,7 @@ class OrderStatusStateMachineTest {
         // change this test deliberately rather than get away with it.
         for (OrderStatus from : EnumSet.of(
                 OrderStatus.PENDING_CONFIRMATION, OrderStatus.CONFIRMED,
-                OrderStatus.PACKING, OrderStatus.READY_TO_DISPATCH,
+                OrderStatus.PACKING, OrderStatus.PACKED, OrderStatus.READY_TO_DISPATCH,
                 OrderStatus.OUT_FOR_DELIVERY)) {
 
             for (OrderStatus to : EnumSet.allOf(OrderStatus.class)) {
@@ -189,12 +189,32 @@ class OrderStatusStateMachineTest {
         assertEquals(OrderStatus.CONFIRMED, statusOf(orderId));
     }
 
+    /**
+     * Every transition the order flow permits.
+     *
+     * It stopped being a single line the day a worker's QR scan needed a state
+     * of its own. PACKED is what that scan writes, and it sits BESIDE
+     * READY_TO_DISPATCH rather than replacing it - the older state is still
+     * reachable from the admin status dropdown and is still on live orders, and
+     * deleting a state that production rows hold breaks every order mid-flight.
+     *
+     * The pair can be reached from either direction (PACKED -> READY_TO_DISPATCH
+     * and back) because they describe the same operational moment under two
+     * names, and an admin correcting one to the other is not a mistake worth
+     * refusing.
+     */
     private static boolean isTheOneLegalStep(OrderStatus from, OrderStatus to) {
         return (from == OrderStatus.PENDING_CONFIRMATION && to == OrderStatus.CONFIRMED)
                 || (from == OrderStatus.CONFIRMED && to == OrderStatus.PACKING)
                 || (from == OrderStatus.PACKING && to == OrderStatus.READY_TO_DISPATCH)
                 || (from == OrderStatus.READY_TO_DISPATCH && to == OrderStatus.OUT_FOR_DELIVERY)
-                || (from == OrderStatus.OUT_FOR_DELIVERY && to == OrderStatus.DELIVERED);
+                || (from == OrderStatus.OUT_FOR_DELIVERY && to == OrderStatus.DELIVERED)
+                // The worker pack-scan path.
+                || (from == OrderStatus.CONFIRMED && to == OrderStatus.PACKED)
+                || (from == OrderStatus.PACKING && to == OrderStatus.PACKED)
+                || (from == OrderStatus.READY_TO_DISPATCH && to == OrderStatus.PACKED)
+                || (from == OrderStatus.PACKED && to == OrderStatus.OUT_FOR_DELIVERY)
+                || (from == OrderStatus.PACKED && to == OrderStatus.READY_TO_DISPATCH);
     }
 
     private OrderStatus statusOf(Long orderId) {

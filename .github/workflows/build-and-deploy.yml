@@ -99,6 +99,40 @@ jobs:
       - name: Decode google-services.json
         run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > android/app/google-services.json
 
+      - name: Build Delivery Worker APK
+        # A SECOND APK FROM THE SAME PROJECT, via a second entrypoint
+        # (lib/worker_main.dart). Flutter compiles only what the entrypoint
+        # reaches, so this carries the worker screens, the HTTP client and the
+        # token storage - and none of the storefront, cart, checkout or 3D
+        # viewer.
+        #
+        # BUILT FIRST, AND THAT ORDER IS LOAD-BEARING. Both builds write to the
+        # same build/app/outputs/flutter-apk/app-release.apk. Building the
+        # worker second would overwrite the customer APK, and renaming it
+        # afterwards would leave nothing at the path the upload step expects -
+        # the job would still go green while shipping the wrong artifact, or
+        # none. Worker first, renamed immediately, then the customer build
+        # writes a fresh app-release.apk.
+        #
+        # This is also the ONLY place the worker entrypoint is ever compiled.
+        # `flutter analyze` covers its Dart, but analysis is not codegen: a
+        # native plugin that fails to link, or a manifest the merger rejects,
+        # shows up here and nowhere earlier.
+        run: |
+          if [ -n "${{ vars.API_BASE_URL }}" ]; then
+            flutter build apk --release -t lib/worker_main.dart --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+          else
+            flutter build apk --release -t lib/worker_main.dart --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+          fi
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/gpstore-worker-release.apk
+
+      - name: Upload Delivery Worker APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-worker-apk
+          path: frontend/build/app/outputs/flutter-apk/gpstore-worker-release.apk
+
       - name: Build APK
         # Same reasoning as the web build's API_BASE_URL handling below -
         # the app's coded default (10.0.2.2, the Android EMULATOR's

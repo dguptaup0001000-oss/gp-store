@@ -24,6 +24,17 @@ dependencies:
 
   # Stores the refresh token securely on-device (Keychain on iOS, Keystore on
   # Android) - NEVER store a refresh token in plain SharedPreferences.
+  # QR scanning for the delivery worker APK (lib/worker_main.dart).
+  #
+  # THE COST, stated where it is incurred: this pulls in MLKit's barcode
+  # native library, and Flutter tree-shakes Dart but not native code - so it
+  # ships in the CUSTOMER apk too, which never scans anything. On an app that
+  # already carries Firebase, a webview and a 3D model viewer that is a small
+  # proportional addition, and the alternative was a second Flutter project
+  # with its own copy of the HTTP client, token storage and 401-refresh
+  # handling, which would have drifted apart from this one within a month.
+  mobile_scanner: ^5.2.3
+
   flutter_secure_storage: ^9.2.2
 
   # Immutable model classes with generated equality/copyWith - reduces a

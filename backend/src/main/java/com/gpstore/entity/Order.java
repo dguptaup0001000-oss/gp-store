@@ -98,7 +98,218 @@ private PaymentStatus paymentStatus;
     @Column(name = "inventory_restored")
     private Boolean inventoryRestored = false;
 
+    // ------------------------------------------------------------------
+    // Worker pack-scan
+    // ------------------------------------------------------------------
+
+    /**
+     * The opaque token printed on the packed order's QR label.
+     *
+     * DELIBERATELY MEANINGLESS. It carries no customer name, phone, address,
+     * amount or payment state - anyone who photographs a label off a discarded
+     * carton learns nothing, because everything the worker's app displays comes
+     * back from an authenticated call. The token's only job is to name one
+     * order to a server that already knows who is asking.
+     *
+     * Single use: {@link #qrTokenUsedAt} is stamped by the first successful
+     * scan, and a token that has been used is refused. That is what makes
+     * "another worker cannot take an order that is already taken" a fact about
+     * the database rather than a hope about the app.
+     */
+    @Column(name = "qr_token", length = 64)
+    private String qrToken;
+
+    @Column(name = "qr_token_issued_at")
+    private LocalDateTime qrTokenIssuedAt;
+
+    @Column(name = "qr_token_used_at")
+    private LocalDateTime qrTokenUsedAt;
+
+    /**
+     * The worker who scanned this order and is now accountable for it.
+     *
+     * Denormalised onto the order rather than read from the scan history,
+     * because "who has GP125" is asked on every row of every admin list and
+     * answering it through the audit table would be a subquery per order.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "packed_by_partner_id")
+    private DeliveryPartner packedByPartner;
+
+    @Column(name = "packed_at")
+    private LocalDateTime packedAt;
+
+    /**
+     * An administrator's explicit "this worker may take this order", which
+     * outranks every territory rule.
+     *
+     * The escape hatch for the day the map is wrong: the primary is absent and
+     * unrostered, a worker is already out at the far village, a subzone has not
+     * been drawn yet. Without it the only way to unblock a real order at a real
+     * counter would be to edit the territory map, which is permanent and
+     * affects every future order - a very large lever for a very small problem.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "assigned_worker_partner_id")
+    private DeliveryPartner assignedWorkerPartner;
+
+    // ------------------------------------------------------------------
+    // Delivery pricing breakdown
+    // ------------------------------------------------------------------
+    // STORED, NOT RECOMPUTED. A quote is a statement made at a moment: the
+    // pricing settings can be edited tomorrow and a variant's cost price can
+    // change, so an admin screen that recalculated would show a number this
+    // customer was never charged. These columns ARE the record of what was
+    // decided and why - every line the admin breakdown shows.
+
+    @Column(name = "delivery_distance_km", precision = 10, scale = 3)
+    private BigDecimal deliveryDistanceKm;
+
+    @Column(name = "delivery_weight_kg", precision = 10, scale = 3)
+    private BigDecimal deliveryWeightKg;
+
+    @Column(name = "delivery_distance_charge", precision = 10, scale = 2)
+    private BigDecimal deliveryDistanceCharge;
+
+    @Column(name = "delivery_weight_charge", precision = 10, scale = 2)
+    private BigDecimal deliveryWeightCharge;
+
+    /** What delivery costs before any margin subsidy. */
+    @Column(name = "delivery_normal_charge", precision = 10, scale = 2)
+    private BigDecimal deliveryNormalCharge;
+
+    /** The margin that was available to spend on delivery. */
+    @Column(name = "delivery_order_profit", precision = 10, scale = 2)
+    private BigDecimal deliveryOrderProfit;
+
+    /** How much of the normal charge the order's own margin absorbed. */
+    @Column(name = "delivery_subsidy", precision = 10, scale = 2)
+    private BigDecimal deliverySubsidy;
+
+    /**
+     * Anything the shop should know about how this price was reached - a
+     * missing cost price, an item with no weight, an estimated distance.
+     *
+     * Never shown to a customer. Kept on the order rather than only in a log
+     * so that "why was this one odd" is answerable months later, when the log
+     * has rotated away.
+     */
+    @Column(name = "delivery_pricing_notes", length = 1000)
+    private String deliveryPricingNotes;
+
     public Order() {
+    }
+
+    public BigDecimal getDeliveryDistanceKm() {
+        return deliveryDistanceKm;
+    }
+
+    public void setDeliveryDistanceKm(BigDecimal deliveryDistanceKm) {
+        this.deliveryDistanceKm = deliveryDistanceKm;
+    }
+
+    public BigDecimal getDeliveryWeightKg() {
+        return deliveryWeightKg;
+    }
+
+    public void setDeliveryWeightKg(BigDecimal deliveryWeightKg) {
+        this.deliveryWeightKg = deliveryWeightKg;
+    }
+
+    public BigDecimal getDeliveryDistanceCharge() {
+        return deliveryDistanceCharge;
+    }
+
+    public void setDeliveryDistanceCharge(BigDecimal deliveryDistanceCharge) {
+        this.deliveryDistanceCharge = deliveryDistanceCharge;
+    }
+
+    public BigDecimal getDeliveryWeightCharge() {
+        return deliveryWeightCharge;
+    }
+
+    public void setDeliveryWeightCharge(BigDecimal deliveryWeightCharge) {
+        this.deliveryWeightCharge = deliveryWeightCharge;
+    }
+
+    public BigDecimal getDeliveryNormalCharge() {
+        return deliveryNormalCharge;
+    }
+
+    public void setDeliveryNormalCharge(BigDecimal deliveryNormalCharge) {
+        this.deliveryNormalCharge = deliveryNormalCharge;
+    }
+
+    public BigDecimal getDeliveryOrderProfit() {
+        return deliveryOrderProfit;
+    }
+
+    public void setDeliveryOrderProfit(BigDecimal deliveryOrderProfit) {
+        this.deliveryOrderProfit = deliveryOrderProfit;
+    }
+
+    public BigDecimal getDeliverySubsidy() {
+        return deliverySubsidy;
+    }
+
+    public void setDeliverySubsidy(BigDecimal deliverySubsidy) {
+        this.deliverySubsidy = deliverySubsidy;
+    }
+
+    public String getDeliveryPricingNotes() {
+        return deliveryPricingNotes;
+    }
+
+    public void setDeliveryPricingNotes(String deliveryPricingNotes) {
+        this.deliveryPricingNotes = deliveryPricingNotes;
+    }
+
+    public String getQrToken() {
+        return qrToken;
+    }
+
+    public void setQrToken(String qrToken) {
+        this.qrToken = qrToken;
+    }
+
+    public LocalDateTime getQrTokenIssuedAt() {
+        return qrTokenIssuedAt;
+    }
+
+    public void setQrTokenIssuedAt(LocalDateTime qrTokenIssuedAt) {
+        this.qrTokenIssuedAt = qrTokenIssuedAt;
+    }
+
+    public LocalDateTime getQrTokenUsedAt() {
+        return qrTokenUsedAt;
+    }
+
+    public void setQrTokenUsedAt(LocalDateTime qrTokenUsedAt) {
+        this.qrTokenUsedAt = qrTokenUsedAt;
+    }
+
+    public DeliveryPartner getPackedByPartner() {
+        return packedByPartner;
+    }
+
+    public void setPackedByPartner(DeliveryPartner packedByPartner) {
+        this.packedByPartner = packedByPartner;
+    }
+
+    public LocalDateTime getPackedAt() {
+        return packedAt;
+    }
+
+    public void setPackedAt(LocalDateTime packedAt) {
+        this.packedAt = packedAt;
+    }
+
+    public DeliveryPartner getAssignedWorkerPartner() {
+        return assignedWorkerPartner;
+    }
+
+    public void setAssignedWorkerPartner(DeliveryPartner assignedWorkerPartner) {
+        this.assignedWorkerPartner = assignedWorkerPartner;
     }
 
     public Long getId() {

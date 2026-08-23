@@ -11,6 +11,18 @@
          Not a runtime permission - it is install-time and prompts nobody. -->
     <uses-permission android:name="android.permission.VIBRATE"/>
 
+    <!-- Reading the QR code on a packed order's label, in the delivery worker
+         APK (lib/worker_main.dart). Declared here because both entrypoints
+         share one Android manifest; the customer app never opens a camera and
+         so never triggers the runtime prompt.
+
+         required="false" so the app still installs on a phone with no camera -
+         a worker without one simply cannot scan, which is a limitation to
+         explain rather than a reason to refuse the install. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+
     <!--
       Voice search. RECORD_AUDIO is what the on-device recogniser needs to
       hear the customer; nothing in this app records, stores or uploads audio
