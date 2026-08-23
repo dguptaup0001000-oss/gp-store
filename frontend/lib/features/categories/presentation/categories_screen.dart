@@ -8,6 +8,7 @@ import '../../products/presentation/category_products_screen.dart';
 import '../../products/presentation/products_providers.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// Full grid of all store categories, reachable from the bottom nav bar.
 /// Complements the compact CategoriesRow shown on the home screen —
@@ -32,7 +33,7 @@ class CategoriesScreen extends ConsumerWidget {
               const Text("Couldn't load categories"),
               const SizedBox(height: 8),
               TextButton(
-                onPressed: () => ref.invalidate(categoriesProvider),
+                onPressed: hapticize(() => ref.invalidate(categoriesProvider)),
                 child: const Text('Retry'),
               ),
             ],
@@ -73,12 +74,12 @@ class _CategoryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () {
+      onTap: hapticize(() {
         HapticFeedback.selectionClick();
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => CategoryProductsScreen(category: category)),
         );
-      },
+      }),
       child: Column(
         children: [
           Container(

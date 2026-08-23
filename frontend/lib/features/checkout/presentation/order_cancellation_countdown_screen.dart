@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../cart/domain/cart_models.dart';
 import '../domain/checkout_models.dart';
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// The 10-second pause between tapping "Place Order" and the order/payment
 /// actually being created. Shows the full price breakdown and product list
@@ -145,7 +146,7 @@ class _OrderCancellationCountdownScreenState
                   child: SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
-                      onPressed: _cancel,
+                      onPressed: hapticize(_cancel),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.error,
                         side: const BorderSide(color: AppColors.error),

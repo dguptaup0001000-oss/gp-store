@@ -10,6 +10,7 @@ import '../../checkout/presentation/checkout_screen.dart';
 import '../domain/cart_models.dart';
 import 'cart_providers.dart';
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class CartScreen extends ConsumerWidget {
   const CartScreen({super.key});
@@ -35,7 +36,7 @@ class CartScreen extends ConsumerWidget {
               Text("Couldn't load your cart: ${extractErrorMessage(error)}"),
               const SizedBox(height: 8),
               TextButton(
-                onPressed: () => ref.invalidate(cartControllerProvider),
+                onPressed: hapticize(() => ref.invalidate(cartControllerProvider)),
                 child: const Text('Retry'),
               ),
             ],
@@ -185,7 +186,7 @@ class _QuantityStepper extends ConsumerWidget {
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             padding: EdgeInsets.zero,
             tooltip: item.quantity <= 1 ? 'Remove from cart' : 'Decrease quantity',
-            onPressed: () {
+            onPressed: hapticize(() {
               HapticFeedback.selectionClick();
               final newQuantity = item.quantity - 1;
               if (newQuantity <= 0) {
@@ -195,7 +196,7 @@ class _QuantityStepper extends ConsumerWidget {
                     .read(cartControllerProvider.notifier)
                     .updateQuantity(cartItemId: item.cartItemId, quantity: newQuantity);
               }
-            },
+            }),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -207,12 +208,12 @@ class _QuantityStepper extends ConsumerWidget {
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             padding: EdgeInsets.zero,
             tooltip: 'Increase quantity',
-            onPressed: () {
+            onPressed: hapticize(() {
               HapticFeedback.selectionClick();
               ref
                   .read(cartControllerProvider.notifier)
                   .updateQuantity(cartItemId: item.cartItemId, quantity: item.quantity + 1);
-            },
+            }),
           ),
         ],
       ),

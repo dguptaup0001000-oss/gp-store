@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'orders_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class InvoiceScreen extends ConsumerWidget {
   const InvoiceScreen({super.key, required this.orderId});
@@ -27,7 +28,7 @@ class InvoiceScreen extends ConsumerWidget {
               // of one static string.
               Text("Couldn't load your invoice: ${extractErrorMessage(error)}"),
               TextButton(
-                onPressed: () => ref.invalidate(orderInvoiceProvider(orderId)),
+                onPressed: hapticize(() => ref.invalidate(orderInvoiceProvider(orderId))),
                 child: const Text('Retry'),
               ),
             ],

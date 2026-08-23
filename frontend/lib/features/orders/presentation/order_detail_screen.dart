@@ -11,6 +11,7 @@ import '../domain/order_models.dart';
 import 'invoice_screen.dart';
 import 'orders_providers.dart';
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class OrderDetailScreen extends ConsumerWidget {
   const OrderDetailScreen({super.key, required this.orderId});
@@ -34,7 +35,7 @@ class OrderDetailScreen extends ConsumerWidget {
               // of one static string.
               Text("Couldn't load this order: ${extractErrorMessage(error)}"),
               TextButton(
-                onPressed: () => ref.invalidate(orderDetailProvider(orderId)),
+                onPressed: hapticize(() => ref.invalidate(orderDetailProvider(orderId))),
                 child: const Text('Retry'),
               ),
             ],
@@ -108,8 +109,8 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
         title: const Text('Cancel this order?'),
         content: const Text('This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('No')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Yes, cancel')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('No')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Yes, cancel')),
         ],
       ),
     );
@@ -212,9 +213,9 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: () => Navigator.of(context).push(
+          onPressed: hapticize(() => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => InvoiceScreen(orderId: order.orderId)),
-          ),
+          )),
           icon: const Icon(Icons.receipt_outlined, size: 18),
           label: const Text('View Invoice'),
         ),
@@ -366,7 +367,7 @@ class _DeliveryTrackingCardState extends ConsumerState<_DeliveryTrackingCard> {
                           ),
                         ),
                         OutlinedButton.icon(
-                          onPressed: () => _navigateToPartner(live.partnerLatitude!, live.partnerLongitude!),
+                          onPressed: hapticize(() => _navigateToPartner(live.partnerLatitude!, live.partnerLongitude!)),
                           icon: const Icon(Icons.map_outlined, size: 16),
                           label: const Text('View on map'),
                         ),

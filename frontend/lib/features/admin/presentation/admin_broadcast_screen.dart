@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminBroadcastScreen extends ConsumerStatefulWidget {
   const AdminBroadcastScreen({super.key});
@@ -32,8 +33,8 @@ class _AdminBroadcastScreenState extends ConsumerState<AdminBroadcastScreen> {
         title: const Text('Send to every customer?'),
         content: const Text('This creates a notification for every active customer account. This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Send')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Send')),
         ],
       ),
     );

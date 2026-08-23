@@ -68,6 +68,17 @@ class AppHaptics {
   /// Navigation and selection. The lightest feedback available.
   static void selection() => _fire(HapticFeedback.selectionClick);
 
+  /// The default for an ordinary tap - a synonym for [selection], and the
+  /// name most call sites should reach for.
+  ///
+  /// Deliberately an alias rather than a fourth intensity. Most taps in a
+  /// shop are navigation (open a product, switch a tab, pick a category) and
+  /// want the lightest thing available; adding a distinct "tap" feel would
+  /// mean deciding, at 300 call sites, whether this particular tap is a
+  /// selection or a tap - a distinction nobody can apply consistently and no
+  /// customer can perceive.
+  static void tap() => selection();
+
   /// The customer changed something that persists.
   static void action() => _fire(HapticFeedback.lightImpact);
 

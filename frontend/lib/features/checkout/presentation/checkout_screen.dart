@@ -14,6 +14,7 @@ import '../domain/checkout_models.dart';
 import 'checkout_providers.dart';
 import 'order_cancellation_countdown_screen.dart';
 import 'order_confirmation_screen.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
@@ -303,7 +304,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                 children: [
                   _sectionLabel('Delivery Address'),
                   InkWell(
-                    onTap: _selectAddress,
+                    onTap: hapticize(_selectAddress),
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
                       padding: const EdgeInsets.all(14),
@@ -359,7 +360,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   RadioListTile<String>(
                     value: 'COD',
                     groupValue: _paymentMethod,
-                    onChanged: (value) => setState(() => _paymentMethod = value!),
+                    onChanged: hapticizeValue((value) => setState(() => _paymentMethod = value!)),
                     secondary: const Icon(Icons.money_outlined, color: AppColors.success),
                     title: const Text('Cash on Delivery'),
                     contentPadding: EdgeInsets.zero,
@@ -367,7 +368,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   RadioListTile<String>(
                     value: 'UPI',
                     groupValue: _paymentMethod,
-                    onChanged: (value) => setState(() => _paymentMethod = value!),
+                    onChanged: hapticizeValue((value) => setState(() => _paymentMethod = value!)),
                     secondary: const Icon(Icons.qr_code_scanner_outlined, color: AppColors.primary),
                     title: const Text('UPI (GPay / PhonePe / Paytm)'),
                     subtitle: const Text('Pay the shop directly, confirmed by the shop'),
@@ -376,7 +377,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   RadioListTile<String>(
                     value: 'ONLINE',
                     groupValue: _paymentMethod,
-                    onChanged: (value) => setState(() => _paymentMethod = value!),
+                    onChanged: hapticizeValue((value) => setState(() => _paymentMethod = value!)),
                     secondary: const Icon(Icons.credit_card_outlined, color: AppColors.primary),
                     title: const Text('Pay online'),
                     subtitle: const Text('Card, UPI or netbanking, confirmed instantly'),
@@ -391,7 +392,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                       child: Column(
                         children: [
                           Text(_previewError!),
-                          TextButton(onPressed: _fetchPreview, child: const Text('Retry')),
+                          TextButton(onPressed: hapticize(_fetchPreview), child: const Text('Retry')),
                         ],
                       ),
                     )

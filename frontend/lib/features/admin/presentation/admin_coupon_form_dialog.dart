@@ -5,6 +5,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart' show DiscountType;
 import '../domain/admin_coupon_models.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminCouponFormDialog extends ConsumerStatefulWidget {
   const AdminCouponFormDialog({super.key, this.coupon});
@@ -127,8 +128,8 @@ class _AdminCouponFormDialogState extends ConsumerState<AdminCouponFormDialog> {
         title: const Text('Deactivate this coupon?'),
         content: const Text('Customers will no longer be able to use it.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Deactivate')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Deactivate')),
         ],
       ),
     );
@@ -174,7 +175,7 @@ class _AdminCouponFormDialogState extends ConsumerState<AdminCouponFormDialog> {
                   DropdownMenuItem(value: DiscountType.percentage, child: Text('Percentage off')),
                   DropdownMenuItem(value: DiscountType.flat, child: Text('Flat amount off')),
                 ],
-                onChanged: (value) => setState(() => _discountType = value!),
+                onChanged: hapticizeValue((value) => setState(() => _discountType = value!)),
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -210,14 +211,14 @@ class _AdminCouponFormDialogState extends ConsumerState<AdminCouponFormDialog> {
                 contentPadding: EdgeInsets.zero,
                 title: Text(_expiryDate == null ? 'No expiry date' : 'Expires: ${_expiryDate!.toLocal()}'.split(' ')[0]),
                 trailing: const Icon(Icons.calendar_today_outlined, size: 18),
-                onTap: _pickExpiryDate,
+                onTap: hapticize(_pickExpiryDate),
               ),
               if (_isEditing)
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Active'),
                   value: _active,
-                  onChanged: (value) => setState(() => _active = value),
+                  onChanged: hapticizeValue((value) => setState(() => _active = value)),
                 ),
             ],
           ),
@@ -226,11 +227,11 @@ class _AdminCouponFormDialogState extends ConsumerState<AdminCouponFormDialog> {
       actions: [
         if (_isEditing)
           TextButton(
-            onPressed: _deactivate,
+            onPressed: hapticize(_deactivate),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Deactivate'),
           ),
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+        TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
         FilledButton(
           onPressed: _isSaving ? null : _save,
           child: _isSaving

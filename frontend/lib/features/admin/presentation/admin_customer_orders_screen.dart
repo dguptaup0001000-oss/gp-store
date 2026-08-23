@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_order_detail_screen.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminCustomerOrdersScreen extends ConsumerWidget {
   const AdminCustomerOrdersScreen({super.key, required this.customerId, required this.customerName});
@@ -30,7 +31,7 @@ class AdminCustomerOrdersScreen extends ConsumerWidget {
               Text("Couldn't load orders: ${extractErrorMessage(error)}"),
               const SizedBox(height: 8),
               TextButton(
-                onPressed: () => ref.invalidate(adminCustomerOrdersProvider(customerId)),
+                onPressed: hapticize(() => ref.invalidate(adminCustomerOrdersProvider(customerId))),
                 child: const Text('Retry'),
               ),
             ],
@@ -51,9 +52,9 @@ class AdminCustomerOrdersScreen extends ConsumerWidget {
               final order = orders[index];
               return InkWell(
                 borderRadius: BorderRadius.circular(12),
-                onTap: () => Navigator.of(context).push(
+                onTap: hapticize(() => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => AdminOrderDetailScreen(orderId: order.orderId)),
-                ),
+                )),
                 child: Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),

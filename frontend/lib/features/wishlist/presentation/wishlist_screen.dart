@@ -7,6 +7,7 @@ import '../../cart/presentation/cart_providers.dart';
 import '../../products/presentation/product_detail_screen.dart';
 import 'wishlist_providers.dart';
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class WishlistScreen extends ConsumerWidget {
   const WishlistScreen({super.key});
@@ -27,7 +28,7 @@ class WishlistScreen extends ConsumerWidget {
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load your wishlist: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(wishlistControllerProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(wishlistControllerProvider)), child: const Text('Retry')),
             ],
           ),
         ),
@@ -51,9 +52,9 @@ class WishlistScreen extends ConsumerWidget {
 
               return InkWell(
                 borderRadius: BorderRadius.circular(12),
-                onTap: () => Navigator.of(context).push(
+                onTap: hapticize(() => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
-                ),
+                )),
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
@@ -86,7 +87,7 @@ class WishlistScreen extends ConsumerWidget {
                         IconButton(
                           icon: const Icon(Icons.add_shopping_cart_outlined, color: AppColors.primary),
                           tooltip: 'Add to cart',
-                          onPressed: () async {
+                          onPressed: hapticize(() async {
                             try {
                               await ref
                                   .read(cartControllerProvider.notifier)
@@ -100,12 +101,12 @@ class WishlistScreen extends ConsumerWidget {
                                 SnackBar(content: Text(extractErrorMessage(e))),
                               );
                             }
-                          },
+                          }),
                         ),
                       IconButton(
                         icon: const Icon(Icons.favorite, color: AppColors.error),
                         tooltip: 'Remove from wishlist',
-                        onPressed: () => ref.read(wishlistControllerProvider.notifier).toggle(product.id),
+                        onPressed: hapticize(() => ref.read(wishlistControllerProvider.notifier).toggle(product.id)),
                       ),
                     ],
                   ),

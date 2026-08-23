@@ -16,6 +16,7 @@ import 'admin_printer_settings_screen.dart';
 import 'admin_product_list_screen.dart';
 import 'admin_reviews_screen.dart';
 import 'admin_voice_settings_screen.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// Only reachable from ProfileScreen when the logged-in customer's role is
 /// ADMIN - see profile_screen.dart's role check.
@@ -34,135 +35,135 @@ class AdminHomeScreen extends StatelessWidget {
             icon: Icons.receipt_long_outlined,
             title: 'All Orders',
             subtitle: 'View and manage every order',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminOrderListScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.payments_outlined,
             title: 'Payments',
             subtitle: 'Confirm UPI, process refunds',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminPaymentsScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.campaign_outlined,
             title: 'Broadcast Notification',
             subtitle: 'Send an announcement to every customer',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminBroadcastScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.analytics_outlined,
             title: 'Analytics',
             subtitle: 'Sales, top products, order status',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminAnalyticsScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.inventory_2_outlined,
             title: 'Products',
             subtitle: 'Add, edit, and manage stock',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminProductListScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.category_outlined,
             title: 'Categories',
             subtitle: 'Organize your product catalog',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminCategoryListScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.inventory_outlined,
             title: 'Inventory',
             subtitle: 'Stock levels, restock, low-stock alerts',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminInventoryScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.local_offer_outlined,
             title: 'Coupons',
             subtitle: 'Create and manage discount offers',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminCouponListScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.delivery_dining_outlined,
             title: 'Delivery Partners',
             subtitle: 'Manage your delivery team and availability',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminDeliveryPartnersScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.report_problem_outlined,
             title: 'Delivery Breaches',
             subtitle: 'Orders that missed their promised delivery time',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminDeliveryBreachesScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.history_outlined,
             title: 'Audit Log',
             subtitle: 'Full history of important actions',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminAuditLogScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.people_outline,
             title: 'Customers',
             subtitle: 'View and manage customer accounts',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminCustomersScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.rate_review_outlined,
             title: 'Review Moderation',
             subtitle: 'Remove inappropriate reviews',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminReviewsScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.print_outlined,
             title: 'Receipt Printer',
             subtitle: 'Connect a printer to auto-print new orders',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminPrinterSettingsScreen()),
-            ),
+            )),
           ),
           _tile(
             context,
             icon: Icons.campaign_outlined,
             title: 'Order Announcements',
             subtitle: 'Speak new orders aloud, like a payment soundbox',
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminVoiceSettingsScreen()),
-            ),
+            )),
           ),
         ],
       ),

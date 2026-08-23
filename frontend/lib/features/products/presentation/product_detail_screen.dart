@@ -12,6 +12,7 @@ import '../../wishlist/presentation/wishlist_providers.dart';
 import 'product_3d_view_screen.dart';
 import 'product_image_gallery.dart';
 import 'products_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class ProductDetailScreen extends ConsumerStatefulWidget {
   const ProductDetailScreen({super.key, required this.product});
@@ -76,7 +77,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   color: isWishlisted ? AppColors.error : null,
                 ),
                 tooltip: isWishlisted ? 'Remove from wishlist' : 'Add to wishlist',
-                onPressed: () => ref.read(wishlistControllerProvider.notifier).toggle(product.id),
+                onPressed: hapticize(() => ref.read(wishlistControllerProvider.notifier).toggle(product.id)),
               );
             },
           ),
@@ -246,7 +247,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                             icon: const Icon(Icons.add),
                             color: AppColors.primary,
                             tooltip: 'Increase quantity',
-                            onPressed: () => setState(() => _quantity++),
+                            onPressed: hapticize(() => setState(() => _quantity++)),
                           ),
                         ],
                       ),

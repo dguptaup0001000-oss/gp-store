@@ -6,6 +6,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../orders/presentation/order_detail_screen.dart';
 import '../domain/notification_models.dart';
 import 'notifications_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class NotificationsScreen extends ConsumerWidget {
   const NotificationsScreen({super.key});
@@ -51,7 +52,7 @@ class NotificationsScreen extends ConsumerWidget {
         title: const Text('Notifications'),
         actions: [
           TextButton(
-            onPressed: () async {
+            onPressed: hapticize(() async {
               try {
                 await ref.read(notificationsRepositoryProvider).markAllAsRead();
                 ref.invalidate(myNotificationsProvider);
@@ -76,7 +77,7 @@ class NotificationsScreen extends ConsumerWidget {
               Text("Couldn't load notifications: ${extractErrorMessage(error)}"),
               TextButton(onPressed: () => ref.invalidate(myNotificationsProvider), child: const Text('Retry')),
             ],
-          ),
+          )),
         ),
         data: (page) {
           final notifications = page.notifications;
@@ -115,7 +116,7 @@ class NotificationsScreen extends ConsumerWidget {
                   onDismissed: (_) => _delete(context, ref, notification),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
-                    onTap: () => _openNotification(context, ref, notification),
+                    onTap: hapticize(() => _openNotification(context, ref, notification)),
                     child: Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(

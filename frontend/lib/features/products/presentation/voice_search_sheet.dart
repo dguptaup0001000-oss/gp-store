@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/util/app_haptics.dart';
 import '../../../core/voice/speech_service.dart';
 import '../../../core/voice/voice_query_parser.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// The listening sheet.
 ///
@@ -163,7 +164,7 @@ class _VoiceSearchSheetState extends State<VoiceSearchSheet> {
         // Not everybody pauses long enough for the recogniser to decide they
         // have finished, and a customer who has said their piece should not
         // have to wait three seconds to find out the app agrees.
-        FilledButton(onPressed: _stopAndUse, child: const Text('Done')),
+        FilledButton(onPressed: hapticize(_stopAndUse), child: const Text('Done')),
       ];
 
   List<Widget> _understanding() => [
@@ -211,7 +212,7 @@ class _VoiceSearchSheetState extends State<VoiceSearchSheet> {
           // Typing always remains available. A voice feature that traps
           // somebody when it fails is worse than no voice feature.
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: hapticize(() => Navigator.of(context).pop()),
             child: const Text('Type instead'),
           ),
           const SizedBox(width: 8),
@@ -227,7 +228,7 @@ class _VoiceSearchSheetState extends State<VoiceSearchSheet> {
               child: const Text('Open settings'),
             )
           else if (retryable)
-            FilledButton(onPressed: _listen, child: const Text('Try again')),
+            FilledButton(onPressed: hapticize(_listen), child: const Text('Try again')),
         ],
       ),
     ];

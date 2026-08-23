@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'auth_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -120,7 +121,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextButton(
-                  onPressed: () => context.pop(),
+                  onPressed: hapticize(() => context.pop()),
                   child: const Text('Already have an account? Log in'),
                 ),
               ],

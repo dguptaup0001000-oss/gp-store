@@ -7,6 +7,7 @@ import '../../features/brands/presentation/brands_screen.dart';
 import '../../features/products/domain/brand_models.dart';
 import '../../features/products/presentation/brand_products_screen.dart';
 import 'brand_avatar.dart';
+import '../../core/util/haptic_widgets.dart';
 
 /// "Shop by Brand" row for the home screen. Auto-advances one tile at a time
 /// so brands rotate through without the user scrolling, but stays fully
@@ -85,7 +86,7 @@ class _BuyByBrandBannerState extends State<BuyByBrandBanner> {
               Text('Shop by Brand',
                   style: Theme.of(context).textTheme.titleMedium),
               GestureDetector(
-                onTap: _openAllBrands,
+                onTap: hapticize(_openAllBrands),
                 child: const Text(
                   'See All',
                   style: TextStyle(
@@ -108,7 +109,7 @@ class _BuyByBrandBannerState extends State<BuyByBrandBanner> {
               padEnds: false,
               itemBuilder: (context, index) {
                 final brand = widget.brands[index % widget.brands.length];
-                return _BrandTile(brand: brand, onTap: () => _openBrand(brand));
+                return _BrandTile(brand: brand, onTap: hapticize(() => _openBrand(brand)));
               },
             ),
           ),

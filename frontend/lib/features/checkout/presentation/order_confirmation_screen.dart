@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class OrderConfirmationScreen extends StatelessWidget {
   const OrderConfirmationScreen({
@@ -90,7 +91,7 @@ class OrderConfirmationScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   FilledButton.icon(
-                    onPressed: () => _openUpiApp(context),
+                    onPressed: hapticize(() => _openUpiApp(context)),
                     icon: const Icon(Icons.account_balance_wallet_outlined),
                     label: const Text('Pay with UPI App'),
                   ),
@@ -104,7 +105,7 @@ class OrderConfirmationScreen extends StatelessWidget {
 
                 const SizedBox(height: 24),
                 TextButton(
-                  onPressed: () { final router = GoRouter.of(context); Navigator.of(context).popUntil((r) => r.isFirst); router.go('/'); },
+                  onPressed: hapticize(() { final router = GoRouter.of(context); Navigator.of(context).popUntil((r) => r.isFirst); router.go('/'); }),
                   child: const Text('Continue Shopping'),
                 ),
               ],
@@ -162,7 +163,7 @@ class _IncompletePaymentView extends StatelessWidget {
                 ),
                 const SizedBox(height: 24),
                 FilledButton(
-                  onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+                  onPressed: hapticize(() => Navigator.of(context).popUntil((route) => route.isFirst)),
                   child: const Text('Back to shopping'),
                 ),
               ],

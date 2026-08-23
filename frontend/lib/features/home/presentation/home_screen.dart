@@ -27,6 +27,7 @@ import '../../../shared/widgets/horizontal_product_section.dart';
 import '../../../shared/widgets/see_all_products_screen.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -61,9 +62,9 @@ class HomeScreen extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.receipt_long_outlined),
             tooltip: 'My Orders',
-            onPressed: () => Navigator.of(context).push(
+            onPressed: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const OrderHistoryScreen()),
-            ),
+            )),
           ),
           Stack(
             alignment: Alignment.center,
@@ -71,9 +72,9 @@ class HomeScreen extends ConsumerWidget {
               IconButton(
                 icon: const Icon(Icons.shopping_cart_outlined),
                 tooltip: 'Cart',
-                onPressed: () => Navigator.of(context).push(
+                onPressed: hapticize(() => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const CartScreen()),
-                ),
+                )),
               ),
               if (cartItemCount > 0)
                 Positioned(
@@ -95,9 +96,9 @@ class HomeScreen extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.person_outline),
             tooltip: 'Profile',
-            onPressed: () => Navigator.of(context).push(
+            onPressed: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ProfileScreen()),
-            ),
+            )),
           ),
         ],
       ),
@@ -177,9 +178,9 @@ class HomeScreen extends ConsumerWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: GestureDetector(
-                onTap: () => Navigator.of(context).push(
+                onTap: hapticize(() => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const SearchScreen()),
-                ),
+                )),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import 'reviews_providers.dart';
 import 'write_review_dialog.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class ProductReviewsSection extends ConsumerWidget {
   const ProductReviewsSection({super.key, required this.productId});
@@ -22,7 +23,7 @@ class ProductReviewsSection extends ConsumerWidget {
           children: [
             Text('Reviews', style: Theme.of(context).textTheme.titleMedium),
             TextButton(
-              onPressed: () async {
+              onPressed: hapticize(() async {
                 final submitted = await showDialog<bool>(
                   context: context,
                   builder: (context) => WriteReviewDialog(productId: productId),
@@ -30,7 +31,7 @@ class ProductReviewsSection extends ConsumerWidget {
                 if (submitted == true) {
                   ref.invalidate(productReviewsProvider(productId));
                 }
-              },
+              }),
               child: const Text('Write a review'),
             ),
           ],

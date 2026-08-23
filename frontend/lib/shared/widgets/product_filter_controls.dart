@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/brand_models.dart';
+import '../../core/util/haptic_widgets.dart';
 
 /// A filter control as a single tappable pill.
 ///
@@ -40,10 +41,10 @@ class FilterPill extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadius.md),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.md),
-        onTap: () {
+        onTap: hapticize(() {
           HapticFeedback.selectionClick();
           onTap();
-        },
+        }),
         child: Container(
           height: 46,
           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -130,7 +131,7 @@ class SortSheet {
               ),
             ),
             trailing: isSelected ? const Icon(Icons.check, color: AppColors.primary, size: 20) : null,
-            onTap: () => Navigator.of(sheetContext).pop(<BrandSortOption?>[value]),
+            onTap: hapticize(() => Navigator.of(sheetContext).pop(<BrandSortOption?>[value])),
           );
         }
 

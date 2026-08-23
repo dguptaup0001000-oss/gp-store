@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminCategoryListScreen extends ConsumerWidget {
   const AdminCategoryListScreen({super.key});
@@ -25,7 +26,7 @@ class AdminCategoryListScreen extends ConsumerWidget {
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load categories: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(adminCategoriesProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(adminCategoriesProvider)), child: const Text('Retry')),
             ],
           ),
         ),
@@ -45,13 +46,13 @@ class AdminCategoryListScreen extends ConsumerWidget {
         },
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
+        onPressed: hapticize(() async {
           final saved = await showDialog<bool>(
             context: context,
             builder: (context) => const _CategoryFormDialog(),
           );
           if (saved == true) ref.invalidate(adminCategoriesProvider);
-        },
+        }),
         icon: const Icon(Icons.add),
         label: const Text('Add Category'),
       ),
@@ -68,13 +69,13 @@ class _CategoryTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: () async {
+      onTap: hapticize(() async {
         final saved = await showDialog<bool>(
           context: context,
           builder: (context) => _CategoryFormDialog(category: category),
         );
         if (saved == true) ref.invalidate(adminCategoriesProvider);
-      },
+      }),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
@@ -190,8 +191,8 @@ class _CategoryFormDialogState extends ConsumerState<_CategoryFormDialog> {
         title: const Text('Deactivate this category?'),
         content: const Text('Existing products keep their reference to it - it will just stop showing to customers.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Deactivate')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Deactivate')),
         ],
       ),
     );
@@ -235,7 +236,7 @@ class _CategoryFormDialogState extends ConsumerState<_CategoryFormDialog> {
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Active'),
                 value: _active,
-                onChanged: (value) => setState(() => _active = value),
+                onChanged: hapticizeValue((value) => setState(() => _active = value)),
               ),
             ],
           ],
@@ -244,11 +245,11 @@ class _CategoryFormDialogState extends ConsumerState<_CategoryFormDialog> {
       actions: [
         if (_isEditing)
           TextButton(
-            onPressed: _deactivate,
+            onPressed: hapticize(_deactivate),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Deactivate'),
           ),
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+        TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
         FilledButton(
           onPressed: _isSaving ? null : _save,
           child: _isSaving

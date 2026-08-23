@@ -6,6 +6,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
 import 'admin_product_form_screen.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminProductListScreen extends ConsumerStatefulWidget {
   const AdminProductListScreen({super.key});
@@ -62,7 +63,7 @@ class _AdminProductListScreenState extends ConsumerState<AdminProductListScreen>
                     // comment for why this shows the real failure reason instead
                     // of one static string.
                     Text("Couldn't load products: ${extractErrorMessage(error)}"),
-                    TextButton(onPressed: () => ref.invalidate(adminAllProductsProvider), child: const Text('Retry')),
+                    TextButton(onPressed: hapticize(() => ref.invalidate(adminAllProductsProvider)), child: const Text('Retry')),
                   ],
                 ),
               ),
@@ -90,12 +91,12 @@ class _AdminProductListScreenState extends ConsumerState<AdminProductListScreen>
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
+        onPressed: hapticize(() async {
           final saved = await Navigator.of(context).push<bool>(
             MaterialPageRoute(builder: (_) => const AdminProductFormScreen()),
           );
           if (saved == true) ref.invalidate(adminAllProductsProvider);
-        },
+        }),
         icon: const Icon(Icons.add),
         label: const Text('Add Product'),
       ),
@@ -114,12 +115,12 @@ class _ProductTile extends ConsumerWidget {
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: () async {
+      onTap: hapticize(() async {
         final saved = await Navigator.of(context).push<bool>(
           MaterialPageRoute(builder: (_) => AdminProductFormScreen(product: product)),
         );
         if (saved == true) ref.invalidate(adminAllProductsProvider);
-      },
+      }),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),

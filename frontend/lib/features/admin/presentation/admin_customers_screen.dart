@@ -6,6 +6,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../domain/admin_customer_model.dart';
 import 'admin_customer_orders_screen.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminCustomersScreen extends ConsumerStatefulWidget {
   const AdminCustomersScreen({super.key});
@@ -64,7 +65,7 @@ class _AdminCustomersScreenState extends ConsumerState<AdminCustomersScreen> {
                     // comment for why this shows the real failure reason instead
                     // of one static string.
                     Text("Couldn't load customers: ${extractErrorMessage(error)}"),
-                    TextButton(onPressed: () => ref.invalidate(adminAllCustomersProvider), child: const Text('Retry')),
+                    TextButton(onPressed: hapticize(() => ref.invalidate(adminAllCustomersProvider)), child: const Text('Retry')),
                   ],
                 ),
               ),
@@ -110,13 +111,13 @@ class _AdminCustomersScreenState extends ConsumerState<AdminCustomersScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
+        onPressed: hapticize(() async {
           final created = await showDialog<bool>(
             context: context,
             builder: (context) => const _CreateCustomerDialog(),
           );
           if (created == true) ref.invalidate(adminAllCustomersProvider);
-        },
+        }),
         icon: const Icon(Icons.add),
         label: const Text('Add Customer'),
       ),
@@ -206,7 +207,7 @@ class _CreateCustomerDialogState extends ConsumerState<_CreateCustomerDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+        TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
         FilledButton(
           onPressed: _isSaving ? null : _save,
           child: _isSaving
@@ -243,8 +244,8 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
             'This immediately signs them out of every device and blocks login until reactivated.',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Deactivate')),
+            TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
+            TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Deactivate')),
           ],
         ),
       );
@@ -280,11 +281,11 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
         children: [
           Expanded(
             child: InkWell(
-              onTap: () => Navigator.of(context).push(
+              onTap: hapticize(() => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => AdminCustomerOrdersScreen(customerId: customer.id, customerName: customer.fullName),
                 ),
-              ),
+              )),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -318,7 +319,7 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
           ),
           _isUpdating
               ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-              : Switch(value: customer.active, onChanged: (_) => _toggleActive()),
+              : Switch(value: customer.active, onChanged: hapticizeValue((_) => _toggleActive())),
         ],
       ),
     );

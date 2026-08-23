@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'reviews_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class MyReviewsScreen extends ConsumerWidget {
   const MyReviewsScreen({super.key});
@@ -24,7 +25,7 @@ class MyReviewsScreen extends ConsumerWidget {
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load your reviews: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(myReviewsProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(myReviewsProvider)), child: const Text('Retry')),
             ],
           ),
         ),
@@ -69,7 +70,7 @@ class MyReviewsScreen extends ConsumerWidget {
                     IconButton(
                       icon: const Icon(Icons.delete_outline, color: AppColors.error, size: 20),
                       tooltip: 'Delete review',
-                      onPressed: () async {
+                      onPressed: hapticize(() async {
                         try {
                           await ref.read(reviewsRepositoryProvider).deleteReview(review.id);
                           ref.invalidate(myReviewsProvider);
@@ -79,7 +80,7 @@ class MyReviewsScreen extends ConsumerWidget {
                             SnackBar(content: Text(extractErrorMessage(e))),
                           );
                         }
-                      },
+                      }),
                     ),
                   ],
                 ),

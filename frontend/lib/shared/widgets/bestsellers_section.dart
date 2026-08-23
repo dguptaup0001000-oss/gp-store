@@ -7,6 +7,7 @@ import '../../features/products/domain/product_models.dart';
 import '../../features/products/presentation/category_products_screen.dart';
 import '../../features/products/presentation/products_providers.dart';
 import '../../core/images/gp_network_image.dart';
+import '../../core/util/haptic_widgets.dart';
 
 /// "Bestsellers" preview grid: a 2x2 photo collage per category, tapping a
 /// tile opens the full category listing.
@@ -93,9 +94,9 @@ class _BestsellerTile extends StatelessWidget {
     final extra = tile.additionalProductCount;
 
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(
+      onTap: hapticize(() => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => CategoryProductsScreen(category: category)),
-      ),
+      )),
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(

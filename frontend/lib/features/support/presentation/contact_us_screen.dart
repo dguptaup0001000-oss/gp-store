@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'support_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class ContactUsScreen extends ConsumerWidget {
   const ContactUsScreen({super.key});
@@ -39,7 +40,7 @@ class ContactUsScreen extends ConsumerWidget {
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load contact info: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(storeInfoProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(storeInfoProvider)), child: const Text('Retry')),
             ],
           ),
         ),
@@ -50,21 +51,21 @@ class ContactUsScreen extends ConsumerWidget {
               icon: Icons.call_outlined,
               label: 'Call us',
               value: info.supportPhone,
-              onTap: () => _call(info.supportPhone),
+              onTap: hapticize(() => _call(info.supportPhone)),
             ),
             const SizedBox(height: 12),
             _ContactTile(
               icon: Icons.chat_outlined,
               label: 'WhatsApp',
               value: info.supportWhatsapp,
-              onTap: () => _whatsapp(info.supportWhatsapp),
+              onTap: hapticize(() => _whatsapp(info.supportWhatsapp)),
             ),
             const SizedBox(height: 12),
             _ContactTile(
               icon: Icons.email_outlined,
               label: 'Email',
               value: info.supportEmail,
-              onTap: () => _email(info.supportEmail),
+              onTap: hapticize(() => _email(info.supportEmail)),
             ),
           ],
         ),

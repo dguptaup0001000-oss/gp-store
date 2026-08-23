@@ -6,6 +6,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../domain/delivery_partner_models.dart';
 import 'admin_delivery_partner_form_dialog.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminDeliveryPartnersScreen extends ConsumerWidget {
   const AdminDeliveryPartnersScreen({super.key});
@@ -26,7 +27,7 @@ class AdminDeliveryPartnersScreen extends ConsumerWidget {
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load delivery partners: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(adminDeliveryPartnersProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(adminDeliveryPartnersProvider)), child: const Text('Retry')),
             ],
           ),
         ),
@@ -46,13 +47,13 @@ class AdminDeliveryPartnersScreen extends ConsumerWidget {
         },
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
+        onPressed: hapticize(() async {
           final saved = await showDialog<bool>(
             context: context,
             builder: (context) => const AdminDeliveryPartnerFormDialog(),
           );
           if (saved == true) ref.invalidate(adminDeliveryPartnersProvider);
-        },
+        }),
         icon: const Icon(Icons.add),
         label: const Text('Add Partner'),
       ),
@@ -69,13 +70,13 @@ class _PartnerTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: () async {
+      onTap: hapticize(() async {
         final saved = await showDialog<bool>(
           context: context,
           builder: (context) => AdminDeliveryPartnerFormDialog(partner: partner),
         );
         if (saved == true) ref.invalidate(adminDeliveryPartnersProvider);
-      },
+      }),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),

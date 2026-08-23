@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// Purely a review/signal list - the backend deliberately attaches no
 /// auto-refund or auto-action to a breach (see the backend endpoint's own
@@ -28,7 +29,7 @@ class AdminDeliveryBreachesScreen extends ConsumerWidget {
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load breach data: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(adminDeliveryBreachesProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(adminDeliveryBreachesProvider)), child: const Text('Retry')),
             ],
           ),
         ),

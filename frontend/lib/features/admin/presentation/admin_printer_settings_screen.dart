@@ -4,6 +4,7 @@ import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 
 import '../../../core/printing/printer_providers.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// One-time setup for the receipt printer that auto-prints every new order
 /// (see main.dart's NEW_ORDER push handling, and printer_service.dart).
@@ -150,7 +151,7 @@ class _AdminPrinterSettingsScreenState extends ConsumerState<AdminPrinterSetting
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
-              onPressed: _forgetPrinter,
+              onPressed: hapticize(_forgetPrinter),
               icon: const Icon(Icons.link_off, color: AppColors.error),
               label: const Text('Forget This Printer', style: TextStyle(color: AppColors.error)),
             ),
@@ -185,7 +186,7 @@ class _AdminPrinterSettingsScreenState extends ConsumerState<AdminPrinterSetting
                   title: Text(device.name, style: const TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(device.macAdress),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _selectPrinter(device),
+                  onTap: hapticize(() => _selectPrinter(device)),
                 ),
               ),
             ),
