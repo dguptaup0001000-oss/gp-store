@@ -30,6 +30,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -57,7 +58,7 @@ class CheckoutEndToEndTest {
     @Autowired private CartRepository cartRepository;
     @Autowired private CartItemRepository cartItemRepository;
     @Autowired private OrderRepository orderRepository;
-    @Autowired private DeliveryFeeService deliveryFeeService;
+    @Autowired private com.gpstore.pricing.DeliveryPricingService deliveryPricingService;
 
     @Value("${store.latitude}") private double storeLatitude;
     @Value("${store.longitude}") private double storeLongitude;
@@ -91,12 +92,52 @@ class CheckoutEndToEndTest {
         Order order = orderRepository.findById(response.getOrderId()).orElseThrow();
 
         BigDecimal subtotal = sellingPrice.multiply(BigDecimal.valueOf(quantity));
-        BigDecimal deliveryFee = deliveryFeeService.calculateDeliveryFee(0.0);
-        boolean freeDelivery = deliveryFeeService.isFreeDeliveryEligible(BigDecimal.ZERO, deliveryFee);
-        BigDecimal expectedTotal = freeDelivery ? subtotal : subtotal.add(deliveryFee);
+
+        // The delivery charge is asserted from the SAME service the checkout
+        // used, not from a number pasted in here. This test is about the total
+        // being computed server-side from real prices - the client never sends
+        // one - and hard-coding the fee would make it fail every time the shop
+        // legitimately changes its pricing, which trains whoever hits it to
+        // edit the expectation rather than think about it.
+        //
+        // The address sits at the shop's own coordinates, so this is the
+        // first distance tier with no weight surcharge and no margin (the
+        // fixture variant has no cost price).
+        // The delivery charge this fixture must produce, derived from the
+        // configured rules rather than pasted in as a number:
+        //
+        //   distance - the address sits at the shop's own coordinates, so the
+        //              first tier
+        //   weight   - the variant is sold by the piece, so nothing derivable
+        //   margin   - no cost price on the variant, so no profit to subsidise
+        //              with, which is why free delivery does NOT apply here
+        //              despite a Rs 270 basket. That is the whole point of
+        //              pricing on margin rather than order value.
+        //
+        // Read from the settings so this keeps passing when the shop
+        // legitimately changes its prices - a hard-coded rupee figure would
+        // fail on every tariff change and train whoever hits it to edit the
+        // expectation instead of thinking.
+        BigDecimal expectedDeliveryFee =
+                deliveryPricingService.settings().getDistanceTier1Charge();
+
+        assertEquals(0, expectedDeliveryFee.compareTo(order.getDeliveryFee()),
+                "the first distance tier, with no weight surcharge and no margin to subsidise it");
+        assertFalse(Boolean.TRUE.equals(order.getFreeDeliveryApplied()),
+                "a Rs 270 basket with no recorded cost price has no margin, so it must NOT get "
+                        + "free delivery - order value alone never earns it");
+
+        // The stored breakdown has to reconcile, or the admin screen is lying
+        // about where the money went.
+        assertEquals(0, order.getDeliveryNormalCharge().compareTo(
+                        order.getDeliverySubsidy().add(order.getDeliveryFee())),
+                "normal charge must equal subsidy + what the customer paid");
+
+        BigDecimal expectedTotal = subtotal.add(expectedDeliveryFee);
 
         assertEquals(0, expectedTotal.compareTo(order.getTotalAmount()),
-                "Total must be computed entirely server-side from the variant's real selling price and the delivery fee formula - the client never sends a price at all");
+                "Total must be computed entirely server-side from the variant's real selling price "
+                        + "and the delivery pricing rules - the client never sends a price at all");
 
         Inventory afterFirstOrder = inventoryRepository.findByProductVariantId(variant.getId()).orElseThrow();
         assertEquals(startingStock - quantity, afterFirstOrder.getStock(),

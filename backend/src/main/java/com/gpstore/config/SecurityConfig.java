@@ -233,6 +233,10 @@ public class SecurityConfig {
                 // permanent territory rules - both belong to whoever runs the
                 // shop, not to the people on the floor.
                 .requestMatchers("/api/admin/worker/**").hasRole("ADMIN")
+                // DELIVERY PRICING. Editing these numbers changes what every
+                // future customer pays, and the per-order breakdown exposes
+                // cost prices and margins - neither is customer-readable.
+                .requestMatchers("/api/admin/delivery-pricing/**").hasRole("ADMIN")
                 // THE WORKER APP. Every route here resolves the worker from the
                 // JWT and never from the request, so ADMIN is included only so
                 // an administrator can exercise the same flow while setting a

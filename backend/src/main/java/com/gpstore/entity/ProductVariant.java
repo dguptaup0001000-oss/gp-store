@@ -59,6 +59,21 @@ private Product product;
 
     private BigDecimal sellingPrice;
 
+    /**
+     * What one unit of this variant weighs, in grams. The OVERRIDE, not the
+     * source of truth.
+     *
+     * Most of the shelf already states its weight in the pack size: 5 kg atta,
+     * 500 g haldi, 1 l oil. OrderWeightCalculator reads those directly, so
+     * this column only needs filling where the pack size cannot say - anything
+     * sold by the piece, and anything whose volume is a poor proxy for its
+     * mass. Where it is set it wins outright.
+     *
+     * Null is the normal state and not a defect.
+     */
+    @Column(name = "weight_grams")
+    private BigDecimal weightGrams;
+
     // Optional exception to the category's GST rate for this specific variant.
     // Null means "use the category's rate" - most products won't need this.
     private BigDecimal gstRateOverride;

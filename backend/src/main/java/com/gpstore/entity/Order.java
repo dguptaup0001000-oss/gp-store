@@ -153,7 +153,115 @@ private PaymentStatus paymentStatus;
     @JoinColumn(name = "assigned_worker_partner_id")
     private DeliveryPartner assignedWorkerPartner;
 
+    // ------------------------------------------------------------------
+    // Delivery pricing breakdown
+    // ------------------------------------------------------------------
+    // STORED, NOT RECOMPUTED. A quote is a statement made at a moment: the
+    // pricing settings can be edited tomorrow and a variant's cost price can
+    // change, so an admin screen that recalculated would show a number this
+    // customer was never charged. These columns ARE the record of what was
+    // decided and why - every line the admin breakdown shows.
+
+    @Column(name = "delivery_distance_km", precision = 10, scale = 3)
+    private BigDecimal deliveryDistanceKm;
+
+    @Column(name = "delivery_weight_kg", precision = 10, scale = 3)
+    private BigDecimal deliveryWeightKg;
+
+    @Column(name = "delivery_distance_charge", precision = 10, scale = 2)
+    private BigDecimal deliveryDistanceCharge;
+
+    @Column(name = "delivery_weight_charge", precision = 10, scale = 2)
+    private BigDecimal deliveryWeightCharge;
+
+    /** What delivery costs before any margin subsidy. */
+    @Column(name = "delivery_normal_charge", precision = 10, scale = 2)
+    private BigDecimal deliveryNormalCharge;
+
+    /** The margin that was available to spend on delivery. */
+    @Column(name = "delivery_order_profit", precision = 10, scale = 2)
+    private BigDecimal deliveryOrderProfit;
+
+    /** How much of the normal charge the order's own margin absorbed. */
+    @Column(name = "delivery_subsidy", precision = 10, scale = 2)
+    private BigDecimal deliverySubsidy;
+
+    /**
+     * Anything the shop should know about how this price was reached - a
+     * missing cost price, an item with no weight, an estimated distance.
+     *
+     * Never shown to a customer. Kept on the order rather than only in a log
+     * so that "why was this one odd" is answerable months later, when the log
+     * has rotated away.
+     */
+    @Column(name = "delivery_pricing_notes", length = 1000)
+    private String deliveryPricingNotes;
+
     public Order() {
+    }
+
+    public BigDecimal getDeliveryDistanceKm() {
+        return deliveryDistanceKm;
+    }
+
+    public void setDeliveryDistanceKm(BigDecimal deliveryDistanceKm) {
+        this.deliveryDistanceKm = deliveryDistanceKm;
+    }
+
+    public BigDecimal getDeliveryWeightKg() {
+        return deliveryWeightKg;
+    }
+
+    public void setDeliveryWeightKg(BigDecimal deliveryWeightKg) {
+        this.deliveryWeightKg = deliveryWeightKg;
+    }
+
+    public BigDecimal getDeliveryDistanceCharge() {
+        return deliveryDistanceCharge;
+    }
+
+    public void setDeliveryDistanceCharge(BigDecimal deliveryDistanceCharge) {
+        this.deliveryDistanceCharge = deliveryDistanceCharge;
+    }
+
+    public BigDecimal getDeliveryWeightCharge() {
+        return deliveryWeightCharge;
+    }
+
+    public void setDeliveryWeightCharge(BigDecimal deliveryWeightCharge) {
+        this.deliveryWeightCharge = deliveryWeightCharge;
+    }
+
+    public BigDecimal getDeliveryNormalCharge() {
+        return deliveryNormalCharge;
+    }
+
+    public void setDeliveryNormalCharge(BigDecimal deliveryNormalCharge) {
+        this.deliveryNormalCharge = deliveryNormalCharge;
+    }
+
+    public BigDecimal getDeliveryOrderProfit() {
+        return deliveryOrderProfit;
+    }
+
+    public void setDeliveryOrderProfit(BigDecimal deliveryOrderProfit) {
+        this.deliveryOrderProfit = deliveryOrderProfit;
+    }
+
+    public BigDecimal getDeliverySubsidy() {
+        return deliverySubsidy;
+    }
+
+    public void setDeliverySubsidy(BigDecimal deliverySubsidy) {
+        this.deliverySubsidy = deliverySubsidy;
+    }
+
+    public String getDeliveryPricingNotes() {
+        return deliveryPricingNotes;
+    }
+
+    public void setDeliveryPricingNotes(String deliveryPricingNotes) {
+        this.deliveryPricingNotes = deliveryPricingNotes;
     }
 
     public String getQrToken() {
