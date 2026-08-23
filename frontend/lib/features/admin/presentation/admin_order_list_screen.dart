@@ -6,6 +6,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../orders/domain/order_models.dart';
 import 'admin_order_detail_screen.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminOrderListScreen extends ConsumerStatefulWidget {
   const AdminOrderListScreen({super.key});
@@ -64,7 +65,7 @@ class _AdminOrderListScreenState extends ConsumerState<AdminOrderListScreen> {
                     // reason instead of one static string.
                     Text("Couldn't load orders: ${extractErrorMessage(error)}"),
                     const SizedBox(height: 8),
-                    TextButton(onPressed: () => ref.invalidate(adminAllOrdersProvider), child: const Text('Retry')),
+                    TextButton(onPressed: hapticize(() => ref.invalidate(adminAllOrdersProvider)), child: const Text('Retry')),
                   ],
                 ),
               ),
@@ -107,12 +108,12 @@ class _AdminOrderListScreenState extends ConsumerState<AdminOrderListScreen> {
                       final order = orders[index];
                       return InkWell(
                         borderRadius: BorderRadius.circular(12),
-                        onTap: () async {
+                        onTap: hapticize(() async {
                           final changed = await Navigator.of(context).push<bool>(
                             MaterialPageRoute(builder: (_) => AdminOrderDetailScreen(orderId: order.orderId)),
                           );
                           if (changed == true) ref.invalidate(adminAllOrdersProvider);
-                        },
+                        }),
                         child: Container(
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),

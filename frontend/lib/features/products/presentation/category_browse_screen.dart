@@ -17,6 +17,7 @@ import 'category_feed_controller.dart';
 import 'product_detail_screen.dart';
 import 'products_providers.dart';
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// Category browsing with a persistent left rail.
 ///
@@ -289,7 +290,7 @@ class _SearchBarState extends State<_SearchBar> {
                 if (value.text.isEmpty) return const SizedBox.shrink();
                 return IconButton(
                   icon: const Icon(Icons.close, size: 18, color: AppColors.textSecondary),
-                  onPressed: _clear,
+                  onPressed: hapticize(_clear),
                   tooltip: 'Clear search',
                 );
               },
@@ -404,7 +405,7 @@ class _CategoryRailState extends State<_CategoryRail> {
 
             return InkWell(
               key: tileKey,
-              onTap: () => widget.onSelect(category),
+              onTap: hapticize(() => widget.onSelect(category)),
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
                 decoration: BoxDecoration(
@@ -666,9 +667,9 @@ class _ContinuousCategoryFeedState extends ConsumerState<_ContinuousCategoryFeed
                   //
                   // Scale-and-fade rather than the default slide - see
                   // productPageRoute for why this is not a hero flight.
-                  onTap: () => Navigator.of(context).push(
+                  onTap: hapticize(() => Navigator.of(context).push(
                     productPageRoute(ProductDetailScreen(product: product)),
-                  ),
+                  )),
                 );
               },
               childCount: section.products.length,
@@ -946,7 +947,7 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
                 child: _error != null
                     ? IconButton(
                         icon: const Icon(Icons.refresh, color: AppColors.primary),
-                        onPressed: _loadMore,
+                        onPressed: hapticize(_loadMore),
                       )
                     : const SizedBox(
                         height: 22,
@@ -962,9 +963,9 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
               product: product,
               // Scale-and-fade rather than the default slide - see
               // productPageRoute for why this is not a hero flight.
-              onTap: () => Navigator.of(context).push(
+              onTap: hapticize(() => Navigator.of(context).push(
                 productPageRoute(ProductDetailScreen(product: product)),
-              ),
+              )),
             );
           },
         ),

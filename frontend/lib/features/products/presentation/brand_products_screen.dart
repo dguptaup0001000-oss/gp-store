@@ -13,6 +13,7 @@ import '../domain/brand_models.dart';
 import 'brand_feed_controller.dart';
 import 'product_detail_screen.dart';
 import 'products_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// One continuous brand feed: the brand the customer opened, then the next
 /// brand, then the next, until the catalogue is exhausted.
@@ -225,9 +226,9 @@ class _BrandProductsScreenState extends ConsumerState<BrandProductsScreen> {
                 final product = section.products[index];
                 return CartAwareProductCard(
                   product: product,
-                  onTap: () => Navigator.of(context).push(
+                  onTap: hapticize(() => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
-                  ),
+                  )),
                 );
               },
               childCount: section.products.length,
@@ -349,7 +350,7 @@ class _BrandControls extends StatelessWidget {
                       prefix: 'Sort by',
                       label: sort?.label ?? 'Default',
                       isActive: sort != null,
-                      onTap: () => _openSortSheet(context),
+                      onTap: hapticize(() => _openSortSheet(context)),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -357,7 +358,7 @@ class _BrandControls extends StatelessWidget {
                     icon: Icons.inventory_2_outlined,
                     label: 'In stock',
                     isActive: inStockOnly,
-                    onTap: () => onInStockChanged(!inStockOnly),
+                    onTap: hapticize(() => onInStockChanged(!inStockOnly)),
                   ),
                 ],
               ),

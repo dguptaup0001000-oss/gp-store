@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/brand_avatar.dart';
 import '../../products/presentation/brand_products_screen.dart';
 import '../../products/presentation/products_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// Full grid of every store brand (built to comfortably scale to 100+),
 /// reached only via the compact "Buy by Brand" banner on the home screen --
@@ -64,7 +65,7 @@ class _BrandsScreenState extends ConsumerState<BrandsScreen> {
                     const Text("Couldn't load brands"),
                     const SizedBox(height: 8),
                     TextButton(
-                      onPressed: () => ref.invalidate(brandsProvider),
+                      onPressed: hapticize(() => ref.invalidate(brandsProvider)),
                       child: const Text('Retry'),
                     ),
                   ],
@@ -91,9 +92,9 @@ class _BrandsScreenState extends ConsumerState<BrandsScreen> {
                   itemBuilder: (context, index) {
                     final brand = filtered[index];
                     return GestureDetector(
-                      onTap: () => Navigator.of(context).push(
+                      onTap: hapticize(() => Navigator.of(context).push(
                         MaterialPageRoute(builder: (_) => BrandProductsScreen(brand: brand)),
-                      ),
+                      )),
                       child: Column(
                         children: [
                           BrandAvatar(brandName: brand.brand),

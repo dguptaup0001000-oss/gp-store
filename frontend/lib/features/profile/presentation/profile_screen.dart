@@ -17,6 +17,7 @@ import '../../support/presentation/privacy_policy_screen.dart';
 import '../../support/presentation/terms_screen.dart';
 import '../../wishlist/presentation/wishlist_screen.dart';
 import 'profile_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -45,7 +46,7 @@ class ProfileScreen extends ConsumerWidget {
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load your profile: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(myProfileProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(myProfileProvider)), child: const Text('Retry')),
             ],
           ),
         ),
@@ -83,8 +84,8 @@ class ProfileScreen extends ConsumerWidget {
                   IconButton(
                     icon: const Icon(Icons.edit_outlined),
                     tooltip: 'Edit profile',
-                    onPressed: () =>
-                        _showEditDialog(context, ref, profile.fullName, profile.mobileNumber ?? '', profile.email),
+                    onPressed: hapticize(() =>
+                        _showEditDialog(context, ref, profile.fullName, profile.mobileNumber ?? '', profile.email)),
                   ),
                 ],
               ),
@@ -95,69 +96,69 @@ class ProfileScreen extends ConsumerWidget {
                 context,
                 icon: Icons.storefront_outlined,
                 label: 'Store Management',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminHomeScreen())),
+                onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminHomeScreen()))),
               ),
             _menuTile(
               context,
               icon: Icons.receipt_long_outlined,
               label: 'My Orders',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OrderHistoryScreen())),
+              onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OrderHistoryScreen()))),
             ),
             _menuTile(
               context,
               icon: Icons.location_on_outlined,
               label: 'My Addresses',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddressListScreen())),
+              onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddressListScreen()))),
             ),
             _menuTile(
               context,
               icon: Icons.favorite_border,
               label: 'My Wishlist',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WishlistScreen())),
+              onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WishlistScreen()))),
             ),
             _menuTile(
               context,
               icon: Icons.star_border,
               label: 'My Reviews',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyReviewsScreen())),
+              onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyReviewsScreen()))),
             ),
             _menuTile(
               context,
               icon: Icons.lock_outline,
               label: 'Change Password',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChangePasswordScreen())),
+              onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChangePasswordScreen()))),
             ),
             _menuTile(
               context,
               icon: Icons.notifications_outlined,
               label: 'Notifications',
               badgeCount: ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0,
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+              onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()))),
             ),
             const SizedBox(height: 16),
             _menuTile(
               context,
               icon: Icons.support_agent_outlined,
               label: 'Contact Us',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ContactUsScreen())),
+              onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ContactUsScreen()))),
             ),
             _menuTile(
               context,
               icon: Icons.info_outline,
               label: 'About',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen())),
+              onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen()))),
             ),
             _menuTile(
               context,
               icon: Icons.privacy_tip_outlined,
               label: 'Privacy Policy',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen())),
+              onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()))),
             ),
             _menuTile(
               context,
               icon: Icons.description_outlined,
               label: 'Terms of Service',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TermsScreen())),
+              onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TermsScreen()))),
             ),
             const SizedBox(height: 16),
             _menuTile(
@@ -167,21 +168,21 @@ class ProfileScreen extends ConsumerWidget {
               // Heavy, not selection: this one takes effect on the tap itself,
               // with no confirmation step in between.
               haptic: AppHaptics.heavy,
-              onTap: () => ref.read(authControllerProvider.notifier).logout(),
+              onTap: hapticize(() => ref.read(authControllerProvider.notifier).logout()),
             ),
             _menuTile(
               context,
               icon: Icons.logout,
               label: 'Log out of all devices',
               isDestructive: true,
-              onTap: () => _confirmLogoutEverywhere(context, ref),
+              onTap: hapticize(() => _confirmLogoutEverywhere(context, ref)),
             ),
             _menuTile(
               context,
               icon: Icons.delete_forever_outlined,
               label: 'Delete Account',
               isDestructive: true,
-              onTap: () => _confirmDeleteAccount(context, ref),
+              onTap: hapticize(() => _confirmDeleteAccount(context, ref)),
             ),
             const SizedBox(height: 24),
             Center(
@@ -244,7 +245,7 @@ class ProfileScreen extends ConsumerWidget {
         title: const Text('Log out everywhere?'),
         content: const Text('This will sign you out on all your devices, not just this one.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
           TextButton(
             // Heavy here rather than on the tile that opened this dialog:
             // opening a confirmation does nothing, confirming it signs every
@@ -286,9 +287,9 @@ class ProfileScreen extends ConsumerWidget {
           'your name, phone, or email.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
           TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: hapticize(() => Navigator.of(context).pop(true)),
             child: const Text('Continue', style: TextStyle(color: AppColors.error)),
           ),
         ],
@@ -308,7 +309,7 @@ class ProfileScreen extends ConsumerWidget {
           decoration: const InputDecoration(hintText: 'DELETE'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
             onPressed: () {
@@ -383,8 +384,8 @@ class ProfileScreen extends ConsumerWidget {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
+          FilledButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Save')),
         ],
       ),
     );

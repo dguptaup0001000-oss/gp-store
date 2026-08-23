@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../auth/presentation/auth_providers.dart' show extractErrorMessage;
 import '../../products/domain/product_models.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminVariantFormDialog extends ConsumerStatefulWidget {
   const AdminVariantFormDialog({super.key, required this.productId, this.variant});
@@ -116,8 +117,8 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
             title: const Text('Selling price is below cost'),
             content: const Text('This means you\'d lose money on every sale. Save anyway?'),
             actions: [
-              TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-              TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save anyway')),
+              TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
+              TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Save anyway')),
             ],
           ),
         );
@@ -227,7 +228,7 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
                       : IconButton(
                           icon: const Icon(Icons.clear, size: 18),
                           tooltip: 'Clear image',
-                          onPressed: () => setState(_imageUrlController.clear),
+                          onPressed: hapticize(() => setState(_imageUrlController.clear)),
                         ),
                 ),
                 onChanged: (_) => setState(() {}),
@@ -258,7 +259,7 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Available'),
                   value: _available,
-                  onChanged: (value) => setState(() => _available = value),
+                  onChanged: hapticizeValue((value) => setState(() => _available = value)),
                 ),
               ],
             ],
@@ -266,7 +267,7 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+        TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
         FilledButton(
           onPressed: _isSaving ? null : () => _save(),
           child: _isSaving

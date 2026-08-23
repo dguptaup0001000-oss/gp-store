@@ -6,6 +6,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../domain/address_models.dart';
 import 'add_address_screen.dart';
 import 'address_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// Used both as a standalone "manage my addresses" screen and, when
 /// [selectMode] is true, as a picker that pops the selected address back to
@@ -33,7 +34,7 @@ class AddressListScreen extends ConsumerWidget {
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load your addresses: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(myAddressesProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(myAddressesProvider)), child: const Text('Retry')),
             ],
           ),
         ),
@@ -53,14 +54,14 @@ class AddressListScreen extends ConsumerWidget {
         },
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
+        onPressed: hapticize(() async {
           final added = await Navigator.of(context).push<bool>(
             MaterialPageRoute(builder: (_) => const AddAddressScreen()),
           );
           if (added == true) {
             ref.invalidate(myAddressesProvider);
           }
-        },
+        }),
         icon: const Icon(Icons.add),
         label: const Text('Add Address'),
       ),
@@ -128,8 +129,8 @@ class _AddressTile extends ConsumerWidget {
         title: const Text('Delete this address?'),
         content: const Text('This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Delete')),
         ],
       ),
     );

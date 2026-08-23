@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart' show extractErrorMessage;
 import 'reviews_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class WriteReviewDialog extends ConsumerStatefulWidget {
   const WriteReviewDialog({super.key, required this.productId});
@@ -67,7 +68,7 @@ class _WriteReviewDialogState extends ConsumerState<WriteReviewDialog> {
                   color: AppColors.gold,
                 ),
                 tooltip: 'Rate $starValue star${starValue == 1 ? '' : 's'}',
-                onPressed: () => setState(() => _rating = starValue),
+                onPressed: hapticize(() => setState(() => _rating = starValue)),
               );
             }),
           ),
@@ -83,7 +84,7 @@ class _WriteReviewDialogState extends ConsumerState<WriteReviewDialog> {
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+        TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
         FilledButton(
           onPressed: _isSaving ? null : _submit,
           child: _isSaving

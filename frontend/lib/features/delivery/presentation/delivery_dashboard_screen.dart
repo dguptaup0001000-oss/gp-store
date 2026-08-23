@@ -9,6 +9,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/delivery_assignment_model.dart';
 import 'delivery_partner_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class DeliveryDashboardScreen extends ConsumerStatefulWidget {
   const DeliveryDashboardScreen({super.key});
@@ -157,7 +158,7 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
                   Text(profile.available ? 'On duty' : 'Off duty', style: const TextStyle(fontSize: 12)),
                   Switch(
                     value: profile.available,
-                    onChanged: _toggleAvailability,
+                    onChanged: hapticizeValue(_toggleAvailability),
                   ),
                 ],
               ),
@@ -166,7 +167,7 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Log out',
-            onPressed: () => ref.read(authControllerProvider.notifier).logout(),
+            onPressed: hapticize(() => ref.read(authControllerProvider.notifier).logout()),
           ),
         ],
       ),
@@ -180,7 +181,7 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load your deliveries: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(myAssignmentsProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(myAssignmentsProvider)), child: const Text('Retry')),
             ],
           ),
         ),
@@ -292,7 +293,7 @@ class _AssignmentCardState extends ConsumerState<_AssignmentCard> {
               if (assignment.latitude != null && assignment.longitude != null)
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: _navigate,
+                    onPressed: hapticize(_navigate),
                     icon: const Icon(Icons.directions, size: 16),
                     label: const Text('Navigate'),
                   ),
@@ -302,7 +303,7 @@ class _AssignmentCardState extends ConsumerState<_AssignmentCard> {
               if (assignment.customerPhone != null)
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: _callCustomer,
+                    onPressed: hapticize(_callCustomer),
                     icon: const Icon(Icons.call, size: 16),
                     label: const Text('Call'),
                   ),

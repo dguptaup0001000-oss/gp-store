@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 
 import 'auth_providers.dart';
 import 'forgot_password_screen.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -181,7 +182,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 ),
                                 suffixIcon: IconButton(
                                   icon: Icon(_obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
-                                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                  onPressed: hapticize(() => setState(() => _obscurePassword = !_obscurePassword)),
                                 ),
                               ),
                               validator: (value) {
@@ -198,7 +199,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   width: 24,
                                   child: Checkbox(
                                     value: _rememberMe,
-                                    onChanged: (value) => setState(() => _rememberMe = value ?? true),
+                                    onChanged: hapticizeValue((value) => setState(() => _rememberMe = value ?? true)),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -206,9 +207,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 const Spacer(),
                                 TextButton(
                                   style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
-                                  onPressed: () => Navigator.of(context).push(
+                                  onPressed: hapticize(() => Navigator.of(context).push(
                                     MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
-                                  ),
+                                  )),
                                   child: const Text('Forgot password?', style: TextStyle(fontSize: 13)),
                                 ),
                               ],
@@ -247,7 +248,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             const SizedBox(height: 16),
 
                             OutlinedButton.icon(
-                              onPressed: () => context.push('/login/otp'),
+                              onPressed: hapticize(() => context.push('/login/otp')),
                               icon: const Icon(Icons.phone_android_outlined, size: 18),
                               label: const Text('Login with Mobile OTP'),
                               style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
@@ -283,7 +284,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                             const SizedBox(width: 8),
                             FilledButton.tonalIcon(
-                              onPressed: () => context.push('/register'),
+                              onPressed: hapticize(() => context.push('/register')),
                               icon: const Icon(Icons.arrow_forward, size: 16),
                               label: const Text('Register'),
                               style: FilledButton.styleFrom(

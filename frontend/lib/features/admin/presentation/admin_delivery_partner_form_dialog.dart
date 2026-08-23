@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/delivery_partner_models.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminDeliveryPartnerFormDialog extends ConsumerStatefulWidget {
   const AdminDeliveryPartnerFormDialog({super.key, this.partner});
@@ -111,7 +112,7 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
                   DropdownMenuItem(value: 'BIKE', child: Text('Bike')),
                   DropdownMenuItem(value: 'PICKUP', child: Text('Pickup (for bulk orders)')),
                 ],
-                onChanged: (value) => setState(() => _vehicleType = value!),
+                onChanged: hapticizeValue((value) => setState(() => _vehicleType = value!)),
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -123,14 +124,14 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Available for new deliveries'),
                 value: _available,
-                onChanged: (value) => setState(() => _available = value),
+                onChanged: hapticizeValue((value) => setState(() => _available = value)),
               ),
             ],
           ),
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+        TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
         FilledButton(
           onPressed: _isSaving ? null : _save,
           child: _isSaving

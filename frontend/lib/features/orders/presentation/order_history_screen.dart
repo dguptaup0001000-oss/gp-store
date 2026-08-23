@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'order_detail_screen.dart';
 import 'orders_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class OrderHistoryScreen extends ConsumerWidget {
   const OrderHistoryScreen({super.key});
@@ -27,7 +28,7 @@ class OrderHistoryScreen extends ConsumerWidget {
               // is a network problem, an auth issue, or something else.
               Text("Couldn't load your orders: ${extractErrorMessage(error)}"),
               const SizedBox(height: 8),
-              TextButton(onPressed: () => ref.invalidate(myOrdersProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(myOrdersProvider)), child: const Text('Retry')),
             ],
           ),
         ),
@@ -58,9 +59,9 @@ class OrderHistoryScreen extends ConsumerWidget {
                 final order = orders[index];
                 return InkWell(
                   borderRadius: BorderRadius.circular(12),
-                  onTap: () => Navigator.of(context).push(
+                  onTap: hapticize(() => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.orderId)),
-                  ),
+                  )),
                   child: Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(

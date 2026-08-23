@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// The 3D view, on its own route, reached only by an explicit tap.
 ///
@@ -71,11 +72,11 @@ class View3dButton extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
       child: OutlinedButton.icon(
-        onPressed: () => Navigator.of(context).push(
+        onPressed: hapticize(() => Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => Product3dViewScreen(modelUrl: url, productName: productName),
           ),
-        ),
+        )),
         icon: const Icon(Icons.threed_rotation, size: 20),
         label: const Text('View in 3D'),
         style: OutlinedButton.styleFrom(

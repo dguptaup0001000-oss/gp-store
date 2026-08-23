@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
+import '../../core/util/haptic_widgets.dart';
 
 /// Auto-rotating offers carousel. Advances every 4 seconds and loops back
 /// to the first offer after the last. Doesn't pause on user drag -- the
@@ -97,7 +98,7 @@ class _OffersBannerState extends State<OffersBanner> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
-                  onTap: () => _copyCode(context, offer),
+                  onTap: hapticize(() => _copyCode(context, offer)),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(

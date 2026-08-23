@@ -9,6 +9,7 @@ import '../../features/products/presentation/product_detail_screen.dart';
 import '../../features/wishlist/presentation/wishlist_providers.dart';
 import 'product_card.dart';
 import 'scroll_to_top.dart';
+import '../../core/util/haptic_widgets.dart';
 
 /// Deliberately NOT a paginated infinite-scroll browser like the brand feed
 /// (see BrandFeedController) - trending/new-arrivals/recommended are ranked
@@ -76,7 +77,7 @@ class _SeeAllProductsScreenState extends ConsumerState<SeeAllProductsScreen> {
                   // comment for why this shows the real failure reason instead
                   // of one static string.
                   Text("Couldn't load this: ${extractErrorMessage(snapshot.error!)}"),
-                  TextButton(onPressed: _retry, child: const Text('Retry')),
+                  TextButton(onPressed: hapticize(_retry), child: const Text('Retry')),
                 ],
               ),
             );
@@ -104,9 +105,9 @@ class _SeeAllProductsScreenState extends ConsumerState<SeeAllProductsScreen> {
               final product = products[index];
               return ProductCard(
                 product: product,
-                onTap: () => Navigator.of(context).push(
+                onTap: hapticize(() => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
-                ),
+                )),
                 onAddPressed: () => _addToCart(product),
                 isWishlisted: wishlistController.isWishlisted(product.id),
                 onWishlistToggle: () => wishlistController.toggle(product.id),

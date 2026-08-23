@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../features/products/presentation/category_products_screen.dart';
+import '../../core/util/haptic_widgets.dart';
 
 /// Horizontal quick-jump tabs shown just below the search bar.
 /// "All" always represents the current Home screen (it's not tappable —
@@ -33,9 +34,9 @@ class CategoryTabsBar extends StatelessWidget {
           return _TabChip(
             label: category.name,
             selected: false,
-            onTap: () => Navigator.of(context).push(
+            onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => CategoryProductsScreen(category: category)),
-            ),
+            )),
           );
         },
       ),

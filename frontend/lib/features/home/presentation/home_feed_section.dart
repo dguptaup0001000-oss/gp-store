@@ -8,6 +8,7 @@ import '../../cart/presentation/cart_providers.dart';
 import '../../products/domain/product_models.dart';
 import '../../products/presentation/product_feed_provider.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// The endless "All Products" feed at the foot of the home screen.
 ///
@@ -140,7 +141,7 @@ class _FeedGrid extends ConsumerWidget {
             return ProductCard(
               key: ValueKey<int>(product.id),
               product: product,
-              onTap: () => onProductTap(product),
+              onTap: hapticize(() => onProductTap(product)),
               isWishlisted: wishlistController.isWishlisted(product.id),
               onWishlistToggle: () => wishlistController.toggle(product.id),
               onAddPressed: variant == null

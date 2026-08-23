@@ -56,6 +56,32 @@ class ProductFlagColumnsTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private JdbcTemplate jdbc;
 
+    /**
+     * Leaves products_id_seq usable before this test inserts anything.
+     *
+     * IdentitySequenceDriftTest deliberately winds this sequence BACKWARDS to
+     * reproduce the production bug it covers. It repairs it afterwards, but a
+     * test that inserts products must not depend on another class's cleanup
+     * having run first - surefire's class order is not a contract, and this
+     * suite shares one database.
+     *
+     * FORWARD ONLY, exactly like IdentitySequenceGuard: the GREATEST includes
+     * the sequence's own current value, so this can never move a sequence
+     * back. An earlier draft compared only against max(id), which on an empty
+     * products table would have wound the sequence down to 1 - handing out
+     * ids that a later insert has to collide with. That is the failure this
+     * exists to prevent, so it must not be the failure this causes.
+     */
+    @BeforeEach
+    void ensureProductSequenceIsUsable() {
+        jdbc.queryForObject(
+                "SELECT setval('products_id_seq', GREATEST("
+                        + "  (SELECT COALESCE(max(id), 0) FROM products), "
+                        + "  COALESCE(pg_sequence_last_value('products_id_seq'), 0), "
+                        + "  1), true)",
+                Long.class);
+    }
+
     @BeforeEach
     void useTheProductionSchemaShape() {
         for (String col : FLAGS) {

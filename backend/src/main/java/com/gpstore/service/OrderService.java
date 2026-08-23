@@ -196,7 +196,14 @@ public class OrderService {
 
         var delivery = deliveryRepository.findByOrderId(orderId).orElse(null);
 
-        return com.gpstore.dto.response.OrderDetailResponse.from(order, delivery);
+        // The same endpoint serves a customer looking at their own order and
+        // an admin looking at anyone's, and only one of them may see a private
+        // product's real name. isAdmin is already established above for the
+        // ownership check, so the privacy decision rides on the authorisation
+        // that was already made rather than on a second, separate judgement.
+        return isAdmin
+                ? com.gpstore.dto.response.OrderDetailResponse.forStaff(order, delivery)
+                : com.gpstore.dto.response.OrderDetailResponse.from(order, delivery);
     }
 
     /**

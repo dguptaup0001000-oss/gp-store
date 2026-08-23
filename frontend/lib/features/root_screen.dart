@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/util/app_haptics.dart';
 import 'auth/presentation/auth_providers.dart';
 import 'delivery/presentation/delivery_dashboard_screen.dart';
 import 'customer_shell.dart';
@@ -21,27 +22,48 @@ class RootScreen extends ConsumerWidget {
 
     return profileAsync.when(
       loading: () => const Scaffold(body: Center(child: CircularProgressIndicator(strokeWidth: 2))),
-      error: (error, stackTrace) => Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // TEMPORARY, for active debugging - shows the REAL failure
-              // reason (extractErrorMessage unwraps the actual backend
-              // message or Dio error type) instead of one static string
-              // that looked identical whether the cause was a network
-              // problem, CORS, an expired token, or anything else. Revert
-              // to a generic "Couldn't load your account" once the app is
-              // stable - showing raw error text to end users long-term
-              // isn't good UX, but it's exactly what's needed to diagnose
-              // this specific failure right now.
-              Text("Couldn't load your account: ${extractErrorMessage(error)}"),
-              const SizedBox(height: 8),
-              TextButton(onPressed: () => ref.invalidate(myProfileProvider), child: const Text('Retry')),
-            ],
+      error: (error, stackTrace) {
+        // NOT AN ERROR - the answer simply is not in yet. myProfileProvider
+        // reports this when no session exists, which can only happen in the
+        // instant before the router's splash redirect takes effect. Painting
+        // a failure here is what produced "Couldn't load your account:
+        // Authentication required" on a first launch.
+        if (error is NotSignedInException) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+        }
+
+        // A real failure. The raw backend text used to be printed here while
+        // this bug was being chased - useful then, wrong to ship: a customer
+        // cannot act on "Authentication required", and it says more about the
+        // stack than they need to know. What they CAN act on is whether the
+        // shop or their connection is at fault, which is what
+        // extractErrorMessage now answers (see error_messages.dart).
+        return Scaffold(
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    extractErrorMessage(error),
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () {
+                      AppHaptics.selection();
+                      ref.invalidate(myProfileProvider);
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
       data: (profile) {
         // CUSTOMER and ADMIN both land on the shopping experience - an admin
         // still needs to browse as a shopper, and reaches Store Management

@@ -6,6 +6,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
 import 'admin_providers.dart';
 import 'admin_variant_form_dialog.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminProductFormScreen extends ConsumerStatefulWidget {
   const AdminProductFormScreen({super.key, this.product});
@@ -117,8 +118,8 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
         title: const Text('Deactivate this product?'),
         content: const Text('It will stop showing up to customers. This can be reversed by editing it again.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Deactivate')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Deactivate')),
         ],
       ),
     );
@@ -145,7 +146,7 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
         title: Text(_isEditing ? 'Edit Product' : 'Add Product'),
         actions: [
           if (_isEditing)
-            IconButton(icon: const Icon(Icons.delete_outline), tooltip: 'Deactivate product', onPressed: _deactivate),
+            IconButton(icon: const Icon(Icons.delete_outline), tooltip: 'Deactivate product', onPressed: hapticize(_deactivate)),
         ],
       ),
       body: SafeArea(
@@ -176,7 +177,7 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
                     items: categories
                         .map((c) => DropdownMenuItem(value: c.id, child: Text(c.name)))
                         .toList(),
-                    onChanged: (value) => setState(() => _selectedCategoryId = value),
+                    onChanged: hapticizeValue((value) => setState(() => _selectedCategoryId = value)),
                   ),
                 ),
                 if (_isEditing)
@@ -184,7 +185,7 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Active (visible to customers)'),
                     value: _isActive,
-                    onChanged: (value) => setState(() => _isActive = value),
+                    onChanged: hapticizeValue((value) => setState(() => _isActive = value)),
                   ),
                 const SizedBox(height: 20),
                 FilledButton(
@@ -233,7 +234,7 @@ class _VariantsSection extends ConsumerWidget {
           children: [
             Text('Variants', style: Theme.of(context).textTheme.titleMedium),
             TextButton.icon(
-              onPressed: () async {
+              onPressed: hapticize(() async {
                 final saved = await showDialog<bool>(
                   context: context,
                   builder: (context) => AdminVariantFormDialog(productId: product.id),
@@ -242,7 +243,7 @@ class _VariantsSection extends ConsumerWidget {
                   ref.invalidate(adminAllProductsProvider);
                   onVariantChanged();
                 }
-              },
+              }),
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Add Variant'),
             ),
@@ -284,7 +285,7 @@ class _VariantsSection extends ConsumerWidget {
                     IconButton(
                       icon: const Icon(Icons.edit_outlined, size: 18),
                       tooltip: 'Edit variant',
-                      onPressed: () async {
+                      onPressed: hapticize(() async {
                         final saved = await showDialog<bool>(
                           context: context,
                           builder: (context) => AdminVariantFormDialog(productId: product.id, variant: variant),
@@ -293,7 +294,7 @@ class _VariantsSection extends ConsumerWidget {
                           ref.invalidate(adminAllProductsProvider);
                           onVariantChanged();
                         }
-                      },
+                      }),
                     ),
                   ],
                 ),

@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/util/app_haptics.dart';
 import '../../../core/voice/speech_service.dart';
 import '../../../core/voice/voice_query_parser.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// The listening sheet.
 ///
@@ -211,7 +212,7 @@ class _VoiceSearchSheetState extends State<VoiceSearchSheet> {
           // Typing always remains available. A voice feature that traps
           // somebody when it fails is worse than no voice feature.
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: hapticize(() => Navigator.of(context).pop()),
             child: const Text('Type instead'),
           ),
           const SizedBox(width: 8),

@@ -6,6 +6,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../orders/domain/order_models.dart';
 import '../../orders/presentation/orders_providers.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// Reuses orderDetailProvider directly - the backend's GET /api/orders/{id}
 /// now lets an admin bypass the ownership check on the SAME endpoint the
@@ -74,7 +75,7 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
               // of one static string.
               Text("Couldn't load this order: ${extractErrorMessage(error)}"),
               TextButton(
-                onPressed: () => ref.invalidate(orderDetailProvider(widget.orderId)),
+                onPressed: hapticize(() => ref.invalidate(orderDetailProvider(widget.orderId))),
                 child: const Text('Retry'),
               ),
             ],
@@ -99,7 +100,8 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
                     items: _statusOptions
                         .map((s) => DropdownMenuItem(value: s, child: Text(s.replaceAll('_', ' '))))
                         .toList(),
-                    onChanged: _isUpdating ? null : (value) => value == null ? null : _updateStatus(value),
+                    onChanged: hapticizeValueOrNull(
+                        _isUpdating ? null : (value) => value == null ? null : _updateStatus(value)),
                   ),
                   if (_isUpdating) ...[
                     const SizedBox(height: 8),
@@ -248,7 +250,7 @@ class _DeliveryAssignmentCardState extends ConsumerState<_DeliveryAssignmentCard
                     items: partners
                         .map((p) => DropdownMenuItem(value: p.id!, child: Text('${p.name} (${p.vehicleType})')))
                         .toList(),
-                    onChanged: (value) => setState(() => _selectedPartnerId = value),
+                    onChanged: hapticizeValue((value) => setState(() => _selectedPartnerId = value)),
                   ),
                   const SizedBox(height: 8),
                   FilledButton(

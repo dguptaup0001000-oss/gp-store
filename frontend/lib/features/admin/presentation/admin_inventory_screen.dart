@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/inventory_models.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminInventoryScreen extends StatelessWidget {
   const AdminInventoryScreen({super.key});
@@ -47,7 +48,7 @@ class _LowStockList extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text("Couldn't load inventory: ${extractErrorMessage(error)}"),
-            TextButton(onPressed: () => ref.invalidate(adminLowStockProvider), child: const Text('Retry')),
+            TextButton(onPressed: hapticize(() => ref.invalidate(adminLowStockProvider)), child: const Text('Retry')),
           ],
         ),
       ),
@@ -90,7 +91,7 @@ class _AllInventoryList extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text("Couldn't load inventory: ${extractErrorMessage(error)}"),
-            TextButton(onPressed: () => ref.invalidate(adminAllInventoryProvider), child: const Text('Retry')),
+            TextButton(onPressed: hapticize(() => ref.invalidate(adminAllInventoryProvider)), child: const Text('Retry')),
           ],
         ),
       ),
@@ -164,12 +165,12 @@ class _InventoryTile extends ConsumerWidget {
               IconButton(
                 icon: const Icon(Icons.add_box_outlined, color: AppColors.primary),
                 tooltip: 'Restock',
-                onPressed: () => _showRestockDialog(context, ref),
+                onPressed: hapticize(() => _showRestockDialog(context, ref)),
               ),
               IconButton(
                 icon: const Icon(Icons.edit_outlined),
                 tooltip: 'Manual correction',
-                onPressed: () => _showEditDialog(context, ref),
+                onPressed: hapticize(() => _showEditDialog(context, ref)),
               ),
             ],
           ),
@@ -192,9 +193,9 @@ class _InventoryTile extends ConsumerWidget {
           decoration: const InputDecoration(labelText: 'How many units received?'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop()), child: const Text('Cancel')),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(int.tryParse(controller.text.trim())),
+            onPressed: hapticize(() => Navigator.of(context).pop(int.tryParse(controller.text.trim()))),
             child: const Text('Add Stock'),
           ),
         ],
@@ -258,8 +259,8 @@ class _InventoryTile extends ConsumerWidget {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save')),
+          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
+          FilledButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Save')),
         ],
       ),
     );

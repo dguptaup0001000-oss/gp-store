@@ -1,5 +1,7 @@
 package com.gpstore.service;
 
+import com.gpstore.entity.Category;
+import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.entity.Product;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.repository.ProductBrowseRepository;
@@ -27,13 +29,51 @@ public class ProductService {
     private final com.gpstore.repository.ProductImageRepository productImageRepository;
     private final ProductBrowseRepository productBrowseRepository;
 
+    private final com.gpstore.repository.CategoryRepository categoryRepository;
+
     public ProductService(
             ProductRepository productRepository,
             ProductBrowseRepository productBrowseRepository,
-            com.gpstore.repository.ProductImageRepository productImageRepository) {
+            com.gpstore.repository.ProductImageRepository productImageRepository,
+            com.gpstore.repository.CategoryRepository categoryRepository) {
         this.productRepository = productRepository;
         this.productImageRepository = productImageRepository;
         this.productBrowseRepository = productBrowseRepository;
+        this.categoryRepository = categoryRepository;
+    }
+
+    /**
+     * Swaps the client's {"id": N} stub for the real Category row.
+     *
+     * THE ADMIN APP SHOWED "Something went wrong" ON PRODUCTS IT HAD JUST
+     * CREATED SUCCESSFULLY, and this is why. The request body carries only
+     * the category id, so Jackson builds a Category with that id and NULL for
+     * every other field. Hibernate needs nothing more - it writes category_id
+     * and the row is correct - but ProductResponse.from() then mapped that
+     * same stub straight back out:
+     *
+     *     "category":{"id":1,"name":null,"description":null,...}
+     *
+     * Flutter's Category model declares `required String name`, so
+     * Category.fromJson threw on the null before the screen ever saw a
+     * product. The catch reported the only thing it had, "Something went
+     * wrong. Please try again.", the admin retried, and the retry created a
+     * SECOND product - which is how the live catalogue ended up with two
+     * "machar bati" rows and two spellings of "pooja bati". A 200 that reads
+     * as a failure is worse than an error: it invites the duplicate.
+     *
+     * Resolving the row also makes the failure honest when the category does
+     * not exist. That used to surface as a foreign-key violation from the
+     * database; now it is a plain 404 naming the id that was not found.
+     */
+    private void resolveCategory(Product product) {
+        Category stub = product.getCategory();
+        if (stub == null || stub.getId() == null) {
+            return;
+        }
+        product.setCategory(categoryRepository.findById(stub.getId())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Category not found with id " + stub.getId())));
     }
 
     // Save Product - evicts the cached listing so a new/changed product shows
@@ -41,7 +81,12 @@ public class ProductService {
     @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles", "trending", "frequentlyBought"}, allEntries = true)
     @Transactional
     public ProductResponse saveProduct(Product product) {
-        return ProductResponse.from(productRepository.save(product));
+        resolveCategory(product);
+        // forAdmin: only an ADMIN can reach POST /api/products, and the reply
+        // has to show them the privacy settings they just set - a
+        // customer-shaped response would silently drop them and make the
+        // toggle look like it had not saved.
+        return ProductResponse.forAdmin(productRepository.save(product));
     }
 
     // A public, unauthenticated GET endpoint backs each of the three methods
@@ -72,7 +117,7 @@ public class ProductService {
     public List<ProductResponse> getAllForAdmin() {
         return productRepository
                 .findAllByOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
-                .map(ProductResponse::from)
+                .map(ProductResponse::forAdmin)
                 .toList();
     }
 
@@ -372,12 +417,22 @@ public class ProductService {
     public ProductResponse update(Long id, Product updated) {
         Product existing = getByIdOrThrow(id);
 
+        resolveCategory(updated);
+
         existing.setName(updated.getName());
         existing.setBrand(updated.getBrand());
         existing.setCategory(updated.getCategory());
         existing.setActive(updated.getActive());
 
-        return ProductResponse.from(productRepository.save(existing));
+        // Privacy is admin-configurable, so it has to be copied here or the
+        // toggle would silently do nothing on edit. Only an ADMIN can reach
+        // this endpoint (SecurityConfig gates PUT /api/products/**), which is
+        // what stops a customer setting it - the check is the existing
+        // authorisation, not a new one invented for this feature.
+        existing.setIsPrivateProduct(updated.getIsPrivateProduct());
+        existing.setCustomerDisplayName(updated.getCustomerDisplayName());
+
+        return ProductResponse.forAdmin(productRepository.save(existing));
     }
 
     /**

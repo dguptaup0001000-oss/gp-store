@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../core/images/gp_network_image.dart';
+import '../../core/util/haptic_widgets.dart';
 
 /// Reusable across every horizontal section on the home screen, search
 /// results, and category browsing - one widget, one place to fix/improve it.
@@ -184,10 +185,10 @@ class _ProductCardState extends State<ProductCard> {
                           // already promotes this to non-null, so a second
                           // null check here was dead code the analyzer
                           // correctly flagged as always false.
-                          onTap: () {
+                          onTap: hapticize(() {
                             HapticFeedback.lightImpact();
                             onWishlistToggle();
-                          },
+                          }),
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),

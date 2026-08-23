@@ -18,6 +18,7 @@ import 'products_providers.dart';
 import 'recent_searches.dart';
 import 'voice_search_sheet.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key, this.openVoice = false});
@@ -122,7 +123,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   /// Runs one of the other things the customer asked for in the same breath.
   void _runOtherIntent(VoiceIntent intent) {
-    AppHaptics.selection();
+    // No haptic here: the only route in is the "also heard" chip, whose
+    // onTap already fires one. Firing again would be two for one tap.
     setState(() {
       _otherIntents = [
         for (final other in _otherIntents)
@@ -311,7 +313,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     if (!_hasSearched) {
       return _RecentSearches(
         terms: _recentTerms,
-        onTap: _runTerm,
+        onTap: hapticizeValue(_runTerm),
         onClear: () async {
           await _recent.clear();
           if (mounted) setState(() => _recentTerms = const []);
@@ -330,7 +332,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           children: [
             Text(_errorMessage!),
             TextButton(
-              onPressed: () => _debouncer.searchNow(_controller.text, onSearch: _search),
+              onPressed: hapticize(() => _debouncer.searchNow(_controller.text, onSearch: _search)),
               child: const Text('Retry'),
             ),
           ],
@@ -342,7 +344,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       return _NoResults(
         query: _controller.text.trim(),
         recentTerms: _recentTerms,
-        onTap: _runTerm,
+        onTap: hapticizeValue(_runTerm),
       );
     }
 
@@ -357,7 +359,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           onUseSuggestion: _runTerm,
         ),
         if (_otherIntents.isNotEmpty)
-          _AlsoHeard(intents: _otherIntents, onTap: _runOtherIntent),
+          _AlsoHeard(intents: _otherIntents, onTap: hapticizeValue(_runOtherIntent)),
         Expanded(child: _buildGrid()),
         _buildLoadMore(),
       ],
@@ -386,7 +388,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 ),
               )
             : OutlinedButton(
-                onPressed: _loadMore,
+                onPressed: hapticize(_loadMore),
                 child: const Text('Show more results'),
               ),
       ),
@@ -411,9 +413,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         final wishlistController = ref.read(wishlistControllerProvider.notifier);
         return ProductCard(
           product: product,
-          onTap: () => Navigator.of(context).push(
+          onTap: hapticize(() => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
-          ),
+          )),
           onAddPressed: () => _addToCart(product),
           isWishlisted: wishlistController.isWishlisted(product.id),
           onWishlistToggle: () => wishlistController.toggle(product.id),
@@ -547,7 +549,7 @@ class _SearchInterpretation extends StatelessWidget {
                 // The way back. A customer who really did mean the odd
                 // spelling must not be stuck with the correction.
                 GestureDetector(
-                  onTap: () => onUseSuggestion(query),
+                  onTap: hapticize(() => onUseSuggestion(query)),
                   child: Text(
                     'Search instead for "$query"',
                     style: const TextStyle(
@@ -560,7 +562,7 @@ class _SearchInterpretation extends StatelessWidget {
               ],
             )
           : GestureDetector(
-              onTap: () => onUseSuggestion(suggestion!),
+              onTap: hapticize(() => onUseSuggestion(suggestion!)),
               child: RichText(
                 text: TextSpan(
                   style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
@@ -623,7 +625,7 @@ class _AlsoHeard extends StatelessWidget {
                   labelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
                   backgroundColor: AppColors.tint(AppColors.primary),
                   side: BorderSide.none,
-                  onPressed: () => onTap(intent),
+                  onPressed: hapticize(() => onTap(intent)),
                 ),
             ],
           ),
@@ -679,7 +681,7 @@ class _RecentSearches extends StatelessWidget {
             leading: const Icon(Icons.history, size: 20, color: AppColors.textSecondary),
             title: Text(term, style: const TextStyle(fontSize: 14)),
             trailing: const Icon(Icons.north_west, size: 16, color: AppColors.textSecondary),
-            onTap: () => onTap(term),
+            onTap: hapticize(() => onTap(term)),
           ),
         ),
       ],
@@ -732,7 +734,7 @@ class _NoResults extends StatelessWidget {
                 .map(
                   (term) => ActionChip(
                     label: Text(term),
-                    onPressed: () => onTap(term),
+                    onPressed: hapticize(() => onTap(term)),
                     backgroundColor: AppColors.cardBackground,
                     side: const BorderSide(color: AppColors.divider),
                   ),

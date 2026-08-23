@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_inventory_screen.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminAnalyticsScreen extends ConsumerWidget {
   const AdminAnalyticsScreen({super.key});
@@ -84,7 +85,7 @@ class _SalesSummarySection extends ConsumerWidget {
           // comment for why this shows the real failure reason instead
           // of one static string.
           Text("Couldn't load sales data: ${extractErrorMessage(error)}"),
-          TextButton(onPressed: () => ref.invalidate(adminSalesSummaryProvider), child: const Text('Retry')),
+          TextButton(onPressed: hapticize(() => ref.invalidate(adminSalesSummaryProvider)), child: const Text('Retry')),
         ],
       ),
       data: (summary) => GridView.count(
@@ -136,9 +137,9 @@ class _LowStockAlert extends ConsumerWidget {
 
         return InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: () => Navigator.of(context).push(
+          onTap: hapticize(() => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const AdminInventoryScreen()),
-          ),
+          )),
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -180,7 +181,7 @@ class _OrderStatusBreakdown extends ConsumerWidget {
           // comment for why this shows the real failure reason instead
           // of one static string.
           Text("Couldn't load order status data: ${extractErrorMessage(error)}"),
-          TextButton(onPressed: () => ref.invalidate(adminOrderStatusBreakdownProvider), child: const Text('Retry')),
+          TextButton(onPressed: hapticize(() => ref.invalidate(adminOrderStatusBreakdownProvider)), child: const Text('Retry')),
         ],
       ),
       data: (breakdown) {
@@ -244,7 +245,7 @@ class _TopProductsList extends ConsumerWidget {
           // comment for why this shows the real failure reason instead
           // of one static string.
           Text("Couldn't load top products: ${extractErrorMessage(error)}"),
-          TextButton(onPressed: () => ref.invalidate(adminTopProductsProvider), child: const Text('Retry')),
+          TextButton(onPressed: hapticize(() => ref.invalidate(adminTopProductsProvider)), child: const Text('Retry')),
         ],
       ),
       data: (products) {

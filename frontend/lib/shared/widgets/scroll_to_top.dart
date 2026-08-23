@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/util/haptic_widgets.dart';
 
 /// Wraps a scrollable page and floats a "Back to top" pill over it once the
 /// customer has scrolled a meaningful distance.
@@ -124,7 +125,7 @@ class _ScrollToTopState extends State<ScrollToTop> {
           child: ValueListenableBuilder<bool>(
             valueListenable: _isVisible,
             builder: (context, isVisible, child) {
-              return _BackToTopPill(isVisible: isVisible, onPressed: _backToTop);
+              return _BackToTopPill(isVisible: isVisible, onPressed: hapticize(_backToTop));
             },
           ),
         ),

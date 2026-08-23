@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/admin_payment_model.dart';
 import 'admin_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AdminPaymentsScreen extends ConsumerWidget {
   const AdminPaymentsScreen({super.key});
@@ -25,7 +26,7 @@ class AdminPaymentsScreen extends ConsumerWidget {
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load payments: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(adminAllPaymentsProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(adminAllPaymentsProvider)), child: const Text('Retry')),
             ],
           ),
         ),
@@ -130,7 +131,7 @@ class _PaymentTileState extends ConsumerState<_PaymentTile> {
                 spacing: 8,
                 children: _actionsFor(payment.paymentStatus)
                     .map((action) => OutlinedButton(
-                          onPressed: () => _run(() => action.onRun(ref, orderId)),
+                          onPressed: hapticize(() => _run(() => action.onRun(ref, orderId))),
                           child: Text(action.label),
                         ))
                     .toList(),
