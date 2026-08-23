@@ -115,14 +115,33 @@ void _fireThen(AppHapticFeedback feedback, VoidCallback callback) {
 
 /// Wraps an existing callback so it buzzes before it runs.
 ///
-/// For the places a wrapper widget does not fit - a Switch's onChanged, a
-/// DropdownButton's onChanged, a dialog action that already has its own
-/// button widget. Returns null for a null callback so a disabled control
-/// stays disabled AND silent.
-VoidCallback? hapticize(VoidCallback? callback,
+/// For the places a wrapper widget does not fit - a dialog action that
+/// already has its own button widget, a custom clickable that takes a
+/// callback, a method reference.
+///
+/// NON-NULLABLE IN AND OUT, and that is not a stylistic choice. Returning
+/// VoidCallback? made every call site that feeds a REQUIRED callback fail to
+/// compile:
+///
+///     The argument type 'VoidCallback?' can't be assigned to
+///     the parameter type 'VoidCallback'
+///
+/// forty times over. A non-null return is assignable to both a nullable and a
+/// non-nullable parameter, so this one shape fits every call site; use
+/// [hapticizeOrNull] where the callback itself may be null.
+VoidCallback hapticize(VoidCallback callback,
+    {AppHapticFeedback feedback = AppHapticFeedback.tap}) {
+  return () => _fireThen(feedback, callback);
+}
+
+/// The same, for a callback that may be null.
+///
+/// Returns null unchanged, so a disabled control stays disabled AND silent -
+/// feedback for a tap that does nothing tells the finger something untrue.
+VoidCallback? hapticizeOrNull(VoidCallback? callback,
     {AppHapticFeedback feedback = AppHapticFeedback.tap}) {
   if (callback == null) return null;
-  return () => _fireThen(feedback, callback);
+  return hapticize(callback, feedback: feedback);
 }
 
 /// The same, for the single-argument callbacks Switch, Checkbox, Radio and
@@ -131,8 +150,15 @@ VoidCallback? hapticize(VoidCallback? callback,
 /// A value CHANGE is the customer acting, so this defaults to `action`
 /// rather than `tap`: flipping a switch is a change that persists, and the
 /// feedback is what confirms it landed.
-ValueChanged<T>? hapticizeValue<T>(ValueChanged<T>? callback,
+ValueChanged<T> hapticizeValue<T>(ValueChanged<T> callback,
+    {AppHapticFeedback feedback = AppHapticFeedback.action}) {
+  return (T value) => _fireThen(feedback, () => callback(value));
+}
+
+/// The same, for a value callback that may be null - a control disabled by
+/// passing null onChanged must stay disabled and silent.
+ValueChanged<T>? hapticizeValueOrNull<T>(ValueChanged<T>? callback,
     {AppHapticFeedback feedback = AppHapticFeedback.action}) {
   if (callback == null) return null;
-  return (T value) => _fireThen(feedback, () => callback(value));
+  return hapticizeValue(callback, feedback: feedback);
 }

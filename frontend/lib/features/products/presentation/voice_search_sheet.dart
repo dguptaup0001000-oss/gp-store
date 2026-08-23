@@ -164,7 +164,7 @@ class _VoiceSearchSheetState extends State<VoiceSearchSheet> {
         // Not everybody pauses long enough for the recogniser to decide they
         // have finished, and a customer who has said their piece should not
         // have to wait three seconds to find out the app agrees.
-        FilledButton(onPressed: hapticize(_stopAndUse), child: const Text('Done')),
+        FilledButton(onPressed: _stopAndUse, child: const Text('Done')),
       ];
 
   List<Widget> _understanding() => [
@@ -228,7 +228,7 @@ class _VoiceSearchSheetState extends State<VoiceSearchSheet> {
               child: const Text('Open settings'),
             )
           else if (retryable)
-            FilledButton(onPressed: hapticize(_listen), child: const Text('Try again')),
+            FilledButton(onPressed: _listen, child: const Text('Try again')),
         ],
       ),
     ];

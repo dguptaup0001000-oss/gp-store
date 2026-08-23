@@ -123,7 +123,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   /// Runs one of the other things the customer asked for in the same breath.
   void _runOtherIntent(VoiceIntent intent) {
-    AppHaptics.selection();
+    // No haptic here: the only route in is the "also heard" chip, whose
+    // onTap already fires one. Firing again would be two for one tap.
     setState(() {
       _otherIntents = [
         for (final other in _otherIntents)
@@ -312,7 +313,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     if (!_hasSearched) {
       return _RecentSearches(
         terms: _recentTerms,
-        onTap: hapticize(_runTerm),
+        onTap: hapticizeValue(_runTerm),
         onClear: () async {
           await _recent.clear();
           if (mounted) setState(() => _recentTerms = const []);
@@ -343,7 +344,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       return _NoResults(
         query: _controller.text.trim(),
         recentTerms: _recentTerms,
-        onTap: hapticize(_runTerm),
+        onTap: hapticizeValue(_runTerm),
       );
     }
 
@@ -358,7 +359,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           onUseSuggestion: _runTerm,
         ),
         if (_otherIntents.isNotEmpty)
-          _AlsoHeard(intents: _otherIntents, onTap: hapticize(_runOtherIntent)),
+          _AlsoHeard(intents: _otherIntents, onTap: hapticizeValue(_runOtherIntent)),
         Expanded(child: _buildGrid()),
         _buildLoadMore(),
       ],
