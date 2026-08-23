@@ -30,10 +30,24 @@ public class MyDeliveryResponse {
     private final Double latitude;
     private final Double longitude;
 
+    /**
+     * The statuses this delivery may move to next.
+     *
+     * SENT SO THE APP NEVER HAS TO KNOW THE RULES. The worker screen draws one
+     * button per entry here and nothing else, so there is exactly one place
+     * the state machine lives (DeliveryStatusTransitions), a phone running an
+     * old build cannot offer a move that has since been removed, and no worker
+     * is ever shown a button the server is going to refuse.
+     *
+     * It is a convenience, not a control: the server re-checks the transition
+     * on the way in regardless of what it previously said was allowed.
+     */
+    private final java.util.List<String> allowedNext;
+
     public MyDeliveryResponse(Long deliveryId, Long orderId, String orderNumber, String deliveryStatus,
                                LocalDateTime estimatedDeliveryTime, LocalDateTime assignedAt,
                                String customerName, String customerPhone, String deliveryAddress,
-                               Double latitude, Double longitude) {
+                               Double latitude, Double longitude, java.util.List<String> allowedNext) {
         this.deliveryId = deliveryId;
         this.orderId = orderId;
         this.orderNumber = orderNumber;
@@ -45,6 +59,7 @@ public class MyDeliveryResponse {
         this.deliveryAddress = deliveryAddress;
         this.latitude = latitude;
         this.longitude = longitude;
+        this.allowedNext = allowedNext == null ? java.util.List.of() : java.util.List.copyOf(allowedNext);
     }
 
     public static MyDeliveryResponse from(Delivery delivery) {
@@ -67,7 +82,10 @@ public class MyDeliveryResponse {
                 address != null ? address.getMobileNumber() : null,
                 fullAddress,
                 address != null ? address.getLatitude() : null,
-                address != null ? address.getLongitude() : null
+                address != null ? address.getLongitude() : null,
+                com.gpstore.delivery.DeliveryStatusTransitions.nextFrom(
+                                com.gpstore.enums.DeliveryStatus.parse(delivery.getDeliveryStatus()).orElse(null))
+                        .stream().map(Enum::name).toList()
         );
     }
 
@@ -82,4 +100,5 @@ public class MyDeliveryResponse {
     public String getDeliveryAddress() { return deliveryAddress; }
     public Double getLatitude() { return latitude; }
     public Double getLongitude() { return longitude; }
+    public java.util.List<String> getAllowedNext() { return allowedNext; }
 }

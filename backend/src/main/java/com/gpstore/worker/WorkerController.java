@@ -2,10 +2,13 @@ package com.gpstore.worker;
 
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.entity.DeliverySubzone;
+import com.gpstore.entity.Order;
 import com.gpstore.entity.OrderScanEvent;
 import com.gpstore.exception.BadRequestException;
+import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliveryRepository;
+import com.gpstore.repository.OrderRepository;
 import com.gpstore.repository.OrderScanEventRepository;
 import com.gpstore.security.CurrentUser;
 import jakarta.validation.Valid;
@@ -59,17 +62,23 @@ public class WorkerController {
     private final DeliveryPartnerRepository partnerRepository;
     private final OrderScanEventRepository scanRepository;
     private final DeliveryRepository deliveryRepository;
+    private final OrderRepository orderRepository;
+    private final com.gpstore.service.DeliveryService deliveryService;
     private final CurrentUser currentUser;
 
     public WorkerController(WorkerScanService scanService,
                             DeliveryPartnerRepository partnerRepository,
                             OrderScanEventRepository scanRepository,
                             DeliveryRepository deliveryRepository,
+                            OrderRepository orderRepository,
+                            com.gpstore.service.DeliveryService deliveryService,
                             CurrentUser currentUser) {
         this.scanService = scanService;
         this.partnerRepository = partnerRepository;
         this.scanRepository = scanRepository;
         this.deliveryRepository = deliveryRepository;
+        this.orderRepository = orderRepository;
+        this.deliveryService = deliveryService;
         this.currentUser = currentUser;
     }
 
@@ -96,6 +105,18 @@ public class WorkerController {
         body.put("status", statusOf(worker));
         body.put("todaysOrders", scanRepository.countAcceptedPacksSince(
                 worker.getId(), LocalDate.now().atStartOfDay()));
+
+        // THE ACTIVE TASKS RIDE ALONG, which is the whole reason this endpoint
+        // says "everything the home screen shows, in one call" and means it.
+        // Fetching them separately would be a second round trip on the screen
+        // that opens most often, on the worst connection in the business - and
+        // the home screen has nothing to draw until both have answered anyway,
+        // so two requests is just the slower of the two arriving later.
+        //
+        // Same rows the delivery app's own /my-assignments returns, built by
+        // the same code, so the ownership check has one home and cannot drift.
+        body.put("activeTasks", deliveryService.getMyAssignments(currentUser.customerId()));
+
         return body;
     }
 
@@ -126,6 +147,50 @@ public class WorkerController {
             rows.add(row);
         }
         return rows;
+    }
+
+    /**
+     * One order, reopened.
+     *
+     * The scan response already carries this view, so the normal flow never
+     * calls it - it exists for the second look: the worker backed out of the
+     * screen, the app was killed on the way to the bike, they tapped an active
+     * task from the home list. Re-scanning a label to see it again would work
+     * too, and would be a worse app.
+     *
+     * AUTHORISATION IS NOT "IS A WORKER". A logged-in worker asking for an
+     * arbitrary order number must not get a customer's name, phone and address
+     * back, so the same two questions the scan asks are asked again here:
+     * did THIS worker pack it, or is it assigned to them? Anything else is a
+     * plain not-found - never "exists but not yours", which would turn this
+     * into a way to confirm order numbers.
+     */
+    @GetMapping("/orders/{orderId}")
+    @Transactional(readOnly = true)
+    public WorkerOrderView order(@PathVariable Long orderId) {
+        DeliveryPartner worker = requireWorker();
+
+        // Keyed on the id, not the order number, because every response the
+        // worker app already holds - the scan result and the active-task row -
+        // carries the id. Looking up by number would need a new index on a
+        // column nothing else queries by.
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        boolean packedByThisWorker = order.getPackedByPartner() != null
+                && order.getPackedByPartner().getId().equals(worker.getId());
+
+        boolean assignedToThisWorker = deliveryRepository.findByOrderId(order.getId())
+                .map(delivery -> delivery.getBatch() != null
+                        && delivery.getBatch().getDeliveryPartner() != null
+                        && delivery.getBatch().getDeliveryPartner().getId().equals(worker.getId()))
+                .orElse(false);
+
+        if (!packedByThisWorker && !assignedToThisWorker) {
+            throw new ResourceNotFoundException("Order not found");
+        }
+
+        return scanService.viewOf(order);
     }
 
     /**

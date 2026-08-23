@@ -6,8 +6,11 @@ import com.gpstore.entity.DeliveryBatch;
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.entity.DeliverySubzone;
 import com.gpstore.entity.Order;
+import com.gpstore.delivery.DeliveryStatusTransitions;
+import com.gpstore.enums.DeliveryStatus;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.exception.BadRequestException;
+import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliveryRepository;
@@ -323,6 +326,32 @@ public class DeliveryService {
         return com.gpstore.dto.response.DeliveryTrackingResponse.from(delivery);
     }
 
+    /**
+     * Moves a delivery to a new status, or refuses.
+     *
+     * WHAT THIS USED TO DO, because the fix only makes sense next to it:
+     *
+     *     delivery.setDeliveryStatus(status);
+     *
+     * where `status` was a @RequestParam string from a phone. Nothing checked
+     * it against anything. Three separate problems, in rising order of cost:
+     *
+     *   1. "BANANA" was a valid delivery status, and so was "delivered " with
+     *      a trailing space - which then failed every equalsIgnoreCase branch
+     *      below while looking correct in the admin list.
+     *   2. The DELIVERED branch fires on the string alone, so a delivery
+     *      partner could mark an order delivered straight from ASSIGNED -
+     *      while it was still on the packing bench. That stamps deliveredAt,
+     *      tells the customer it arrived, and completes the COD payment for
+     *      cash nobody collected.
+     *   3. Nothing recorded that any of it had happened.
+     *
+     * Now: the value is parsed, the move is checked against
+     * DeliveryStatusTransitions, and an illegal move is refused with a message
+     * naming what IS allowed. The authorization check below is unchanged and
+     * still runs first - being allowed to touch this delivery and being
+     * allowed to make this particular move are two different questions.
+     */
     @Transactional
     public com.gpstore.dto.response.DeliveryResponse updateDeliveryStatus(Long deliveryId, String status, Long callerCustomerId, boolean isAdmin) {
 
@@ -347,17 +376,48 @@ public class DeliveryService {
             }
         }
 
-        delivery.setDeliveryStatus(status);
+        // ---- the status itself ------------------------------------------
+        DeliveryStatus target = DeliveryStatus.parse(status)
+                .orElseThrow(() -> new BadRequestException(
+                        "\"" + status + "\" is not a delivery status. Valid values: "
+                                + String.join(", ",
+                                        java.util.Arrays.stream(DeliveryStatus.values())
+                                                .map(Enum::name).toList()) + "."));
+
+        DeliveryStatus current = DeliveryStatus.parse(delivery.getDeliveryStatus()).orElse(null);
+
+        if (!DeliveryStatusTransitions.isAllowed(current, target)) {
+            throw new ConflictException(DeliveryStatusTransitions.refusalMessage(current, target));
+        }
+
+        // Re-asserting the same state does nothing at all. Returning early
+        // rather than falling through matters: the branches below stamp
+        // deliveredAt and complete COD payments, and a retried request must
+        // not do either of those a second time.
+        if (current == target) {
+            return com.gpstore.dto.response.DeliveryResponse.from(delivery);
+        }
+
+        delivery.setDeliveryStatus(target.name());
+
+        // Who moved it, when, and to what. The admin accountability view is
+        // built from these, and without the log a delivery's history is just
+        // its current row - which says nothing about how it got there.
+        auditLogService.log("DELIVERY_STATUS_" + target.name(), "Delivery", delivery.getId(),
+                "from=" + (current == null ? "NONE" : current.name())
+                        + ", to=" + target.name()
+                        + ", by=" + (isAdmin ? "admin" : "worker")
+                        + " account " + callerCustomerId);
 
         Order order = delivery.getOrder();
 
-        if ("OUT_FOR_DELIVERY".equalsIgnoreCase(status) && order != null) {
+        if (target == DeliveryStatus.OUT_FOR_DELIVERY && order != null) {
             order.setOrderStatus(OrderStatus.OUT_FOR_DELIVERY);
             orderRepository.save(order);
             notificationService.notifyOrderStatusChange(order, OrderStatus.OUT_FOR_DELIVERY);
         }
 
-        if ("DELIVERED".equalsIgnoreCase(status)) {
+        if (target == DeliveryStatus.DELIVERED) {
 
             LocalDateTime deliveredAt = LocalDateTime.now();
             delivery.setDeliveredAt(deliveredAt);

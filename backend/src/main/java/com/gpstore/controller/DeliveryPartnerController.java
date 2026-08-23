@@ -66,7 +66,8 @@ public class DeliveryPartnerController {
     // location.
     @PutMapping("/me/location")
     public DeliveryPartner updateMyLocation(@Valid @RequestBody LocationUpdateRequest request) {
-        return service.updateMyLocation(currentUser.customerId(), request.getLatitude(), request.getLongitude());
+        return service.updateMyLocation(currentUser.customerId(), request.getLatitude(),
+                request.getLongitude(), request.getAccuracyMeters());
     }
 
 }

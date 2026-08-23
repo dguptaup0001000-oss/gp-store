@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/worker_location_service.dart';
 import '../data/worker_repository.dart';
 import '../domain/worker_models.dart';
+import 'worker_order_screen.dart';
 import 'worker_scan_screen.dart';
 
 /// Name, code, territory, today's count, and one very large button.
@@ -29,15 +31,50 @@ class WorkerHomeScreen extends StatefulWidget {
 
 class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
   late WorkerProfile _profile;
-  List<WorkerScanRow> _today = const [];
   int _pending = 0;
   bool _refreshing = false;
+
+  late final WorkerLocationService _location =
+      WorkerLocationService(repository: widget.repository);
+
+  /// Why location is not being shared, when it is not. Shown once, in place.
+  String? _locationProblem;
 
   @override
   void initState() {
     super.initState();
     _profile = widget.initialProfile;
+    _syncLocationTracking();
     _refresh();
+  }
+
+  @override
+  void dispose() {
+    // The GPS stream stops with the screen. There is no background service
+    // and no foreground notification, which is the point: when this app is
+    // not open, this app is not tracking anybody.
+    _location.stop();
+    super.dispose();
+  }
+
+  /// Starts or stops GPS to match whether there is anything to track.
+  ///
+  /// THE CONDITION IS THE FEATURE. Location runs only while the worker has a
+  /// live delivery - not while they are logged in, not while they are on
+  /// shift, not while the app is merely open. A worker restocking a shelf
+  /// with no delivery out is not a worker whose position the shop needs, and
+  /// GPS is the most expensive thing this app could ask of a cheap phone's
+  /// battery.
+  Future<void> _syncLocationTracking() async {
+    final shouldTrack = _profile.activeTasks.isNotEmpty;
+
+    if (shouldTrack && !_location.isRunning) {
+      final problem = await _location.start();
+      if (mounted) setState(() => _locationProblem = problem);
+    } else if (!shouldTrack && _location.isRunning) {
+      await _location.stop();
+      if (mounted) setState(() => _locationProblem = null);
+    }
   }
 
   /// Refreshes the screen and, first, tries to send anything stuck on the phone.
@@ -57,15 +94,18 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
             : 'Queued scans reached the server but were refused.');
       }
 
+      // ONE NETWORK CALL. /api/worker/me carries the profile AND the active
+      // tasks, because the home screen cannot draw without both and two
+      // requests would only mean the slower one arriving later. The pending
+      // count is local storage, not a request.
       final profile = await widget.repository.me();
-      final today = await widget.repository.myOrders();
       final pending = await widget.repository.pendingScans();
       if (!mounted) return;
       setState(() {
         _profile = profile;
-        _today = today;
         _pending = pending.length;
       });
+      await _syncLocationTracking();
     } catch (_) {
       // Offline. The screen keeps showing what it last knew rather than
       // blanking - stale numbers beat an error page when the next action is
@@ -90,8 +130,37 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
         builder: (_) => WorkerScanScreen(repository: widget.repository),
       ),
     );
-    if (outcome != null) {
+    if (outcome == null) {
+      return;
+    }
+
+    // Straight into the order. The scan response already carries it, so this
+    // costs no request at all - which is what makes SCAN -> SHOW ORDER feel
+    // like one action rather than two.
+    final order = outcome.order;
+    if (order != null && mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => WorkerOrderScreen(repository: widget.repository, order: order),
+        ),
+      );
+    }
+
+    await _refresh();
+  }
+
+  Future<void> _openTask(WorkerTask task) async {
+    try {
+      final order = await widget.repository.order(task.orderId);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => WorkerOrderScreen(repository: widget.repository, order: order),
+        ),
+      );
       await _refresh();
+    } catch (_) {
+      if (mounted) _tell('Could not open that order. Check your connection.');
     }
   }
 
@@ -181,11 +250,18 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
                 ),
               ),
 
-              if (_today.isNotEmpty) ...[
+              if (_locationProblem != null) ...[
+                const SizedBox(height: 16),
+                _Notice(icon: Icons.location_off, text: _locationProblem!, emphasis: true),
+              ],
+
+              if (_profile.activeTasks.isNotEmpty) ...[
                 const SizedBox(height: 32),
-                Text('Today', style: theme.textTheme.titleLarge),
+                Text('Active orders: ${_profile.activeTasks.length}',
+                    style: theme.textTheme.titleLarge),
                 const SizedBox(height: 8),
-                for (final row in _today) _ScanRowTile(row: row),
+                for (final task in _profile.activeTasks)
+                  _TaskTile(task: task, onOpen: () => _openTask(task)),
               ],
             ],
           ),
@@ -293,39 +369,33 @@ class _Notice extends StatelessWidget {
   }
 }
 
-class _ScanRowTile extends StatelessWidget {
-  const _ScanRowTile({required this.row});
+class _TaskTile extends StatelessWidget {
+  const _TaskTile({required this.task, required this.onOpen});
 
-  final WorkerScanRow row;
+  final WorkerTask task;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
-    // Refused scans are shown, not hidden. A worker who was told no needs to
-    // be able to look back at why, and hiding them would make the list a
-    // flattering summary rather than a record.
-    final ok = row.accepted;
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      leading: Icon(
-        ok ? Icons.check_circle : Icons.cancel,
-        color: ok ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
-      ),
-      title: Text(row.orderNumber ?? 'Unrecognised code',
-          style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(
-        [
-          if (row.subzoneCode != null) row.subzoneCode!,
-          if (row.scannedAt != null) _time(row.scannedAt!),
-          if (!ok && row.reason != null) row.reason!,
-        ].join('  ·  '),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(task.orderNumber, style: theme.textTheme.titleLarge),
+                Text(task.deliveryStatus,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.outline)),
+              ],
+            ),
+          ),
+          OutlinedButton(onPressed: onOpen, child: const Text('Open')),
+        ],
       ),
     );
   }
-
-  static String _time(DateTime t) =>
-      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:'
-      '${t.second.toString().padLeft(2, '0')}';
 }

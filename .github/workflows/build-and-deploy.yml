@@ -106,32 +106,71 @@ jobs:
         # token storage - and none of the storefront, cart, checkout or 3D
         # viewer.
         #
-        # BUILT FIRST, AND THAT ORDER IS LOAD-BEARING. Both builds write to the
-        # same build/app/outputs/flutter-apk/app-release.apk. Building the
-        # worker second would overwrite the customer APK, and renaming it
-        # afterwards would leave nothing at the path the upload step expects -
-        # the job would still go green while shipping the wrong artifact, or
-        # none. Worker first, renamed immediately, then the customer build
-        # writes a fresh app-release.apk.
+        # BUILT FIRST, and it used to be the case that the order was
+        # load-bearing: both builds wrote the same app-release.apk, so
+        # building the worker second overwrote the customer APK and the job
+        # went green shipping the wrong artifact. Splitting per ABI below
+        # changes the worker's output names to app-<abi>-release.apk, so the
+        # two no longer collide at all. The order is kept because relying on
+        # that is a footgun waiting for the day somebody drops --split-per-abi.
         #
         # This is also the ONLY place the worker entrypoint is ever compiled.
         # `flutter analyze` covers its Dart, but analysis is not codegen: a
         # native plugin that fails to link, or a manifest the merger rejects,
         # shows up here and nowhere earlier.
+        #
+        # --split-per-abi, AND IT IS THE WHOLE SIZE STORY.
+        #
+        # The measured worker APK was 31.8 MB against the customer app's
+        # 35.6 MB - only 3.8 MB apart, despite the worker entrypoint's entire
+        # Dart dependency closure being four packages (dio, secure storage,
+        # mobile_scanner, flutter) against the customer app's twenty-five.
+        # That gap is the proof that the size is NOT Dart: Flutter tree-shakes
+        # Dart, but Gradle links every plugin's native code into the one
+        # Android module regardless of which entrypoint compiled, so the worker
+        # APK carries Firebase, the Cashfree SDK, a WebView, text-to-speech, a
+        # thermal printer driver and a speech recogniser it can never reach.
+        #
+        # A fat APK also carries THREE copies of all of it - armeabi-v7a,
+        # arm64-v8a and x86_64 - and a phone installs exactly one. Splitting
+        # is not a trade-off: each output has the same code for its own
+        # architecture, and only the two it was never going to run are gone.
+        # Ship the arm64-v8a one; armeabi-v7a is there for genuinely old
+        # handsets, and x86_64 is emulators.
         run: |
           if [ -n "${{ vars.API_BASE_URL }}" ]; then
-            flutter build apk --release -t lib/worker_main.dart --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+            flutter build apk --release --split-per-abi -t lib/worker_main.dart --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           else
-            flutter build apk --release -t lib/worker_main.dart --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+            flutter build apk --release --split-per-abi -t lib/worker_main.dart --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           fi
-          mv build/app/outputs/flutter-apk/app-release.apk \
-             build/app/outputs/flutter-apk/gpstore-worker-release.apk
+          cd build/app/outputs/flutter-apk
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            if [ -f "app-$abi-release.apk" ]; then
+              mv "app-$abi-release.apk" "gpstore-worker-$abi-release.apk"
+            fi
+          done
+
+      # THE NUMBER, PRINTED. Every size claim about this app should be
+      # checkable from a build log rather than taken on trust, and an APK that
+      # quietly grows back is exactly the regression nobody notices.
+      - name: Report Worker APK sizes
+        run: |
+          echo "### Delivery Worker APK sizes" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| APK | Size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          for f in build/app/outputs/flutter-apk/gpstore-worker-*.apk; do
+            [ -f "$f" ] || continue
+            size=$(du -h "$f" | cut -f1)
+            echo "| $(basename "$f") | $size |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$(basename "$f"): $size"
+          done
 
       - name: Upload Delivery Worker APK
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-worker-apk
-          path: frontend/build/app/outputs/flutter-apk/gpstore-worker-release.apk
+          path: frontend/build/app/outputs/flutter-apk/gpstore-worker-*.apk
 
       - name: Build APK
         # Same reasoning as the web build's API_BASE_URL handling below -

@@ -5,6 +5,8 @@ import com.gpstore.entity.DeliverySubzone;
 import com.gpstore.entity.Order;
 import com.gpstore.entity.OrderScanEvent;
 import com.gpstore.entity.SubzoneBackupPartner;
+import com.gpstore.delivery.DeliveryStatusTransitions;
+import com.gpstore.enums.DeliveryStatus;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
@@ -83,12 +85,35 @@ public class WorkerScanService {
                              String zoneCode,
                              String subzoneCode,
                              LocalDateTime scannedAt,
-                             boolean replayed) {
+                             boolean replayed,
+
+                             /**
+                              * The order itself, on an accepted scan. Null on
+                              * a refusal and on a replay.
+                              *
+                              * CARRIED HERE TO SAVE A ROUND TRIP, which on a
+                              * village 4G connection is the difference between
+                              * a worker reading a packing list and a worker
+                              * watching a spinner. The alternative shape -
+                              * scan, then fetch the order - is two requests
+                              * for one action, and the second one is on the
+                              * critical path of every single scan of the day.
+                              *
+                              * Null on a refusal because a refused scan means
+                              * this worker may not see this order; sending its
+                              * contents anyway would hand over exactly what
+                              * the refusal withheld. Null on a replay because
+                              * a replay is answered from the recorded event,
+                              * not from a fresh read of the order.
+                              */
+                             WorkerOrderView order) {
     }
 
     private final OrderRepository orderRepository;
     private final OrderScanEventRepository scanRepository;
     private final DeliveryPartnerRepository partnerRepository;
+    private final com.gpstore.repository.DeliveryRepository deliveryRepository;
+    private final com.gpstore.repository.PaymentRepository paymentRepository;
     private final DeliverySubzoneRepository subzoneRepository;
     private final SubzoneBackupPartnerRepository backupRepository;
     private final NotificationService notificationService;
@@ -97,6 +122,8 @@ public class WorkerScanService {
     public WorkerScanService(OrderRepository orderRepository,
                              OrderScanEventRepository scanRepository,
                              DeliveryPartnerRepository partnerRepository,
+                             com.gpstore.repository.DeliveryRepository deliveryRepository,
+                             com.gpstore.repository.PaymentRepository paymentRepository,
                              DeliverySubzoneRepository subzoneRepository,
                              SubzoneBackupPartnerRepository backupRepository,
                              NotificationService notificationService,
@@ -104,6 +131,8 @@ public class WorkerScanService {
         this.orderRepository = orderRepository;
         this.scanRepository = scanRepository;
         this.partnerRepository = partnerRepository;
+        this.deliveryRepository = deliveryRepository;
+        this.paymentRepository = paymentRepository;
         this.subzoneRepository = subzoneRepository;
         this.backupRepository = backupRepository;
         this.notificationService = notificationService;
@@ -219,6 +248,27 @@ public class WorkerScanService {
         order.setOrderStatus(OrderStatus.PACKED);
         orderRepository.save(order);
 
+        // THE DELIVERY MOVES WITH THE ORDER, when there is one.
+        //
+        // Packing and "this delivery is packed" are the same event seen from
+        // two sides, so making the worker press a second button for it would
+        // be a second chance to forget. There often is no delivery row yet -
+        // these are shop employees who pack whatever is on the bench, and a
+        // delivery is created at assignment, which may come later - so its
+        // absence is normal and not an error.
+        //
+        // Guarded by the same transition table as every other status change:
+        // a delivery already OUT_FOR_DELIVERY does not go backwards because
+        // somebody re-scanned a label.
+        deliveryRepository.findByOrderId(order.getId()).ifPresent(delivery -> {
+            DeliveryStatus current = DeliveryStatus.parse(delivery.getDeliveryStatus()).orElse(null);
+            if (DeliveryStatusTransitions.isAllowed(current, DeliveryStatus.PACKED)
+                    && current != DeliveryStatus.PACKED) {
+                delivery.setDeliveryStatus(DeliveryStatus.PACKED.name());
+                deliveryRepository.save(delivery);
+            }
+        });
+
         OrderScanEvent event = newEvent(order, worker, clientRequestId, subzone);
         event.setOutcome("ACCEPTED");
         event.setReason(auth.reason());
@@ -254,7 +304,29 @@ public class WorkerScanService {
 
         return new ScanResult(true, "ACCEPTED", "Order " + order.getOrderNumber() + " is yours.",
                 order.getOrderNumber(), worker.getName(), workerCode(worker),
-                zoneCodeOf(subzone), subzoneCodeOf(subzone), now, false);
+                zoneCodeOf(subzone), subzoneCodeOf(subzone), now, false,
+                viewOf(order));
+    }
+
+    /**
+     * Builds the worker's view of an order it has just been given.
+     *
+     * Reads the payment because "how much cash to take" is not answerable from
+     * the order alone - a prepaid order and a COD order have the same total
+     * and opposite answers. One extra query on the scan path, which is the
+     * round trip it saves the app from making itself.
+     */
+    WorkerOrderView viewOf(Order order) {
+        com.gpstore.entity.Delivery delivery = deliveryRepository.findByOrderId(order.getId()).orElse(null);
+        com.gpstore.entity.Payment payment = paymentRepository.findByOrderId(order.getId()).orElse(null);
+
+        List<String> allowedNext = delivery == null
+                ? List.of()
+                : DeliveryStatusTransitions
+                        .nextFrom(DeliveryStatus.parse(delivery.getDeliveryStatus()).orElse(null))
+                        .stream().map(Enum::name).toList();
+
+        return WorkerOrderView.of(order, delivery, payment, allowedNext);
     }
 
     // --------------------------------------------------------- authorisation
@@ -341,14 +413,17 @@ public class WorkerScanService {
         return new ScanResult(false, outcome, message,
                 order == null ? null : order.getOrderNumber(),
                 worker.getName(), workerCode(worker),
-                zoneCodeOf(subzone), subzoneCodeOf(subzone), event.getScannedAt(), false);
+                zoneCodeOf(subzone), subzoneCodeOf(subzone), event.getScannedAt(), false,
+                // Deliberately null. A refusal must not carry the contents of
+                // the order it just refused to hand over.
+                null);
     }
 
     private ScanResult replay(OrderScanEvent previous, DeliveryPartner worker) {
         return new ScanResult("ACCEPTED".equals(previous.getOutcome()), previous.getOutcome(),
                 previous.getReason(), previous.getOrderNumber(), worker.getName(),
                 workerCode(worker), previous.getZoneCode(), previous.getSubzoneCode(),
-                previous.getScannedAt(), true);
+                previous.getScannedAt(), true, null);
     }
 
     private OrderScanEvent newEvent(Order order, DeliveryPartner worker,
