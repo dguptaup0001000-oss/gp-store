@@ -92,6 +92,62 @@ private List<ProductVariant> variants;
     @Column(name = "price_verified")
     private Boolean priceVerified = Boolean.FALSE;
 
+    /**
+     * PRIVACY, NOT SECRECY. A product marked private keeps its real name in
+     * this table and everywhere staff need it - inventory, fulfilment,
+     * accounting, refunds, analytics, audit. What changes is only what a
+     * CUSTOMER is shown about their own past purchases, and whether the shop
+     * volunteers the product back to them in a recommendation.
+     *
+     * The case this exists for: someone buys something they would rather not
+     * see announced on their own home screen, or listed in front of whoever
+     * they hand the phone to. The shop still knows exactly what it sold.
+     *
+     * THIS IS NOT AN AGE OR COMPLIANCE CONTROL and must never be used as one.
+     * Eligibility checks run where they already run; this layer sits after
+     * them and changes presentation only.
+     *
+     * Defaulted in Java as well as in the column, for the reason V17 exists:
+     * Hibernate never omits a mapped column from an INSERT, so a NOT NULL
+     * column with a DEFAULT still receives an explicit NULL unless the field
+     * has a value.
+     */
+    @Column(name = "is_private_product")
+    private Boolean isPrivateProduct = Boolean.FALSE;
+
+    /**
+     * What a customer sees instead of the real name, once the product is
+     * private. Optional: PRIVACY_FALLBACK_NAME is used when it is blank, so
+     * turning privacy on is never a two-step operation that leaks in between.
+     */
+    @Column(name = "customer_display_name", length = 120)
+    private String customerDisplayName;
+
+    /** Shown when a private product has no alias of its own. */
+    public static final String PRIVACY_FALLBACK_NAME = "Personal Item";
+
+    /**
+     * The one place that decides what a customer is allowed to be shown.
+     *
+     * Everything customer-facing goes through this - order history, order
+     * detail, cart, receipts - so the rule lives once rather than at every
+     * screen that happens to render a name. Anything reading getName()
+     * directly is, by construction, an internal or staff-facing path.
+     */
+    public String customerFacingName() {
+        if (!Boolean.TRUE.equals(isPrivateProduct)) {
+            return name;
+        }
+        return (customerDisplayName == null || customerDisplayName.isBlank())
+                ? PRIVACY_FALLBACK_NAME
+                : customerDisplayName;
+    }
+
+    /** True when this product's real name must not reach the customer. */
+    public boolean isPrivate() {
+        return Boolean.TRUE.equals(isPrivateProduct);
+    }
+
     @Column(name = "data_source", length = 60)
     private String dataSource;
 
@@ -153,5 +209,6 @@ private List<ProductVariant> variants;
         if (featured == null) featured = Boolean.FALSE;
         if (isTestData == null) isTestData = Boolean.FALSE;
         if (priceVerified == null) priceVerified = Boolean.FALSE;
+        if (isPrivateProduct == null) isPrivateProduct = Boolean.FALSE;
     }
 }

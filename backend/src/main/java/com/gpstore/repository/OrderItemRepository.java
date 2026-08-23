@@ -26,6 +26,13 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
             "where oi1.order = oi2.order " +
             "and oi1.productVariant.product.id = :productId " +
             "and oi2.productVariant.product.id <> :productId " +
+            // PRIVATE PRODUCTS ARE EXCLUDED IN THE DATABASE, not afterwards.
+            // A recommendation is the shop volunteering a product back to
+            // someone who did not ask for it, on a screen anyone nearby can
+            // see. Filtering in Java would still have carried the row - and
+            // its real name - out of the database and into a response
+            // somebody could forget to filter.
+            "and oi2.productVariant.product.isPrivateProduct = false " +
             "group by oi2.productVariant.product.id " +
             "order by cnt desc")
     List<Object[]> findFrequentlyBoughtWithProductId(@Param("productId") Long productId, Pageable pageable);
@@ -46,6 +53,9 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     @Query("select oi.productVariant.product.id as productId, count(oi) as cnt " +
             "from OrderItem oi " +
             "where oi.order.orderDate >= :since " +
+            // Same rule as frequently-bought-together above: a private
+            // product never appears in a list the customer did not ask for.
+            "and oi.productVariant.product.isPrivateProduct = false " +
             "group by oi.productVariant.product.id " +
             "order by cnt desc")
     List<Object[]> findTrendingProductIds(@Param("since") LocalDateTime since, Pageable pageable);
@@ -67,6 +77,11 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
             "JOIN FETCH oi.productVariant pv " +
             "JOIN FETCH pv.product " +
             "WHERE oi.order.customer.id = :customerId " +
+            // Buy Again / reorder suggestions are built from this. A private
+            // product must never be suggested back to the customer who bought
+            // it - that is precisely the leak this feature exists to close -
+            // so it is excluded here rather than downstream.
+            "AND pv.product.isPrivateProduct = false " +
             "ORDER BY oi.order.orderDate DESC")
     List<OrderItem> findByCustomerIdWithProductFetched(@Param("customerId") Long customerId,
                                                        org.springframework.data.domain.Pageable pageable);

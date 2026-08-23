@@ -27,6 +27,8 @@ import java.util.stream.Collectors;
  * NotSerializableException from inside the cache write, turning a
  * successful DB result into a failed request.
  */
+@com.fasterxml.jackson.annotation.JsonInclude(
+        com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
 public class ProductResponse implements Serializable {
 
     /**
@@ -76,6 +78,16 @@ public class ProductResponse implements Serializable {
      * InvalidClassException on every browse request until the TTL drains.
      */
     private final String subcategory;
+
+    /**
+     * ADMIN RESPONSES ONLY - null on every customer-facing payload.
+     *
+     * Whether a product is private, and what a customer is shown instead, is
+     * information the shop needs and the customer does not. Jackson omits
+     * nulls on this DTO, so a customer response does not even carry the keys.
+     */
+    private final Boolean isPrivateProduct;
+    private final String customerDisplayName;
     private final Boolean bestseller;
     private final Boolean featured;
 
@@ -121,6 +133,17 @@ public class ProductResponse implements Serializable {
                             List<VariantResponse> variants, Boolean active, List<String> images,
                             String model3dUrl, String subcategory, Boolean bestseller,
                             Boolean featured, Boolean testData) {
+        this(id, name, brand, category, variants, active, images, model3dUrl, subcategory,
+                bestseller, featured, testData, null, null);
+    }
+
+    public ProductResponse(Long id, String name, String brand, CategoryResponse category,
+                            List<VariantResponse> variants, Boolean active, List<String> images,
+                            String model3dUrl, String subcategory, Boolean bestseller,
+                            Boolean featured, Boolean testData,
+                            Boolean isPrivateProduct, String customerDisplayName) {
+        this.isPrivateProduct = isPrivateProduct;
+        this.customerDisplayName = customerDisplayName;
         this.id = id;
         this.name = name;
         this.brand = brand;
@@ -155,6 +178,28 @@ public class ProductResponse implements Serializable {
         return new ProductResponse(id, name, brand, category, variants, active, images,
                 url, subcategory, bestseller, featured, testData);
     }
+
+    /**
+     * Staff view: the real name, plus the privacy settings themselves.
+     *
+     * Separate factory rather than a boolean flag on from(), because the two
+     * differ in WHAT THEY CONTAIN, not merely how they render - and a call
+     * site that picks the wrong one should be obvious in review.
+     */
+    public static ProductResponse forAdmin(Product product) {
+        ProductResponse base = from(product);
+        if (base == null) return null;
+        return base.withPrivacy(product.getIsPrivateProduct(), product.getCustomerDisplayName());
+    }
+
+    private ProductResponse withPrivacy(Boolean isPrivateProduct, String customerDisplayName) {
+        return new ProductResponse(id, name, brand, category, variants, active, images,
+                model3dUrl, subcategory, bestseller, featured, testData,
+                isPrivateProduct, customerDisplayName);
+    }
+
+    public Boolean getIsPrivateProduct() { return isPrivateProduct; }
+    public String getCustomerDisplayName() { return customerDisplayName; }
 
     public static ProductResponse from(Product product) {
         if (product == null) {

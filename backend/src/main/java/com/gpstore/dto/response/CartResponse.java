@@ -112,7 +112,12 @@ public class CartResponse {
             return new CartItemResponse(
                     item.getId(),
                     product != null ? product.getId() : null,
-                    product != null ? product.getName() : null,
+                    // Privacy-safe: a cart is the screen most likely to be
+                    // visible to someone standing next to the customer, and
+                    // the real name is never needed to render it. The product
+                    // ID below is the real one, so inventory and checkout are
+                    // unaffected - see Product.customerFacingName().
+                    product != null ? product.customerFacingName() : null,
                     product != null ? product.getBrand() : null,
                     variant != null ? variant.getId() : null,
                     item.getQuantity(),

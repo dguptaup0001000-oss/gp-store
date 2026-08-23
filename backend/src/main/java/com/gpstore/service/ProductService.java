@@ -82,7 +82,11 @@ public class ProductService {
     @Transactional
     public ProductResponse saveProduct(Product product) {
         resolveCategory(product);
-        return ProductResponse.from(productRepository.save(product));
+        // forAdmin: only an ADMIN can reach POST /api/products, and the reply
+        // has to show them the privacy settings they just set - a
+        // customer-shaped response would silently drop them and make the
+        // toggle look like it had not saved.
+        return ProductResponse.forAdmin(productRepository.save(product));
     }
 
     // A public, unauthenticated GET endpoint backs each of the three methods
@@ -113,7 +117,7 @@ public class ProductService {
     public List<ProductResponse> getAllForAdmin() {
         return productRepository
                 .findAllByOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
-                .map(ProductResponse::from)
+                .map(ProductResponse::forAdmin)
                 .toList();
     }
 
@@ -420,7 +424,15 @@ public class ProductService {
         existing.setCategory(updated.getCategory());
         existing.setActive(updated.getActive());
 
-        return ProductResponse.from(productRepository.save(existing));
+        // Privacy is admin-configurable, so it has to be copied here or the
+        // toggle would silently do nothing on edit. Only an ADMIN can reach
+        // this endpoint (SecurityConfig gates PUT /api/products/**), which is
+        // what stops a customer setting it - the check is the existing
+        // authorisation, not a new one invented for this feature.
+        existing.setIsPrivateProduct(updated.getIsPrivateProduct());
+        existing.setCustomerDisplayName(updated.getCustomerDisplayName());
+
+        return ProductResponse.forAdmin(productRepository.save(existing));
     }
 
     /**

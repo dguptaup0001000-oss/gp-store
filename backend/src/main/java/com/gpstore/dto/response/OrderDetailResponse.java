@@ -50,10 +50,26 @@ public class OrderDetailResponse {
         this.delivery = delivery;
     }
 
+    /**
+     * Customer-facing by default. Staff must call {@link #forStaff}.
+     *
+     * The default is the private one on purpose: a new call site that forgets
+     * to think about this shows a customer the privacy-safe name, which is
+     * the harmless mistake. The other way round leaks.
+     */
     public static OrderDetailResponse from(Order order, Delivery deliveryOrNull) {
+        return from(order, deliveryOrNull, false);
+    }
+
+    /** Real product names, for staff who must be able to identify the item. */
+    public static OrderDetailResponse forStaff(Order order, Delivery deliveryOrNull) {
+        return from(order, deliveryOrNull, true);
+    }
+
+    public static OrderDetailResponse from(Order order, Delivery deliveryOrNull, boolean forStaff) {
         List<OrderItemResponse> items = order.getOrderItems() == null
                 ? List.of()
-                : order.getOrderItems().stream().map(OrderItemResponse::from).toList();
+                : order.getOrderItems().stream().map(i -> OrderItemResponse.from(i, forStaff)).toList();
 
         return new OrderDetailResponse(
                 order.getId(),
@@ -115,13 +131,29 @@ public class OrderDetailResponse {
             this.currentlyAvailable = currentlyAvailable;
         }
 
-        static OrderItemResponse from(OrderItem item) {
+        /**
+         * PRIVACY LIVES HERE, not in the app.
+         *
+         * A private product's real name is replaced before the response is
+         * built, so a customer-facing payload never carries it at all - there
+         * is nothing for a client to accidentally render, log, or cache. Staff
+         * get the real name because fulfilling, refunding and auditing an
+         * order all require knowing what was actually sold.
+         *
+         * Read live from the product rather than copied onto the order line at
+         * purchase time: marking a product private has to take effect for
+         * orders already placed, which is the whole point of marking it.
+         */
+        static OrderItemResponse from(OrderItem item, boolean forStaff) {
             var variant = item.getProductVariant();
             var product = variant != null ? variant.getProduct() : null;
 
+            String displayName = product == null ? null
+                    : (forStaff ? product.getName() : product.customerFacingName());
+
             return new OrderItemResponse(
                     variant != null ? variant.getId() : null,
-                    product != null ? product.getName() : null,
+                    displayName,
                     product != null ? product.getBrand() : null,
                     variant != null ? variant.getQuantity() : null,
                     variant != null ? variant.getUnit() : null,
