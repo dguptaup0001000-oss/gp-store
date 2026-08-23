@@ -3,6 +3,7 @@ package com.gpstore.repository;
 import com.gpstore.entity.ProductVariant;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -20,6 +21,20 @@ public interface ProductVariantRepository
      * row.
      */
     Optional<ProductVariant> findBySku(String sku);
+
+    /**
+     * One variant with its product already loaded.
+     *
+     * FOR THE CART PATH, where the difference is measurable rather than
+     * cosmetic. Every add-to-cart checks the product's active flag, which is
+     * one association hop from the variant - so a plain findById costs a
+     * second round trip, and that round trip happens INSIDE the customer row
+     * lock that every other cart request for the same customer is queued
+     * behind. Fetching both together removes a network round trip from a
+     * critical section, which is worth far more than the one query it saves.
+     */
+    @Query("select v from ProductVariant v join fetch v.product where v.id = :id")
+    Optional<ProductVariant> findByIdWithProduct(@Param("id") Long id);
 
     /**
      * Variants of seeded products, fetched with their product so the image

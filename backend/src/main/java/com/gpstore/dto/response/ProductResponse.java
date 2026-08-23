@@ -171,6 +171,33 @@ public class ProductResponse implements Serializable {
     }
 
     /**
+     * Same product, with each variant's own photos attached.
+     *
+     * DETAIL-ONLY, for the same reason withImages is: a listing renders one
+     * thumbnail per card and reads VariantResponse.imageUrl for it. Carrying
+     * five URLs per variant through a twenty-product grid would be payload
+     * nobody looks at, on exactly the traffic that saturates this instance.
+     *
+     * @param galleriesByVariantId variant id to its ordered photo list; a
+     *                             variant missing from the map keeps the
+     *                             empty list it already has, which is what
+     *                             every variant photographed by nobody has.
+     */
+    public ProductResponse withVariantImages(java.util.Map<Long, List<String>> galleriesByVariantId) {
+        if (variants == null || variants.isEmpty() || galleriesByVariantId.isEmpty()) {
+            return this;
+        }
+        List<VariantResponse> withGalleries = variants.stream()
+                .map(v -> {
+                    List<String> gallery = galleriesByVariantId.get(v.getId());
+                    return gallery == null || gallery.isEmpty() ? v : v.withImages(gallery);
+                })
+                .toList();
+        return new ProductResponse(id, name, brand, category, withGalleries, active, images,
+                model3dUrl, subcategory, bestseller, featured, testData);
+    }
+
+    /**
      * Same product, told that it has a 3D model. Detail-only, like
      * withImages - a list response deliberately never carries this.
      */

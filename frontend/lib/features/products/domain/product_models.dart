@@ -31,6 +31,19 @@ class ProductVariant with _$ProductVariant {
     double? mrp,
     required double sellingPrice,
     int? displayOrder,
+
+    /// This variant's own photos, in order. First is the primary one.
+    ///
+    /// EMPTY ON EVERY LIST RESPONSE, and that is the server being deliberate
+    /// rather than this model being wrong: a browse grid renders one
+    /// thumbnail per card from [imageUrl], and carrying five URLs per variant
+    /// through twenty cards would be payload nobody looks at. The detail
+    /// endpoint is the only one that fills this in.
+    ///
+    /// Also empty for every variant nobody has photographed, which is every
+    /// variant that existed before this feature - the gallery falls back to
+    /// [imageUrl] for those, exactly as it did.
+    @Default([]) List<String> images,
   }) = _ProductVariant;
 
   factory ProductVariant.fromJson(Map<String, dynamic> json) => _$ProductVariantFromJson(json);

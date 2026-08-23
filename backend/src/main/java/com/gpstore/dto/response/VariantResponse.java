@@ -42,9 +42,38 @@ public class VariantResponse implements Serializable {
     private final BigDecimal sellingPrice;
     private final Integer displayOrder;
 
+    /**
+     * This variant's photos, in order. First is the primary.
+     *
+     * EMPTY ON EVERY LIST RESPONSE, and that is deliberate rather than an
+     * oversight. Attached only by ProductService.getProductById, because the
+     * detail screen is the only one that shows more than a thumbnail -
+     * carrying five URLs per variant through a twenty-product grid would be
+     * bandwidth and serialisation nobody ever sees, on exactly the traffic
+     * that saturates this instance.
+     *
+     * Listings keep reading {@link #imageUrl}, which the write path keeps
+     * equal to the first photo - so the primary image appears everywhere the
+     * old single field already did, with no client change.
+     */
+    private final java.util.List<String> images;
+
+    /** Same variant, with its gallery attached. Used on the detail screen only. */
+    public VariantResponse withImages(java.util.List<String> gallery) {
+        return new VariantResponse(id, quantity, unit, imageUrl, available, mrp, sellingPrice,
+                displayOrder, gallery);
+    }
+
     public VariantResponse(Long id, Double quantity, String unit, String imageUrl,
                             Boolean available, BigDecimal mrp, BigDecimal sellingPrice,
                             Integer displayOrder) {
+        this(id, quantity, unit, imageUrl, available, mrp, sellingPrice, displayOrder,
+                java.util.List.of());
+    }
+
+    public VariantResponse(Long id, Double quantity, String unit, String imageUrl,
+                            Boolean available, BigDecimal mrp, BigDecimal sellingPrice,
+                            Integer displayOrder, java.util.List<String> images) {
         this.id = id;
         this.quantity = quantity;
         this.unit = unit;
@@ -53,6 +82,7 @@ public class VariantResponse implements Serializable {
         this.mrp = mrp;
         this.sellingPrice = sellingPrice;
         this.displayOrder = displayOrder;
+        this.images = images == null ? java.util.List.of() : java.util.List.copyOf(images);
     }
 
     public static VariantResponse from(ProductVariant variant) {
@@ -79,4 +109,5 @@ public class VariantResponse implements Serializable {
     public BigDecimal getMrp() { return mrp; }
     public BigDecimal getSellingPrice() { return sellingPrice; }
     public Integer getDisplayOrder() { return displayOrder; }
+    public java.util.List<String> getImages() { return images; }
 }

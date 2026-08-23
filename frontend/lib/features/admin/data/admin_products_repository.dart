@@ -65,7 +65,13 @@ class AdminProductsRepository {
   /// ProductVariant.costPrice's @JsonProperty WRITE_ONLY on the backend) -
   /// this is why variant creation takes plain named parameters here instead
   /// of reusing that read model.
-  Future<void> createVariant({
+  /// Creates a variant and returns its new id.
+  ///
+  /// The id is returned because photos are attached in a second call - they
+  /// live in their own table and a variant has to exist before anything can
+  /// point at it. Returning void meant the caller had no way to say which
+  /// variant the photos it just uploaded belonged to.
+  Future<int> createVariant({
     required int productId,
     required double quantity,
     required String unit,
@@ -75,7 +81,7 @@ class AdminProductsRepository {
     double? costPrice,
     bool allowBelowCost = false,
   }) async {
-    await apiClient.dio.post(
+    final response = await apiClient.dio.post(
       '/api/product-variants',
       queryParameters: {'allowBelowCost': allowBelowCost},
       data: {
@@ -90,6 +96,7 @@ class AdminProductsRepository {
         'active': true,
       },
     );
+    return ((response.data as Map)['id'] as num).toInt();
   }
 
   Future<void> updateVariant({
@@ -136,17 +143,89 @@ class AdminProductsRepository {
   /// auth header and error-mapping interceptor - both meant for OUR
   /// backend's responses - never touch this third-party request. Returns
   /// null if the admin cancelled the picker instead of choosing a photo.
+  /// The most photos one variant may have. Mirrors the server's own limit
+  /// (VariantImageService.MAX_IMAGES_PER_VARIANT), which is what actually
+  /// enforces it - this is here so the picker can stop before a wasted upload
+  /// rather than after one.
+  static const int maxVariantImages = 5;
+
+  /// The longest edge any uploaded photo is allowed to have, in pixels.
+  ///
+  /// A modern phone camera produces something like 4000x3000 and four
+  /// megabytes. Nothing in this app ever displays a grocery photo larger than
+  /// a phone screen, so uploading the original would cost the shopkeeper's
+  /// data to store pixels the customer's data then pays to download again.
+  /// 1600 is generous for a full-screen gallery view on a high-density phone
+  /// and roughly a tenth of the bytes.
+  static const double _maxImageEdge = 1600;
+
+  /// JPEG quality. 85 is the usual "you cannot see the difference on a
+  /// photograph" point; below about 75 the compression starts showing on
+  /// packaging text, which is exactly what these photos are of.
+  static const int _imageQuality = 85;
+
   Future<String?> pickAndUploadVariantImage() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: _imageQuality,
+      maxWidth: _maxImageEdge,
+      maxHeight: _maxImageEdge,
+    );
     if (picked == null) return null;
+    return _uploadOne(picked, await getCloudinarySignature());
+  }
+
+  /// Picks several photos at once and uploads them, in the order picked.
+  ///
+  /// [remaining] is how many the variant can still take. The picker itself
+  /// cannot be told "at most three", so the list is trimmed after the fact -
+  /// which is why this returns how many were dropped, so the caller can say
+  /// so rather than silently ignoring the admin's last two taps.
+  ///
+  /// ONE SIGNATURE FOR THE WHOLE BATCH. Each upload goes straight from this
+  /// phone to Cloudinary and never through the backend; asking the backend to
+  /// sign each one separately would be five round trips to a server that is
+  /// not otherwise involved.
+  Future<({List<String> urls, int skipped})> pickAndUploadVariantImages({
+    required int remaining,
+  }) async {
+    if (remaining <= 0) {
+      return (urls: const <String>[], skipped: 0);
+    }
+
+    final picked = await ImagePicker().pickMultiImage(
+      imageQuality: _imageQuality,
+      maxWidth: _maxImageEdge,
+      maxHeight: _maxImageEdge,
+    );
+    if (picked.isEmpty) {
+      return (urls: const <String>[], skipped: 0);
+    }
+
+    final accepted = picked.length > remaining ? picked.sublist(0, remaining) : picked;
+    final skipped = picked.length - accepted.length;
 
     final signature = await getCloudinarySignature();
-    final bytes = await picked.readAsBytes();
+
+    // SEQUENTIAL, NOT PARALLEL, and on purpose. Five simultaneous multipart
+    // uploads from a shop phone on rural mobile data is how all five get slow
+    // and one times out. One at a time is slower on a good connection and far
+    // more likely to finish on a bad one.
+    final urls = <String>[];
+    for (final file in accepted) {
+      urls.add(await _uploadOne(file, signature));
+    }
+
+    return (urls: urls, skipped: skipped);
+  }
+
+  Future<String> _uploadOne(XFile file, CloudinarySignature signature) async {
+    final bytes = await file.readAsBytes();
 
     final response = await Dio().post(
       'https://api.cloudinary.com/v1_1/${signature.cloudName}/image/upload',
       data: FormData.fromMap({
-        'file': MultipartFile.fromBytes(bytes, filename: picked.name),
+        'file': MultipartFile.fromBytes(bytes, filename: file.name),
         'api_key': signature.apiKey,
         'timestamp': signature.timestamp,
         'signature': signature.signature,
@@ -155,6 +234,29 @@ class AdminProductsRepository {
     );
 
     return response.data['secure_url'] as String;
+  }
+
+  /// This variant's photos, in order.
+  Future<List<String>> getVariantImages(int variantId) async {
+    final response = await apiClient.dio.get('/api/product-variants/$variantId/images');
+    return ((response.data as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(growable: false);
+  }
+
+  /// Replaces a variant's photos with exactly this list, in this order.
+  ///
+  /// The whole list, not one image - the first entry is the primary photo, so
+  /// order carries meaning, and add/remove/reorder as three calls is three
+  /// chances for the screen's order and the server's to drift apart.
+  Future<List<String>> setVariantImages(int variantId, List<String> urls) async {
+    final response = await apiClient.dio.put(
+      '/api/product-variants/$variantId/images',
+      data: {'imageUrls': urls},
+    );
+    return ((response.data as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(growable: false);
   }
 
   Future<List<Category>> getCategories() async {

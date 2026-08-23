@@ -138,18 +138,29 @@ public class CartService {
             throw new BadRequestException("Quantity must be positive");
         }
 
-        // Locked for the rest of this transaction (see
-        // CustomerRepository.findByIdForUpdate) - a second concurrent
-        // addToCart/updateItemQuantity/removeItem for this same customer
-        // blocks here until this one commits, instead of racing the cart
-        // lookup-or-create and item quantity increment below. The customer
-        // row (unlike the cart row) is guaranteed to already exist, so this
-        // also closes the "this customer's very first cart, created twice
-        // at once" race that locking the cart row alone couldn't.
-        Customer customer = customerRepository.findByIdForUpdate(customerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
-
-        ProductVariant variant = productVariantRepository.findById(variantId)
+        // ---- BEFORE THE LOCK ---------------------------------------------
+        //
+        // THE ORDER OF THESE TWO BLOCKS IS THE FIX, and it is worth spelling
+        // out because the code reads almost identically either way.
+        //
+        // Reading the variant and checking whether it is sellable needs no
+        // lock at all - it touches nothing this customer can race with. It
+        // used to happen AFTER the customer row was locked, which meant every
+        // add-to-cart held that lock across an extra database round trip (two,
+        // before the fetch join below), while every other cart request for the
+        // same customer queued behind it holding a pooled connection of its
+        // own and doing nothing.
+        //
+        // That is what "connections stay active too long" looks like in
+        // production: the connections are not working, they are waiting on a
+        // row lock, and the pool queue behind them is what shows up as
+        // `waiting=27`. Moving read-only work out of the critical section
+        // shortens the queue without weakening a single guarantee.
+        //
+        // findByIdWithProduct, not findById: the availability check below
+        // reads the product, which is a lazy association and therefore a
+        // second round trip that used to happen inside the lock too.
+        ProductVariant variant = productVariantRepository.findByIdWithProduct(variantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product variant not found"));
 
         // Same check as checkout - catching it here means the customer
@@ -163,6 +174,23 @@ public class CartService {
                     (variant.getProduct() != null ? variant.getProduct().getName() : "This item")
                             + " is currently unavailable");
         }
+
+        // ---- THE CRITICAL SECTION STARTS HERE ----------------------------
+        //
+        // Locked for the rest of this transaction (see
+        // CustomerRepository.findByIdForUpdate) - a second concurrent
+        // addToCart/updateItemQuantity/removeItem for this same customer
+        // blocks here until this one commits, instead of racing the cart
+        // lookup-or-create and item quantity increment below. The customer
+        // row (unlike the cart row) is guaranteed to already exist, so this
+        // also closes the "this customer's very first cart, created twice
+        // at once" race that locking the cart row alone couldn't.
+        //
+        // UNCHANGED IN SUBSTANCE. Everything that races is still inside it,
+        // in the same order, with the same lock. What moved out above is only
+        // work that never needed to be in here.
+        Customer customer = customerRepository.findByIdForUpdate(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
 
         Cart cart = cartRepository.findByCustomerId(customerId)
                 .orElseGet(() -> {

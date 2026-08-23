@@ -30,6 +30,24 @@ public class ProductImage {
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
 
+    /**
+     * The variant these photos are OF, when they are of a variant.
+     *
+     * NULL MEANS PRODUCT-LEVEL, which is what every row written before V22
+     * is. A shopkeeper photographing the 1 kg pack front, back and side
+     * produces variant rows; the older product-wide gallery produces rows
+     * with this null. Both are valid and both keep working - see V22 for why
+     * that is the whole backward-compatibility story.
+     *
+     * LAZY and @JsonIgnore: nothing that serialises an image needs the
+     * variant back, and loading it would be a query per image on a screen
+     * that shows five of them.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "product_variant_id")
+    private ProductVariant productVariant;
+
     @Column(name = "image_url", nullable = false, length = 500)
     private String imageUrl;
 
@@ -45,6 +63,9 @@ public class ProductImage {
 
     public Product getProduct() { return product; }
     public void setProduct(Product product) { this.product = product; }
+
+    public ProductVariant getProductVariant() { return productVariant; }
+    public void setProductVariant(ProductVariant productVariant) { this.productVariant = productVariant; }
 
     public String getImageUrl() { return imageUrl; }
     public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }

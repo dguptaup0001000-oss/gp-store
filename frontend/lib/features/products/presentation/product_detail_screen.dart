@@ -92,27 +92,51 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Gallery, assembled from three sources in priority order
+                    // Gallery, assembled from four sources in priority order
                     // so the screen is never empty and never waits:
                     //
-                    //   1. the product's own gallery, once the detail request
-                    //      lands (list screens do not carry one);
-                    //   2. the variant thumbnail the caller already had, shown
-                    //      immediately while that request is in flight and kept
-                    //      permanently for products with no gallery yet;
-                    //   3. a basket placeholder if there is no image at all.
+                    //   1. the SELECTED VARIANT's own photos - the front, back
+                    //      and side of this exact pack size;
+                    //   2. the product's own gallery, for products
+                    //      photographed before variants could have their own;
+                    //   3. the variant thumbnail the caller already had, shown
+                    //      immediately while the detail request is in flight
+                    //      and kept permanently for products with no gallery;
+                    //   4. a basket placeholder if there is no image at all.
                     //
-                    // That ordering is what makes multi-image support additive:
-                    // an old single-image product looks exactly as it did.
+                    // That ordering is what makes multi-image support
+                    // additive: an old single-image product falls straight
+                    // through to (3) and looks exactly as it did.
                     Consumer(
                       builder: (context, ref, _) {
                         final detail = ref.watch(productDetailProvider(product.id));
-                        final gallery = detail.valueOrNull?.images ?? const <String>[];
+
+                        // THE SELECTED VARIANT'S OWN PHOTOS COME FIRST, and
+                        // this is the point of the whole feature: the front,
+                        // back and side of the 1 kg packet are different
+                        // pictures from the 500 g packet's. Tapping a size
+                        // should change what you are looking at.
+                        //
+                        // The variant here comes from the detail response
+                        // rather than the one passed in, because only the
+                        // detail response carries galleries - a variant that
+                        // arrived from a browse grid has an empty list by
+                        // design.
+                        final matching = detail.valueOrNull?.variants
+                                .where((v) => v.id == variant?.id)
+                                .toList() ??
+                            const [];
+
+                        final variantGallery =
+                            matching.isEmpty ? const <String>[] : matching.first.images;
+                        final productGallery = detail.valueOrNull?.images ?? const <String>[];
                         final fallback = variant?.imageUrl;
 
-                        final urls = gallery.isNotEmpty
-                            ? gallery
-                            : (fallback != null ? <String>[fallback] : const <String>[]);
+                        final urls = variantGallery.isNotEmpty
+                            ? variantGallery
+                            : productGallery.isNotEmpty
+                                ? productGallery
+                                : (fallback != null ? <String>[fallback] : const <String>[]);
 
                         return ProductImageGallery(imageUrls: urls);
                       },
