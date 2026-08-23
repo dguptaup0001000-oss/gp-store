@@ -223,23 +223,50 @@ class ApiClient {
     // Security's default entry point, which this branch never matched, so
     // it always fell through to this fallback. Back to a plain message now
     // that the real cause is known and fixed at the source.
+    final status = error.response?.statusCode;
+
     String message = 'Something went wrong. Please try again.';
     Map<String, String>? fieldErrors;
 
-    if (data is Map<String, dynamic>) {
-      if (data['message'] is String) {
-        message = data['message'] as String;
+    // Map, not Map<String, dynamic>. A decoded JSON object is normally the
+    // latter, but not always - and when the cast missed, a perfectly good
+    // backend message was thrown away in favour of the generic sentence.
+    if (data is Map) {
+      final body = data.map((key, value) => MapEntry(key.toString(), value));
+      if (body['message'] is String) {
+        message = body['message'] as String;
       }
-      if (data['fieldErrors'] is Map) {
-        fieldErrors = (data['fieldErrors'] as Map).map(
+      if (body['fieldErrors'] is Map) {
+        fieldErrors = (body['fieldErrors'] as Map).map(
           (key, value) => MapEntry(key.toString(), value.toString()),
         );
       }
     } else if (error.type == DioExceptionType.connectionTimeout ||
-        error.type == DioExceptionType.receiveTimeout) {
+        error.type == DioExceptionType.receiveTimeout ||
+        // sendTimeout was missing, so a request that stalled mid-body - an
+        // admin uploading a product photo on one bar - reported the generic
+        // message instead of a timeout the customer could act on.
+        error.type == DioExceptionType.sendTimeout) {
       message = 'Connection timed out. Check your internet and try again.';
     } else if (error.type == DioExceptionType.connectionError) {
       message = 'Could not reach the server. Check your internet connection.';
+    } else if (status != null) {
+      // A RESPONSE ARRIVED, AND IT WAS NOT FROM THIS BACKEND. Every error
+      // this API returns is a JSON object carrying "message"; anything else
+      // with a status code came from something in front of it - a hosting
+      // platform's HTML error page while the service is down or restarting.
+      //
+      // Naming the status is the whole point. "Something went wrong" is
+      // indistinguishable from a validation failure, a permission problem and
+      // a dead server, and an admin staring at it has no idea which of those
+      // is happening or whether it is their fault. This exact sentence cost
+      // an evening of guessing at a bug that had already been fixed and
+      // deployed - the app simply could not say that the server was the
+      // problem.
+      message = status >= 500
+          ? 'The server is not responding correctly (HTTP $status). '
+              'It may be restarting - please try again in a minute.'
+          : 'Request failed (HTTP $status). Please try again.';
     }
 
     return error.copyWith(
