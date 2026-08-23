@@ -1,5 +1,6 @@
 package com.gpstore.search;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,6 +9,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -48,31 +51,64 @@ class BrandCorrectionTest {
      * IdentitySequenceDriftTest deliberately winds this sequence BACKWARDS to
      * reproduce the production bug it covers. It repairs it afterwards, but a
      * test that inserts products must not depend on another class's cleanup
-     * having run first - surefire's class order is not a contract, and CI
-     * proved it by failing here with
+     * having run first - surefire's class order is not a contract, and this
+     * suite shares one database.
      *
-     *     duplicate key value violates unique constraint "products_pkey"
-     *     Key (id)=(1) already exists.
-     *
-     * Forward only, exactly like IdentitySequenceGuard: never move a sequence
-     * back, because that hands out ids that are already taken.
+     * FORWARD ONLY, exactly like IdentitySequenceGuard: the GREATEST includes
+     * the sequence's own current value, so this can never move a sequence
+     * back. An earlier draft compared only against max(id), which on an empty
+     * products table would have wound the sequence down to 1 - handing out
+     * ids that a later insert has to collide with. That is the failure this
+     * exists to prevent, so it must not be the failure this causes.
      */
     @BeforeEach
     void ensureProductSequenceIsUsable() {
         jdbc.queryForObject(
-                "SELECT setval('products_id_seq', GREATEST((SELECT COALESCE(max(id), 0) FROM products), 1), true)",
+                "SELECT setval('products_id_seq', GREATEST("
+                        + "  (SELECT COALESCE(max(id), 0) FROM products), "
+                        + "  COALESCE(pg_sequence_last_value('products_id_seq'), 0), "
+                        + "  1), true)",
                 Long.class);
+    }
+
+    /**
+     * Every product this class inserts, so it can take them out again.
+     *
+     * WHY THIS EXISTS. These fixtures used to be left behind, and CI failed
+     * three classes later in CatalogSeedIntegrationTest.auditIsClean with
+     *
+     *     3 test product(s) not attached to a category
+     *
+     * - the catalogue audit counts the whole products table, so a fixture
+     * that outlives its test becomes someone else's failure. It passed
+     * locally only because surefire happened to run the audit first.
+     */
+    private final List<String> insertedProducts = new ArrayList<>();
+
+    @AfterEach
+    void removeFixtures() {
+        for (String name : insertedProducts) {
+            jdbc.update("DELETE FROM products WHERE name = ?", name);
+        }
+        insertedProducts.clear();
+        brands.refresh();
     }
 
     private void ensureBrandExists(String brand, String productName) {
         Integer existing = jdbc.queryForObject(
                 "SELECT count(*) FROM products WHERE brand = ? AND active", Integer.class, brand);
         if (existing != null && existing > 0) return;
+        // is_test_data is FALSE deliberately. These are this class's own
+        // fixtures, not rows the catalogue seeder produced, and the pre-launch
+        // audit and cleanup both key off that flag - claiming to be seed data
+        // would make them the seeder's problem to explain and the cleanup's
+        // rows to delete.
         jdbc.update("""
                 INSERT INTO products (name, brand, active, bestseller, featured,
                                       is_test_data, price_verified, created_at)
-                VALUES (?, ?, true, false, false, true, false, now())
+                VALUES (?, ?, true, false, false, false, false, now())
                 """, productName, brand);
+        insertedProducts.add(productName);
         brands.refresh();
     }
 
@@ -161,8 +197,9 @@ class BrandCorrectionTest {
                 INSERT INTO products (name, brand, active, bestseller, featured,
                                       is_test_data, price_verified, created_at)
                 VALUES ('Zeppelina Kumquat Marmalade 200 g', 'Zeppelina',
-                        true, false, false, true, false, now())
+                        true, false, false, false, false, now())
                 """);
+        insertedProducts.add("Zeppelina Kumquat Marmalade 200 g");
         brands.refresh();
 
         // One letter wrong, exactly as a recogniser would leave it.

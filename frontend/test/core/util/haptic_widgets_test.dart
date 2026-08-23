@@ -82,16 +82,21 @@ void main() {
     expect(AppHaptics.callCount, 1);
   });
 
-  test('hapticize returns null for a null callback, so disabled stays disabled', () {
-    expect(hapticize(null), isNull);
-    expect(hapticizeValue<bool>(null), isNull);
+  test('the OrNull variants pass null through, so disabled stays disabled', () {
+    // hapticize/hapticizeValue are non-null in and out - a nullable return
+    // failed to compile at every call site feeding a required callback. The
+    // OrNull pair is what a genuinely-optional handler uses, and a control
+    // disabled by a null handler must stay disabled AND silent.
+    expect(hapticizeOrNull(null), isNull);
+    expect(hapticizeValueOrNull<bool>(null), isNull);
+    expect(AppHaptics.callCount, 0);
   });
 
   test('hapticize fires once and passes the value through', () {
     bool? received;
     final wrapped = hapticizeValue<bool>((v) => received = v);
 
-    wrapped!(true);
+    wrapped(true);
 
     expect(received, isTrue);
     expect(AppHaptics.callCount, 1);

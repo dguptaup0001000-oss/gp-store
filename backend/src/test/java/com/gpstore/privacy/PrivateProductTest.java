@@ -48,7 +48,10 @@ class PrivateProductTest {
     @BeforeEach
     void ensureProductSequenceIsUsable() {
         jdbc.queryForObject(
-                "SELECT setval('products_id_seq', GREATEST((SELECT COALESCE(max(id), 0) FROM products), 1), true)",
+                "SELECT setval('products_id_seq', GREATEST("
+                        + "  (SELECT COALESCE(max(id), 0) FROM products), "
+                        + "  COALESCE(pg_sequence_last_value('products_id_seq'), 0), "
+                        + "  1), true)",
                 Long.class);
     }
 
@@ -131,7 +134,7 @@ class PrivateProductTest {
                 INSERT INTO products (name, brand, active, bestseller, featured,
                                       is_test_data, price_verified, is_private_product,
                                       customer_display_name, created_at)
-                VALUES (?, 'PrivacyTest', true, false, false, true, false, true, ?, now())
+                VALUES (?, 'PrivacyTest', true, false, false, false, false, true, ?, now())
                 """, REAL_NAME, ALIAS);
 
         // trending() is the personalised surface the home screen calls on

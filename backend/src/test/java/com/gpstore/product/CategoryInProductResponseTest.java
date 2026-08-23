@@ -59,19 +59,23 @@ class CategoryInProductResponseTest {
      * IdentitySequenceDriftTest deliberately winds this sequence BACKWARDS to
      * reproduce the production bug it covers. It repairs it afterwards, but a
      * test that inserts products must not depend on another class's cleanup
-     * having run first - surefire's class order is not a contract, and CI
-     * proved it by failing here with
+     * having run first - surefire's class order is not a contract, and this
+     * suite shares one database.
      *
-     *     duplicate key value violates unique constraint "products_pkey"
-     *     Key (id)=(1) already exists.
-     *
-     * Forward only, exactly like IdentitySequenceGuard: never move a sequence
-     * back, because that hands out ids that are already taken.
+     * FORWARD ONLY, exactly like IdentitySequenceGuard: the GREATEST includes
+     * the sequence's own current value, so this can never move a sequence
+     * back. An earlier draft compared only against max(id), which on an empty
+     * products table would have wound the sequence down to 1 - handing out
+     * ids that a later insert has to collide with. That is the failure this
+     * exists to prevent, so it must not be the failure this causes.
      */
     @BeforeEach
     void ensureProductSequenceIsUsable() {
         jdbc.queryForObject(
-                "SELECT setval('products_id_seq', GREATEST((SELECT COALESCE(max(id), 0) FROM products), 1), true)",
+                "SELECT setval('products_id_seq', GREATEST("
+                        + "  (SELECT COALESCE(max(id), 0) FROM products), "
+                        + "  COALESCE(pg_sequence_last_value('products_id_seq'), 0), "
+                        + "  1), true)",
                 Long.class);
     }
 
