@@ -44,7 +44,77 @@ public class Address {
 
     private Boolean defaultAddress;
 
+    /**
+     * The permanent delivery territory this address belongs to.
+     *
+     * Stamped once, from the coordinates, when the address is saved - never
+     * recomputed per order. Two reasons, and both matter.
+     *
+     * PERMANENCE. A customer who resolved to Z7B must still be Z7B next
+     * month. If this were derived on every read, an administrator nudging a
+     * boundary would silently move existing customers between riders, and the
+     * territory knowledge the whole design is built on would quietly rot.
+     *
+     * COST. Checkout preview runs on every cart change. Keeping the
+     * point-in-polygon test off that path means the territory system adds no
+     * per-request database work at all.
+     *
+     * Null is a real and permitted state: an address saved before the
+     * territory map existed, or one whose coordinates fall outside every
+     * drawn subzone. TerritoryDispatchService treats it as "no territory
+     * information" and says so, rather than guessing a subzone.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "subzone_id")
+    private DeliverySubzone subzone;
+
+    /**
+     * True when an administrator placed this address in its subzone by hand.
+     *
+     * The map cannot know that a house sits on the wrong side of a line, or
+     * that a gated colony's only gate opens into the next territory. A human
+     * can. When they say so, nothing automatic may overwrite it - not a
+     * coordinate update, not a boundary edit, not a bulk re-resolve.
+     */
+    // NOT declared nullable = false here, and that is deliberate. This column
+    // is being ADDED to a table that already holds every customer's addresses,
+    // and Postgres cannot add a NOT NULL column to a non-empty table without a
+    // default - Hibernate's ddl-auto emits exactly that ALTER, it fails, and
+    // Hibernate logs the failure and carries on, leaving the column missing
+    // entirely. V19 is what makes it NOT NULL, by the add/backfill/alter route
+    // that works on a populated table. The @PrePersist below is what actually
+    // keeps the value non-null, since Hibernate binds an explicit NULL for an
+    // unset field rather than letting the column DEFAULT apply.
+    private Boolean subzoneLocked = Boolean.FALSE;
+
     public Address() {
+    }
+
+    @PrePersist
+    @PreUpdate
+    void normaliseTerritoryFlags() {
+        // Hibernate binds an explicit NULL for an unset field rather than
+        // omitting the column, so a database DEFAULT never applies on insert.
+        // The column is NOT NULL; this is what actually keeps it satisfied.
+        if (subzoneLocked == null) {
+            subzoneLocked = Boolean.FALSE;
+        }
+    }
+
+    public DeliverySubzone getSubzone() {
+        return subzone;
+    }
+
+    public void setSubzone(DeliverySubzone subzone) {
+        this.subzone = subzone;
+    }
+
+    public Boolean getSubzoneLocked() {
+        return subzoneLocked;
+    }
+
+    public void setSubzoneLocked(Boolean subzoneLocked) {
+        this.subzoneLocked = subzoneLocked;
     }
 
     public Long getId() {

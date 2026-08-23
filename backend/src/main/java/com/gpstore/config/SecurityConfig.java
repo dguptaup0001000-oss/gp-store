@@ -220,6 +220,14 @@ public class SecurityConfig {
                 // narrowest possible grant, and it sits ABOVE the broader
                 // rules so nothing below can widen it by accident.
                 .requestMatchers("/api/admin/catalog/**").hasRole("ADMIN")
+                // TERRITORY ADMINISTRATION. Every route under here edits the
+                // permanent delivery map - a boundary, a rider's territory,
+                // which territories may lend to each other. Redrawing one
+                // silently reroutes every future order in that area, so this
+                // is admin-only for the same reason catalog administration
+                // above is, and sits beside it so neither can be widened by a
+                // broader rule further down.
+                .requestMatchers("/api/admin/territory/**").hasRole("ADMIN")
                 .requestMatchers("/api/orders/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/orders/customer/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/orders/*/status").hasRole("ADMIN")

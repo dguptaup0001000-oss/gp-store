@@ -117,7 +117,24 @@ public class DeliveryBatchService {
      * error, a new run just starts automatically.
      */
     @Transactional
+    /** Pre-territory signature. Groups on the typed area string alone. */
     public DeliveryBatch getOrCreateOpenBatch(Long deliveryPartnerId, String area) {
+        return getOrCreateOpenBatch(deliveryPartnerId, area, null);
+    }
+
+    /**
+     * The open batch a rider is currently filling for one territory, creating
+     * one if there is none.
+     *
+     * The subzone is stamped on the batch so a route can later be planned over
+     * it - every stop inside one territory the rider already knows is the
+     * whole precondition for sequencing them into something worth riding.
+     * Grouping still keys on the area string so that behaviour is unchanged
+     * for addresses with no territory yet; for those that have one, the string
+     * IS the subzone code, so the two agree.
+     */
+    public DeliveryBatch getOrCreateOpenBatch(Long deliveryPartnerId, String area,
+                                              com.gpstore.entity.DeliverySubzone subzone) {
 
         List<DeliveryBatch> openBatches =
                 repository.findOpenBatchForUpdate(deliveryPartnerId, area);
@@ -140,6 +157,7 @@ public class DeliveryBatchService {
         DeliveryBatch newBatch = new DeliveryBatch();
         newBatch.setBatchNumber("BATCH-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
         newBatch.setArea(area);
+        newBatch.setSubzone(subzone);
         newBatch.setDeliveryPartner(partner);
         newBatch.setStatus("OPEN");
         newBatch.setCreatedAt(LocalDateTime.now());
