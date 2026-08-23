@@ -29,6 +29,25 @@ String extractErrorMessage(Object error) {
 
   if (error is DioException) return _describeDioFailure(error);
 
+  // THE SERVER ANSWERED AND THE APP COULD NOT READ THE ANSWER.
+  //
+  // A TypeError here means a field the model declares as required came back
+  // null - and the request itself SUCCEEDED. That combination is worse than a
+  // plain error: the admin sees a failure, retries, and the retry creates a
+  // second row. The live catalogue collected two "machar bati" products and
+  // two spellings of "pooja bati" that way, because a saved product whose
+  // response carried "category":{"name":null} threw before the screen could
+  // show it.
+  //
+  // Saying so matters. "Something went wrong" sends an admin looking at their
+  // own input; naming it as a fault in the app tells them - and whoever they
+  // ask - that retrying will not help and may duplicate.
+  if (error is TypeError || error is FormatException) {
+    return 'The app could not read the server\'s reply. This is a bug on our '
+        'side - the change may already have been saved, so check before '
+        'trying again.';
+  }
+
   return _unknown;
 }
 
