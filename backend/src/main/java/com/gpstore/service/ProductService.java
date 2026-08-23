@@ -403,7 +403,40 @@ public class ProductService {
         // feature: return it exactly as before and let the client fall back
         // to the variant thumbnail, rather than handing back an empty
         // gallery the UI might render as a broken strip.
-        return gallery.isEmpty() ? product : product.withImages(gallery);
+        product = gallery.isEmpty() ? product : product.withImages(gallery);
+
+        // PER-VARIANT PHOTOS, in ONE query for every variant of this product.
+        //
+        // The front, back and side of the 1 kg packet are different pictures
+        // from the front, back and side of the 500 g packet, which is why
+        // these hang off the variant rather than the product. Asking per
+        // variant would be an N+1 on precisely the screen the feature exists
+        // for, so the whole product's worth is fetched at once and grouped
+        // here.
+        //
+        // One extra query per detail view, on a response that is cached with
+        // the rest of it under "productDetail". Listings are untouched and
+        // still carry one thumbnail per card.
+        List<Long> variantIds = product.getVariants() == null ? List.of()
+                : product.getVariants().stream()
+                        .map(com.gpstore.dto.response.VariantResponse::getId)
+                        .filter(java.util.Objects::nonNull)
+                        .toList();
+
+        if (!variantIds.isEmpty()) {
+            java.util.Map<Long, List<String>> byVariant = new java.util.LinkedHashMap<>();
+            for (com.gpstore.entity.ProductImage image
+                    : productImageRepository.findByProductVariantIdIn(variantIds)) {
+                if (image.getImageUrl() == null || image.getImageUrl().isBlank()) {
+                    continue;
+                }
+                byVariant.computeIfAbsent(image.getProductVariant().getId(), k -> new ArrayList<>())
+                        .add(image.getImageUrl());
+            }
+            product = product.withVariantImages(byVariant);
+        }
+
+        return product;
     }
 
     public Product getByIdOrThrow(Long id) {
