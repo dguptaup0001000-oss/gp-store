@@ -56,8 +56,78 @@ public class CartService {
         return cartRepository.findAll(pageable);
     }
 
+    // ------------------------------------------------------------------
+    // DTOs, produced inside the transaction
+    //
+    // A CartResponse names each line's product, which is two lazy
+    // associations away (CartItem -> ProductVariant -> Product). While the
+    // controller did that mapping, the loads happened during response
+    // serialisation and only worked because open-session-in-view was holding
+    // a pooled database connection open for the length of the whole request.
+    // With that off (see spring.jpa.open-in-view) the same code raises
+    // LazyInitializationException - which is the accurate report of what was
+    // always going on. Mapping here is the fix, and it is also faster: the
+    // loads happen against an open session in a bounded number of batched
+    // queries rather than one per row while Jackson writes.
+    // ------------------------------------------------------------------
+
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<com.gpstore.dto.response.CartResponse> getAllCartResponses(
+            org.springframework.data.domain.Pageable pageable) {
+        // DELIBERATELY NOT a fetch join on the items collection. Paginating a
+        // query that fetch-joins a one-to-many forces Hibernate to read every
+        // matching row and page in memory - which on the admin listing of
+        // every cart in the shop is the exact unbounded query the paging was
+        // added to prevent. hibernate.default_batch_fetch_size (16) makes the
+        // association loads batched instead of one-per-row.
+        return cartRepository.findAll(pageable).map(com.gpstore.dto.response.CartResponse::from);
+    }
+
     public Cart getCustomerCart(Long customerId) {
         return cartRepository.findByCustomerIdWithItemsFetched(customerId).orElse(null);
+    }
+
+    /**
+     * The customer's own cart, mapped while the session is open.
+     *
+     * A customer with no cart row still gets a CartResponse - an empty one,
+     * from CartResponse.from(null). That is the existing contract and the app
+     * relies on it: returning null here would send a bare "null" body to a
+     * client that expects an object with an items array.
+     */
+    @Transactional(readOnly = true)
+    public com.gpstore.dto.response.CartResponse getCustomerCartResponse(Long customerId) {
+        return com.gpstore.dto.response.CartResponse.from(getCustomerCart(customerId));
+    }
+
+    /**
+     * The three mutations, mapped inside their own transaction.
+     *
+     * The mutation methods below are already @Transactional; what these add
+     * is that the DTO is built before that transaction closes, rather than
+     * afterwards in the controller. Same rule as the reads above, same
+     * reason.
+     *
+     * @Transactional here rather than relying on the inner annotation: this
+     * is a self-invocation, so the inner @Transactional would not be applied
+     * by the proxy at all.
+     */
+    @Transactional
+    public com.gpstore.dto.response.CartResponse addToCartResponse(
+            Long customerId, Long variantId, Integer quantity) {
+        return com.gpstore.dto.response.CartResponse.from(addToCart(customerId, variantId, quantity));
+    }
+
+    @Transactional
+    public com.gpstore.dto.response.CartResponse updateItemQuantityResponse(
+            Long customerId, Long cartItemId, int newQuantity) {
+        return com.gpstore.dto.response.CartResponse.from(
+                updateItemQuantity(customerId, cartItemId, newQuantity));
+    }
+
+    @Transactional
+    public com.gpstore.dto.response.CartResponse removeItemResponse(Long customerId, Long cartItemId) {
+        return com.gpstore.dto.response.CartResponse.from(removeItem(customerId, cartItemId));
     }
 
     @Transactional

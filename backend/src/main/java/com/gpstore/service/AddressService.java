@@ -85,7 +85,7 @@ public class AddressService {
      */
     public org.springframework.data.domain.Page<Address> getAll(
             org.springframework.data.domain.Pageable pageable) {
-        return repository.findAll(pageable);
+        return repository.findAllWithSubzone(pageable);
     }
 
     public List<Address> getCustomerAddresses(Long customerId) {
@@ -93,12 +93,12 @@ public class AddressService {
     }
 
     public Address getById(Long id) {
-        return repository.findById(id).orElse(null);
+        return repository.findByIdWithSubzone(id).orElse(null);
     }
 
     /** Throws if the address doesn't exist or doesn't belong to this customer - prevents IDOR. */
     public Address getOwnedAddress(Long id, Long customerId) {
-        Address address = repository.findById(id)
+        Address address = repository.findByIdWithSubzone(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Address not found"));
 
         if (address.getCustomer() == null || !address.getCustomer().getId().equals(customerId)) {

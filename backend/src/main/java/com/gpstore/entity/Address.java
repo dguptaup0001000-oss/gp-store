@@ -64,6 +64,31 @@ public class Address {
      * drawn subzone. TerritoryDispatchService treats it as "no territory
      * information" and says so, rather than guessing a subzone.
      */
+    /*
+     * @JsonIgnore, and this is about what a customer's phone should be sent
+     * as much as about serialisation.
+     *
+     * AddressController returns this entity directly, so without the
+     * annotation a DeliverySubzone travels with every address - and a
+     * DeliverySubzone carries its polygon boundary, its zone, its assigned
+     * DeliveryPartner (with that partner's name and phone number) and, one
+     * hop further, its neighbour list. None of that is the customer's, and
+     * all of it was being shipped to their phone the moment the first
+     * territory was drawn.
+     *
+     * It was also the mechanism of a 500. neighbours is a lazy collection, so
+     * with open-session-in-view off (see spring.jpa.open-in-view) Jackson
+     * reaching it during serialisation raises LazyInitializationException.
+     * Under open-session-in-view it did not throw - it ran the queries, which
+     * is worse in every way except that nobody noticed.
+     *
+     * NOTHING READS IT FROM THE RESPONSE. The Flutter AddressModel does not
+     * declare a subzone field at all, so this removes a value no client has
+     * ever used. The territory itself is unchanged and still stamped on the
+     * row - it is simply the server's business, which is where the dispatch
+     * code reads it from.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "subzone_id")
     private DeliverySubzone subzone;

@@ -246,6 +246,61 @@ public class GlobalExceptionHandler {
                 req.getMethod() + " is not supported for this endpoint", req);
     }
 
+    /**
+     * The database pool had nothing left to give within its timeout.
+     *
+     * WHY THIS IS 503 AND NOT 500. A 500 says "this request hit a bug"; a
+     * caller retries it and gets the same bug. A 503 with Retry-After says
+     * "this server is over capacity right now", which is both TRUE and
+     * actionable - the client backs off, and a load balancer or monitor can
+     * tell overload apart from breakage. Under the load test this is the
+     * difference between a wall of indistinguishable 5xx and a signal that
+     * says exactly which resource ran out.
+     *
+     * IT IS NOT HIDING A FAILURE. The request genuinely did not succeed and
+     * the caller is told so. What changes is that the answer is honest about
+     * WHY, and that it arrives in seconds instead of the caller waiting out a
+     * long acquisition timeout holding a request thread the server needs.
+     *
+     * Logged at warn rather than error, and without a stack trace: at
+     * saturation this fires thousands of times a minute, and thousands of
+     * identical stack traces is how a log stops being readable at the exact
+     * moment somebody needs to read it.
+     */
+    /*
+     * FOUR TYPES, because the same failure arrives wearing four different
+     * names depending on where in the stack it happened, and catching only
+     * the obvious one would have meant this worked on some endpoints and
+     * silently did not on others:
+     *
+     *   SQLTransientConnectionException  - Hikari's own timeout, raw.
+     *   CannotCreateTransactionException - the same thing hit while Spring
+     *                                      was opening a @Transactional.
+     *   CannotGetJdbcConnectionException - the same thing on a JdbcTemplate.
+     *   DataAccessResourceFailureException - the same thing after Hibernate
+     *                                      wrapped it and Spring translated
+     *                                      it, which is the JPA repository
+     *                                      path and therefore most of the
+     *                                      application.
+     */
+    @ExceptionHandler({
+            java.sql.SQLTransientConnectionException.class,
+            org.springframework.transaction.CannotCreateTransactionException.class,
+            org.springframework.jdbc.CannotGetJdbcConnectionException.class,
+            org.springframework.dao.DataAccessResourceFailureException.class
+    })
+    public ResponseEntity<ApiError> handlePoolExhausted(Exception ex, HttpServletRequest req) {
+        log.warn("Database connection pool exhausted serving {} {}: {}",
+                req.getMethod(), req.getRequestURI(), ex.getMessage());
+        ApiError body = new ApiError(HttpStatus.SERVICE_UNAVAILABLE.value(),
+                HttpStatus.SERVICE_UNAVAILABLE.getReasonPhrase(),
+                "The shop is very busy right now. Please try again in a moment.",
+                req.getRequestURI());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header("Retry-After", "2")
+                .body(body);
+    }
+
     // Catch-all: never leak internal exception messages/stack traces to the client,
     // but this is the only handler for genuinely unanticipated failures, so it must
     // log the real exception - otherwise a bug that lands here leaves no trace

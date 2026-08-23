@@ -26,7 +26,17 @@ import java.time.LocalDateTime;
 @Getter
 @Setter
 @NoArgsConstructor
-public class DeliveryPricingSettings {
+public class DeliveryPricingSettings implements java.io.Serializable {
+
+    /**
+     * Serializable because this is cached, and the cache is Redis with JDK
+     * serialization (see ProductResponse, which carries the same note). A
+     * cached type that is not Serializable does not fail at startup or in any
+     * test that misses the cache - it throws NotSerializableException from
+     * inside the cache WRITE, on the first request that would have populated
+     * it, turning a read path into a 500.
+     */
+    private static final long serialVersionUID = 1L;
 
     public static final long SINGLETON_ID = 1L;
 

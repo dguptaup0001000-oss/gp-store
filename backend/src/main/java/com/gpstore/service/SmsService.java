@@ -22,18 +22,32 @@ public class SmsService {
     private final String templateId;
     private final String senderId;
     private final boolean sendingEnabled;
+    private final Duration requestTimeout;
     private final HttpClient httpClient;
 
     public SmsService(
             @Value("${otp.msg91-auth-key}") String authKey,
             @Value("${otp.msg91-template-id}") String templateId,
             @Value("${otp.msg91-sender-id}") String senderId,
-            @Value("${otp.sms-sending-enabled}") boolean sendingEnabled) {
+            @Value("${otp.sms-sending-enabled}") boolean sendingEnabled,
+            @Value("${otp.sms-connect-timeout-seconds:5}") int connectTimeoutSeconds,
+            @Value("${otp.sms-request-timeout-seconds:5}") int requestTimeoutSeconds) {
         this.authKey = authKey;
         this.templateId = templateId;
         this.senderId = senderId;
         this.sendingEnabled = sendingEnabled;
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        this.requestTimeout = Duration.ofSeconds(Math.max(1, requestTimeoutSeconds));
+        // TIMEOUTS ARE A CAPACITY DECISION, not just a reliability one. This
+        // call runs on a Tomcat worker thread and there are forty of those,
+        // so every second MSG91 spends not answering is a second one of the
+        // forty cannot serve anybody else. Ten plus ten was twenty seconds of
+        // a worker per stuck send; five plus five is ten, and MSG91 answering
+        // from India in over five seconds has already failed the customer,
+        // who will tap resend long before then. Both are env-overridable so a
+        // genuinely slow link can be given more without a rebuild.
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(Math.max(1, connectTimeoutSeconds)))
+                .build();
     }
 
     /**
@@ -61,7 +75,7 @@ public class SmsService {
                     .header("authkey", authKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.noBody())
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(requestTimeout)
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());

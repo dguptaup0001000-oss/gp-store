@@ -1,6 +1,6 @@
 package com.gpstore.controller;
 
-import com.gpstore.entity.Inventory;
+import com.gpstore.dto.response.InventoryResponse;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.InventoryService;
 import com.gpstore.service.OrderService;
@@ -72,7 +72,7 @@ class PaginationCapTest {
 
     @Test
     void inventoryGetAllCapsRequestedPageSizeAt100() {
-        when(inventoryService.getAll(any())).thenReturn(Page.<Inventory>empty());
+        when(inventoryService.getAll(any())).thenReturn(Page.<InventoryResponse>empty());
 
         inventoryController.getAll(0, 5000);
 

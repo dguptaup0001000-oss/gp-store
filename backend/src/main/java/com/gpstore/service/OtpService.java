@@ -5,7 +5,9 @@ import com.gpstore.exception.BadRequestException;
 import com.gpstore.repository.OtpVerificationRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -24,6 +26,7 @@ public class OtpService {
 
     private final OtpVerificationRepository repository;
     private final SmsService smsService;
+    private final TransactionTemplate transactionTemplate;
     private final SecureRandom secureRandom = new SecureRandom();
 
     private final int expiryMinutes;
@@ -34,12 +37,14 @@ public class OtpService {
     public OtpService(
             OtpVerificationRepository repository,
             SmsService smsService,
+            PlatformTransactionManager transactionManager,
             @Value("${otp.expiry-minutes}") int expiryMinutes,
             @Value("${otp.max-verify-attempts}") int maxVerifyAttempts,
             @Value("${otp.max-sends-per-window}") int maxSendsPerWindow,
             @Value("${otp.send-window-minutes}") int sendWindowMinutes) {
         this.repository = repository;
         this.smsService = smsService;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.expiryMinutes = expiryMinutes;
         this.maxVerifyAttempts = maxVerifyAttempts;
         this.maxSendsPerWindow = maxSendsPerWindow;
@@ -51,9 +56,39 @@ public class OtpService {
      * window - each send costs real money, so this stops one number being
      * SMS-bombed (deliberately or by a buggy retry loop) from running up
      * your bill.
+     *
+     * DELIBERATELY NOT @Transactional, and the SMS call is deliberately
+     * outside the transaction this opens. MSG91 is a third party reached
+     * over the public internet with a 10 s connect timeout and a 10 s
+     * request timeout; sending inside the transaction meant one slow
+     * provider held a pooled database connection for up to twenty seconds
+     * per request. The pool is ten connections wide, so ten people tapping
+     * "send code" during an MSG91 slowdown took the whole shop down - not
+     * just login, everything, because there were no connections left for
+     * anyone. The database work is short and stays transactional; the
+     * network call now happens after it has committed.
+     *
+     * The order also matters for correctness, not only for latency: the row
+     * commits first, so a code that reaches a customer's phone is always a
+     * code this service can verify. The reverse order can text somebody a
+     * code the database then rolls back.
      */
-    @Transactional
     public void sendOtp(String mobileNumber) {
+        String otpCode = transactionTemplate.execute(status -> recordOtp(mobileNumber));
+
+        // Outside the transaction on purpose - see above. SmsService never
+        // throws; a provider outage is logged and the customer can retry.
+        smsService.sendOtp(mobileNumber, otpCode);
+    }
+
+    /**
+     * The database half of {@link #sendOtp}: rate-limit check and the row.
+     *
+     * Runs inside the caller's TransactionTemplate rather than carrying its
+     * own @Transactional, because a self-invocation would not pass through
+     * the proxy and would silently run with no transaction at all.
+     */
+    private String recordOtp(String mobileNumber) {
         LocalDateTime windowStart = LocalDateTime.now().minusMinutes(sendWindowMinutes);
         long recentSends = repository.countRecentByMobileNumber(mobileNumber, windowStart);
 
@@ -74,7 +109,7 @@ public class OtpService {
 
         repository.save(entry);
 
-        smsService.sendOtp(mobileNumber, otpCode);
+        return otpCode;
     }
 
     /**
