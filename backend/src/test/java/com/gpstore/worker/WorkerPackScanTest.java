@@ -108,9 +108,34 @@ class WorkerPackScanTest {
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM delivery_subzones WHERE code LIKE ?", PREFIX + "%");
         jdbc.update("DELETE FROM delivery_zones WHERE code LIKE ?", PREFIX + "%");
+        // RETIRE BEFORE DELETING, and the order is load-bearing - the same
+        // race that bit TerritoryDispatchTest. While a fixture worker exists
+        // with available = true they are a real candidate for the least-loaded
+        // fallback path, and fourteen test classes in this suite run with a
+        // live outbox worker (they do not disable outbox.drain-interval-ms,
+        // Spring caches their contexts, and those contexts are never closed).
+        // So a worker belonging to a class that finished minutes ago can
+        // auto-assign an order to one of these and open a batch against them
+        // between these two statements.
+        //
+        // Marking them unavailable and inactive first closes the window
+        // instead of racing it; the deletes then have a stable target, and
+        // anything that still slipped in leaves them retired rather than
+        // failing the test.
         jdbc.update("UPDATE delivery_partners SET available = false, active = false WHERE name LIKE ?",
                 PREFIX + "%");
-        jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", PREFIX + "%");
+        try {
+            jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
+                    + "(SELECT id FROM delivery_batches WHERE delivery_partner_id IN "
+                    + " (SELECT id FROM delivery_partners WHERE name LIKE ?))", PREFIX + "%");
+            jdbc.update("DELETE FROM delivery_batches WHERE delivery_partner_id IN "
+                    + "(SELECT id FROM delivery_partners WHERE name LIKE ?)", PREFIX + "%");
+            jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", PREFIX + "%");
+        } catch (org.springframework.dao.DataIntegrityViolationException retiredButReferenced) {
+            // Already unavailable and inactive, so inert. A handful of leftover
+            // rows is a far smaller problem than a red suite that says nothing
+            // about the code.
+        }
         jdbc.update("DELETE FROM customers WHERE full_name LIKE ?", MARKER + "%");
     }
 
