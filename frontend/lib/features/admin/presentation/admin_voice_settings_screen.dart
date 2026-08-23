@@ -63,7 +63,7 @@ class _AdminVoiceSettingsScreenState extends ConsumerState<AdminVoiceSettingsScr
               value: enabled.valueOrNull ?? true,
               // Disabled only while a save is genuinely in flight, and while
               // the first read is still loading, so a tap can't race it.
-              onChanged: hapticizeValue((_isSaving || enabled.isLoading) ? null : _setEnabled),
+              onChanged: hapticizeValueOrNull((_isSaving || enabled.isLoading) ? null : _setEnabled),
               title: const Text('Speak new orders aloud', style: TextStyle(fontWeight: FontWeight.w700)),
               subtitle: const Text(
                 'Announces the customer name and the order amount, like a payment soundbox.',

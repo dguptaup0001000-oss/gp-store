@@ -100,7 +100,8 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
                     items: _statusOptions
                         .map((s) => DropdownMenuItem(value: s, child: Text(s.replaceAll('_', ' '))))
                         .toList(),
-                    onChanged: hapticizeValue(_isUpdating ? null : (value) => value == null ? null : _updateStatus(value)),
+                    onChanged: hapticizeValueOrNull(
+                        _isUpdating ? null : (value) => value == null ? null : _updateStatus(value)),
                   ),
                   if (_isUpdating) ...[
                     const SizedBox(height: 8),
