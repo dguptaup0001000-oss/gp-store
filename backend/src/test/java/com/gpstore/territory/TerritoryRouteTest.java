@@ -25,7 +25,14 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class TerritoryRouteTest {
 
-    /** The store, and the point every route starts from. */
+    /**
+     * An arbitrary origin for the fixtures, NOT the real shop.
+     *
+     * The planner takes the store position as a constructor argument, so this
+     * file can pick any point and reason in offsets from it. Deliberately not
+     * read from configuration: a route-ordering test that changes behaviour
+     * when the shop moves is testing the wrong thing.
+     */
     private static final double STORE_LAT = 28.6139;
     private static final double STORE_LNG = 77.2090;
 
