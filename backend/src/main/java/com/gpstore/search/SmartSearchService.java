@@ -51,10 +51,14 @@ public class SmartSearchService {
 
     private final ProductService productService;
     private final SynonymDictionary synonyms;
+    private final BrandVocabulary brands;
 
-    public SmartSearchService(ProductService productService, SynonymDictionary synonyms) {
+    public SmartSearchService(ProductService productService,
+                              SynonymDictionary synonyms,
+                              BrandVocabulary brands) {
         this.productService = productService;
         this.synonyms = synonyms;
+        this.brands = brands;
     }
 
     public SmartSearchResult search(String rawQuery, Pageable pageable) {
@@ -128,6 +132,36 @@ public class SmartSearchService {
             }
         }
 
+        // LAYER 1c - a brand the recogniser got wrong.
+        //
+        // A customer said "aachi haldi" three times. Google heard
+        // "रांची हल्दी" every time, which romanises to "ranchi haldi", and the
+        // shop announced "Showing results for ranchi turmeric" - a brand
+        // nobody sells. Aachi is stocked, and "ranchi" is two edits from
+        // "aachi", but nothing in the pipeline knew that: the dictionary
+        // holds vocabulary (haldi, chini, doodh) and a brand name is not
+        // vocabulary. It is catalogue data that changes with the shelf, so
+        // BrandVocabulary reads it from the catalogue.
+        //
+        // Applied to the ROMANISED form when there is one, because that is
+        // what a Hindi-script mishearing turns into, and combined with the
+        // dictionary in one pass so "ranchi haldi" reaches "aachi turmeric"
+        // rather than stopping at "aachi haldi".
+        //
+        // ONLY AFTER LAYER 1 FAILED TO ANSWER. Rewriting a word to a brand is
+        // safe only when the word found nothing itself - "catch" is a real
+        // brand and one edit from "match" - and a shop that silently rewrites
+        // what people ask for is worse than one that occasionally finds
+        // nothing.
+        String brandSource = hasRomanised ? romanised : query;
+        Optional<String> brandCorrected = correctBrands(brandSource);
+        if (brandCorrected.isPresent()) {
+            Page<ProductResponse> results = productService.searchInstant(brandCorrected.get(), pageable);
+            if (results.hasContent() && answersWholeQuery(brandCorrected.get(), results.getContent())) {
+                return SmartSearchResult.interpreted(query, brandCorrected.get(), results);
+            }
+        }
+
         // LAYER 2 - translated.
         //
         // Reached when the query found nothing AND when it found something
@@ -175,6 +209,57 @@ public class SmartSearchService {
         }
 
         return SmartSearchResult.empty(query, asTyped);
+    }
+
+
+    /**
+     * Rewrites tokens that name no product but closely match a stocked brand,
+     * translating the rest through the dictionary in the same pass.
+     *
+     * Returns empty unless at least one token was actually corrected to a
+     * brand - a query that only needed the dictionary is layer 2's job, and
+     * answering it here would report the wrong reason for the results.
+     */
+    private Optional<String> correctBrands(String source) {
+        List<String> tokens = SearchNormalizer.tokenize(source);
+
+        // A ONE-WORD QUERY IS NEVER BRAND-CORRECTED, and this guard was
+        // earned rather than assumed. Without it "match" - a thing a kirana
+        // shop genuinely sells - was rewritten to the brand "Catch", one edit
+        // away, and the customer got cloves and hing instead of matchboxes.
+        //
+        // What separates "ranchi haldi" from "match" is not the distance;
+        // both are a hair away from a stocked brand. It is that a brand
+        // almost never arrives alone. Someone naming a brand is naming it
+        // WITH the thing they want - "aachi haldi", "tata namak" - whereas a
+        // lone word is far likelier to be the product itself. Requiring a
+        // second token keeps the correction where the evidence is, and a
+        // single word that finds nothing still reaches layers 2 and 3.
+        if (tokens.size() < 2) return Optional.empty();
+
+        List<String> rewritten = new ArrayList<>(tokens.size());
+        boolean correctedABrand = false;
+
+        for (String token : tokens) {
+            // The dictionary wins: a word it knows is vocabulary, not a
+            // misheard brand, however close it happens to look to one.
+            Optional<String> canonical = synonyms.canonicalFor(token);
+            if (canonical.isPresent()) {
+                rewritten.add(canonical.get());
+                continue;
+            }
+
+            Optional<String> brand = brands.closestBrand(token);
+            if (brand.isPresent()) {
+                rewritten.add(brand.get());
+                correctedABrand = true;
+                continue;
+            }
+
+            rewritten.add(token);
+        }
+
+        return correctedABrand ? Optional.of(String.join(" ", rewritten)) : Optional.empty();
     }
 
     /**
