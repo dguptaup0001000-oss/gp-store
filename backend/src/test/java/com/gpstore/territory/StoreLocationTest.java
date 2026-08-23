@@ -1,7 +1,9 @@
 package com.gpstore.territory;
 
+import com.gpstore.service.DeliveryEstimateService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -42,6 +44,8 @@ class StoreLocationTest {
     @Value("${store.latitude}") private double storeLatitude;
     @Value("${store.longitude}") private double storeLongitude;
 
+    @Autowired private DeliveryEstimateService estimates;
+
     @Test
     @DisplayName("the shop is not sitting on the Delhi placeholder")
     void notThePlaceholder() {
@@ -78,5 +82,43 @@ class StoreLocationTest {
     void isSet() {
         assertNotEquals(0.0, storeLatitude, 1e-9, "0,0 is in the Atlantic Ocean");
         assertNotEquals(0.0, storeLongitude, 1e-9, "0,0 is in the Atlantic Ocean");
+    }
+
+    @Test
+    @DisplayName("the delivery radius fits inside the ETA promise, so nothing is under-promised")
+    void radiusDoesNotOutrunTheEtaCap() {
+        // THE FAILURE THIS CATCHES, which nothing else would. estimateMinutes
+        // is distance-based but hard-capped, so past a certain distance every
+        // address is quoted the same maximum however far away it really is.
+        // Widen the radius past that point and nothing breaks, nothing logs:
+        // far customers are simply told a time the shop's own arithmetic says
+        // it cannot meet, and the delivery-guarantee check starts reporting
+        // breaches that were designed in.
+        //
+        // At the radius set here the two are in agreement, and this asserts
+        // that they stay so. If the radius is deliberately widened past the
+        // cap, raise MAX_MINUTES in DeliveryEstimateService in the same
+        // change - do not delete this test.
+        double radiusKm = estimates.getMaxDeliveryRadiusKm();
+
+        // A point due north at exactly the edge of the serviceable area.
+        double edgeLat = storeLatitude + radiusKm / 111.32;
+
+        assertTrue(estimates.isWithinServiceableRadius(edgeLat, storeLongitude),
+                "the edge of the radius must itself be deliverable, or this test is measuring "
+                        + "the wrong point");
+
+        int atTheEdge = estimates.estimateMinutes(edgeLat, storeLongitude);
+
+        // An address with no coordinates falls back to the cap, which makes it
+        // a reliable way to read the cap without reaching into a private
+        // constant.
+        int theCap = estimates.estimateMinutes(null, null);
+
+        assertTrue(atTheEdge < theCap,
+                "the furthest deliverable address is quoted " + atTheEdge + " minutes, which is the "
+                        + theCap + "-minute ceiling rather than a real estimate. Every address past "
+                        + "the point where the cap binds is being under-promised. Either bring the "
+                        + "radius back inside the cap or raise the cap to match the radius.");
     }
 }

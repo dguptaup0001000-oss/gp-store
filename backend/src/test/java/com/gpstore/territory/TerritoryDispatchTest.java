@@ -108,9 +108,56 @@ class TerritoryDispatchTest {
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM delivery_subzones WHERE code LIKE ?", PREFIX + "%");
         jdbc.update("DELETE FROM delivery_zones WHERE code LIKE ?", PREFIX + "%");
-        jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", PREFIX + "%");
+
+        retireFixturePartners();
         createdPartners.clear();
         resolver.invalidate();
+    }
+
+    /**
+     * Takes this file's fixture riders out of service, then out of the
+     * database - in that order, and that order is the whole point.
+     *
+     * WHY THIS IS NOT THREE DELETEs. While a fixture rider exists with
+     * available = true, they are a REAL candidate for the least-loaded
+     * fallback path, and fourteen test classes in this suite run with a live
+     * outbox worker - they do not disable outbox.drain-interval-ms, Spring
+     * caches their contexts, and those contexts are never closed. So a worker
+     * belonging to a class that finished minutes ago can auto-assign an order
+     * to one of these riders at any moment, opening a batch against them.
+     * Delete the batch and a delivery inserted a millisecond later still
+     * points at it; the foreign key fires and a cleanup takes the test down
+     * with it.
+     *
+     * Retiring first closes the window instead of racing it. An unavailable,
+     * inactive rider cannot be picked by anything, so nothing new can attach
+     * to them, and the deletes that follow have a stable target.
+     *
+     * WHY THE CATCH. Cleanup must not be the thing that fails a test. If a
+     * row did slip in during the microseconds before retirement, the riders
+     * stay in the table - unavailable, inactive, and unpickable, which is
+     * exactly what a rider who has left the roster looks like. Inert rows are
+     * a far smaller problem than a red suite that says nothing about the code.
+     *
+     * This is a pre-existing property of the suite rather than something the
+     * territory work introduced; a 20 km radius made more test addresses
+     * deliverable, which made more orders auto-assign, which made it visible.
+     */
+    private void retireFixturePartners() {
+        jdbc.update("UPDATE delivery_partners SET available = false, active = false "
+                + "WHERE name LIKE ?", PREFIX + "%");
+        try {
+            jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
+                    + "(SELECT id FROM delivery_batches WHERE delivery_partner_id IN "
+                    + " (SELECT id FROM delivery_partners WHERE name LIKE ?))", PREFIX + "%");
+            jdbc.update("DELETE FROM delivery_batches WHERE delivery_partner_id IN "
+                    + "(SELECT id FROM delivery_partners WHERE name LIKE ?)", PREFIX + "%");
+            jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", PREFIX + "%");
+        } catch (org.springframework.dao.DataIntegrityViolationException retiredButStillReferenced) {
+            // Already unavailable and inactive above, so harmless. Left in
+            // place deliberately rather than retried in a loop, which would
+            // just be racing the same worker again.
+        }
     }
 
     private DeliverySubzone newSubzone(String code, String boundary, int capacity) {
