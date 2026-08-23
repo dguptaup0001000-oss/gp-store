@@ -33,28 +33,49 @@ public class DeliveryPricingSettings {
     @Id
     private Long id = SINGLETON_ID;
 
+    // EVERY COLUMN NAME IS EXPLICIT, and that is not style. Hibernate's
+    // naming strategy turns distanceTier1Charge into "distance_tier1charge" -
+    // no underscore before "charge", because the splitter does not break
+    // between a digit and the word after it. The migration writes
+    // "distance_tier1_charge", which reads the way a person would.
+    //
+    // Under ddl-auto=update those two names silently become TWO COLUMNS and
+    // the application quietly uses its own, so nothing fails and the settings
+    // an admin edits are not the settings that get read. Under validate it is
+    // a startup failure. Naming them here removes the guess entirely.
+
     // ---- distance ----------------------------------------------------
 
     /** Flat charge for anything up to {@link #distanceTier1MaxKm}. */
+    @Column(name = "distance_tier1_charge")
     private BigDecimal distanceTier1Charge = new BigDecimal("5.00");
+    @Column(name = "distance_tier1_max_km")
     private BigDecimal distanceTier1MaxKm = new BigDecimal("1.00");
 
     /** Flat charge above tier 1 and up to {@link #distanceTier2MaxKm}. */
+    @Column(name = "distance_tier2_charge")
     private BigDecimal distanceTier2Charge = new BigDecimal("10.00");
+    @Column(name = "distance_tier2_max_km")
     private BigDecimal distanceTier2MaxKm = new BigDecimal("2.00");
 
     /** Added per whole kilometre beyond tier 2, rounding the distance up. */
+    @Column(name = "additional_km_charge")
     private BigDecimal additionalKmCharge = new BigDecimal("5.00");
 
     // ---- weight ------------------------------------------------------
 
+    @Column(name = "free_weight_kg")
+
     private BigDecimal freeWeightKg = new BigDecimal("10.000");
+    @Column(name = "additional_weight_per_kg")
     private BigDecimal additionalWeightPerKg = new BigDecimal("2.00");
+    @Column(name = "maximum_weight_surcharge")
     private BigDecimal maximumWeightSurcharge = new BigDecimal("20.00");
 
     // ---- margin ------------------------------------------------------
 
     /** Free delivery needs profit >= this x the normal charge. */
+    @Column(name = "free_delivery_multiplier")
     private BigDecimal freeDeliveryMultiplier = new BigDecimal("3.00");
 
     // ---- honesty knobs -----------------------------------------------
@@ -70,6 +91,7 @@ public class DeliveryPricingSettings {
      * measured, and a known under-charge is the better error to have. The
      * quote states which distance it used.
      */
+    @Column(name = "road_distance_factor")
     private BigDecimal roadDistanceFactor = new BigDecimal("1.000");
 
     /**
@@ -80,9 +102,13 @@ public class DeliveryPricingSettings {
      * every item that fell back to this, so filling in real weights is a list
      * to work through rather than a mystery.
      */
+    @Column(name = "assumed_weight_per_item_kg")
     private BigDecimal assumedWeightPerItemKg = new BigDecimal("0.000");
 
+    @Column(name = "updated_at")
+
     private LocalDateTime updatedAt;
+    @Column(name = "updated_by")
     private String updatedBy;
 
     /**
