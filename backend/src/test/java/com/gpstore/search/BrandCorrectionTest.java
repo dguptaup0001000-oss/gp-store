@@ -1,6 +1,7 @@
 package com.gpstore.search;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -40,6 +41,28 @@ class BrandCorrectionTest {
     @Autowired private BrandVocabulary brands;
     @Autowired private SmartSearchService search;
     @Autowired private JdbcTemplate jdbc;
+
+    /**
+     * Leaves products_id_seq usable before this test inserts anything.
+     *
+     * IdentitySequenceDriftTest deliberately winds this sequence BACKWARDS to
+     * reproduce the production bug it covers. It repairs it afterwards, but a
+     * test that inserts products must not depend on another class's cleanup
+     * having run first - surefire's class order is not a contract, and CI
+     * proved it by failing here with
+     *
+     *     duplicate key value violates unique constraint "products_pkey"
+     *     Key (id)=(1) already exists.
+     *
+     * Forward only, exactly like IdentitySequenceGuard: never move a sequence
+     * back, because that hands out ids that are already taken.
+     */
+    @BeforeEach
+    void ensureProductSequenceIsUsable() {
+        jdbc.queryForObject(
+                "SELECT setval('products_id_seq', GREATEST((SELECT COALESCE(max(id), 0) FROM products), 1), true)",
+                Long.class);
+    }
 
     private void ensureBrandExists(String brand, String productName) {
         Integer existing = jdbc.queryForObject(

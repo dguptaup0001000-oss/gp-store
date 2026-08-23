@@ -60,7 +60,7 @@ class NotificationsScreen extends ConsumerWidget {
               } catch (_) {
                 // Best-effort - the list just won't reflect it until next successful retry.
               }
-            },
+            }),
             child: const Text('Mark all read'),
           ),
         ],
@@ -75,9 +75,9 @@ class NotificationsScreen extends ConsumerWidget {
               // comment for why this shows the real failure reason instead
               // of one static string.
               Text("Couldn't load notifications: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: () => ref.invalidate(myNotificationsProvider), child: const Text('Retry')),
+              TextButton(onPressed: hapticize(() => ref.invalidate(myNotificationsProvider)), child: const Text('Retry')),
             ],
-          )),
+          ),
         ),
         data: (page) {
           final notifications = page.notifications;

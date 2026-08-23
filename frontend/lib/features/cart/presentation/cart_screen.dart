@@ -260,7 +260,7 @@ class _CartSummary extends ConsumerWidget {
             ),
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: () {
+              onPressed: hapticize(() {
                 HapticFeedback.mediumImpact();
 
                 // Start loading the address list BEFORE navigating. Checkout
@@ -282,7 +282,7 @@ class _CartSummary extends ConsumerWidget {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const CheckoutScreen()),
                 );
-              },
+              }),
               child: const Text('Proceed to Checkout'),
             ),
           ],

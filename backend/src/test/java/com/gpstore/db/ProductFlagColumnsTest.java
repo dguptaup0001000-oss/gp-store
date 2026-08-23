@@ -56,6 +56,28 @@ class ProductFlagColumnsTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private JdbcTemplate jdbc;
 
+    /**
+     * Leaves products_id_seq usable before this test inserts anything.
+     *
+     * IdentitySequenceDriftTest deliberately winds this sequence BACKWARDS to
+     * reproduce the production bug it covers. It repairs it afterwards, but a
+     * test that inserts products must not depend on another class's cleanup
+     * having run first - surefire's class order is not a contract, and CI
+     * proved it by failing here with
+     *
+     *     duplicate key value violates unique constraint "products_pkey"
+     *     Key (id)=(1) already exists.
+     *
+     * Forward only, exactly like IdentitySequenceGuard: never move a sequence
+     * back, because that hands out ids that are already taken.
+     */
+    @BeforeEach
+    void ensureProductSequenceIsUsable() {
+        jdbc.queryForObject(
+                "SELECT setval('products_id_seq', GREATEST((SELECT COALESCE(max(id), 0) FROM products), 1), true)",
+                Long.class);
+    }
+
     @BeforeEach
     void useTheProductionSchemaShape() {
         for (String col : FLAGS) {
