@@ -29,12 +29,77 @@ class WorkerRepository {
     return WorkerProfile.fromJson(Map<String, dynamic>.from(response.data as Map));
   }
 
-  Future<List<WorkerScanRow>> myOrders() async {
-    final response = await apiClient.dio.get('/api/worker/orders');
-    final rows = (response.data as List?) ?? const [];
-    return rows
-        .map((r) => WorkerScanRow.fromJson(Map<String, dynamic>.from(r as Map)))
-        .toList(growable: false);
+  // myOrders() - the worker's own scan history - was removed from this app
+  // when the home screen stopped showing it. The brief's home screen is the
+  // scan button and the active orders, and "what I did today" was neither;
+  // its one number (todaysOrders) already rides along with the profile.
+  //
+  // GET /api/worker/orders still exists on the server and is untouched. It is
+  // this CLIENT that no longer needs it - a request the app was making on
+  // every home refresh, on the worst connection in the business, for a list
+  // nobody was looking at.
+
+  /// One order, reopened.
+  ///
+  /// The scan response already carries this, so the normal flow never calls
+  /// it - this is for the second look, after the app was backgrounded or the
+  /// worker tapped a task on the home list.
+  Future<WorkerOrder> order(int orderId) async {
+    final response = await apiClient.dio.get('/api/worker/orders/$orderId');
+    return WorkerOrder.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// Moves a delivery to its next status.
+  ///
+  /// NOT QUEUED WHEN OFFLINE, and that is the important difference from a
+  /// scan. A scan is a claim about the past - "I took this carton" - which
+  /// stays true whenever it reaches the server. A status change is a claim
+  /// about now, and the server may refuse it: the delivery may have been
+  /// cancelled, or reassigned, or already moved on. Replaying it an hour
+  /// later could mark something delivered that never was. So this either
+  /// succeeds against the server or fails visibly, and the worker retries
+  /// when they have signal.
+  ///
+  /// Reuses PUT /api/deliveries/{id}/status, which already checks that the
+  /// delivery is assigned to the caller and now also checks that the move is
+  /// legal. The app never decides either.
+  Future<void> setDeliveryStatus({
+    required int deliveryId,
+    required String status,
+  }) async {
+    await apiClient.dio.put(
+      '/api/deliveries/$deliveryId/status',
+      queryParameters: {'status': status},
+    );
+  }
+
+  /// Reports where the phone is.
+  ///
+  /// Fire-and-forget by design: a dropped position is replaced by the next
+  /// one a minute later, and an error banner every time a worker rides
+  /// through a dead spot would train them to ignore banners. Genuine
+  /// refusals - a fix too vague, a position that is not a coordinate - are
+  /// the server's business and it drops them; nothing here pretends they
+  /// were stored.
+  Future<bool> reportLocation({
+    required double latitude,
+    required double longitude,
+    double? accuracyMeters,
+  }) async {
+    try {
+      await apiClient.dio.put(
+        '/api/delivery-partners/me/location',
+        data: {
+          'latitude': latitude,
+          'longitude': longitude,
+          if (accuracyMeters != null) 'accuracyMeters': accuracyMeters,
+        },
+      );
+      return true;
+    } on DioException catch (e) {
+      debugPrint('Location update not stored: ${e.message}');
+      return false;
+    }
   }
 
   Future<void> setAvailable(bool available) async {

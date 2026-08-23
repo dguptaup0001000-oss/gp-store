@@ -18,6 +18,7 @@ class WorkerProfile {
     this.subzoneName,
     required this.status,
     required this.todaysOrders,
+    this.activeTasks = const [],
   });
 
   /// D21. Comes from the server - the app never invents or sends it.
@@ -34,6 +35,14 @@ class WorkerProfile {
   final String status;
   final int todaysOrders;
 
+  /// The deliveries assigned to this worker and still running.
+  ///
+  /// Arrives with the profile rather than from its own request. The home
+  /// screen has nothing to draw until both have answered, so two calls would
+  /// only mean the slower one arriving later - on the screen that opens most
+  /// often, on the worst connection in the business.
+  final List<WorkerTask> activeTasks;
+
   factory WorkerProfile.fromJson(Map<String, dynamic> json) => WorkerProfile(
         workerCode: (json['workerCode'] ?? '') as String,
         name: (json['name'] ?? '') as String,
@@ -42,6 +51,10 @@ class WorkerProfile {
         subzoneName: json['subzoneName'] as String?,
         status: (json['status'] ?? 'OFFLINE') as String,
         todaysOrders: (json['todaysOrders'] as num?)?.toInt() ?? 0,
+        activeTasks: (json['activeTasks'] as List?)
+                ?.map((e) => WorkerTask.fromJson(Map<String, dynamic>.from(e as Map)))
+                .toList(growable: false) ??
+            const [],
       );
 }
 
@@ -55,6 +68,7 @@ class ScanOutcome {
     this.subzoneCode,
     this.replayed = false,
     this.queued = false,
+    this.order,
   });
 
   final bool accepted;
@@ -76,6 +90,15 @@ class ScanOutcome {
   /// carton nobody is accountable for.
   final bool queued;
 
+  /// The order itself, on an accepted scan. Null on a refusal or a replay.
+  ///
+  /// Carried on the scan response so SCAN -> VERIFY -> SHOW ORDER is ONE
+  /// round trip. Fetching the order separately afterwards would put a second
+  /// request on the critical path of every scan of the day, on a connection
+  /// where that is the difference between reading a packing list and watching
+  /// a spinner.
+  final WorkerOrder? order;
+
   factory ScanOutcome.fromJson(Map<String, dynamic> json) => ScanOutcome(
         accepted: json['accepted'] == true,
         outcome: (json['outcome'] ?? 'UNKNOWN') as String,
@@ -83,6 +106,9 @@ class ScanOutcome {
         orderNumber: json['orderNumber'] as String?,
         subzoneCode: json['subzoneCode'] as String?,
         replayed: json['replayed'] == true,
+        order: json['order'] == null
+            ? null
+            : WorkerOrder.fromJson(json['order'] as Map<String, dynamic>),
       );
 
   static const ScanOutcome offline = ScanOutcome(
@@ -93,31 +119,147 @@ class ScanOutcome {
   );
 }
 
-/// One line of "what I did today".
-class WorkerScanRow {
-  const WorkerScanRow({
-    this.orderNumber,
-    required this.outcome,
-    this.reason,
-    this.subzoneCode,
-    this.scannedAt,
+/// One order, as the worker screen shows it.
+///
+/// Mirrors the server's WorkerOrderView exactly, including its omissions: no
+/// prices per line, no GST, no discounts, no payment instrument. A worker packs
+/// a carton and carries it to a door, and [amountToCollect] is the only money
+/// on this screen because it is the only money they handle.
+class WorkerOrder {
+  const WorkerOrder({
+    required this.orderId,
+    required this.orderNumber,
+    this.orderStatus,
+    this.deliveryStatus,
+    this.deliveryId,
+    this.allowedNext = const [],
+    this.customerName,
+    this.customerPhone,
+    this.deliveryAddress,
+    this.latitude,
+    this.longitude,
+    this.totalItems = 0,
+    this.items = const [],
+    this.amountToCollect,
+    this.cashOnDelivery = false,
+    this.packedAt,
+    this.packedBy,
   });
 
-  final String? orderNumber;
-  final String outcome;
-  final String? reason;
-  final String? subzoneCode;
-  final DateTime? scannedAt;
+  final int orderId;
+  final String orderNumber;
+  final String? orderStatus;
+  final String? deliveryStatus;
 
-  bool get accepted => outcome == 'ACCEPTED';
+  /// Null when no delivery row exists yet - the order was packed before
+  /// anybody was assigned to carry it. The screen shows the packing list and
+  /// no status buttons, which is the truth of that situation.
+  final int? deliveryId;
 
-  factory WorkerScanRow.fromJson(Map<String, dynamic> json) => WorkerScanRow(
-        orderNumber: json['orderNumber'] as String?,
-        outcome: (json['outcome'] ?? '') as String,
-        reason: json['reason'] as String?,
-        subzoneCode: json['subzoneCode'] as String?,
-        scannedAt: json['scannedAt'] == null
+  /// The statuses this delivery may move to next, decided by the server.
+  ///
+  /// THE APP KNOWS NO RULES. It draws one button per entry here. That is why
+  /// a phone running an old build cannot offer a move that has since been
+  /// removed, and why no worker is ever shown a button the server refuses.
+  final List<String> allowedNext;
+
+  final String? customerName;
+  final String? customerPhone;
+  final String? deliveryAddress;
+  final double? latitude;
+  final double? longitude;
+
+  final int totalItems;
+  final List<WorkerOrderLine> items;
+
+  /// Cash to take at the door. Null or zero for anything already paid.
+  final num? amountToCollect;
+  final bool cashOnDelivery;
+
+  final DateTime? packedAt;
+  final String? packedBy;
+
+  factory WorkerOrder.fromJson(Map<String, dynamic> json) => WorkerOrder(
+        orderId: (json['orderId'] as num).toInt(),
+        orderNumber: (json['orderNumber'] ?? '') as String,
+        orderStatus: json['orderStatus'] as String?,
+        deliveryStatus: json['deliveryStatus'] as String?,
+        deliveryId: (json['deliveryId'] as num?)?.toInt(),
+        allowedNext: (json['allowedNext'] as List?)
+                ?.map((e) => e.toString())
+                .toList(growable: false) ??
+            const [],
+        customerName: json['customerName'] as String?,
+        customerPhone: json['customerPhone'] as String?,
+        deliveryAddress: json['deliveryAddress'] as String?,
+        latitude: (json['latitude'] as num?)?.toDouble(),
+        longitude: (json['longitude'] as num?)?.toDouble(),
+        totalItems: (json['totalItems'] as num?)?.toInt() ?? 0,
+        items: (json['items'] as List?)
+                ?.map((e) => WorkerOrderLine.fromJson(e as Map<String, dynamic>))
+                .toList(growable: false) ??
+            const [],
+        amountToCollect: json['amountToCollect'] as num?,
+        cashOnDelivery: json['cashOnDelivery'] == true,
+        packedAt: json['packedAt'] == null
             ? null
-            : DateTime.tryParse(json['scannedAt'].toString()),
+            : DateTime.tryParse(json['packedAt'].toString()),
+        packedBy: json['packedBy'] as String?,
+      );
+}
+
+/// One line on the packing list: what it is, what size, how many.
+class WorkerOrderLine {
+  const WorkerOrderLine({required this.name, this.pack, required this.quantity});
+
+  final String name;
+
+  /// "500 g", "1 kg" - what is printed on the packet, which is how a worker
+  /// tells two shelf-neighbours apart.
+  final String? pack;
+  final int quantity;
+
+  factory WorkerOrderLine.fromJson(Map<String, dynamic> json) => WorkerOrderLine(
+        name: (json['name'] ?? 'Item') as String,
+        pack: json['pack'] as String?,
+        quantity: (json['quantity'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// One active delivery on the home screen.
+///
+/// Deliberately not a [WorkerOrder]: a LIST does not need a packing list, and
+/// sending one per row would multiply the payload on the screen that opens
+/// most often, on the worst connection.
+class WorkerTask {
+  const WorkerTask({
+    required this.deliveryId,
+    required this.orderId,
+    required this.orderNumber,
+    required this.deliveryStatus,
+    this.allowedNext = const [],
+    this.customerName,
+    this.deliveryAddress,
+  });
+
+  final int deliveryId;
+  final int orderId;
+  final String orderNumber;
+  final String deliveryStatus;
+  final List<String> allowedNext;
+  final String? customerName;
+  final String? deliveryAddress;
+
+  factory WorkerTask.fromJson(Map<String, dynamic> json) => WorkerTask(
+        deliveryId: (json['deliveryId'] as num).toInt(),
+        orderId: (json['orderId'] as num?)?.toInt() ?? 0,
+        orderNumber: (json['orderNumber'] ?? '') as String,
+        deliveryStatus: (json['deliveryStatus'] ?? 'ASSIGNED') as String,
+        allowedNext: (json['allowedNext'] as List?)
+                ?.map((e) => e.toString())
+                .toList(growable: false) ??
+            const [],
+        customerName: json['customerName'] as String?,
+        deliveryAddress: json['deliveryAddress'] as String?,
       );
 }

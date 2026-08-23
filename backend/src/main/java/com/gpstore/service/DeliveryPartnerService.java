@@ -3,10 +3,12 @@ package com.gpstore.service;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.entity.Role;
+import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliveryRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,13 +24,26 @@ public class DeliveryPartnerService {
     private final DeliveryRepository deliveryRepository;
     private final CustomerRepository customerRepository;
 
+    /**
+     * How vague a GPS fix may be and still be worth recording, in metres.
+     *
+     * 500 m is deliberately generous: a phone indoors at a packing bench, or
+     * one that has just woken up, legitimately reports a few hundred metres
+     * and its next fix is fine. What this stops is the kilometre-scale
+     * cell-tower estimate being drawn on a map as though somebody knew.
+     * Configurable because the right number depends on the handsets in use.
+     */
+    private final double maxLocationAccuracyMeters;
+
     public DeliveryPartnerService(
             DeliveryPartnerRepository repository,
             DeliveryRepository deliveryRepository,
-            CustomerRepository customerRepository) {
+            CustomerRepository customerRepository,
+            @Value("${delivery.max-location-accuracy-meters:500}") double maxLocationAccuracyMeters) {
         this.repository = repository;
         this.deliveryRepository = deliveryRepository;
         this.customerRepository = customerRepository;
+        this.maxLocationAccuracyMeters = maxLocationAccuracyMeters;
     }
 
     /**
@@ -120,9 +135,52 @@ public class DeliveryPartnerService {
      * used to spoof someone else's location.
      */
     public DeliveryPartner updateMyLocation(Long customerId, Double latitude, Double longitude) {
+        return updateMyLocation(customerId, latitude, longitude, null);
+    }
+
+    /**
+     * @param accuracyMeters the phone's own confidence in the fix, or null when
+     *                       it did not say. Fixes vaguer than the configured
+     *                       ceiling are refused rather than stored.
+     */
+    public DeliveryPartner updateMyLocation(Long customerId, Double latitude, Double longitude,
+                                            Double accuracyMeters) {
         DeliveryPartner partner = getByAccountIdOrThrow(customerId);
+
+        // NaN and infinity get past @DecimalMin/@DecimalMax - the comparison
+        // they do is false for NaN in both directions, so neither bound
+        // rejects it. Stored, it makes every distance calculation that touches
+        // this partner return NaN, silently, from then on.
+        if (latitude == null || longitude == null
+                || !Double.isFinite(latitude) || !Double.isFinite(longitude)) {
+            throw new BadRequestException("That is not a usable position.");
+        }
+
+        // The classic no-fix sentinel. A phone that has not found satellites
+        // yet reports exactly (0, 0), which is a real coordinate in the Gulf
+        // of Guinea and will be drawn on the map as confidently as any other.
+        // Refusing it means the admin screen keeps showing the last position
+        // that was real, with its own timestamp, which is the honest answer.
+        if (latitude == 0.0d && longitude == 0.0d) {
+            throw new BadRequestException(
+                    "The phone has not got a position fix yet. Nothing was recorded.");
+        }
+
+        if (accuracyMeters != null && Double.isFinite(accuracyMeters)
+                && accuracyMeters > maxLocationAccuracyMeters) {
+            // A cell-tower guess, not a position. Kilometres of uncertainty
+            // rendered as a pin looks exactly like a real fix.
+            throw new BadRequestException(
+                    "That position is only accurate to about " + Math.round(accuracyMeters)
+                            + " m, which is too vague to record.");
+        }
+
         partner.setCurrentLatitude(latitude);
         partner.setCurrentLongitude(longitude);
+        // SERVER TIME, never the phone's. The timestamp is what tells an
+        // administrator whether a pin is current or an hour old, and a device
+        // clock is one more untrusted field - a phone with a wrong date would
+        // make a stale position look fresh, or a fresh one look stale.
         partner.setLocationUpdatedAt(LocalDateTime.now());
         return repository.save(partner);
     }

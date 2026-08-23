@@ -200,21 +200,46 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
             ),
           ],
           const SizedBox(height: 40),
-          SizedBox(
-            height: 64,
-            child: FilledButton(
-              onPressed: _scanAnother,
-              child: const Text('SCAN ANOTHER', style: TextStyle(fontSize: 18)),
+
+          // ON AN ACCEPTED SCAN, THE PACKING LIST IS THE NEXT THING. The order
+          // already arrived with this response, so opening it costs no request
+          // at all - which is what makes scan-then-pack feel like one action.
+          // The worker screen pops and the home screen pushes the order, so
+          // "back" from the order lands somewhere sensible rather than on a
+          // dead camera.
+          if (outcome.accepted && outcome.order != null) ...[
+            SizedBox(
+              height: 64,
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop(outcome),
+                child: const Text('OPEN ORDER', style: TextStyle(fontSize: 18)),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 56,
-            child: OutlinedButton(
-              onPressed: () => Navigator.of(context).pop(outcome),
-              child: const Text('DONE', style: TextStyle(fontSize: 17)),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 56,
+              child: OutlinedButton(
+                onPressed: _scanAnother,
+                child: const Text('SCAN ANOTHER', style: TextStyle(fontSize: 17)),
+              ),
             ),
-          ),
+          ] else ...[
+            SizedBox(
+              height: 64,
+              child: FilledButton(
+                onPressed: _scanAnother,
+                child: const Text('SCAN ANOTHER', style: TextStyle(fontSize: 18)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 56,
+              child: OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(outcome),
+                child: const Text('DONE', style: TextStyle(fontSize: 17)),
+              ),
+            ),
+          ],
         ],
       ),
     );

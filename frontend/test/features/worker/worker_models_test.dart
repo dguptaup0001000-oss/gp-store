@@ -86,26 +86,151 @@ void main() {
     });
   });
 
-  group('WorkerScanRow', () {
-    test('refused rows are readable, because they are shown too', () {
-      final row = WorkerScanRow.fromJson({
-        'orderNumber': 'GP125',
-        'outcome': 'NOT_AUTHORISED',
-        'reason': 'This order is in Z7B, which belongs to Rahul.',
-        'subzoneCode': 'Z7B',
-        'scannedAt': '2026-08-23T12:42:18',
+  group('WorkerOrder', () {
+    test('the packing list is what the screen is for', () {
+      final order = WorkerOrder.fromJson({
+        'orderId': 42,
+        'orderNumber': 'GP10245',
+        'orderStatus': 'PACKED',
+        'deliveryStatus': 'PACKED',
+        'deliveryId': 7,
+        'allowedNext': ['PICKED_UP', 'CANCELLED'],
+        'totalItems': 5,
+        'items': [
+          {'name': 'Aashirvaad Atta', 'pack': '5 kg', 'quantity': 1},
+          {'name': 'Tata Salt', 'pack': '1 kg', 'quantity': 4},
+        ],
       });
 
-      expect(row.accepted, isFalse);
-      expect(row.reason, contains('Rahul'));
-      expect(row.scannedAt?.hour, 12);
-      expect(row.scannedAt?.minute, 42);
+      expect(order.orderNumber, 'GP10245');
+      expect(order.totalItems, 5);
+      expect(order.items, hasLength(2));
+      expect(order.items.first.pack, '5 kg');
+      expect(order.items.last.quantity, 4);
     });
 
-    test('an unparseable timestamp is null rather than an exception', () {
-      final row = WorkerScanRow.fromJson({'outcome': 'ACCEPTED', 'scannedAt': 'not a date'});
-      expect(row.scannedAt, isNull);
-      expect(row.accepted, isTrue);
+    test('the allowed moves come from the server and nowhere else', () {
+      // The screen draws one button per entry here. If the app ever computed
+      // this itself, a phone running an old build could offer a transition the
+      // server has since removed - and a worker would tap it at a door.
+      final order = WorkerOrder.fromJson({
+        'orderId': 1,
+        'orderNumber': 'GP1',
+        'allowedNext': ['OUT_FOR_DELIVERY', 'RETURNED', 'CANCELLED'],
+      });
+
+      expect(order.allowedNext, ['OUT_FOR_DELIVERY', 'RETURNED', 'CANCELLED']);
+    });
+
+    test('an order with no delivery yet offers no moves at all', () {
+      // Packed before anybody was assigned to carry it. The screen shows the
+      // packing list and no buttons, which is the truth of that situation
+      // rather than a bug.
+      final order = WorkerOrder.fromJson({'orderId': 1, 'orderNumber': 'GP1'});
+
+      expect(order.deliveryId, isNull);
+      expect(order.allowedNext, isEmpty);
+    });
+
+    test('a prepaid order carries no cash to collect', () {
+      // The distinction that stops a customer being asked to pay twice: a
+      // paid order shows nothing, not its total.
+      final prepaid = WorkerOrder.fromJson({
+        'orderId': 1,
+        'orderNumber': 'GP1',
+        'amountToCollect': 0,
+        'cashOnDelivery': false,
+      });
+      expect(prepaid.cashOnDelivery, isFalse);
+      expect(prepaid.amountToCollect, 0);
+
+      final cod = WorkerOrder.fromJson({
+        'orderId': 2,
+        'orderNumber': 'GP2',
+        'amountToCollect': 250.5,
+        'cashOnDelivery': true,
+      });
+      expect(cod.cashOnDelivery, isTrue);
+      expect(cod.amountToCollect, 250.5);
+    });
+
+    test('an order arriving with a scan needs no second request', () {
+      // The reason ScanOutcome carries an order at all: SCAN -> SHOW ORDER is
+      // one round trip, on the worst connection in the business.
+      final outcome = ScanOutcome.fromJson({
+        'accepted': true,
+        'outcome': 'ACCEPTED',
+        'message': 'Order GP10245 is yours.',
+        'order': {
+          'orderId': 42,
+          'orderNumber': 'GP10245',
+          'totalItems': 1,
+          'items': [
+            {'name': 'Tata Salt', 'quantity': 1}
+          ],
+        },
+      });
+
+      expect(outcome.order, isNotNull);
+      expect(outcome.order!.orderNumber, 'GP10245');
+      expect(outcome.order!.items.single.name, 'Tata Salt');
+    });
+
+    test('a refused scan carries no order', () {
+      // A refusal must not hand over the contents of the order it just
+      // refused to hand over.
+      final outcome = ScanOutcome.fromJson({
+        'accepted': false,
+        'outcome': 'NOT_AUTHORISED',
+        'message': 'This order is in Z7B, which belongs to Rahul.',
+      });
+
+      expect(outcome.order, isNull);
+    });
+
+    test('missing item fields do not crash a screen somebody is standing in front of', () {
+      final line = WorkerOrderLine.fromJson({});
+      expect(line.name, 'Item');
+      expect(line.quantity, 0);
+      expect(line.pack, isNull);
+    });
+  });
+
+  group('WorkerTask', () {
+    test('active tasks arrive with the profile, not from their own request', () {
+      // One network call for the whole home screen. Two would only mean the
+      // slower one arriving later - the screen cannot draw without both.
+      final profile = WorkerProfile.fromJson({
+        'workerCode': 'D21',
+        'name': 'Rahul',
+        'status': 'ON_DELIVERY',
+        'todaysOrders': 4,
+        'activeTasks': [
+          {
+            'deliveryId': 7,
+            'orderId': 42,
+            'orderNumber': 'GP10245',
+            'deliveryStatus': 'OUT_FOR_DELIVERY',
+            'allowedNext': ['DELIVERED', 'FAILED', 'CANCELLED'],
+          },
+        ],
+      });
+
+      expect(profile.activeTasks, hasLength(1));
+      expect(profile.activeTasks.single.orderNumber, 'GP10245');
+      expect(profile.activeTasks.single.deliveryStatus, 'OUT_FOR_DELIVERY');
+      expect(profile.activeTasks.single.allowedNext, contains('DELIVERED'));
+    });
+
+    test('a worker with nothing out has an empty list, not a null', () {
+      final profile = WorkerProfile.fromJson({
+        'workerCode': 'D21',
+        'name': 'Rahul',
+        'status': 'AVAILABLE',
+        'todaysOrders': 0,
+      });
+
+      expect(profile.activeTasks, isEmpty);
     });
   });
 }
