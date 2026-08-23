@@ -70,9 +70,9 @@ private List<ProductVariant> variants;
     @Column(name = "search_keywords", length = 500)
     private String searchKeywords;
 
-    private Boolean bestseller;
+    private Boolean bestseller = Boolean.FALSE;
 
-    private Boolean featured;
+    private Boolean featured = Boolean.FALSE;
 
     /**
      * Seeded test data, and the flag the pre-launch cleanup keys on.
@@ -82,7 +82,7 @@ private List<ProductVariant> variants;
      * has to be deliberately marked to be deletable by it.
      */
     @Column(name = "is_test_data")
-    private Boolean isTestData;
+    private Boolean isTestData = Boolean.FALSE;
 
     /**
      * Separate from isTestData on purpose: someone can confirm a product is
@@ -90,7 +90,7 @@ private List<ProductVariant> variants;
      * Collapsing the two would let a half-checked product read as verified.
      */
     @Column(name = "price_verified")
-    private Boolean priceVerified;
+    private Boolean priceVerified = Boolean.FALSE;
 
     @Column(name = "data_source", length = 60)
     private String dataSource;
@@ -106,8 +106,52 @@ private List<ProductVariant> variants;
     // This is what "New Arrivals" actually sorts by.
     private java.time.LocalDateTime createdAt;
 
+    /**
+     * THESE FOUR FLAGS MAY NEVER BE NULL, and defaulting them in Java is the
+     * only thing that actually enforces it.
+     *
+     * V15 created bestseller, featured, is_test_data and price_verified as
+     * NOT NULL DEFAULT FALSE. A column default only applies when the INSERT
+     * OMITS the column - and Hibernate never omits a mapped column. It lists
+     * every one of them and binds NULL for anything unset, so the default
+     * never gets a chance and Postgres refuses the row:
+     *
+     *     null value in column "bestseller" of relation "products"
+     *     violates not-null constraint
+     *
+     * That is what the admin Add Product screen was hitting. The form sends
+     * name, brand, category and active; nothing sends these four; Hibernate
+     * bound four NULLs.
+     *
+     * WHY IT NEVER REPRODUCED LOCALLY, which is the part worth remembering:
+     * V15 uses ADD COLUMN IF NOT EXISTS. On a machine where Hibernate had
+     * already created these columns - nullable, from the entity - the clause
+     * matched and V15 skipped them entirely, leaving them nullable forever.
+     * Production ran the migration before those columns existed, so there
+     * they are NOT NULL. Same code, same migrations, two different schemas,
+     * and the failure only exists in one of them. V17 brings every
+     * environment to the production shape so this cannot diverge again.
+     *
+     * The field initializers above cover the ordinary path; this covers
+     * anything that explicitly nulls one afterwards, including Jackson
+     * binding an explicit "bestseller": null from a request body.
+     */
     @PrePersist
     protected void onCreate() {
         this.createdAt = java.time.LocalDateTime.now();
+        normaliseFlags();
+    }
+
+    /** Same guarantee on update - an explicit null must not reach the column. */
+    @PreUpdate
+    protected void onUpdate() {
+        normaliseFlags();
+    }
+
+    private void normaliseFlags() {
+        if (bestseller == null) bestseller = Boolean.FALSE;
+        if (featured == null) featured = Boolean.FALSE;
+        if (isTestData == null) isTestData = Boolean.FALSE;
+        if (priceVerified == null) priceVerified = Boolean.FALSE;
     }
 }
