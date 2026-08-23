@@ -879,6 +879,17 @@ public class OrderService {
                         || (currentStatus == OrderStatus.CONFIRMED && status == OrderStatus.PACKING)
                         || (currentStatus == OrderStatus.PACKING && status == OrderStatus.READY_TO_DISPATCH)
                         || (currentStatus == OrderStatus.READY_TO_DISPATCH && status == OrderStatus.OUT_FOR_DELIVERY)
+                        // PACKED is what a worker's QR scan writes. It sits
+                        // beside READY_TO_DISPATCH rather than replacing it:
+                        // the older state is still reachable from the admin
+                        // status dropdown and still on live orders, and
+                        // deleting a state that production rows hold is how a
+                        // deployment breaks every order mid-flight.
+                        || (currentStatus == OrderStatus.CONFIRMED && status == OrderStatus.PACKED)
+                        || (currentStatus == OrderStatus.PACKING && status == OrderStatus.PACKED)
+                        || (currentStatus == OrderStatus.READY_TO_DISPATCH && status == OrderStatus.PACKED)
+                        || (currentStatus == OrderStatus.PACKED && status == OrderStatus.OUT_FOR_DELIVERY)
+                        || (currentStatus == OrderStatus.PACKED && status == OrderStatus.READY_TO_DISPATCH)
                         || (currentStatus == OrderStatus.OUT_FOR_DELIVERY && status == OrderStatus.DELIVERED);
 
         if (!validTransition) {

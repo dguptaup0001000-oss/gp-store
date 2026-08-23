@@ -98,7 +98,110 @@ private PaymentStatus paymentStatus;
     @Column(name = "inventory_restored")
     private Boolean inventoryRestored = false;
 
+    // ------------------------------------------------------------------
+    // Worker pack-scan
+    // ------------------------------------------------------------------
+
+    /**
+     * The opaque token printed on the packed order's QR label.
+     *
+     * DELIBERATELY MEANINGLESS. It carries no customer name, phone, address,
+     * amount or payment state - anyone who photographs a label off a discarded
+     * carton learns nothing, because everything the worker's app displays comes
+     * back from an authenticated call. The token's only job is to name one
+     * order to a server that already knows who is asking.
+     *
+     * Single use: {@link #qrTokenUsedAt} is stamped by the first successful
+     * scan, and a token that has been used is refused. That is what makes
+     * "another worker cannot take an order that is already taken" a fact about
+     * the database rather than a hope about the app.
+     */
+    @Column(name = "qr_token", length = 64)
+    private String qrToken;
+
+    @Column(name = "qr_token_issued_at")
+    private LocalDateTime qrTokenIssuedAt;
+
+    @Column(name = "qr_token_used_at")
+    private LocalDateTime qrTokenUsedAt;
+
+    /**
+     * The worker who scanned this order and is now accountable for it.
+     *
+     * Denormalised onto the order rather than read from the scan history,
+     * because "who has GP125" is asked on every row of every admin list and
+     * answering it through the audit table would be a subquery per order.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "packed_by_partner_id")
+    private DeliveryPartner packedByPartner;
+
+    @Column(name = "packed_at")
+    private LocalDateTime packedAt;
+
+    /**
+     * An administrator's explicit "this worker may take this order", which
+     * outranks every territory rule.
+     *
+     * The escape hatch for the day the map is wrong: the primary is absent and
+     * unrostered, a worker is already out at the far village, a subzone has not
+     * been drawn yet. Without it the only way to unblock a real order at a real
+     * counter would be to edit the territory map, which is permanent and
+     * affects every future order - a very large lever for a very small problem.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "assigned_worker_partner_id")
+    private DeliveryPartner assignedWorkerPartner;
+
     public Order() {
+    }
+
+    public String getQrToken() {
+        return qrToken;
+    }
+
+    public void setQrToken(String qrToken) {
+        this.qrToken = qrToken;
+    }
+
+    public LocalDateTime getQrTokenIssuedAt() {
+        return qrTokenIssuedAt;
+    }
+
+    public void setQrTokenIssuedAt(LocalDateTime qrTokenIssuedAt) {
+        this.qrTokenIssuedAt = qrTokenIssuedAt;
+    }
+
+    public LocalDateTime getQrTokenUsedAt() {
+        return qrTokenUsedAt;
+    }
+
+    public void setQrTokenUsedAt(LocalDateTime qrTokenUsedAt) {
+        this.qrTokenUsedAt = qrTokenUsedAt;
+    }
+
+    public DeliveryPartner getPackedByPartner() {
+        return packedByPartner;
+    }
+
+    public void setPackedByPartner(DeliveryPartner packedByPartner) {
+        this.packedByPartner = packedByPartner;
+    }
+
+    public LocalDateTime getPackedAt() {
+        return packedAt;
+    }
+
+    public void setPackedAt(LocalDateTime packedAt) {
+        this.packedAt = packedAt;
+    }
+
+    public DeliveryPartner getAssignedWorkerPartner() {
+        return assignedWorkerPartner;
+    }
+
+    public void setAssignedWorkerPartner(DeliveryPartner assignedWorkerPartner) {
+        this.assignedWorkerPartner = assignedWorkerPartner;
     }
 
     public Long getId() {

@@ -209,6 +209,18 @@ public class NotificationService {
                 title = "Order Being Packed";
                 message = "Your order " + order.getOrderNumber() + " is being packed.";
             }
+            case PACKED -> {
+                // EXACTLY THIS, and nothing more. A worker scanning a packed
+                // order is recording accountability inside the shop - the
+                // order has not left the counter. "Ready for delivery",
+                // "picked up", "on the way" and "your delivery partner has
+                // your order" are all promises about a journey that has not
+                // started, and a customer who reads one of them starts waiting
+                // at the door. The order number is deliberately left out: the
+                // brief specifies this sentence and only this sentence.
+                title = "Order Packed";
+                message = "\uD83D\uDCE6 Your order is packed.";
+            }
             case READY_TO_DISPATCH -> {
                 title = "Order Ready";
                 message = "Your order " + order.getOrderNumber() + " is ready for dispatch.";

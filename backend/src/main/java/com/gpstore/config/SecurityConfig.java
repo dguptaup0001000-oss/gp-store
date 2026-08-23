@@ -228,6 +228,17 @@ public class SecurityConfig {
                 // above is, and sits beside it so neither can be widened by a
                 // broader rule further down.
                 .requestMatchers("/api/admin/territory/**").hasRole("ADMIN")
+                // WORKER ACCOUNTABILITY. Issuing a QR token prints a label that
+                // makes an order scannable, and reassigning one overrides the
+                // permanent territory rules - both belong to whoever runs the
+                // shop, not to the people on the floor.
+                .requestMatchers("/api/admin/worker/**").hasRole("ADMIN")
+                // THE WORKER APP. Every route here resolves the worker from the
+                // JWT and never from the request, so ADMIN is included only so
+                // an administrator can exercise the same flow while setting a
+                // phone up - it grants no ability a worker does not already
+                // have over their own record.
+                .requestMatchers("/api/worker/**").hasAnyRole("ADMIN", "DELIVERY_BOY")
                 .requestMatchers("/api/orders/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/orders/customer/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/orders/*/status").hasRole("ADMIN")
