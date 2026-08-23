@@ -1,8 +1,10 @@
 package com.gpstore.service;
 
+import com.gpstore.entity.AssignmentReason;
 import com.gpstore.entity.Delivery;
 import com.gpstore.entity.DeliveryBatch;
 import com.gpstore.entity.DeliveryPartner;
+import com.gpstore.entity.DeliverySubzone;
 import com.gpstore.entity.Order;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.exception.BadRequestException;
@@ -10,6 +12,7 @@ import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliveryRepository;
 import com.gpstore.repository.OrderRepository;
+import com.gpstore.territory.TerritoryDispatchService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +35,7 @@ public class DeliveryService {
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
     private final PaymentService paymentService;
+    private final TerritoryDispatchService territoryDispatchService;
     private final int bulkOrderItemThreshold;
 
     public DeliveryService(
@@ -44,6 +48,7 @@ public class DeliveryService {
             NotificationService notificationService,
             AuditLogService auditLogService,
             PaymentService paymentService,
+            TerritoryDispatchService territoryDispatchService,
             @org.springframework.beans.factory.annotation.Value("${delivery.bulk-order-item-threshold}") int bulkOrderItemThreshold) {
 
         this.deliveryRepository = deliveryRepository;
@@ -55,6 +60,7 @@ public class DeliveryService {
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
         this.paymentService = paymentService;
+        this.territoryDispatchService = territoryDispatchService;
         this.bulkOrderItemThreshold = bulkOrderItemThreshold;
     }
 
@@ -72,19 +78,50 @@ public class DeliveryService {
     }
 
     /**
-     * Auto-assigns to whichever available partner currently has the lightest
-     * load - the real operational path for 10 partners. Routes bulk orders
-     * (total item count >= bulkOrderItemThreshold) to a PICKUP-type partner
-     * when one is free, since that's more than a bike can reasonably carry;
-     * falls back to any available partner otherwise so a bulk order never
-     * gets stuck waiting for a specific vehicle. assignDelivery() with an
-     * explicit partner ID, and assignWithVehicleType() with an explicit
-     * vehicle type, both stay available for manual overrides.
+     * Auto-assigns an order, preferring the rider who owns its permanent
+     * territory.
+     *
+     * THE ORDER OF PREFERENCE, and why it is this way round. Before
+     * territories existed this method picked whichever available partner had
+     * the lightest load, anywhere in the service area. That is a reasonable
+     * rule when riders are interchangeable, and they are not: a rider who
+     * works Z7B every day knows which society gate actually opens, which lane
+     * floods, and which tower has the lift out. So the territory's own rider
+     * is asked first, and only when they are absent or already at capacity
+     * does TerritoryDispatchService walk outward - named backup, declared
+     * neighbouring territory, same main zone, neighbouring main zone.
+     *
+     * WHAT HAPPENS WHEN THE MAP CANNOT HELP. An address in no drawn territory,
+     * or a ladder that finds nobody geographically suitable, falls back to the
+     * old least-loaded pick rather than leaving the order unassigned. The
+     * order is already placed and usually already paid; refusing to dispatch
+     * it would be a worse answer than dispatching it imperfectly. It is
+     * recorded as FALLBACK so a rising count is visible as what it is - a hole
+     * in the map, not a dispatch tuning problem.
+     *
+     * VEHICLE TYPE STILL APPLIES, but only on the fallback path. A bulk order
+     * (>= bulkOrderItemThreshold items) wants a PICKUP rather than a bike.
+     * Deliberately NOT used to reject the territory's own rider: sending
+     * someone who does not know the streets because the local rider is on a
+     * bike trades a real, everyday advantage for a capacity guess, and a rider
+     * who cannot physically carry a load will say so far more reliably than a
+     * threshold in a config file.
      */
     @Transactional
     public com.gpstore.dto.response.DeliveryResponse autoAssignDelivery(Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        DeliverySubzone subzone = order.getAddress() == null ? null : order.getAddress().getSubzone();
+        Double lat = order.getAddress() == null ? null : order.getAddress().getLatitude();
+        Double lng = order.getAddress() == null ? null : order.getAddress().getLongitude();
+
+        TerritoryDispatchService.DispatchDecision decision =
+                territoryDispatchService.chooseFor(subzone, lat, lng);
+
+        if (decision.hasPartner()) {
+            return assignDelivery(orderId, decision.partner().getId(), decision);
+        }
 
         int totalItemCount = order.getOrderItems() == null ? 0 :
                 order.getOrderItems().stream().mapToInt(item -> item.getQuantity() == null ? 0 : item.getQuantity()).sum();
@@ -92,7 +129,12 @@ public class DeliveryService {
         String preferredVehicleType = totalItemCount >= bulkOrderItemThreshold ? "PICKUP" : "BIKE";
 
         DeliveryPartner partner = deliveryPartnerService.getLeastLoadedAvailablePartner(preferredVehicleType);
-        return assignDelivery(orderId, partner.getId());
+
+        // Recorded, not swallowed. Every one of these is an order that went
+        // out without local knowledge, and the reason is worth reading.
+        auditLogService.log("DELIVERY_TERRITORY_FALLBACK", "Order", orderId, decision.explanation());
+
+        return assignDelivery(orderId, partner.getId(), decision);
     }
 
     /**
@@ -135,6 +177,17 @@ public class DeliveryService {
      */
     @Transactional
     public com.gpstore.dto.response.DeliveryResponse assignDelivery(Long orderId, Long deliveryPartnerId) {
+        // A hand assignment by an administrator. It is still recorded against
+        // the order's territory - which territory a delivery happened in is a
+        // fact about the delivery, not about how the rider was chosen - but
+        // the reason says plainly that no ladder was walked.
+        return assignDelivery(orderId, deliveryPartnerId, null);
+    }
+
+    @Transactional
+    public com.gpstore.dto.response.DeliveryResponse assignDelivery(
+            Long orderId, Long deliveryPartnerId,
+            TerritoryDispatchService.DispatchDecision decision) {
 
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
@@ -146,11 +199,20 @@ public class DeliveryService {
         DeliveryPartner partner = deliveryPartnerRepository.findById(deliveryPartnerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
 
-        String area = order.getAddress() != null && order.getAddress().getArea() != null
-                ? order.getAddress().getArea()
-                : "UNASSIGNED";
+        DeliverySubzone subzone = order.getAddress() == null ? null : order.getAddress().getSubzone();
 
-        DeliveryBatch batch = deliveryBatchService.getOrCreateOpenBatch(deliveryPartnerId, area);
+        // Batching key. A subzone is a row in a table; the old area string was
+        // whatever the customer typed, matched with =, so "Sector 12",
+        // "sector 12" and "Sector-12" opened three batches for one
+        // neighbourhood. The string is still passed for addresses that have
+        // no territory yet, because some grouping beats none.
+        String area = subzone != null
+                ? subzone.getCode()
+                : (order.getAddress() != null && order.getAddress().getArea() != null
+                        ? order.getAddress().getArea()
+                        : "UNASSIGNED");
+
+        DeliveryBatch batch = deliveryBatchService.getOrCreateOpenBatch(deliveryPartnerId, area, subzone);
 
         Double lat = order.getAddress() != null ? order.getAddress().getLatitude() : null;
         Double lng = order.getAddress() != null ? order.getAddress().getLongitude() : null;
@@ -161,6 +223,9 @@ public class DeliveryService {
         Delivery delivery = new Delivery();
         delivery.setOrder(order);
         delivery.setBatch(batch);
+        delivery.setSubzone(subzone);
+        delivery.setAssignmentReason(
+                decision == null ? AssignmentReason.PRIMARY : decision.reason());
         delivery.setDistanceKm(Double.isNaN(distanceKm) ? null : distanceKm);
         delivery.setDeliveryStatus("ASSIGNED");
         delivery.setDeliveryPersonName(partner.getName());

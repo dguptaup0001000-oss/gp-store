@@ -24,7 +24,29 @@ public class DeliveryBatch {
 
     private String batchNumber;
 
+    /**
+     * Free text copied from whatever the customer typed into their address,
+     * and matched with = when looking for an open batch.
+     *
+     * "Sector 12", "sector 12" and "Sector-12" therefore open three separate
+     * batches for one neighbourhood, and every typo opens a fourth. Kept so
+     * existing rows still read; new grouping goes through {@link #subzone},
+     * which is a row in a table rather than a string a customer typed.
+     */
+    @Deprecated
     private String area;
+
+    /**
+     * The permanent territory this batch is being built for.
+     *
+     * Batching by territory rather than by typed text is what makes a batch
+     * mean something to the rider carrying it: every stop in it is inside one
+     * area they already know, which is the precondition for ordering the
+     * stops into a route worth riding.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "subzone_id")
+    private DeliverySubzone subzone;
 
     // DTO refactor complete: DeliveryBatchService/Controller now return
     // DeliveryBatchResponse from @Transactional(readOnly = true) service methods.
