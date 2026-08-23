@@ -222,6 +222,40 @@
                          by default, which is exactly what Mockito's ByteBuddy
                          mock maker needs to do its job. This flag allows it. -->
                     <argLine>-XX:+EnableDynamicAgentLoading</argLine>
+                    <systemPropertyVariables>
+                        <!-- A SMALL POOL FOR TESTS, and this is not the test
+                             environment being special for its own sake - it is
+                             the one place the production setting's real cost is
+                             visible, so it is worth writing down here.
+
+                             Production runs a FIXED pool: minimum-idle equals
+                             maximum-pool-size, so the pool never has to grow
+                             during a burst (see application.properties). The
+                             cost of that is that every application INSTANCE
+                             holds its full pool open permanently - connections
+                             multiply by instance count, against whatever
+                             budget Postgres or Supabase allows.
+
+                             A test run is the extreme case. Spring caches a
+                             separate application context per distinct test
+                             configuration and never closes them, so a full
+                             suite ends up with a dozen or more live contexts,
+                             each holding its own pool. At ten apiece that is
+                             150+ connections against a local Postgres whose
+                             default max_connections is 100 - and the run dies
+                             with "FATAL: sorry, too many clients already",
+                             which is what happened the first time.
+
+                             Two here, and a ceiling of five. Tests are
+                             single-threaded per context and need almost
+                             nothing; what they must not do is starve each
+                             other. The production values are asserted from the
+                             properties file by ConnectionHoldTimeTest, so
+                             overriding them here cannot hide a regression in
+                             the setting that actually ships. -->
+                        <spring.datasource.hikari.minimum-idle>1</spring.datasource.hikari.minimum-idle>
+                        <spring.datasource.hikari.maximum-pool-size>5</spring.datasource.hikari.maximum-pool-size>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
 

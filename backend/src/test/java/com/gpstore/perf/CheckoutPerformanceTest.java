@@ -95,6 +95,7 @@ class CheckoutPerformanceTest {
     private com.gpstore.service.CartItemService cartItemService;
 
     @Autowired private OrderService orderService;
+    @Autowired private com.gpstore.service.ProductService productService;
     @Autowired private CartService cartService;
     @Autowired private EntityManagerFactory entityManagerFactory;
     @Autowired private CustomerRepository customerRepository;
@@ -236,6 +237,72 @@ class CheckoutPerformanceTest {
                 "Adding one item should not cost a query per existing cart item. Was: " + result);
     }
 
+
+    /**
+     * The cart READ, which is the endpoint the production logs name most.
+     *
+     * WHY THIS NEEDED MEASURING. When the pool saturated in production, the
+     * warnings were dominated by GET /v1/api/carts/mine - which reads as "the
+     * cart endpoint is the problem". It is not necessarily: the most FREQUENT
+     * endpoint is the one most likely to be holding the timeout when
+     * connections run out, whatever actually consumed them. Telling those two
+     * apart requires knowing what a cart read actually costs, and nothing
+     * measured it.
+     *
+     * The number matters more than it looks. Connection hold time is roughly
+     * queries x round-trip latency, and production talks to Supabase over a
+     * network rather than to a local socket. Every query removed from this
+     * path is removed from the time a connection spends checked out, on the
+     * most-called authenticated endpoint in the application.
+     */
+    @Test
+    void cartReadIsASingleQuery() {
+        Fixture fixture = newCustomerWithCart(CART_SIZE);
+
+        // Warm up - the first call pays one-off metamodel and plan costs.
+        cartService.getCustomerCartResponse(fixture.customerId);
+
+        QueryCounter.Result result = QueryCounter.measure(entityManagerFactory,
+                () -> cartService.getCustomerCartResponse(fixture.customerId));
+
+        System.out.println("[PERF] cart-read (cart of " + CART_SIZE + "): " + result);
+
+        assertTrue(result.queryCount() <= 2,
+                "A cart read must be one fetch-joined query regardless of how many items are in the "
+                        + "cart. A count that scales with cart size is an N+1 on the most-called "
+                        + "authenticated endpoint in the application. Was: " + result);
+    }
+
+    /**
+     * Product detail, on a cache miss.
+     *
+     * The production logs show GET /v1/api/products/{id} waiting on the pool,
+     * which is only possible on a miss - the response is @Cacheable. A load
+     * test walking many product ids is mostly MISSES, so the cold cost is what
+     * that traffic actually pays, and it is the number worth bounding.
+     */
+    @Test
+    void productDetailIsBoundedOnACacheMiss() {
+        Fixture fixture = newCustomerWithCart(1);
+
+        // Any product this fixture's cart references - the cart was just
+        // built from real variants, so its first item names one.
+        Long productId = cartRepository.findByCustomerIdWithItemsFetched(fixture.customerId())
+                .orElseThrow().getItems().get(0).getProductVariant().getProduct().getId();
+
+        // Straight at the service beneath the cache, so this measures the
+        // miss path rather than a Redis hit.
+        productService.getProductById(productId);
+
+        QueryCounter.Result result = QueryCounter.measure(entityManagerFactory,
+                () -> productService.getProductById(productId));
+
+        System.out.println("[PERF] product-detail (cache miss): " + result);
+
+        assertTrue(result.queryCount() <= 4,
+                "Product detail on a miss should be the entity graph plus the gallery, not a query "
+                        + "per variant or per image. Was: " + result);
+    }
 
     /**
      * Order status update.
