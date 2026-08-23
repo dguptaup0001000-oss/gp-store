@@ -23,7 +23,7 @@ public class InventoryController {
 
     @PostMapping
     public InventoryResponse create(@RequestBody Inventory inventory) {
-        return InventoryResponse.from(inventoryService.save(inventory));
+        return inventoryService.saveAsResponse(inventory);
     }
 
     @GetMapping
@@ -31,29 +31,29 @@ public class InventoryController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));
-        return inventoryService.getAll(pageable).map(InventoryResponse::from);
+        return inventoryService.getAll(pageable);
     }
 
     @GetMapping("/{id}")
     public InventoryResponse getById(@PathVariable Long id) {
-        return InventoryResponse.from(inventoryService.getById(id));
+        return inventoryService.getByIdAsResponse(id);
     }
 
     // The actual restock list - items at or below their reorder point.
     @GetMapping("/low-stock")
     public List<InventoryResponse> getLowStock() {
-        return inventoryService.getLowStock().stream().map(InventoryResponse::from).toList();
+        return inventoryService.getLowStock();
     }
 
     // Full manual correction (e.g. stock-take reconciliation).
     @PutMapping("/{id}")
     public InventoryResponse update(@PathVariable Long id, @RequestBody Inventory inventory) {
-        return InventoryResponse.from(inventoryService.update(id, inventory));
+        return inventoryService.updateAsResponse(id, inventory);
     }
 
     // The real day-to-day operation: "we received N more units" - additive, audited.
     @PutMapping("/{id}/restock")
     public InventoryResponse restock(@PathVariable Long id, @RequestParam int quantity) {
-        return InventoryResponse.from(inventoryService.restock(id, quantity));
+        return inventoryService.restockAsResponse(id, quantity);
     }
 }

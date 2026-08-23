@@ -9,6 +9,8 @@ import com.gpstore.repository.DeliveryPricingSettingsRepository;
 import com.gpstore.service.DeliveryEstimateService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,11 +51,22 @@ public class DeliveryPricingService {
      * The current settings, creating the V1 row if this is a database the
      * migration has not reached.
      *
+     * CACHED, because this is on the checkout path. Every checkout preview and
+     * every placed order asks for these, preview runs on every cart change,
+     * and without a cache that is one database round trip per keystroke-ish
+     * event on a pool of ten connections. The row changes when an
+     * administrator edits a price - a few times a year - so re-reading it per
+     * request buys nothing and costs a connection at exactly the moment
+     * connections are scarce.
+     *
+     * The @CacheEvict on save() is what keeps an edit visible immediately.
+     *
      * Never returns null and never throws. The pricing path runs inside
      * checkout, and a settings read that failed would take the shop offline
      * over a configuration table - the defaults on the entity are the same V1
      * numbers the migration inserts.
      */
+    @Cacheable(value = "deliveryPricingSettings", unless = "#result == null")
     @Transactional
     public DeliveryPricingSettings settings() {
         try {
@@ -78,6 +91,7 @@ public class DeliveryPricingService {
         }
     }
 
+    @CacheEvict(value = "deliveryPricingSettings", allEntries = true)
     @Transactional
     public DeliveryPricingSettings save(DeliveryPricingSettings incoming, String who) {
         incoming.setId(DeliveryPricingSettings.SINGLETON_ID);

@@ -2,8 +2,8 @@ package com.gpstore.security;
 
 import com.gpstore.controller.AddressController;
 import com.gpstore.controller.CartController;
+import com.gpstore.dto.response.CartResponse;
 import com.gpstore.entity.Address;
-import com.gpstore.entity.Cart;
 import com.gpstore.service.AddressService;
 import com.gpstore.service.CartService;
 
@@ -66,12 +66,16 @@ class UnboundedQueryGuardTest {
     }
 
     private Pageable captureCartPageable(int page, int size) {
-        when(cartService.getAllCarts(any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.<Cart>of()));
+        // getAllCartResponses, not getAllCarts: the entity-to-DTO mapping
+        // moved into the service so it happens while the session is still
+        // open (see spring.jpa.open-in-view). The cap being asserted here is
+        // unchanged - only which method the controller calls.
+        when(cartService.getAllCartResponses(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.<CartResponse>of()));
         cartController.getAllCarts(page, size);
 
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-        verify(cartService).getAllCarts(captor.capture());
+        verify(cartService).getAllCartResponses(captor.capture());
         return captor.getValue();
     }
 

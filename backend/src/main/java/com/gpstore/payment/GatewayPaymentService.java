@@ -340,26 +340,113 @@ public class GatewayPaymentService {
      * It is also the reason the app never needs to poll: one call at the
      * moment the customer is actually looking, rather than a loop.
      */
-    @Transactional
+    /**
+     * NOT @Transactional, for exactly the reason startCheckout is not, and
+     * this method used to be. It is split into three parts on purpose.
+     *
+     * WHAT IT USED TO DO: open a transaction, take SELECT ... FOR UPDATE on
+     * the order row AND the payment row, and then - still holding both locks
+     * and a pooled database connection - make a ten-second HTTPS call to
+     * Cashfree. The app calls this on every return from checkout, so a
+     * Cashfree slowdown meant ten customers coming back from payment could
+     * hold all ten connections in the pool for ten seconds each and take the
+     * entire shop down, browse and search included. The order row lock made
+     * it worse: nothing else could touch that order either.
+     *
+     * WHAT IT DOES NOW: a short read to authorise the caller and find the
+     * provider order id, the network call with no transaction and no lock
+     * open, then a second short transaction that re-takes the locks and
+     * applies the answer.
+     *
+     * WHY THE SPLIT IS STILL SAFE, which is the only part that matters. The
+     * lock was never protecting the network call, it was protecting the
+     * write. The write still happens under both locks in the same order as
+     * every other payment path here, and the second transaction re-reads the
+     * payment before applying anything - so a webhook that settled the
+     * payment while Cashfree was answering is seen, and applyVerdict's
+     * already-settled branch makes the second application a no-op. That
+     * branch was always the real duplicate-protection; the long lock only
+     * ever hid how much it was relied upon.
+     */
     public PaymentStatus reconcile(Long orderId, Long callerCustomerId) {
-        Order order = orderRepository.findByIdForUpdate(orderId)
+        ReconcileIntent intent = self.prepareReconcile(orderId, callerCustomerId);
+
+        if (intent.alreadySettled() != null) {
+            return intent.alreadySettled();
+        }
+
+        // No transaction, no locks, no connection borrowed. This is the ten
+        // seconds that used to be spent inside all three.
+        GatewayOrderStatus verdict = gateway.fetchOrderStatus(intent.providerOrderId());
+
+        return self.applyReconciledVerdict(orderId, verdict);
+    }
+
+    /**
+     * Either "here is the id to ask about" or "there is nothing to ask".
+     *
+     * A value, not an entity, for the same reason CheckoutIntent is one: it
+     * outlives the transaction that produced it.
+     */
+    public record ReconcileIntent(String providerOrderId, PaymentStatus alreadySettled) {}
+
+    /**
+     * Authorises the caller and decides whether the gateway needs asking.
+     *
+     * Deliberately NOT taking FOR UPDATE. Nothing here writes, and a lock
+     * held across the call that follows is the whole problem being fixed.
+     * The locks are taken in applyReconciledVerdict, where the write is.
+     */
+    @Transactional(readOnly = true)
+    public ReconcileIntent prepareReconcile(Long orderId, Long callerCustomerId) {
+        Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
+        // Not-found rather than forbidden, matching prepareCheckout: a
+        // customer probing order ids learns nothing either way.
         if (order.getCustomer() == null || !order.getCustomer().getId().equals(callerCustomerId)) {
             throw new ResourceNotFoundException("Order not found");
         }
 
-        Payment payment = paymentRepository.findByOrderIdForUpdate(orderId)
+        Payment payment = paymentRepository.findByOrderId(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
 
         // Terminal already, or never a gateway payment: nothing to ask about.
         if (payment.getProviderOrderId() == null
                 || payment.getPaymentStatus() == PaymentStatus.SUCCESS
                 || payment.getPaymentStatus() == PaymentStatus.REFUNDED) {
+            return new ReconcileIntent(null, payment.getPaymentStatus());
+        }
+
+        return new ReconcileIntent(payment.getProviderOrderId(), null);
+    }
+
+    /**
+     * Applies what the gateway said, under the locks, in the standard order.
+     *
+     * THE RE-READ IS THE POINT. Between prepareReconcile and here the
+     * webhook may have arrived and settled this payment; the state loaded in
+     * the first transaction is stale by definition. Everything this method
+     * decides on is loaded fresh, inside the lock.
+     */
+    @Transactional
+    public PaymentStatus applyReconciledVerdict(Long orderId, GatewayOrderStatus verdict) {
+        // ORDER then PAYMENT. Same order as prepareCheckout, placeOrder and
+        // the webhook - diverging here is how a deadlock gets introduced.
+        orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        Payment payment = paymentRepository.findByOrderIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
+
+        // Settled while we were asking. applyVerdict would no-op on SUCCESS
+        // anyway; REFUNDED it would not, and re-marking a refunded payment
+        // FAILED from a stale gateway answer is a real way to lose money.
+        if (payment.getPaymentStatus() == PaymentStatus.SUCCESS
+                || payment.getPaymentStatus() == PaymentStatus.REFUNDED) {
             return payment.getPaymentStatus();
         }
 
-        GatewayOrderStatus verdict = gateway.fetchOrderStatus(payment.getProviderOrderId());
         applyVerdict(payment, verdict, "reconcile");
         return payment.getPaymentStatus();
     }

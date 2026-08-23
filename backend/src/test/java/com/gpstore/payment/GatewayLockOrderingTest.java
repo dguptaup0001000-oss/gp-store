@@ -4,6 +4,7 @@ import com.gpstore.entity.Customer;
 import com.gpstore.entity.Order;
 import com.gpstore.entity.Payment;
 import com.gpstore.entity.PaymentProviderEvent;
+import com.gpstore.payment.gateway.PaymentGateway;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.enums.PaymentMethod;
 import com.gpstore.enums.PaymentProvider;
@@ -103,6 +104,10 @@ class GatewayLockOrderingTest {
     @MockitoSpyBean private OrderRepository orderRepository;
     @MockitoSpyBean private PaymentRepository paymentRepository;
 
+    // A spy so the sandbox gateway stays real for every other test in this
+    // class, and only the one call below is answered by the test.
+    @MockitoSpyBean private PaymentGateway gateway;
+
     /**
      * The regression this file was written for.
      *
@@ -138,21 +143,73 @@ class GatewayLockOrderingTest {
     }
 
     /**
-     * The same rule from the customer-facing side. Here the order lookup
-     * finds nothing and throws, which is itself the proof: the payment row
-     * is never reached, so it cannot have been locked first.
+     * The same rule from the customer-facing side.
+     *
+     * THIS TEST MOVED WHEN reconcile WAS SPLIT, and the reason is worth
+     * writing down. reconcile used to be one transaction that locked the
+     * order, locked the payment, and then made a ten-second call to Cashfree
+     * while holding both. It is now three parts - a short read to authorise
+     * the caller, the network call with nothing held, then a short write
+     * transaction - so the locks live in applyReconciledVerdict and that is
+     * where the ordering rule now has to be checked.
+     *
+     * The mechanism is the same as before: the order lookup finds nothing
+     * and throws, which is itself the proof that the payment row was never
+     * reached and therefore cannot have been locked first.
      */
     @Test
-    @DisplayName("reconcile locks the order row first and never touches the payment without it")
+    @DisplayName("applying a gateway verdict locks the order row first and never the payment without it")
     void reconcileLocksOrderFirst() {
         try {
-            service.reconcile(999_999_999L, 1L);
+            service.applyReconciledVerdict(999_999_999L, null);
         } catch (RuntimeException expected) {
             // Order not found. It was still looked up - and locked - first.
         }
 
         verify(orderRepository).findByIdForUpdate(999_999_999L);
         verify(paymentRepository, never()).findByOrderIdForUpdate(anyLong());
+    }
+
+    /**
+     * The reason the split was made, asserted rather than described.
+     *
+     * A transaction open across an outbound HTTPS call holds a pooled
+     * database connection for the whole of it. The pool is ten wide; the app
+     * calls this on every return from checkout. Ten customers coming back
+     * during a Cashfree slowdown was the whole shop down - browse and search
+     * included, because there were no connections left for anything.
+     *
+     * isActualTransactionActive() is checked INSIDE the gateway call, which
+     * is the only place the question means anything: it is asking what was
+     * true at the moment the ten seconds would have been spent.
+     */
+    @Test
+    @DisplayName("the gateway is called with no transaction and no row lock held")
+    void reconcileDoesNotCallTheGatewayInsideATransaction() {
+        Order order = persistedOrder();
+        String providerOrderId = "GP-" + order.getId() + "-nolock";
+        persistedPayment(order, providerOrderId);
+
+        java.util.concurrent.atomic.AtomicBoolean sawTransaction =
+                new java.util.concurrent.atomic.AtomicBoolean(true);
+
+        org.mockito.Mockito.doAnswer(invocation -> {
+            sawTransaction.set(org.springframework.transaction.support.TransactionSynchronizationManager
+                    .isActualTransactionActive());
+            // ACTIVE, so applyVerdict does nothing and this test measures the
+            // transaction boundary rather than a state change.
+            return new PaymentGateway.GatewayOrderStatus(
+                    providerOrderId, null,
+                    PaymentGateway.GatewayOrderStatus.State.ACTIVE,
+                    AMOUNT, "INR", null);
+        }).when(gateway).fetchOrderStatus(providerOrderId);
+
+        service.reconcile(order.getId(), order.getCustomer().getId());
+
+        org.junit.jupiter.api.Assertions.assertFalse(sawTransaction.get(),
+                "The gateway was called with a transaction open. That holds a Hikari connection - one "
+                        + "of ten - for the length of a third party's response, which is how a slow "
+                        + "Cashfree takes the entire application down rather than just payment.");
     }
 
     private Order persistedOrder() {

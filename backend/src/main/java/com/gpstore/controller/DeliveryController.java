@@ -69,8 +69,7 @@ public class DeliveryController {
     // Ownership is enforced here - never trust customerId from a client.
     @GetMapping("/my-order/{orderId}")
     public Optional<com.gpstore.dto.response.DeliveryResponse> getMyOrderDelivery(@PathVariable Long orderId) {
-        return deliveryService.getOwnedDeliveryByOrderId(orderId, currentUser.customerId())
-                .map(com.gpstore.dto.response.DeliveryResponse::from);
+        return deliveryService.getOwnedDeliveryResponse(orderId, currentUser.customerId());
     }
 
     // Live tracking screen data for a customer's own order - assigned

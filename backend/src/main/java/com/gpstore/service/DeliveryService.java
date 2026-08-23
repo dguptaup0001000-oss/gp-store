@@ -293,6 +293,24 @@ public class DeliveryService {
     }
 
     /**
+     * The same lookup, mapped while the session is still open.
+     *
+     * DeliveryResponse names the order, and Delivery.order is lazy - so the
+     * controller mapping the entity itself only worked because
+     * open-session-in-view was holding a database connection open for the
+     * whole request. With that off (see spring.jpa.open-in-view) the mapping
+     * has to happen inside the transaction, which is where it belonged: the
+     * controller's job is to answer the request, not to run queries while
+     * Jackson writes the response.
+     */
+    @Transactional(readOnly = true)
+    public Optional<com.gpstore.dto.response.DeliveryResponse> getOwnedDeliveryResponse(
+            Long orderId, Long callerCustomerId) {
+        return getOwnedDeliveryByOrderId(orderId, callerCustomerId)
+                .map(com.gpstore.dto.response.DeliveryResponse::from);
+    }
+
+    /**
      * Live tracking view for a customer's own order - same ownership check
      * as getOwnedDeliveryByOrderId() above, shaped down to just the
      * assigned partner's current GPS position (see DeliveryTrackingResponse).

@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.dto.response.InventoryResponse;
 import com.gpstore.entity.Inventory;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
@@ -25,24 +26,68 @@ public class InventoryService {
         return repository.save(inventory);
     }
 
+    // ------------------------------------------------------------------
+    // The admin screen's reads
+    //
+    // THESE RETURN DTOs, NOT ENTITIES, and that is a boundary rather than a
+    // style preference. An InventoryResponse names the product, which lives
+    // two lazy associations away (Inventory -> ProductVariant -> Product).
+    // While the controller did the mapping, that lazy load happened outside
+    // any transaction - which open-session-in-view quietly covered up by
+    // holding a database connection for the whole request. With that turned
+    // off (see spring.jpa.open-in-view) the same code is a
+    // LazyInitializationException and a 500, which is the honest report of
+    // what was always happening: queries being issued from the serialisation
+    // layer.
+    //
+    // Mapping here means the associations are resolved while the session is
+    // genuinely open, from a query that fetch-joined them, and what leaves
+    // this class is finished data with nothing left to load.
+    // ------------------------------------------------------------------
+
     // Was an unbounded findAll() - every inventory row ever created, loaded
     // into memory on every call to the admin inventory screen. Now genuinely
     // paginated (see admin_inventory_screen.dart's infinite scroll), not
     // just capped.
-    public org.springframework.data.domain.Page<Inventory> getAll(org.springframework.data.domain.Pageable pageable) {
-        return repository.findAllByOrderByIdAsc(pageable);
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<InventoryResponse> getAll(
+            org.springframework.data.domain.Pageable pageable) {
+        return repository.findAllByOrderByIdAsc(pageable).map(InventoryResponse::from);
     }
 
+    /** The entity, for callers inside this package that need to change it. */
     public Inventory getById(Long id) {
         return repository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Inventory record not found"));
     }
 
-    /** The actual "what needs restocking" list - didn't exist before despite minimumStock already being a field. */
-    public List<Inventory> getLowStock() {
-        return repository.findLowStock();
+    @Transactional(readOnly = true)
+    public InventoryResponse getByIdAsResponse(Long id) {
+        return InventoryResponse.from(getById(id));
     }
 
+    /** The actual "what needs restocking" list - didn't exist before despite minimumStock already being a field. */
+    @Transactional(readOnly = true)
+    public List<InventoryResponse> getLowStock() {
+        return repository.findLowStock().stream().map(InventoryResponse::from).toList();
+    }
+
+    @Transactional
+    public InventoryResponse saveAsResponse(Inventory inventory) {
+        return InventoryResponse.from(save(inventory));
+    }
+
+    @Transactional
+    public InventoryResponse updateAsResponse(Long id, Inventory updated) {
+        return InventoryResponse.from(update(id, updated));
+    }
+
+    @Transactional
+    public InventoryResponse restockAsResponse(Long id, int quantity) {
+        return InventoryResponse.from(restock(id, quantity));
+    }
+
+    @Transactional
     public Inventory update(Long id, Inventory updated) {
         Inventory existing = getById(id);
 

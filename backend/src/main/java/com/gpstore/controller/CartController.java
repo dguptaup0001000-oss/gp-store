@@ -30,17 +30,16 @@ public class CartController {
     public org.springframework.data.domain.Page<CartResponse> getAllCarts(
             @org.springframework.web.bind.annotation.RequestParam(defaultValue = "0") int page,
             @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20") int size) {
-        return cartService.getAllCarts(org.springframework.data.domain.PageRequest.of(
-                        Math.max(page, 0), Math.min(Math.max(size, 1), 100),
-                        org.springframework.data.domain.Sort.by("id")))
-                .map(CartResponse::from);
+        return cartService.getAllCartResponses(org.springframework.data.domain.PageRequest.of(
+                Math.max(page, 0), Math.min(Math.max(size, 1), 100),
+                org.springframework.data.domain.Sort.by("id")));
     }
 
     // Returns only the logged-in customer's cart, with real product
     // name/brand included (see CartResponse for why that needs an explicit DTO).
     @GetMapping("/mine")
     public CartResponse getMyCart() {
-        return CartResponse.from(cartService.getCustomerCart(currentUser.customerId()));
+        return cartService.getCustomerCartResponse(currentUser.customerId());
     }
 
     // Adds to the logged-in customer's cart - variantId/customerId can no longer
@@ -66,7 +65,7 @@ public class CartController {
         DataIntegrityViolationException lastFailure = null;
         for (int attempt = 0; attempt < 3; attempt++) {
             try {
-                return CartResponse.from(cartService.addToCart(currentUser.customerId(), variantId, quantity));
+                return cartService.addToCartResponse(currentUser.customerId(), variantId, quantity);
             } catch (DataIntegrityViolationException e) {
                 lastFailure = e;
             }
@@ -82,11 +81,11 @@ public class CartController {
             @PathVariable Long cartItemId,
             @RequestParam Integer quantity) {
 
-        return CartResponse.from(cartService.updateItemQuantity(currentUser.customerId(), cartItemId, quantity));
+        return cartService.updateItemQuantityResponse(currentUser.customerId(), cartItemId, quantity);
     }
 
     @DeleteMapping("/items/{cartItemId}")
     public CartResponse removeItem(@PathVariable Long cartItemId) {
-        return CartResponse.from(cartService.removeItem(currentUser.customerId(), cartItemId));
+        return cartService.removeItemResponse(currentUser.customerId(), cartItemId);
     }
 }
