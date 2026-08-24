@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Every screen in this app talks to the backend API. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Haptic feedback. lightImpact/selectionClick route through
@@ -60,6 +61,12 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"/>
+
+    <!-- Merged-in from plugins. A grocery app must not require NFC to install,
+         and DUMP is a privileged permission we never use. -->
+    <uses-permission android:name="android.permission.DUMP" tools:node="remove"/>
+    <uses-permission android:name="android.permission.NFC" tools:node="remove"/>
+    <uses-feature android:name="android.hardware.nfc" android:required="false" tools:replace="android:required"/>
 
     <!--
       Android 11 (API 30) hides every other installed app from this one
