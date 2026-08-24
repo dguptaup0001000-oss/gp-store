@@ -9,14 +9,14 @@ before calling MSG91. Flutter must never call MSG91.
 ## What the backend already does
 
 - Password login is unchanged.
-- Existing Flutter OTP paths still work: `POST /v1/api/auth/otp/send` and
+- Existing Flutter OTP paths still work for older clients: `POST /v1/api/auth/otp/send` and
   `POST /v1/api/auth/otp/verify` (LOGIN purpose, same JWT as password login).
-- New purpose-separated APIs:
+- Current Flutter customer app uses the purpose-separated APIs:
   - `POST /v1/api/auth/otp/login/request` `{ "phone": "9876543210" }`
   - `POST /v1/api/auth/otp/login/verify` `{ "phone": "...", "otp": "123456" }`
   - `POST /v1/api/auth/password-reset/request`
   - `POST /v1/api/auth/password-reset/verify` → `{ "reset_token", "expires_in_seconds" }`
-    (this token is **not** a login JWT)
+    (this token is **not** a login JWT and is held only in memory until complete)
   - `POST /v1/api/auth/password-reset/complete` `{ "reset_token", "new_password" }`
 - LOGIN OTPs cannot reset a password. PASSWORD_RESET OTPs cannot log in.
 - OTPs are never stored in plaintext. Production verification uses MSG91.

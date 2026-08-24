@@ -35,6 +35,7 @@ void main() {
       // throw the customer off the form and discard its progress state.
       expect(resolveStartupRedirect(status: AuthStatus.unknown, location: '/login'), isNull);
       expect(resolveStartupRedirect(status: AuthStatus.unknown, location: '/login/otp'), isNull);
+      expect(resolveStartupRedirect(status: AuthStatus.unknown, location: '/login/forgot'), isNull);
       expect(resolveStartupRedirect(status: AuthStatus.unknown, location: '/register'), isNull);
     });
   });
