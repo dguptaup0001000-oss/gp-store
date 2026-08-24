@@ -15,6 +15,7 @@ import 'package:gpstore/features/auth/presentation/forgot_password_screen.dart';
 import 'package:gpstore/features/auth/presentation/login_screen.dart';
 import 'package:gpstore/features/auth/presentation/otp_login_screen.dart';
 import 'package:gpstore/features/auth/presentation/otp_providers.dart';
+import 'package:gpstore/features/auth/presentation/password_reset_providers.dart';
 
 import '../../../support/test_api_client.dart';
 
@@ -34,7 +35,9 @@ class _FakeAuthRepository extends AuthRepository {
   int loginOtpRequests = 0;
   int loginOtpVerifies = 0;
   int resetRequests = 0;
+  int resetCompletes = 0;
   String? lastPhone;
+  String? lastCompletedResetToken;
 
   @override
   Future<void> requestLoginOtp({required String phone}) async {
@@ -72,6 +75,8 @@ class _FakeAuthRepository extends AuthRepository {
 
   @override
   Future<void> completePasswordReset({required String resetToken, required String newPassword}) async {
+    resetCompletes++;
+    lastCompletedResetToken = resetToken;
     if (resetCompleteError != null) throw resetCompleteError!;
   }
 
@@ -96,6 +101,7 @@ void main() {
   setUp(() {
     AppHaptics.resetForTest();
     AppHaptics.enabled = false;
+    setUpFakeSecureStorage();
     repo = _FakeAuthRepository();
   });
 
@@ -195,6 +201,37 @@ void main() {
     expect(repo.loginOtpRequests, 2);
   });
 
+  testWidgets('successful OTP verify authenticates with the existing session', (tester) async {
+    await tester.pumpWidget(otpApp());
+    await tester.enterText(find.byType(TextFormField), '9876543210');
+    await tester.tap(find.text('Continue'));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextFormField), '654321');
+    await tester.pump();
+    expect(repo.loginOtpVerifies, 1);
+
+    final container = ProviderScope.containerOf(tester.element(find.byType(OtpLoginScreen)));
+    expect(container.read(authControllerProvider).status, AuthStatus.authenticated);
+    expect(await repo.tokenStorage.getAccessToken(), 'access');
+  });
+
+  testWidgets('an expired OTP asks the customer to request a new code', (tester) async {
+    repo.verifyError = ApiException(statusCode: 400, message: 'Invalid or expired OTP');
+    await tester.pumpWidget(otpApp());
+    await tester.enterText(find.byType(TextFormField), '9876543210');
+    await tester.tap(find.text('Continue'));
+    await tester.pump();
+
+    final otpContainer = ProviderScope.containerOf(tester.element(find.byType(OtpLoginScreen)));
+    otpContainer.read(otpFlowControllerProvider.notifier).markExpiredForTest();
+
+    await tester.enterText(find.byType(TextFormField), '000000');
+    await tester.pump();
+    expect(find.text(OtpUserMessages.otpExpired), findsWidgets);
+    expect(find.text('Verify & continue'), findsOneWidget);
+  });
+
   testWidgets('forgot password mismatch is caught before complete', (tester) async {
     await tester.pumpWidget(ProviderScope(
       overrides: [authRepositoryProvider.overrideWithValue(repo)],
@@ -216,5 +253,51 @@ void main() {
     await tester.tap(find.text('Reset password'));
     await tester.pump();
     expect(find.text(OtpUserMessages.passwordMismatch), findsWidgets);
+    expect(repo.resetCompletes, 0);
+  });
+
+  testWidgets('forgot password completes and returns a success message', (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [authRepositoryProvider.overrideWithValue(repo)],
+      child: const MaterialApp(home: ForgotPasswordScreen()),
+    ));
+
+    await tester.enterText(find.byType(TextField), '9876543210');
+    await tester.tap(find.text('Send OTP'));
+    await tester.pump();
+    expect(find.text("Enter your account's mobile number. If it is eligible, we'll send a reset code."), findsNothing);
+
+    await tester.enterText(find.byType(TextField), '123456');
+    await tester.pump();
+
+    await tester.enterText(find.widgetWithText(TextField, 'New password'), 'BrandNewPass9');
+    await tester.enterText(find.widgetWithText(TextField, 'Confirm password'), 'BrandNewPass9');
+    await tester.tap(find.text('Reset password'));
+    await tester.pump();
+
+    expect(find.text(OtpUserMessages.resetSuccess), findsWidgets);
+    expect(repo.resetCompletes, 1);
+    expect(repo.lastCompletedResetToken, 'reset-token');
+    expect(await repo.tokenStorage.getAccessToken(), isNull);
+  });
+
+  testWidgets('forgot password expired OTP stays on the code step', (tester) async {
+    repo.resetVerifyError = ApiException(statusCode: 400, message: 'Invalid or expired OTP');
+    await tester.pumpWidget(ProviderScope(
+      overrides: [authRepositoryProvider.overrideWithValue(repo)],
+      child: const MaterialApp(home: ForgotPasswordScreen()),
+    ));
+
+    await tester.enterText(find.byType(TextField), '9876543210');
+    await tester.tap(find.text('Send OTP'));
+    await tester.pump();
+    ProviderScope.containerOf(tester.element(find.byType(ForgotPasswordScreen)))
+        .read(passwordResetControllerProvider.notifier)
+        .markExpiredForTest();
+
+    await tester.enterText(find.byType(TextField), '000000');
+    await tester.pump();
+    expect(find.text(OtpUserMessages.otpExpired), findsWidgets);
+    expect(find.text('Verify'), findsOneWidget);
   });
 }

@@ -164,6 +164,11 @@ class PasswordResetController extends StateNotifier<PasswordResetState> {
     state = const PasswordResetState();
   }
 
+  /// Widget tests cannot fake [DateTime.now]; this forces the expiry path.
+  void markExpiredForTest() {
+    _sentAt = DateTime.now().subtract(otpLifetime);
+  }
+
   void _startCountdown() {
     _countdown?.cancel();
     _countdown = Timer.periodic(const Duration(seconds: 1), (timer) {
