@@ -84,6 +84,7 @@ public class TerritoryDispatchService {
     private final SubzoneBackupPartnerRepository backupRepository;
     private final DeliveryRepository deliveryRepository;
     private final DeliveryEstimateService estimateService;
+    private final TerritoryResolver resolver;
 
     private final boolean enabled;
     private final double maxBackupDetourKm;
@@ -94,6 +95,7 @@ public class TerritoryDispatchService {
             SubzoneBackupPartnerRepository backupRepository,
             DeliveryRepository deliveryRepository,
             DeliveryEstimateService estimateService,
+            TerritoryResolver resolver,
             @Value("${territory.enabled:true}") boolean enabled,
             @Value("${territory.max-backup-detour-km:4.0}") double maxBackupDetourKm,
             @Value("${territory.load-weight-km-per-order:0.8}") double loadWeightKmPerOrder) {
@@ -101,6 +103,7 @@ public class TerritoryDispatchService {
         this.backupRepository = backupRepository;
         this.deliveryRepository = deliveryRepository;
         this.estimateService = estimateService;
+        this.resolver = resolver;
         this.enabled = enabled;
         this.maxBackupDetourKm = maxBackupDetourKm;
         this.loadWeightKmPerOrder = loadWeightKmPerOrder;
@@ -124,6 +127,18 @@ public class TerritoryDispatchService {
         if (!enabled) {
             return new DispatchDecision(null, AssignmentReason.FALLBACK, subzone,
                     "Territory dispatch is switched off (territory.enabled=false).");
+        }
+        // THE MAP GATE. Subzone rows can exist (and even have a primary rider)
+        // before anyone stores a drawable outline. mappedTerritoryCount() is
+        // how many outlines the resolver can actually use. Until that is at
+        // least one, walking the ladder would assign from a map nobody has
+        // finished drawing. Load-based FALLBACK is the honest answer; the
+        // order still goes out.
+        if (resolver.mappedTerritoryCount() == 0) {
+            return new DispatchDecision(null, AssignmentReason.FALLBACK, subzone,
+                    "No drawable territory outlines are mapped yet (mappedTerritoryCount=0). "
+                            + "Territory dispatch is not used until at least one subzone has a "
+                            + "usable boundary. Draw an outline to stop these falling back.");
         }
         if (subzone == null) {
             return new DispatchDecision(null, AssignmentReason.FALLBACK, null,

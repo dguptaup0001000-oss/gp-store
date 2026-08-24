@@ -94,8 +94,11 @@ public class DeliveryService {
      * does TerritoryDispatchService walk outward - named backup, declared
      * neighbouring territory, same main zone, neighbouring main zone.
      *
-     * WHAT HAPPENS WHEN THE MAP CANNOT HELP. An address in no drawn territory,
-     * or a ladder that finds nobody geographically suitable, falls back to the
+     * WHAT HAPPENS WHEN THE MAP CANNOT HELP. Until at least one subzone has a
+     * drawable outline ({@code mappedTerritoryCount() == 0}), the territory
+     * ladder is not consulted at all. An address in no drawn territory, or a
+     * ladder that finds nobody geographically suitable, falls back to the
+     * old least-loaded pick rather than leaving the order unassigned. The
      * old least-loaded pick rather than leaving the order unassigned. The
      * order is already placed and usually already paid; refusing to dispatch
      * it would be a worse answer than dispatching it imperfectly. It is
