@@ -113,7 +113,7 @@ class WorkerDeliveryStatusTest {
         jdbc.update("DELETE FROM delivery_batches WHERE delivery_partner_id IN "
                 + "(SELECT id FROM delivery_partners WHERE name LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", PREFIX + "%");
-        jdbc.update("DELETE FROM delivery_partners WHERE customer_id IN "
+        jdbc.update("DELETE FROM delivery_partners WHERE account_customer_id IN "
                 + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM customers WHERE full_name LIKE ?", MARKER + "%");
     }
