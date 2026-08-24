@@ -20,10 +20,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * and would have died on the next column, and the one after that. The ordering
  * made schema changes permanently undeployable.
  *
- * CI COULD NOT HAVE CAUGHT IT: ci.yml sets FLYWAY_ENABLED=false and
- * DDL_AUTO=update, so neither half of the situation exists there. Which is why
- * this is a unit test on the Condition itself - it asserts the DECISION, which
- * is the part that was wrong, and it runs in whatever configuration CI has.
+ * CI's default verify job still sets FLYWAY_ENABLED=false, so it cannot
+ * catch a migrate-then-validate failure. The Condition is still unit-tested
+ * here. The sibling {@code schema-migrate} job is what actually runs Flyway
+ * against an empty database.
  */
 class FlywayOrderingTest {
 

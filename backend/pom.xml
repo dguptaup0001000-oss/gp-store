@@ -222,6 +222,12 @@
                          by default, which is exactly what Mockito's ByteBuddy
                          mock maker needs to do its job. This flag allows it. -->
                     <argLine>-XX:+EnableDynamicAgentLoading</argLine>
+                    <!-- Empty-database Flyway tests need a real migrate against
+                         a clean Postgres and a second boot with ddl-auto=validate.
+                         The default verify job still uses FLYWAY_ENABLED=false, so
+                         those tests are excluded here and selected by the
+                         schema-bootstrap profile (see .github/workflows/ci.yml). -->
+                    <excludedGroups>schema-bootstrap</excludedGroups>
                     <systemPropertyVariables>
                         <!-- A SMALL POOL FOR TESTS, and this is not the test
                              environment being special for its own sake - it is
@@ -293,5 +299,25 @@
 
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>schema-bootstrap</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <groups>schema-bootstrap</groups>
+                            <!-- Override the default exclusion so this profile
+                                 is the only way these tests run. -->
+                            <excludedGroups combine.self="override"/>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

@@ -68,48 +68,86 @@ safely.
    either way, just a startup check that either passes or doesn't.
 
 Once that's set: any future schema change needs an explicit new Flyway
-migration (`V7__description.sql`, `V8__...`, etc.) - `ddl-auto` will never
-again silently apply one for you. That's the actual safety improvement this
-whole exercise is for.
+migration (`V23__description.sql`, …) — `ddl-auto` will never again silently
+apply one for you. That's the actual safety improvement this whole exercise
+is for.
+
+
+## CI: proving migrations against an empty database
+
+The default GitHub Actions job (`build-and-test` in `.github/workflows/ci.yml`)
+still sets `FLYWAY_ENABLED=false` and `DDL_AUTO=update`. It never executes the
+SQL files under this directory. That is unchanged, so existing tests keep the
+same schema source they have always had.
+
+A second job, **`schema-migrate`**, is the empty-database proof:
+
+1. Start a clean Postgres 16 (database `gpstore_schema_bootstrap`) and Redis.
+2. Drop/recreate `public` so the job cannot inherit leftover tables.
+3. Boot the app with `FLYWAY_ENABLED=true` and `DDL_AUTO=update`.
+   Hibernate creates domain tables; `FlywayAfterSchemaConfig` then runs every
+   versioned script **V2 through current** (there is no V1 — see below).
+4. Boot again against the **same** database with `FLYWAY_ENABLED=true` and
+   `DDL_AUTO=validate`. Flyway runs first (nothing pending), then Hibernate
+   refuses to start if the live schema disagrees with the JPA entities.
+
+Local equivalent (requires Postgres + Redis, and a database that may be wiped):
+
+```
+# after creating an empty database owned by your test user:
+export DB_URL=jdbc:postgresql://localhost:5432/gpstore_schema_bootstrap
+export DB_USERNAME=gpstore
+export DB_PASSWORD=gpstore_test_password
+export REDIS_HOST=localhost
+export FLYWAY_ENABLED=true
+
+./mvnw -B test -Pschema-bootstrap -Dtest=EmptyDatabaseBootstrapTest -DexcludedGroups=
+./mvnw -B test -Pschema-bootstrap -Dtest=ProductionSchemaValidateTest -DexcludedGroups=
+```
+
+`FlywayMigrationInventoryTest` runs in the default `verify` job and only
+checks classpath filenames (contiguous V2…Vn, no V1 file). It does not need
+Postgres.
 
 
 ## Known limitation: migrations alone cannot provision an EMPTY database
 
 Verified directly, not assumed: pointing this app at a brand-new empty
-database with `FLYWAY_ENABLED=true` fails on V2, because **no migration
-creates the domain tables**. Only V3 (shedlock) and V9 (outbox_events)
-contain `CREATE TABLE` at all; every other table exists solely because
-`ddl-auto=update` created it during the project's early life, and V2 onward
-assume those tables are already there.
+database with `FLYWAY_ENABLED=true` **and** `DDL_AUTO=validate` fails on V2,
+because **no migration creates the domain tables**. Only V3 (shedlock) and V9
+(outbox_events) contain `CREATE TABLE` at all; every other table exists solely
+because `ddl-auto=update` created it during the project's early life, and V2
+onward assume those tables are already there.
 
 This is not a problem for the existing production database - its schema is
 already present and its `flyway_schema_history` already records V2 onward.
-It is a problem the first time somebody provisions a NEW environment
-(a staging copy, a disaster-recovery rebuild), especially now that
-production runs `DDL_AUTO=validate` and will refuse to start against a
-schema it cannot validate.
 
 **Why this is not fixed by adding a V1 baseline:** production's history
-already has V2-V6 applied. Flyway validates on migrate by default, so a
+already has V2 onward applied. Flyway validates on migrate by default, so a
 newly-added lower-numbered V1 is reported as "detected resolved migration
 not applied to database" and the application refuses to start. Adding V1
 would fix fresh installs by breaking the live system - the wrong trade.
+**Do not add a V1 file.**
 
-**Procedure for a new environment**, until a baseline is introduced
-deliberately (which requires coordinating `flyway.baselineVersion` with the
-existing production history):
+**Procedure for a new environment** (staging, disaster-recovery, local from
+scratch). This is what `schema-migrate` CI automates; it does **not** change
+production environment variables:
 
-1. Create the empty database and `CREATE EXTENSION pg_trgm;`.
-2. Start the app ONCE with `DDL_AUTO=update` and `FLYWAY_ENABLED=false`, so
-   Hibernate creates the entity tables.
-3. Restart with `FLYWAY_ENABLED=true` and `DDL_AUTO=validate`. Flyway applies
-   V2 onward, then Hibernate validates.
+1. Create the empty database. `pg_trgm` is installed by V5 when Flyway runs;
+   creating the extension first is still harmless.
+2. Start the app **once** with `DDL_AUTO=update` and `FLYWAY_ENABLED=true`.
+   Hibernate creates entity tables; Flyway then applies V2 through current.
+   (`FlywayAfterSchemaConfig` is what makes that ordering happen.)
+3. Restart with `FLYWAY_ENABLED=true` and `DDL_AUTO=validate`. Flyway is a
+   no-op if history is complete; Hibernate then validates.
 
-Steps 2 and 3 are exactly what was executed to verify this - all eight
-migrations applied cleanly and `validate` then passed, which is also the
-proof that V7/V8/V9 are consistent with the current entities.
+Do **not** restore `backend/docs/production-schema-reference.sql` as a
+bootstrap script. That file is a point-in-time dump from 2026-08-19 and does
+not include later columns (V17–V22). It remains a human-readable snapshot,
+not an executable migration.
 
-Alternatively, restore `backend/docs/production-schema-reference.sql` into
-the empty database first and skip step 2; that file is a real dump of the
-live schema and exists for this purpose. It is deliberately NOT a migration
-- see its own header.
+**Production `DDL_AUTO=validate`:** still a **manual** Render environment
+change, outside this repository. Set it only after `schema-migrate` is green
+on `main`. Flipping that variable does not rewrite data; if validate fails,
+the new deploy does not start and you can unset it. This repo does not set
+or change production secrets.

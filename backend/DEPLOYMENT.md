@@ -89,6 +89,26 @@ variables and *how* you get a public URL - not the application itself.
    looking wrong. Failing at boot is recoverable in minutes; running on it is
    an authentication bypass that could go unnoticed indefinitely.
 
+   This repository does **not** set Render environment variables. Setting
+   `DDL_AUTO=validate` remains a dashboard change. Do it only after the
+   `schema-migrate` CI job (below) is green on `main`. Flipping that variable
+   does not rewrite customer data.
+
+## Empty-database / Flyway CI
+
+Root `.github/workflows/ci.yml` has two test jobs:
+
+- **`build-and-test`** — existing contract: `FLYWAY_ENABLED=false`,
+  `DDL_AUTO=update`, plus the three objects Flyway would otherwise create
+  (`pg_trgm`, `order_number_seq`, `shedlock`).
+- **`schema-migrate`** — clean Postgres, `FLYWAY_ENABLED=true`: first boot
+  with `DDL_AUTO=update` (Hibernate then Flyway V2 through current), second
+  boot with `DDL_AUTO=validate`. Publishing the container image waits for
+  **both** jobs.
+
+There is no V1 migration; do not add one. Local commands and the empty-database
+procedure: `src/main/resources/db/migration/README.md`.
+
 ## Schema migration procedure
 
 Since `DDL_AUTO=validate`, the database is never changed by deploying code

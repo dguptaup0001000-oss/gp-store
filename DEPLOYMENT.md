@@ -1,5 +1,11 @@
 # Deploying GP-Store to Railway
 
+> **Current production host is Render + Supabase**, not Railway. Use
+> `backend/DEPLOYMENT.md`. Schema/Flyway empty-database CI is the
+> `schema-migrate` job in `.github/workflows/ci.yml` (see
+> `backend/src/main/resources/db/migration/README.md`). This Railway page is
+> left in place so old links do not 404; it is not the live runbook.
+
 Why Railway: it auto-detects the `Dockerfile` already in this repo, gives you
 managed Postgres with one click, and its GitHub integration auto-redeploys on
 every push - no GitHub Actions deploy scripting needed for this part.

@@ -30,9 +30,10 @@ import org.springframework.context.annotation.Configuration;
  * environment could not be brought up. Production only works because its
  * tables predate the migrations.
  *
- * NOBODY NOTICED BECAUSE CI NEVER RAN THEM. ci.yml sets FLYWAY_ENABLED=false
- * and builds the schema from DDL_AUTO=update, so V2 through V16 have never
- * executed in CI even once.
+ * NOBODY NOTICED BECAUSE THE DEFAULT CI JOB NEVER RAN THEM. ci.yml's
+ * build-and-test job sets FLYWAY_ENABLED=false and builds the schema from
+ * DDL_AUTO=update. The sibling schema-migrate job is what actually executes
+ * V2 through current against an empty database.
  *
  * WHY NOT JUST FIX THE MIGRATIONS. Guarding each script on table existence
  * would change its checksum, and Flyway validates checksums of already-applied
