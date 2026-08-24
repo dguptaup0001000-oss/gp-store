@@ -1,0 +1,30 @@
+name: gpstore
+description: GP-Store delivery worker app (slim Android plugin set)
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+# Used only by tool/with_worker_pubspec.sh when compiling lib/worker_main.dart.
+# Flutter registers every plugin in pubspec.yaml into the Android Gradle
+# module regardless of which Dart entrypoint is compiled. The customer
+# pubspec therefore ships Firebase, Cashfree, WebView/model-viewer, TTS,
+# BLE printing and speech into the worker APK. This file lists only the
+# packages worker Dart actually imports.
+dependencies:
+  flutter:
+    sdk: flutter
+
+  dio: ^5.4.3
+  flutter_secure_storage: ^9.2.2
+  mobile_scanner: ^5.2.3
+  geolocator: ^13.0.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

@@ -16,10 +16,11 @@ import 'features/worker/presentation/worker_gate.dart';
 /// `flutter build apk -t lib/worker_main.dart` produces a genuinely separate,
 /// much smaller APK that reuses all of it.
 ///
-/// THE COST, stated plainly: the QR scanner's native library ships in the
-/// customer APK too, because Flutter tree-shakes Dart and not native code. On
-/// an app that already carries Firebase, a webview and a 3D model viewer that
-/// is a small proportional addition, but it is not nothing.
+/// THE COST, stated plainly: Flutter tree-shakes Dart, not Gradle plugins.
+/// The customer APK still carries the scanner native library. Worker release
+/// builds swap pubspec.worker.yaml (see tool/with_worker_pubspec.sh) so this
+/// APK does not also ship Cashfree, Firebase, WebView/model-viewer, TTS or
+/// the thermal-printer stack.
 ///
 /// WHAT THIS APP IS NOT. There is no map, no route, no navigation, no delivery
 /// confirmation, no OTP, no proof of delivery. A worker here packs and takes

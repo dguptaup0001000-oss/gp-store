@@ -2,6 +2,8 @@ name: gpstore
 description: GP-Store customer app
 publish_to: 'none'
 version: 0.1.0
+# Delivery-worker Android builds use pubspec.worker.yaml via
+# tool/with_worker_pubspec.sh so unused native plugins are not linked.
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

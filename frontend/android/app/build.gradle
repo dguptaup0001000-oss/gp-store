@@ -3,16 +3,19 @@ plugins {
     id "kotlin-android"
     // The Flutter Gradle Plugin must be applied after Android/Kotlin.
     id "dev.flutter.flutter-gradle-plugin"
+}
+
+// Delivery-worker APK/AAB builds (tool/with_worker_pubspec.sh) do not
+// compile Firebase Dart and must not require google-services.json. The
+// customer entrypoint still applies both plugins below.
+def workerSlim = (System.getenv("GPSTORE_WORKER_SLIM") ?: "0") == "1"
+if (!workerSlim) {
     // Needs android/app/google-services.json to exist (see
     // FIREBASE_SETUP.md) - without it, this line makes the build fail
     // loudly with a clear "File google-services.json is missing" error
-    // rather than silently shipping an app where push never works. That's
-    // the intended failure mode until you've done the one-time Firebase
-    // setup.
-    id "com.google.gms.google-services"
-    // Must come after google-services: it reads the Firebase app id from
-    // the same google-services.json to know where to send the mapping file.
-    id "com.google.firebase.crashlytics"
+    // rather than silently shipping an app where push never works.
+    apply plugin: "com.google.gms.google-services"
+    apply plugin: "com.google.firebase.crashlytics"
 }
 
 def localProperties = new Properties()
