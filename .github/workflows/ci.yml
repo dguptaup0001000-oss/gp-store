@@ -65,13 +65,9 @@ jobs:
       # FLYWAY_ENABLED is false below (schema comes from DDL_AUTO=update
       # instead, see that env var's own comment) - so none of the
       # hand-written SQL migrations (db/migration/V*.sql) ever run here.
-      # ddl-auto only creates schema for things a JPA @Entity maps to, so
-      # anything migration-only has to be created by hand for CI: pg_trgm
-      # (V5), the order-number sequence (V6 - OrderService.placeOrder calls
-      # nextval() on this directly, so any test that actually places a real
-      # order fails without it), and the shedlock table (V3 - ShedLock's own
-      # required layout, not a domain table, so it was never going to come
-      # from ddl-auto either).
+      # The schema-migrate job below is what executes those files against a
+      # clean database. This job still stubs the three objects tests need
+      # when Flyway is off: pg_trgm (V5), order_number_seq (V6), shedlock (V3).
       #
       # Runs psql via the postgres:16 image (already pulled locally for the
       # "postgres" service container above) instead of
@@ -108,8 +104,94 @@ jobs:
           name: surefire-reports
           path: target/surefire-reports/
 
+  # Flyway against a CLEAN database. The job above deliberately sets
+  # FLYWAY_ENABLED=false and builds the schema with ddl-auto=update, so it
+  # never executes db/migration/V*.sql. This job is the proof those files
+  # still apply: empty Postgres, Hibernate creates domain tables, Flyway
+  # runs V2 through current, then a second boot with ddl-auto=validate.
+  #
+  # There is no V1 file (baseline-on-migrate). Do not add one — production
+  # history already starts at V2.
+  #
+  # Does not change production environment variables.
+  schema-migrate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: gpstore_schema_bootstrap
+          POSTGRES_USER: gpstore
+          POSTGRES_PASSWORD: gpstore_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Wipe public schema so this job always starts empty
+        run: |
+          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:16 \
+            psql -h localhost -U gpstore -d gpstore_schema_bootstrap -c \
+            "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO gpstore;"
+
+      - name: Bootstrap empty database (ddl-auto=update, Flyway on)
+        env:
+          DB_URL: jdbc:postgresql://localhost:5432/gpstore_schema_bootstrap
+          DB_USERNAME: gpstore
+          DB_PASSWORD: gpstore_test_password
+          JWT_SECRET: ci-test-secret-not-for-real-use-1234567890123456789012345
+          DDL_AUTO: update
+          FLYWAY_ENABLED: 'true'
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: ./mvnw -B test -Pschema-bootstrap -Dtest=EmptyDatabaseBootstrapTest -DexcludedGroups=
+
+      - name: Validate Hibernate schema against migrated database
+        env:
+          DB_URL: jdbc:postgresql://localhost:5432/gpstore_schema_bootstrap
+          DB_USERNAME: gpstore
+          DB_PASSWORD: gpstore_test_password
+          JWT_SECRET: ci-test-secret-not-for-real-use-1234567890123456789012345
+          DDL_AUTO: validate
+          FLYWAY_ENABLED: 'true'
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: ./mvnw -B test -Pschema-bootstrap -Dtest=ProductionSchemaValidateTest -DexcludedGroups=
+
+      - name: Upload schema-migrate test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-migrate-surefire-reports
+          path: backend/target/surefire-reports/
+
   build-and-push-image:
-    needs: build-and-test
+    needs: [build-and-test, schema-migrate]
     runs-on: ubuntu-latest
     # Only publish an image from main - a PR branch shouldn't produce a
     # "real" versioned image until it's actually merged.
