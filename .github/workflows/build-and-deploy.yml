@@ -227,6 +227,18 @@ jobs:
             echo "| $(basename "$f") | $size |" >> "$GITHUB_STEP_SUMMARY"
           done
 
+      - name: Verify APK signatures and zip alignment
+        # assembleRelease already signs (debug key unless key.properties exists)
+        # and zip-aligns. This step fails the job if an artifact is actually
+        # unsigned or unaligned. It does not re-sign. A debug signer is printed
+        # as a warning: Play still needs a real keystore on the machine/CI that
+        # produces the upload AAB.
+        run: |
+          chmod +x tool/verify_apk_release.py
+          python3 tool/verify_apk_release.py \
+            build/app/outputs/flutter-apk/gpstore-worker-*.apk \
+            build/app/outputs/flutter-apk/app-*-release.apk
+
       - name: Build App Bundle
         # What Google Play actually wants. Play splits an .aab per device, so
         # a phone downloads one ABI instead of all three - the APK above
