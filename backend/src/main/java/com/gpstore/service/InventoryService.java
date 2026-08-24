@@ -137,26 +137,27 @@ public class InventoryService {
     }
 
     /**
-     * Concurrency-safe stock decrement: locks the row for the duration of
-     * this transaction (see getByProductVariantForUpdate above), then
-     * checks and decrements under that lock - the same pattern
-     * OrderService.placeOrder() already applies inline for real checkout,
-     * extracted here as its own reusable, directly-testable unit (see
-     * ConcurrencyIntegrationTest). Throws ConflictException rather than
-     * silently clamping to zero - a caller must never treat insufficient
-     * stock as a successful purchase.
+     * Concurrency-safe stock decrement. The UPDATE itself is the lock:
+     * {@code stock = stock - n WHERE stock >= n} either matches one row or
+     * none. Two buyers of the last unit cannot both succeed. Throws
+     * ConflictException rather than clamping to zero.
      */
     @Transactional
     public Inventory decrementForPurchase(Long productVariantId, int quantity) {
-        Inventory inventory = getByProductVariantForUpdate(productVariantId);
-        if (inventory == null) {
-            throw new ResourceNotFoundException("Inventory not found for product variant " + productVariantId);
+        if (quantity <= 0) {
+            throw new BadRequestException("Purchase quantity must be positive");
         }
-        if (inventory.getStock() == null || inventory.getStock() < quantity) {
+        int updated = repository.decrementIfAvailable(productVariantId, quantity);
+        if (updated == 0) {
+            Inventory inventory = repository.findByProductVariantId(productVariantId).orElse(null);
+            if (inventory == null) {
+                throw new ResourceNotFoundException("Inventory not found for product variant " + productVariantId);
+            }
             throw new com.gpstore.exception.ConflictException("Insufficient stock");
         }
-        inventory.setStock(inventory.getStock() - quantity);
-        return repository.save(inventory);
+        return repository.findByProductVariantId(productVariantId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Inventory not found for product variant " + productVariantId));
     }
 
     private void validateNonNegativeStock(Inventory inventory) {

@@ -66,12 +66,11 @@ import java.util.List;
  *       leaving impatient double-taps (already made safe by idempotency
  *       keys and row locks) comfortably under the line.
  *
- *   rate-limit.mutation-per-minute        default 60, per customer
- *       cart mutations and review creation. Deliberately generous: a
- *       customer tapping + on a quantity stepper genuinely can fire
- *       several requests per second, and blocking that would break normal
- *       shopping. This exists to stop runaway loops, not to pace users.
- *
+   *   rate-limit.admin-per-minute             default 30, per admin account
+   *       POST /api/notifications/broadcast and writes under /api/admin/**.
+   *       Broadcasts can fan out to every customer; this is a brake, not the
+   *       RBAC check (that stays in SecurityConfig).
+   *
  * None of this replaces the correctness guards (row locks, unique
  * constraints, idempotency keys) - those are what make concurrent requests
  * safe. Rate limiting only stops one client burning capacity that other
@@ -97,22 +96,25 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final int authPerMinute;
     private final int checkoutPerMinute;
     private final int mutationPerMinute;
+    private final int adminPerMinute;
 
     public RateLimitFilter(
             StringRedisTemplate redisTemplate,
             @Value("${rate-limit.trust-forwarded-for:false}") boolean trustForwardedFor,
             @Value("${rate-limit.auth-per-minute:20}") int authPerMinute,
             @Value("${rate-limit.checkout-per-minute:20}") int checkoutPerMinute,
-            @Value("${rate-limit.mutation-per-minute:60}") int mutationPerMinute) {
+            @Value("${rate-limit.mutation-per-minute:60}") int mutationPerMinute,
+            @Value("${rate-limit.admin-per-minute:30}") int adminPerMinute) {
         this.redisTemplate = redisTemplate;
         this.trustForwardedFor = trustForwardedFor;
         this.authPerMinute = authPerMinute;
         this.checkoutPerMinute = checkoutPerMinute;
         this.mutationPerMinute = mutationPerMinute;
+        this.adminPerMinute = adminPerMinute;
     }
 
     /** Which bucket a request falls into, or null if it is not limited at all. */
-    private enum Bucket { AUTH, CHECKOUT, MUTATION }
+    private enum Bucket { AUTH, CHECKOUT, MUTATION, ADMIN }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -128,6 +130,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             case AUTH -> authPerMinute;
             case CHECKOUT -> checkoutPerMinute;
             case MUTATION -> mutationPerMinute;
+            case ADMIN -> adminPerMinute;
         };
 
         String clientKey = "ratelimit:" + identity(bucket, request) + ":" + request.getServletPath();
@@ -177,6 +180,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/cart-items")
                 || path.startsWith("/api/reviews"))) {
             return Bucket.MUTATION;
+        }
+
+        if (isWrite && (path.equals("/api/notifications/broadcast")
+                || path.startsWith("/api/admin/"))) {
+            return Bucket.ADMIN;
         }
 
         return null;

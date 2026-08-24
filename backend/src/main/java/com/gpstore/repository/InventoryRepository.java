@@ -46,6 +46,16 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     Optional<Inventory> findByProductVariantIdForUpdate(Long productVariantId);
 
     /**
+     * One-statement decrement. Two concurrent checkouts cannot both subtract
+     * from the same unit: PostgreSQL applies the WHERE atomically, so the
+     * second update matches zero rows.
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update Inventory i set i.stock = i.stock - :quantity "
+            + "where i.productVariant.id = :productVariantId and i.stock >= :quantity")
+    int decrementIfAvailable(Long productVariantId, int quantity);
+
+    /**
      * Items at or below their configured reorder point - the actual
      * "restock this" list. Fetch-joined for the same reason as the page
      * above: the response names the product on every row.

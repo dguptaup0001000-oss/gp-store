@@ -116,18 +116,16 @@ jobs:
         # worker artifact; build it locally with android-x64 if needed.
         run: |
           chmod +x tool/with_worker_pubspec.sh
-          if [ -n "${{ vars.API_BASE_URL }}" ]; then
-            ./tool/with_worker_pubspec.sh flutter build apk --release --split-per-abi \
-              --target-platform android-arm,android-arm64 \
-              -t lib/worker_main.dart \
-              --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" \
-              --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
-          else
-            ./tool/with_worker_pubspec.sh flutter build apk --release --split-per-abi \
-              --target-platform android-arm,android-arm64 \
-              -t lib/worker_main.dart \
-              --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+          API_URL="${{ vars.API_BASE_URL }}"
+          if [ -z "$API_URL" ]; then
+            API_URL="https://gp-store.onrender.com/v1"
           fi
+          ./tool/with_worker_pubspec.sh flutter build apk --release --split-per-abi \
+            --target-platform android-arm,android-arm64 \
+            -t lib/worker_main.dart \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_URL" \
+            --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           cd build/app/outputs/flutter-apk
           for abi in arm64-v8a armeabi-v7a; do
             if [ -f "app-$abi-release.apk" ]; then
@@ -162,18 +160,17 @@ jobs:
         # app (com.gpstore.app) — this is a size/packaging artifact, not a
         # second Play listing. Do not treat the universal APK as the Play size.
         run: |
-          if [ -n "${{ vars.API_BASE_URL }}" ]; then
-            ./tool/with_worker_pubspec.sh flutter build appbundle --release \
-              --target-platform android-arm,android-arm64 \
-              -t lib/worker_main.dart \
-              --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" \
-              --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
-          else
-            ./tool/with_worker_pubspec.sh flutter build appbundle --release \
-              --target-platform android-arm,android-arm64 \
-              -t lib/worker_main.dart \
-              --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+          chmod +x tool/with_worker_pubspec.sh
+          API_URL="${{ vars.API_BASE_URL }}"
+          if [ -z "$API_URL" ]; then
+            API_URL="https://gp-store.onrender.com/v1"
           fi
+          ./tool/with_worker_pubspec.sh flutter build appbundle --release \
+            --target-platform android-arm,android-arm64 \
+            -t lib/worker_main.dart \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_URL" \
+            --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           mkdir -p build/app/outputs/bundle/worker
           mv build/app/outputs/bundle/release/app-release.aab \
             build/app/outputs/bundle/worker/gpstore-worker-release.aab
@@ -209,11 +206,14 @@ jobs:
         # is emulators; Play's AAB (next step) still contains every ABI and
         # serves one per device. Sideload artifacts are arm only.
         run: |
-          if [ -n "${{ vars.API_BASE_URL }}" ]; then
-            flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
-          else
-            flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+          API_URL="${{ vars.API_BASE_URL }}"
+          if [ -z "$API_URL" ]; then
+            API_URL="https://gp-store.onrender.com/v1"
           fi
+          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_URL" \
+            --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
 
       - name: Report customer APK sizes
         run: |
@@ -253,11 +253,14 @@ jobs:
         # only runs in release, so a missing ProGuard keep rule cannot fail
         # any debug build - it fails here, or it fails on a customer's phone.
         run: |
-          if [ -n "${{ vars.API_BASE_URL }}" ]; then
-            flutter build appbundle --release --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
-          else
-            flutter build appbundle --release --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+          API_URL="${{ vars.API_BASE_URL }}"
+          if [ -z "$API_URL" ]; then
+            API_URL="https://gp-store.onrender.com/v1"
           fi
+          flutter build appbundle --release \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_URL" \
+            --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -322,14 +325,14 @@ jobs:
         # API_BASE_URL, value: your deployed backend's URL (e.g. from
         # Render) + /v1.
         run: |
-          if [ -n "${{ vars.API_BASE_URL }}" ]; then
-            flutter build web --release \
-              --base-href "/${{ github.event.repository.name }}/" \
-              --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}"
-          else
-            flutter build web --release \
-              --base-href "/${{ github.event.repository.name }}/"
+          API_URL="${{ vars.API_BASE_URL }}"
+          if [ -z "$API_URL" ]; then
+            API_URL="https://gp-store.onrender.com/v1"
           fi
+          flutter build web --release \
+            --base-href "/${{ github.event.repository.name }}/" \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_URL"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
