@@ -38,7 +38,6 @@ class _FakeTerritoryRepository extends TerritoryRepository {
 
   @override
   Future<List<TerritoryZone>> listZones() {
-    if (zonesError != null) return Future.error(zonesError!);
     return Future.value(zones);
   }
 
