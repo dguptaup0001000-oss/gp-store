@@ -118,6 +118,19 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
+
+    // Uncompressed native libs, page-aligned by AGP (zipalign is part of
+    // assembleRelease — do not unzip/repack/sign by hand afterwards).
+    packaging {
+        jniLibs {
+            useLegacyPackaging false
+        }
+        resources {
+            // print_bluetooth_thermal pulls win_ble, which ships a Windows
+            // BLEServer.exe into Flutter assets. Android cannot run it.
+            excludes += ["**/BLEServer.exe", "**/win_ble/assets/**"]
+        }
+    }
 }
 
 dependencies {
