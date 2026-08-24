@@ -70,7 +70,11 @@ public class SecurityConfig {
                         .filter(origin -> !origin.isEmpty())
                         .toList());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        // Idempotency-Key is what checkout sends on POST /api/orders/place.
+        // Without it here, a browser client (Flutter web) is blocked on the
+        // CORS preflight even though native apps are unaffected. Do not
+        // widen this to "*" — extra request headers would be allowed too.
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Idempotency-Key"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
