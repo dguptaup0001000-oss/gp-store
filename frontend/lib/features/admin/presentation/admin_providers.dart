@@ -2,7 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
+import '../../orders/domain/order_models.dart';
 import '../data/admin_products_repository.dart';
+import '../data/delivery_pricing_repository.dart';
 import '../domain/admin_coupon_models.dart';
 import '../domain/admin_customer_model.dart';
 import '../domain/admin_payment_model.dart';
@@ -11,7 +13,7 @@ import '../domain/analytics_models.dart';
 import '../domain/audit_log_model.dart';
 import '../domain/delivery_breach_model.dart';
 import '../domain/delivery_partner_models.dart';
-import '../../orders/domain/order_models.dart';
+import '../domain/delivery_pricing_models.dart';
 import '../domain/inventory_models.dart';
 
 final adminProductsRepositoryProvider = Provider<AdminProductsRepository>((ref) {
@@ -252,4 +254,17 @@ final adminAllPaymentsProvider = AsyncNotifierProvider.autoDispose<AdminAllPayme
 
 final adminAvailablePartnersProvider = FutureProvider.autoDispose<List<DeliveryPartnerModel>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getAvailablePartners();
+});
+
+final deliveryPricingRepositoryProvider = Provider<DeliveryPricingRepository>((ref) {
+  return DeliveryPricingRepository(apiClient: ref.watch(apiClientProvider));
+});
+
+final deliveryPricingSettingsProvider = FutureProvider.autoDispose<DeliveryPricingSettings>((ref) {
+  return ref.watch(deliveryPricingRepositoryProvider).getSettings();
+});
+
+final adminOrderDeliveryBreakdownProvider =
+    FutureProvider.autoDispose.family<DeliveryOrderBreakdown, int>((ref, orderId) {
+  return ref.watch(deliveryPricingRepositoryProvider).getOrderBreakdown(orderId);
 });

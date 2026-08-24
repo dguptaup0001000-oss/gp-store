@@ -6,6 +6,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../orders/domain/order_models.dart';
 import '../../orders/presentation/orders_providers.dart';
 import 'admin_providers.dart';
+import 'admin_order_delivery_breakdown.dart';
 import '../../../core/util/haptic_widgets.dart';
 
 /// Reuses orderDetailProvider directly - the backend's GET /api/orders/{id}
@@ -143,6 +144,8 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
             const SizedBox(height: 8),
             ...order.items.map((item) => _AdminOrderItemTile(item: item)),
 
+            const SizedBox(height: 16),
+            AdminOrderDeliveryBreakdownCard(orderId: widget.orderId),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(14),
