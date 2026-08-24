@@ -1,9 +1,10 @@
 package com.gpstore.perf;
 
-import com.gpstore.exception.BadRequestException;
+import com.gpstore.auth.OtpPurpose;
+import com.gpstore.exception.TooManyRequestsException;
+import com.gpstore.otp.OtpProvider;
 import com.gpstore.repository.OtpVerificationRepository;
 import com.gpstore.service.OtpService;
-import com.gpstore.service.SmsService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,6 +15,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
@@ -35,9 +37,9 @@ import static org.mockito.Mockito.verify;
  * the network call moved out.
  */
 @SpringBootTest(properties = {
-        // No real SMS is sent regardless - this is the shipped default and is
-        // restated here so the test cannot depend on ambient configuration.
         "otp.sms-sending-enabled=false",
+        "msg91.enabled=false",
+        "otp.resend-cooldown-seconds=0",
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",
@@ -50,7 +52,7 @@ class OtpSendBoundaryTest {
 
     @Autowired private OtpService otpService;
     @Autowired private OtpVerificationRepository otpRepository;
-    @MockitoSpyBean private SmsService smsService;
+    @MockitoSpyBean private OtpProvider otpProvider;
 
     private static String freshNumber() {
         return "9" + String.valueOf(System.nanoTime()).substring(0, 9);
@@ -62,11 +64,9 @@ class OtpSendBoundaryTest {
         AtomicBoolean sawTransaction = new AtomicBoolean(true);
 
         doAnswer(invocation -> {
-            // Asked from inside the call itself, which is the only moment the
-            // question means anything: this is where the ten seconds would go.
             sawTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
-            return null;
-        }).when(smsService).sendOtp(anyString(), anyString());
+            return OtpProvider.SendResult.ok("test");
+        }).when(otpProvider).send(anyString(), any(OtpPurpose.class), any(), any());
 
         otpService.sendOtp(freshNumber());
 
@@ -83,15 +83,11 @@ class OtpSendBoundaryTest {
         AtomicBoolean rowVisible = new AtomicBoolean(false);
 
         doAnswer(invocation -> {
-            // A separate read, outside the transaction that wrote it. If the
-            // row is visible here it has committed - so any code that reaches
-            // a phone is a code this service can verify. The reverse order
-            // texts somebody a code the database then rolls back.
             rowVisible.set(otpRepository
                     .findFirstByMobileNumberAndVerifiedFalseOrderByCreatedAtDesc(number)
                     .isPresent());
-            return null;
-        }).when(smsService).sendOtp(anyString(), anyString());
+            return OtpProvider.SendResult.ok("test");
+        }).when(otpProvider).send(anyString(), any(OtpPurpose.class), any(), any());
 
         otpService.sendOtp(number);
 
@@ -104,23 +100,18 @@ class OtpSendBoundaryTest {
     void rateLimitStillBlocksBeforeAnySend() {
         String number = freshNumber();
 
-        // Whatever the configured window allows, exceed it.
         for (int i = 0; i < 20; i++) {
             try {
                 otpService.sendOtp(number);
-            } catch (BadRequestException stopHere) {
+            } catch (TooManyRequestsException stopHere) {
                 break;
             }
         }
 
-        // The rate limit runs inside the transaction and throws before the
-        // TransactionTemplate returns, so the send below it never happens.
-        // Moving the network call out must not have moved it out from behind
-        // the guard as well - each send costs real money.
-        int sendsBefore = org.mockito.Mockito.mockingDetails(smsService).getInvocations().size();
-        assertThrows(BadRequestException.class, () -> otpService.sendOtp(number),
+        int sendsBefore = org.mockito.Mockito.mockingDetails(otpProvider).getInvocations().size();
+        assertThrows(TooManyRequestsException.class, () -> otpService.sendOtp(number),
                 "The rate limit stopped being enforced.");
-        int sendsAfter = org.mockito.Mockito.mockingDetails(smsService).getInvocations().size();
+        int sendsAfter = org.mockito.Mockito.mockingDetails(otpProvider).getInvocations().size();
 
         assertEquals(sendsBefore, sendsAfter,
                 "A rate-limited request still reached the SMS provider - that is a bill, not a bug report.");
@@ -129,12 +120,9 @@ class OtpSendBoundaryTest {
     @Test
     @DisplayName("sendOtp does not carry @Transactional")
     void theBoundaryIsWhereItLooks() {
-        // Belt and braces on the behavioural tests above: the regression that
-        // reintroduces this is somebody adding @Transactional back to the
-        // method for tidiness, which would silently re-enclose the send.
         var method = assertDoesNotThrow(() -> OtpService.class.getMethod("sendOtp", String.class));
         assertNull(method.getAnnotation(org.springframework.transaction.annotation.Transactional.class),
                 "sendOtp is @Transactional again, which puts the MSG91 call back inside the transaction.");
-        verify(smsService, never()).sendOtp(null, null);
+        verify(otpProvider, never()).send(null, null, null, null);
     }
 }

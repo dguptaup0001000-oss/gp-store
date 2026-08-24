@@ -1,40 +1,72 @@
 package com.gpstore.service;
 
+import com.gpstore.auth.IndianPhoneNumbers;
+import com.gpstore.auth.OtpPurpose;
 import com.gpstore.dto.AuthRequest;
 import com.gpstore.dto.AuthResponse;
+import com.gpstore.dto.PasswordResetTokenResponse;
 import com.gpstore.dto.RegisterRequest;
 import com.gpstore.entity.Customer;
+import com.gpstore.entity.PasswordResetToken;
 import com.gpstore.entity.Role;
 import com.gpstore.exception.AuthException;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.CustomerRepository;
+import com.gpstore.repository.PasswordResetTokenRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.util.Base64;
+import java.util.HexFormat;
+import java.util.Optional;
+
 @Service
 public class AuthService {
 
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+
     private static final String INVALID_CREDENTIALS = "Invalid email or password";
+    private static final String GENERIC_OTP_REQUEST = OtpService.GENERIC_REQUEST_MESSAGE;
+    private static final String INVALID_RESET_TOKEN = "Invalid or expired reset token";
 
     private final CustomerRepository customerRepository;
     private final JwtService jwtService;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
     private final OtpService otpService;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final Clock clock;
+    private final SecureRandom secureRandom = new SecureRandom();
+    private final int passwordResetTokenMinutes;
 
     public AuthService(CustomerRepository customerRepository,
                         JwtService jwtService,
                         PasswordEncoder passwordEncoder,
                         RefreshTokenService refreshTokenService,
-                        OtpService otpService) {
+                        OtpService otpService,
+                        PasswordResetTokenRepository passwordResetTokenRepository,
+                        Clock clock,
+                        @Value("${otp.password-reset-token-minutes:10}") int passwordResetTokenMinutes) {
         this.customerRepository = customerRepository;
         this.jwtService = jwtService;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
         this.otpService = otpService;
+        this.passwordResetTokenRepository = passwordResetTokenRepository;
+        this.clock = clock;
+        this.passwordResetTokenMinutes = Math.max(1, passwordResetTokenMinutes);
     }
 
     @Transactional
@@ -43,10 +75,6 @@ public class AuthService {
         customerRepository.findByEmail(request.getEmail()).ifPresent(existing -> {
             throw new ConflictException("An account with this email already exists");
         });
-        // customers.mobile_number has the same unique constraint as email but
-        // was missing the equivalent pre-check - a duplicate phone number
-        // fell straight through to the DB constraint and surfaced as a raw,
-        // unhandled 500 instead of a clear "already registered" message.
         customerRepository.findByMobileNumber(request.getPhone()).ifPresent(existing -> {
             throw new ConflictException("An account with this phone number already exists");
         });
@@ -74,14 +102,9 @@ public class AuthService {
                 .orElseThrow(() -> new AuthException(INVALID_CREDENTIALS));
 
         if (Boolean.FALSE.equals(customer.getActive())) {
-            // Same generic message on purpose - don't reveal account state to an unauthenticated caller.
             throw new AuthException(INVALID_CREDENTIALS);
         }
 
-        // An OTP-only account (registered via phone, never set a password)
-        // has no password hash to check against - reject with the same
-        // generic message rather than throwing an NPE from
-        // passwordEncoder.matches(..., null).
         if (customer.getPassword() == null || !passwordEncoder.matches(request.getPassword(), customer.getPassword())) {
             throw new AuthException(INVALID_CREDENTIALS);
         }
@@ -94,6 +117,11 @@ public class AuthService {
         otpService.sendOtp(mobileNumber);
     }
 
+    public String requestLoginOtp(String phone) {
+        otpService.requestOtp(phone, OtpPurpose.LOGIN, true);
+        return GENERIC_OTP_REQUEST;
+    }
+
     /**
      * Verifies the OTP, then logs in the existing customer with this phone
      * number, OR auto-creates a bare-bones account if it's a new number -
@@ -104,15 +132,16 @@ public class AuthService {
      */
     @Transactional
     public AuthResponse verifyOtpAndAuthenticate(String mobileNumber, String otpCode) {
-        otpService.verifyOtp(mobileNumber, otpCode);
+        String local10 = IndianPhoneNumbers.toLocal10(mobileNumber);
+        otpService.verifyOtp(mobileNumber, otpCode, OtpPurpose.LOGIN);
 
-        Customer customer = customerRepository.findByMobileNumber(mobileNumber)
+        Customer customer = findByPhone(local10)
                 .orElseGet(() -> {
                     Customer newCustomer = new Customer();
-                    newCustomer.setMobileNumber(mobileNumber);
+                    newCustomer.setMobileNumber(local10);
                     newCustomer.setRole(Role.CUSTOMER);
                     newCustomer.setEnabled(true);
-                    newCustomer.setVerified(true); // phone was just verified via OTP
+                    newCustomer.setVerified(true);
                     newCustomer.setActive(true);
                     return customerRepository.save(newCustomer);
                 });
@@ -122,6 +151,61 @@ public class AuthService {
         }
 
         return issueTokens(customer);
+    }
+
+    public String requestPasswordResetOtp(String phone) {
+        String local10 = IndianPhoneNumbers.toLocal10(phone);
+        boolean deliver = findByPhone(local10).isPresent();
+        otpService.requestOtp(phone, OtpPurpose.PASSWORD_RESET, deliver);
+        return GENERIC_OTP_REQUEST;
+    }
+
+    @Transactional
+    public PasswordResetTokenResponse verifyPasswordResetOtp(String phone, String otp) {
+        otpService.verifyOtp(phone, otp, OtpPurpose.PASSWORD_RESET);
+        String local10 = IndianPhoneNumbers.toLocal10(phone);
+        Customer customer = findByPhone(local10)
+                .orElseThrow(() -> new BadRequestException(OtpService.INVALID_OTP_MESSAGE));
+
+        byte[] randomBytes = new byte[32];
+        secureRandom.nextBytes(randomBytes);
+        String rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+
+        PasswordResetToken entity = new PasswordResetToken();
+        entity.setCustomer(customer);
+        entity.setTokenHash(sha256(rawToken));
+        entity.setCreatedAt(LocalDateTime.now(clock));
+        entity.setExpiresAt(LocalDateTime.now(clock).plusMinutes(passwordResetTokenMinutes));
+        passwordResetTokenRepository.save(entity);
+
+        return new PasswordResetTokenResponse(rawToken, passwordResetTokenMinutes * 60L);
+    }
+
+    @Transactional
+    public void completePasswordReset(String rawResetToken, String newPassword) {
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new BadRequestException("Password must be at least 8 characters");
+        }
+        PasswordResetToken token = passwordResetTokenRepository.findByTokenHash(sha256(rawResetToken))
+                .orElseThrow(() -> new BadRequestException(INVALID_RESET_TOKEN));
+
+        if (token.getConsumedAt() != null || token.getExpiresAt().isBefore(LocalDateTime.now(clock))) {
+            throw new BadRequestException(INVALID_RESET_TOKEN);
+        }
+
+        Customer customer = token.getCustomer();
+        customer.setPassword(passwordEncoder.encode(newPassword));
+        customerRepository.save(customer);
+
+        token.setConsumedAt(LocalDateTime.now(clock));
+        passwordResetTokenRepository.save(token);
+        passwordResetTokenRepository.consumeAllOpenForCustomer(customer.getId(), LocalDateTime.now(clock));
+
+        if (customer.getMobileNumber() != null) {
+            otpService.consumeOpenChallenges(customer.getMobileNumber(), OtpPurpose.PASSWORD_RESET);
+        }
+        refreshTokenService.revokeAllForCustomer(customer.getId());
+        log.info("PASSWORD_RESET_SUCCESS phone={}", IndianPhoneNumbers.mask(customer.getMobileNumber()));
     }
 
     /**
@@ -142,41 +226,40 @@ public class AuthService {
                 throw new AuthException("Current password is incorrect");
             }
         } else if (customer.getEmail() == null) {
-            // Password login is only meaningful with an email to log in
-            // with - an account with neither would just create a password
-            // nothing can ever use.
             throw new BadRequestException("Add an email to your account before setting a password");
         }
 
         customer.setPassword(passwordEncoder.encode(newPassword));
         customerRepository.save(customer);
 
-        // Changing a password is a real security-sensitive event - force
-        // every OTHER session to re-authenticate, same reasoning as
-        // deactivating an account. This device's own session (the one that
-        // just made this change) keeps working via its current tokens.
         refreshTokenService.revokeAllForCustomer(customerId);
     }
 
     /**
-     * Forgot-password via OTP - reuses the existing rate-limited OTP send
-     * endpoint (/api/auth/otp/send) and the same OtpService.verifyOtp used
-     * for OTP login, just for a different purpose (proving phone ownership
-     * to reset a password, not logging in via OTP directly). No email
-     * infrastructure exists in this system - OTP is the real, working
-     * verification mechanism already available, not a placeholder choice.
+     * Legacy combined reset. Requires a PASSWORD_RESET challenge (not LOGIN).
+     * Does not reveal whether the account exists — invalid OTP is the only
+     * public failure.
      */
     @Transactional
     public void resetPasswordWithOtp(String mobileNumber, String otpCode, String newPassword) {
-        otpService.verifyOtp(mobileNumber, otpCode);
+        try {
+            otpService.verifyOtp(mobileNumber, otpCode, OtpPurpose.PASSWORD_RESET);
+        } catch (BadRequestException ex) {
+            throw new BadRequestException(OtpService.INVALID_OTP_MESSAGE);
+        }
 
-        Customer customer = customerRepository.findByMobileNumber(mobileNumber)
-                .orElseThrow(() -> new ResourceNotFoundException("No account found for this mobile number"));
+        Optional<Customer> customer = findByPhone(mobileNumber);
+        if (customer.isEmpty()) {
+            throw new BadRequestException(OtpService.INVALID_OTP_MESSAGE);
+        }
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new BadRequestException("Password must be at least 8 characters");
+        }
 
-        customer.setPassword(passwordEncoder.encode(newPassword));
-        customerRepository.save(customer);
-
-        refreshTokenService.revokeAllForCustomer(customer.getId());
+        customer.get().setPassword(passwordEncoder.encode(newPassword));
+        customerRepository.save(customer.get());
+        refreshTokenService.revokeAllForCustomer(customer.get().getId());
+        log.info("PASSWORD_RESET_SUCCESS phone={}", IndianPhoneNumbers.mask(mobileNumber));
     }
 
 
@@ -195,15 +278,30 @@ public class AuthService {
         refreshTokenService.revoke(rawRefreshToken);
     }
 
-    /** Logs out of every device/session for this customer - e.g. after a password change or "sign out everywhere". */
+    /** Logs out of every device/session for this customer. */
     @Transactional
     public void logoutAllSessions(Long customerId) {
         refreshTokenService.revokeAllForCustomer(customerId);
+    }
+
+    private Optional<Customer> findByPhone(String rawPhone) {
+        String local10 = IndianPhoneNumbers.toLocal10(rawPhone);
+        return customerRepository.findByMobileNumber(local10)
+                .or(() -> customerRepository.findByMobileNumber(IndianPhoneNumbers.normalizeTo91(rawPhone)));
     }
 
     private AuthResponse issueTokens(Customer customer) {
         String accessToken = jwtService.generateToken(customer.getId(), customer.getEmail(), customer.getRole());
         String refreshToken = refreshTokenService.issue(customer);
         return new AuthResponse(accessToken, refreshToken, customer.getId(), customer.getEmail(), customer.getRole().name());
+    }
+
+    private static String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 }

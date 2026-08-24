@@ -55,7 +55,8 @@ import java.util.List;
  * DOCUMENTED LIMITS (all per minute, all overridable by env var):
  *
  *   rate-limit.auth-per-minute            default 20, per IP
- *       login, register, otp/send, otp/verify, reset-password-with-otp.
+ *       login, register, otp/send, otp/verify, otp/login/*,
+ *       password-reset/*, reset-password-with-otp.
  *       Tight on purpose - these are the credential-stuffing and
  *       SMS-cost targets. 20/min still allows a real person to mistype a
  *       password several times and request a fresh OTP.
@@ -164,6 +165,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.equals("/api/auth/register")
                 || path.equals("/api/auth/otp/send")
                 || path.equals("/api/auth/otp/verify")
+                || path.equals("/api/auth/otp/login/request")
+                || path.equals("/api/auth/otp/login/verify")
+                || path.equals("/api/auth/password-reset/request")
+                || path.equals("/api/auth/password-reset/verify")
+                || path.equals("/api/auth/password-reset/complete")
                 || path.equals("/api/auth/reset-password-with-otp")) {
             return Bucket.AUTH;
         }

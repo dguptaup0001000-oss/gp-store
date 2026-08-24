@@ -3,6 +3,10 @@ package com.gpstore.controller;
 import com.gpstore.dto.AuthRequest;
 import com.gpstore.dto.AuthResponse;
 import com.gpstore.dto.ChangePasswordRequest;
+import com.gpstore.dto.PasswordResetCompleteRequest;
+import com.gpstore.dto.PasswordResetTokenResponse;
+import com.gpstore.dto.PhoneOtpRequest;
+import com.gpstore.dto.PhoneOtpVerifyRequest;
 import com.gpstore.dto.RefreshRequest;
 import com.gpstore.dto.RegisterRequest;
 import com.gpstore.dto.ResetPasswordWithOtpRequest;
@@ -53,6 +57,32 @@ public class AuthController {
         return authService.verifyOtpAndAuthenticate(request.getMobileNumber(), request.getOtp());
     }
 
+    @PostMapping("/otp/login/request")
+    public Map<String, String> requestLoginOtp(@Valid @RequestBody PhoneOtpRequest request) {
+        return Map.of("message", authService.requestLoginOtp(request.getPhone()));
+    }
+
+    @PostMapping("/otp/login/verify")
+    public AuthResponse verifyLoginOtp(@Valid @RequestBody PhoneOtpVerifyRequest request) {
+        return authService.verifyOtpAndAuthenticate(request.getPhone(), request.getOtp());
+    }
+
+    @PostMapping("/password-reset/request")
+    public Map<String, String> requestPasswordReset(@Valid @RequestBody PhoneOtpRequest request) {
+        return Map.of("message", authService.requestPasswordResetOtp(request.getPhone()));
+    }
+
+    @PostMapping("/password-reset/verify")
+    public PasswordResetTokenResponse verifyPasswordReset(@Valid @RequestBody PhoneOtpVerifyRequest request) {
+        return authService.verifyPasswordResetOtp(request.getPhone(), request.getOtp());
+    }
+
+    @PostMapping("/password-reset/complete")
+    public Map<String, String> completePasswordReset(@Valid @RequestBody PasswordResetCompleteRequest request) {
+        authService.completePasswordReset(request.getResetToken(), request.getNewPassword());
+        return Map.of("message", "Password reset - you can now log in with your new password");
+    }
+
     // Exchanges a refresh token for a new access token + a new refresh token
     // (rotation). No access token/auth header needed here - the refresh token
     // itself is the credential.
@@ -88,7 +118,7 @@ public class AuthController {
         return Map.of("message", "Logged out successfully");
     }
 
-    // Logs out of every device/session for the currently logged-in customer.
+    // Logs out of every device/session for this customer.
     @PostMapping("/logout-all")
     public Map<String, String> logoutAll() {
         authService.logoutAllSessions(currentUser.customerId());
