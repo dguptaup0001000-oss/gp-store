@@ -3,13 +3,19 @@ package com.gpstore.territory;
 import com.gpstore.entity.AssignmentReason;
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.entity.DeliverySubzone;
+import com.gpstore.repository.DeliveryRepository;
+import com.gpstore.repository.DeliverySubzoneRepository;
+import com.gpstore.repository.SubzoneBackupPartnerRepository;
+import com.gpstore.service.DeliveryEstimateService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -20,22 +26,34 @@ import static org.mockito.Mockito.when;
  * drawable map would look like a finished territory system while every
  * address still fails closed.
  *
- * Own Spring context (unique property below) so replacing TerritoryResolver
- * does not leak into TerritoryDispatchTest, which needs the real map.
+ * This is a constructor unit test on purpose. A @SpringBootTest that replaced
+ * TerritoryResolver with @MockitoBean shared enough of the cached application
+ * context that TerritoryDispatchTest saw a mock map on CI and picked the
+ * wrong rider. The gate does not need a database.
  */
-@SpringBootTest(properties = {
-        "outbox.initial-delay-ms=3600000",
-        "outbox.drain-interval-ms=3600000",
-        "payment.expiry-initial-delay-ms=3600000",
-        "idempotency.cleanup-initial-delay-ms=3600000",
-        "otp.cleanup-initial-delay-ms=3600000",
-        "delivery.late-flag-initial-delay-ms=3600000",
-        "gpstore.test.context=territory-dispatch-map-gate"
-})
+@ExtendWith(MockitoExtension.class)
 class TerritoryDispatchMapGateTest {
 
-    @MockitoBean private TerritoryResolver resolver;
-    @Autowired private TerritoryDispatchService dispatch;
+    @Mock private DeliverySubzoneRepository subzoneRepository;
+    @Mock private SubzoneBackupPartnerRepository backupRepository;
+    @Mock private DeliveryRepository deliveryRepository;
+    @Mock private DeliveryEstimateService estimateService;
+    @Mock private TerritoryResolver resolver;
+
+    private TerritoryDispatchService dispatch;
+
+    @BeforeEach
+    void buildTheService() {
+        dispatch = new TerritoryDispatchService(
+                subzoneRepository,
+                backupRepository,
+                deliveryRepository,
+                estimateService,
+                resolver,
+                true,
+                4.0,
+                0.8);
+    }
 
     @Test
     @DisplayName("mappedTerritoryCount=0 does not assign the primary, even if one is set")
@@ -61,6 +79,7 @@ class TerritoryDispatchMapGateTest {
         assertEquals(AssignmentReason.FALLBACK, decision.reason());
         assertTrue(decision.explanation().contains("mappedTerritoryCount=0"),
                 "the explanation must name the gate; was: " + decision.explanation());
+        verifyNoInteractions(subzoneRepository, backupRepository, deliveryRepository);
     }
 
     @Test
@@ -75,5 +94,6 @@ class TerritoryDispatchMapGateTest {
         assertTrue(decision.explanation().contains("mappedTerritoryCount=0"),
                 "an empty map is not the same as a hole in a finished map; was: "
                         + decision.explanation());
+        verifyNoInteractions(subzoneRepository, backupRepository, deliveryRepository);
     }
 }

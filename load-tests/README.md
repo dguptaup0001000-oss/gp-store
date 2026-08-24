@@ -50,21 +50,34 @@ between actions (`thinkTime()`) - the actual request rate that produces is rough
 achieved rate (`http_reqs` / test duration); read that number, don't infer it from the
 VU count.
 
-### Staged execution
+### Staged execution (required order)
 
-Run these in order, on a machine with a real network path to the target (not
-localhost), and only past the "browse, against a staging/dev target" tier with
-explicit approval - see the honesty section below for exactly why going straight to
-50k VUs from one machine, or against production, doesn't measure what it looks like
-it measures.
+Do **not** start at 1,000 or 5,000 VUs. A previous production run at that
+scale produced ~95–99% HTTP failures and 502/503s. That is overload, not a
+capacity rating, and it is **not** a reason to raise `DB_POOL_MAX_SIZE`.
 
-| Stage | Command | What it validates |
+Pass/fail for each stage (see `staged-capacity.js`): error rate < 2%,
+p95 < 2s, p99 < 4s, **zero** 502, 503, and network errors. Stop at the
+first failure; that VU count is the measured ceiling for that target.
+
+| Stage | VUs | How |
 |---|---|---|
-| 1,000 VU | `BROWSE_VUS=1000 CART_VUS=100 k6 run browse-cart-checkout.js` | Baseline - the number this whole ladder is measured against. Safe against production. |
-| 5,000 VU | `BROWSE_VUS=5000 CART_VUS=300 k6 run browse-cart-checkout.js` | Where p95 latency starts climbing, if it does. Prefer staging once you're sizing infrastructure changes off these numbers, since this is enough sustained load to be felt by real concurrent shoppers if run against production. |
-| 10,000 VU | `BROWSE_VUS=10000 CART_VUS=600 k6 run browse-cart-checkout.js` | Approaching a single k6 process's own realistic ceiling (see below) - watch k6's own CPU/memory, not just the target's, past this point. Staging only. |
-| 25,000 VU | Needs a distributed generator (k6 Cloud, or several self-hosted k6 instances behind a coordinator) - one machine can't reliably produce this much load itself. | Requires infrastructure already sized for this range (Phase 3 of the roadmap) - running it against today's single Render instance mostly re-confirms the 5k/10k findings, not new information. |
-| 50,000 VU | Same distributed-generator requirement as 25k, plus explicit sign-off before running - this is real production-scale load. | The actual target number. Only meaningful once infrastructure was sized for it - see below for why running this today would just measure today's infrastructure, not the app. |
+| A–D | 10, 25, 50, 100 | `BASE_URL=http://localhost:8080/v1 ./run-staged-capacity.sh` |
+| E–G | 250, 500, 1,000 | `STAGES="250" HOLD_TIME=1m ./run-staged-capacity.sh` on staging only |
+
+Browse-only probe (no checkout, no seeded accounts):
+
+```bash
+cd load-tests
+chmod +x run-staged-capacity.sh
+BASE_URL=http://localhost:8080/v1 HOLD_TIME=20s ./run-staged-capacity.sh
+```
+
+Record Hikari (`total/active/idle/waiting`), `pg_stat_activity`, CPU and
+RSS in the same window. k6 cannot see the pool.
+
+The older 5k/10k/25k/50k commands remain in `browse-cart-checkout.js` and
+must not be run against the live Render service.
 
 ## Quickstart (phone, using Termux - no k6)
 
