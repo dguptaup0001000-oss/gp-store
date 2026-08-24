@@ -9,6 +9,7 @@ import 'admin_coupon_list_screen.dart';
 import 'admin_customers_screen.dart';
 import 'admin_delivery_breaches_screen.dart';
 import 'admin_delivery_partners_screen.dart';
+import 'admin_delivery_pricing_screen.dart';
 import 'admin_inventory_screen.dart';
 import 'admin_order_list_screen.dart';
 import 'admin_payments_screen.dart';
@@ -109,6 +110,15 @@ class AdminHomeScreen extends StatelessWidget {
             subtitle: 'Manage your delivery team and availability',
             onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminDeliveryPartnersScreen()),
+            )),
+          ),
+          _tile(
+            context,
+            icon: Icons.local_shipping_outlined,
+            title: 'Delivery Pricing',
+            subtitle: 'Distance, weight, and free-delivery rules',
+            onTap: hapticize(() => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AdminDeliveryPricingScreen()),
             )),
           ),
           _tile(
