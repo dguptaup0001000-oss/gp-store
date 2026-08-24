@@ -5,6 +5,7 @@ import '../../products/domain/product_models.dart';
 import '../../orders/domain/order_models.dart';
 import '../data/admin_products_repository.dart';
 import '../data/delivery_pricing_repository.dart';
+import '../data/territory_repository.dart';
 import '../domain/admin_coupon_models.dart';
 import '../domain/admin_customer_model.dart';
 import '../domain/admin_payment_model.dart';
@@ -15,6 +16,7 @@ import '../domain/delivery_breach_model.dart';
 import '../domain/delivery_partner_models.dart';
 import '../domain/delivery_pricing_models.dart';
 import '../domain/inventory_models.dart';
+import '../domain/territory_models.dart';
 
 final adminProductsRepositoryProvider = Provider<AdminProductsRepository>((ref) {
   return AdminProductsRepository(apiClient: ref.watch(apiClientProvider));
@@ -267,4 +269,20 @@ final deliveryPricingSettingsProvider = FutureProvider.autoDispose<DeliveryPrici
 final adminOrderDeliveryBreakdownProvider =
     FutureProvider.autoDispose.family<DeliveryOrderBreakdown, int>((ref, orderId) {
   return ref.watch(deliveryPricingRepositoryProvider).getOrderBreakdown(orderId);
+});
+
+final territoryRepositoryProvider = Provider<TerritoryRepository>((ref) {
+  return TerritoryRepository(apiClient: ref.watch(apiClientProvider));
+});
+
+final territoryHealthProvider = FutureProvider.autoDispose<TerritoryHealth>((ref) {
+  return ref.watch(territoryRepositoryProvider).getHealth();
+});
+
+final territoryZonesProvider = FutureProvider.autoDispose<List<TerritoryZone>>((ref) {
+  return ref.watch(territoryRepositoryProvider).listZones();
+});
+
+final territorySubzonesProvider = FutureProvider.autoDispose<List<TerritorySubzone>>((ref) {
+  return ref.watch(territoryRepositoryProvider).listSubzones();
 });
