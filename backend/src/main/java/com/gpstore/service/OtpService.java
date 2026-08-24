@@ -11,9 +11,11 @@ import com.gpstore.otp.OtpProviderException;
 import com.gpstore.repository.OtpVerificationRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -56,7 +58,7 @@ public class OtpService {
             OtpVerificationRepository repository,
             OtpProvider otpProvider,
             PlatformTransactionManager transactionManager,
-            Clock clock,
+            ObjectProvider<Clock> clocks,
             @Value("${otp.expiry-minutes}") int expiryMinutes,
             @Value("${otp.max-verify-attempts}") int maxVerifyAttempts,
             @Value("${otp.max-sends-per-window}") int maxSendsPerWindow,
@@ -65,7 +67,8 @@ public class OtpService {
         this.repository = repository;
         this.otpProvider = otpProvider;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
-        this.clock = clock;
+        this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.clock = clocks.getIfAvailable(Clock::systemDefaultZone);
         this.expiryMinutes = Math.min(5, Math.max(1, expiryMinutes));
         this.maxVerifyAttempts = maxVerifyAttempts;
         this.maxSendsPerWindow = maxSendsPerWindow;
@@ -109,7 +112,7 @@ public class OtpService {
         String mobileE164 = IndianPhoneNumbers.normalizeTo91(rawPhone);
         log.info("OTP_REQUESTED phone={} purpose={}", IndianPhoneNumbers.mask(local10), purpose);
 
-        if (isWithinResendCooldown(local10)) {
+        if (isWithinResendCooldown(local10, purpose)) {
             log.info("OTP_RATE_LIMITED phone={} reason=cooldown", IndianPhoneNumbers.mask(local10));
             return GENERIC_REQUEST_MESSAGE;
         }
@@ -145,11 +148,11 @@ public class OtpService {
         return GENERIC_REQUEST_MESSAGE;
     }
 
-    private boolean isWithinResendCooldown(String local10) {
+    private boolean isWithinResendCooldown(String local10, OtpPurpose purpose) {
         if (resendCooldownSeconds <= 0) {
             return false;
         }
-        return repository.findLatestSentAt(local10)
+        return repository.findLatestSentAtForPurpose(local10, purpose)
                 .filter(sent -> sent.isAfter(now().minusSeconds(resendCooldownSeconds)))
                 .isPresent();
     }
@@ -164,6 +167,9 @@ public class OtpService {
         List<OtpVerification> open = repository.findByMobileNumberAndVerifiedFalseAndConsumedAtIsNull(local10);
         LocalDateTime consumedAt = now();
         for (OtpVerification previous : open) {
+            if (previous.getPurpose() == null) {
+                previous.setPurpose(OtpPurpose.LOGIN);
+            }
             previous.setConsumedAt(consumedAt);
             repository.save(previous);
         }
@@ -201,32 +207,35 @@ public class OtpService {
      * A LOGIN code cannot satisfy PASSWORD_RESET and vice versa. Wrong
      * attempts are counted and capped independently of the send rate limit.
      */
-    @Transactional
+    /**
+     * Verifies against the MOST RECENT open OTP for this number AND purpose.
+     * A LOGIN code cannot satisfy PASSWORD_RESET and vice versa. Wrong
+     * attempts are counted and capped independently of the send rate limit.
+     *
+     * Not {@code @Transactional}: a failed attempt must COMMIT the attempt
+     * counter. Throwing {@link BadRequestException} inside a transaction
+     * rolled the increment back, which made the brute-force cap a no-op.
+     */
     public void verifyOtp(String mobileNumber, String otpCode) {
         verifyOtp(mobileNumber, otpCode, OtpPurpose.LOGIN);
     }
 
-    @Transactional
     public void verifyOtp(String mobileNumber, String otpCode, OtpPurpose purpose) {
         String local10 = IndianPhoneNumbers.toLocal10(mobileNumber);
         String mobileE164 = IndianPhoneNumbers.normalizeTo91(mobileNumber);
 
-        OtpVerification entry = repository
-                .findFirstByMobileNumberAndPurposeAndVerifiedFalseAndConsumedAtIsNullOrderByCreatedAtDesc(
-                        local10, purpose)
-                .orElseThrow(() -> {
-                    log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=no_challenge",
-                            IndianPhoneNumbers.mask(local10), purpose);
-                    return new BadRequestException(INVALID_OTP_MESSAGE);
-                });
-
-        if (entry.getExpiresAt().isBefore(now())) {
+        ChallengeSnapshot snapshot = transactionTemplate.execute(status -> loadOpenChallenge(local10, purpose));
+        if (snapshot == null) {
+            log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=no_challenge",
+                    IndianPhoneNumbers.mask(local10), purpose);
+            throw new BadRequestException(INVALID_OTP_MESSAGE);
+        }
+        if (snapshot.expired()) {
             log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=expired",
                     IndianPhoneNumbers.mask(local10), purpose);
             throw new BadRequestException(INVALID_OTP_MESSAGE);
         }
-
-        if (entry.getAttempts() != null && entry.getAttempts() >= maxVerifyAttempts) {
+        if (snapshot.maxAttempts()) {
             log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=max_attempts",
                     IndianPhoneNumbers.mask(local10), purpose);
             throw new BadRequestException("Too many incorrect attempts - please request a new OTP");
@@ -234,12 +243,12 @@ public class OtpService {
 
         boolean matches;
         try {
-            if (OtpVerification.PROVIDER_MANAGED_HASH.equals(entry.getOtpHash())) {
+            if (OtpVerification.PROVIDER_MANAGED_HASH.equals(snapshot.otpHash())) {
                 matches = otpProvider.verify(mobileE164, otpCode, purpose);
-            } else if ("UNDELIVERED".equals(entry.getOtpHash())) {
+            } else if ("UNDELIVERED".equals(snapshot.otpHash())) {
                 matches = false;
             } else {
-                matches = entry.getOtpHash().equals(hash(otpCode));
+                matches = snapshot.otpHash().equals(hash(otpCode));
             }
         } catch (OtpProviderException ex) {
             log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=provider",
@@ -247,18 +256,47 @@ public class OtpService {
             throw new BadRequestException(GENERIC_SEND_FAILURE);
         }
 
-        if (!matches) {
-            entry.setAttempts(entry.getAttempts() == null ? 1 : entry.getAttempts() + 1);
-            repository.save(entry);
+        Boolean accepted = transactionTemplate.execute(status -> applyVerifyResult(snapshot.id(), matches));
+        if (!Boolean.TRUE.equals(accepted)) {
             log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=mismatch",
                     IndianPhoneNumbers.mask(local10), purpose);
             throw new BadRequestException(INVALID_OTP_MESSAGE);
         }
+        log.info("OTP_VERIFY_SUCCESS phone={} purpose={}", IndianPhoneNumbers.mask(local10), purpose);
+    }
 
+    private ChallengeSnapshot loadOpenChallenge(String local10, OtpPurpose purpose) {
+        return repository
+                .findFirstByMobileNumberAndPurposeAndVerifiedFalseAndConsumedAtIsNullOrderByCreatedAtDesc(
+                        local10, purpose)
+                .map(entry -> new ChallengeSnapshot(
+                        entry.getId(),
+                        entry.getOtpHash(),
+                        entry.getExpiresAt().isBefore(now()),
+                        entry.getAttempts() != null && entry.getAttempts() >= maxVerifyAttempts))
+                .orElse(null);
+    }
+
+    private boolean applyVerifyResult(Long id, boolean matches) {
+        OtpVerification entry = repository.findById(id).orElse(null);
+        if (entry == null || Boolean.TRUE.equals(entry.getVerified()) || entry.getConsumedAt() != null) {
+            return false;
+        }
+        if (entry.getExpiresAt().isBefore(now())) {
+            return false;
+        }
+        if (entry.getAttempts() != null && entry.getAttempts() >= maxVerifyAttempts) {
+            return false;
+        }
+        if (!matches) {
+            entry.setAttempts(entry.getAttempts() == null ? 1 : entry.getAttempts() + 1);
+            repository.save(entry);
+            return false;
+        }
         entry.setVerified(true);
         entry.setConsumedAt(now());
         repository.save(entry);
-        log.info("OTP_VERIFY_SUCCESS phone={} purpose={}", IndianPhoneNumbers.mask(local10), purpose);
+        return true;
     }
 
     @Transactional
@@ -310,5 +348,8 @@ public class OtpService {
     }
 
     private record PreparedChallenge(Long id, String plaintextOtp, boolean deliverSms) {
+    }
+
+    private record ChallengeSnapshot(Long id, String otpHash, boolean expired, boolean maxAttempts) {
     }
 }

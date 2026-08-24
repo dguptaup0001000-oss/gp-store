@@ -25,6 +25,10 @@ public interface OtpVerificationRepository extends JpaRepository<OtpVerification
     @Query("select max(o.lastSentAt) from OtpVerification o where o.mobileNumber = :mobileNumber")
     Optional<LocalDateTime> findLatestSentAt(@Param("mobileNumber") String mobileNumber);
 
+    @Query("select max(o.lastSentAt) from OtpVerification o where o.mobileNumber = :mobileNumber and o.purpose = :purpose")
+    Optional<LocalDateTime> findLatestSentAtForPurpose(
+            @Param("mobileNumber") String mobileNumber, @Param("purpose") OtpPurpose purpose);
+
     List<OtpVerification> findByMobileNumberAndVerifiedFalseAndConsumedAtIsNull(String mobileNumber);
 
     /** Used to rate-limit OTP sends per phone number - prevents SMS-cost abuse. */

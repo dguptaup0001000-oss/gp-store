@@ -17,6 +17,7 @@ import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.PasswordResetTokenRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -57,7 +58,7 @@ public class AuthService {
                         RefreshTokenService refreshTokenService,
                         OtpService otpService,
                         PasswordResetTokenRepository passwordResetTokenRepository,
-                        Clock clock,
+                        ObjectProvider<Clock> clocks,
                         @Value("${otp.password-reset-token-minutes:10}") int passwordResetTokenMinutes) {
         this.customerRepository = customerRepository;
         this.jwtService = jwtService;
@@ -65,7 +66,7 @@ public class AuthService {
         this.refreshTokenService = refreshTokenService;
         this.otpService = otpService;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
-        this.clock = clock;
+        this.clock = clocks.getIfAvailable(Clock::systemDefaultZone);
         this.passwordResetTokenMinutes = Math.max(1, passwordResetTokenMinutes);
     }
 

@@ -41,7 +41,7 @@ public class OtpVerification {
     private LocalDateTime createdAt;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 32)
+    @Column(length = 32)
     private OtpPurpose purpose = OtpPurpose.LOGIN;
 
     private LocalDateTime consumedAt;
