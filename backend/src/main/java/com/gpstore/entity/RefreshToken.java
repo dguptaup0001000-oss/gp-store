@@ -30,4 +30,13 @@ public class RefreshToken {
     private Boolean revoked = false;
 
     private LocalDateTime createdAt;
+
+    /**
+     * Tokens issued by the same login/refresh chain share a family id.
+     * Replaying a revoked token of the family revokes every live successor,
+     * so a stolen refresh token that is used after rotation cannot keep a
+     * second session alive.
+     */
+    @Column(length = 36)
+    private String familyId;
 }

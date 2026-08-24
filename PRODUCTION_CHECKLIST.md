@@ -92,3 +92,10 @@ Android apps do not use CORS.
 - Run 1,000+ VU load tests against the live Render URL. Use
   `load-tests/run-staged-capacity.sh` locally/staging, smallest stage first.
 - Merge or rewrite Flyway V2–V22.
+- Treat a leftover **Railway** GitHub status (`brilliant-spontaneity`) as a
+  required check. Disconnect that integration; production is Render.
+
+Release Android/web builds must pass `--dart-define=APP_ENV=production` (CI
+does this). Point them at a stable API host later by setting the GitHub
+variable `API_BASE_URL` (for example `https://api.gpstore.co.in/v1`) without
+changing Flutter repositories.

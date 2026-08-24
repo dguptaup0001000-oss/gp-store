@@ -44,7 +44,17 @@ def main() -> None:
         if v.returncode != 0:
             print(f"UNSIGNED_OR_INVALID {apk}")
             failed = True
-        debug = "CN=Android Debug" in (v.stdout or "")
+        out = v.stdout or ""
+        v1 = "Verified using v1 scheme (JAR signing): true" in out
+        v2 = "Verified using v2 scheme (APK Signature Scheme v2): true" in out
+        v3 = "Verified using v3 scheme (APK Signature Scheme v3): true" in out
+        print(f"SCHEMES v1={v1} v2={v2} v3={v3}")
+        if v.returncode == 0 and not v1:
+            print(
+                "NOTE: missing META-INF/*.RSA is v1 JAR signing. "
+                "Play accepts v2/v3. apksigner is the check, not unzipping META-INF."
+            )
+        debug = "CN=Android Debug" in out
         if debug:
             print(
                 "SIGNER=Android Debug — sideload/CI only. "

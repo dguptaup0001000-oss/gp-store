@@ -70,4 +70,28 @@ class AdminAuthorizationIntegrationTest {
         mockMvc.perform(get("/api/delivery-batches"))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    @WithMockUser(roles = "CUSTOMER")
+    void deliveryPricingAdminRejectsCustomerRole() throws Exception {
+        mockMvc.perform(get("/api/admin/delivery-pricing/settings"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "CUSTOMER")
+    void workerAdminRejectsCustomerRole() throws Exception {
+        mockMvc.perform(get("/api/admin/worker/orders/1/accountability"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "CUSTOMER")
+    void broadcastRejectsCustomerRole() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/notifications/broadcast")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"x\",\"message\":\"y\"}"))
+                .andExpect(status().isForbidden());
+    }
 }

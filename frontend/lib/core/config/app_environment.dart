@@ -44,11 +44,11 @@ enum AppEnvironment {
 
   /// Where this build's API lives.
   ///
-  /// PRODUCTION STILL POINTS AT RENDER, deliberately. The Oracle Mumbai box
-  /// is not deployed and not load-tested yet, and pointing production at a
-  /// host that does not answer would break every installed app for the sake
-  /// of being ready early. Change this one line once Oracle is serving and
-  /// has been tested - see deploy/DEPLOY-ARM64.md.
+  /// Override with `--dart-define=API_BASE_URL=https://api.example/v1` so a
+  /// future stable host (for example api.gpstore.co.in) does not require
+  /// scattered URL edits. Production's coded default remains the current
+  /// Render service until that host is live and pointed here via CI's
+  /// `API_BASE_URL` variable — not hardcoded throughout the app.
   String get baseUrl {
     const override = String.fromEnvironment('API_BASE_URL');
     if (override.isNotEmpty) return override;

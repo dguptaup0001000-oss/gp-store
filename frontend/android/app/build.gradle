@@ -84,7 +84,18 @@ android {
     }
 
     signingConfigs {
+        debug {
+            // Naive APK unzip audits look for META-INF/*.RSA (v1 JAR signing).
+            // AGP 8 defaults to v2-only, which is valid for Play but those
+            // audits report "unsigned". Keep v1+v2+v3 on every signing config.
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
+        }
         release {
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
             if (hasRealSigningConfig) {
                 storeFile rootProject.file(keystoreProperties["storeFile"])
                 storePassword keystoreProperties["storePassword"]
@@ -119,6 +130,12 @@ android {
         }
     }
 
+    androidResources {
+        // packaging.resources.excludes does not strip Flutter package assets.
+        // BLEServer.exe is Windows-only (win_ble via the thermal printer plugin).
+        ignoreAssetsPattern "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:BLEServer.exe"
+    }
+
     // Uncompressed native libs, page-aligned by AGP (zipalign is part of
     // assembleRelease — do not unzip/repack/sign by hand afterwards).
     packaging {
@@ -126,8 +143,6 @@ android {
             useLegacyPackaging false
         }
         resources {
-            // print_bluetooth_thermal pulls win_ble, which ships a Windows
-            // BLEServer.exe into Flutter assets. Android cannot run it.
             excludes += ["**/BLEServer.exe", "**/win_ble/assets/**"]
         }
     }
