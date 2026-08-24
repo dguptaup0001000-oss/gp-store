@@ -52,9 +52,10 @@ VU count.
 
 ### Staged execution (required order)
 
-Do **not** start at 1,000 or 5,000 VUs. A previous production run at that
-scale produced ~95–99% HTTP failures and 502/503s. That is overload, not a
-capacity rating, and it is **not** a reason to raise `DB_POOL_MAX_SIZE`.
+Do **not** start at 1,000 or 5,000 VUs against one Render instance.
+A previous production run at ~5,005 VUs produced **95% HTTP failures and
+~325k 502s**. That is overload of a 40-thread / 10-connection container,
+not a code rating, and it is **not** a reason to raise `DB_POOL_MAX_SIZE`.
 
 Pass/fail for each stage (see `staged-capacity.js`): error rate < 2%,
 p95 < 2s, p99 < 4s, **zero** 502, 503, and network errors. Stop at the

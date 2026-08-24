@@ -186,4 +186,13 @@ class ResourceCeilingTest {
                         + "response has been serialised - so on a pool of ten, threads wait on each "
                         + "other rather than on the database. That is the shape of the 21.6 s p95.");
     }
+
+    @Test
+    @DisplayName("JSON responses are gzipped so a browse flood does not ship 200 GB uncompressed")
+    void jsonIsCompressed() throws IOException {
+        String text = properties();
+        assertTrue(text.contains("server.compression.enabled=true"),
+                "HTTP compression is off. Catalog JSON is large enough that a few thousand concurrent "
+                        + "browsers saturate the instance with payload, not with queries.");
+    }
 }
