@@ -1,14 +1,15 @@
 # Deploying GP-Store to Render (app) + Supabase (database)
 
-This project no longer uses Railway for anything - not app hosting, not the
-database. Render hosts the Spring Boot app; Supabase remains the database,
-unchanged from before.
+Operator checklist (what is code vs a dashboard click, and the
+`DDL_AUTO=validate` step): see the repo-root `PRODUCTION_CHECKLIST.md`.
+
+This project does not use Railway for app hosting or the database.
 
 Why this required almost no code changes: the app was already
 platform-agnostic before this migration - it reads `PORT` from the
 environment (`server.port=${PORT:8081}`) rather than hardcoding it, binds to
 all network interfaces by default, and builds from a standard multi-stage
-Dockerfile. Render supports all three the same way Railway did. The only
+Dockerfile. Render supports all three the same way. The only
 things that actually change are *where* you click to set environment
 variables and *how* you get a public URL - not the application itself.
 
@@ -40,7 +41,7 @@ variables and *how* you get a public URL - not the application itself.
 7. Set these environment variables (Render → your service → **Environment**
    tab), using your real Supabase and Redis values:
    ```
-   DB_URL=jdbc:postgresql://db.ckkksweijbdccvvmamid.supabase.co:5432/postgres?sslmode=require
+   DB_URL=jdbc:postgresql://db.<project-ref>.supabase.co:5432/postgres?sslmode=require
    DB_USERNAME=postgres
    DB_PASSWORD=<your Supabase database password>
    FLYWAY_ENABLED=true
@@ -160,12 +161,12 @@ Path**:
 `application.properties` if that ever changes.) This endpoint is already
 public in `SecurityConfig` - no code change needed.
 
-## Free tier behavior (this is genuinely different from Railway)
+## Free tier behavior
 
 Render's free web services **spin down after ~15 minutes of no traffic** and
 take roughly 30-60 seconds to cold-start on the next incoming request.
-Railway's free trial credit didn't do this - it stayed warm until the credit
-ran out. Practically: if you test the API, wait 20 minutes, then test again,
+A platform that stays warm until credits run out will not show this; Render
+free does. Practically: if you test the API, wait 20 minutes, then test again,
 the first request will hang for up to a minute before responding. That's
 expected, not a bug. If this matters for your launch (customers hitting a
 slow first request), you'll want a paid instance type, which stays warm.
@@ -173,7 +174,7 @@ slow first request), you'll want a paid instance type, which stays warm.
 ## After that
 
 Every push to your main branch auto-redeploys - Render rebuilds the
-Dockerfile and restarts the service, same auto-deploy model Railway used.
+Dockerfile and restarts the service.
 `.github/workflows/ci.yml` still only catches bugs via build/test *before*
 Render ever sees the code - no separate deploy job needed there.
 

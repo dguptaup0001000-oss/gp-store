@@ -275,7 +275,7 @@ jobs:
         # fail until you set this. One-time setup: this repo's Settings ->
         # Secrets and variables -> Actions -> Variables tab, name:
         # API_BASE_URL, value: your deployed backend's URL (e.g. from
-        # Railway) + /v1.
+        # Render) + /v1.
         run: |
           if [ -n "${{ vars.API_BASE_URL }}" ]; then
             flutter build web --release \

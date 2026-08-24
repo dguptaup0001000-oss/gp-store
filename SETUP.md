@@ -79,11 +79,11 @@ optional cleanup:
    - Testing on a **physical phone**: use your computer's real LAN IP
      instead (e.g. `http://192.168.1.x:8081/v1`), and make sure your phone
      and backend are on the same network.
-   - Testing against your **deployed Railway backend**: use that real HTTPS
+   - Testing against your **deployed Render backend**: use that real HTTPS
      URL instead.
 
 4. **Backend must actually be running and reachable** at whatever URL you
-   pass in step 3 - via `docker compose up`, a deployed Railway instance, or
+   pass in step 3 - via `docker compose up`, a deployed Render instance, or
    similar. This app has nothing to talk to otherwise.
 
 ## Platform folders (android/, web/) - what's real and what needs one more step
@@ -135,7 +135,7 @@ a text format, not binary) - so `web/` has no placeholder gaps at all.
 flutter build web --release
 ```
 Output lands in `build/web/` - deploy that folder's contents to any static
-host (Netlify, Vercel, GitHub Pages, Railway's static hosting, etc.).
+host (Netlify, Vercel, GitHub Pages, etc.).
 
 ### iOS, macOS, Windows, Linux - deliberately not hand-written here
 
@@ -176,7 +176,8 @@ call (login, browsing products, everything) will fail until they know
 where your real backend actually lives. The app's own coded default
 (`10.0.2.2`, the Android *emulator's* localhost alias) is unreachable from
 both a real phone and a public website. Once your backend is deployed
-somewhere reachable (e.g. Railway, per the backend's own DEPLOYMENT.md),
+somewhere reachable (e.g. Render, per [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md)
+and `backend/DEPLOYMENT.md`),
 set it once: this repo's Settings -> Secrets and variables -> Actions ->
 Variables tab -> New repository variable -> name `API_BASE_URL`, value
 your backend's real URL with `/v1` on the end. Every build after that
