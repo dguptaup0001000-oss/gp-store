@@ -11,15 +11,30 @@ import 'package:gpstore/core/storage/token_storage.dart';
 /// (which ApiClient's interceptor calls on every request) would throw
 /// MissingPluginException. This stubs the channel to behave like "nothing
 /// stored yet", which is exactly what a fresh test run should simulate.
-void setUpFakeSecureStorage() {
+void setUpFakeSecureStorage({Map<String, String>? seed}) {
   TestWidgetsFlutterBinding.ensureInitialized();
+  final values = seed ?? <String, String>{};
 
   const channel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
     channel,
     (MethodCall call) async {
-      if (call.method == 'read') return null;
-      if (call.method == 'readAll') return <String, String>{};
+      final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? const {};
+      switch (call.method) {
+        case 'read':
+          return values[args['key'] as String];
+        case 'readAll':
+          return Map<String, String>.from(values);
+        case 'write':
+          values[args['key'] as String] = args['value'] as String;
+          return null;
+        case 'delete':
+          values.remove(args['key'] as String);
+          return null;
+        case 'deleteAll':
+          values.clear();
+          return null;
+      }
       return null;
     },
   );

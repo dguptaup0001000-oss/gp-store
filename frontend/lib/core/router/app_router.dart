@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/auth_providers.dart';
+import '../../features/auth/presentation/forgot_password_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/otp_login_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
@@ -41,6 +42,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(path: '/login/otp', builder: (context, state) => const OtpLoginScreen()),
+      GoRoute(path: '/login/forgot', builder: (context, state) => const ForgotPasswordScreen()),
       GoRoute(path: '/register', builder: (context, state) => const RegisterScreen()),
     ],
   );
@@ -70,7 +72,10 @@ String? resolveStartupRedirect({
   required String location,
 }) {
   final isAuthRoute =
-      location == '/login' || location == '/login/otp' || location == '/register';
+      location == '/login' ||
+      location == '/login/otp' ||
+      location == '/login/forgot' ||
+      location == '/register';
   final isSplashRoute = location == '/splash';
 
   // STILL CHECKING THE STORED SESSION - go to the splash, and note that

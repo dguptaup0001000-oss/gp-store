@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.auth.IndianPhoneNumbers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,6 +14,10 @@ import java.nio.charset.StandardCharsets;
 import java.net.URLEncoder;
 import java.time.Duration;
 
+/**
+ * Legacy MSG91 send helper. OTP login/reset now go through {@code OtpProvider}.
+ * Kept so any leftover caller still cannot log an OTP value.
+ */
 @Service
 public class SmsService {
 
@@ -37,36 +42,25 @@ public class SmsService {
         this.senderId = senderId;
         this.sendingEnabled = sendingEnabled;
         this.requestTimeout = Duration.ofSeconds(Math.max(1, requestTimeoutSeconds));
-        // TIMEOUTS ARE A CAPACITY DECISION, not just a reliability one. This
-        // call runs on a Tomcat worker thread and there are forty of those,
-        // so every second MSG91 spends not answering is a second one of the
-        // forty cannot serve anybody else. Ten plus ten was twenty seconds of
-        // a worker per stuck send; five plus five is ten, and MSG91 answering
-        // from India in over five seconds has already failed the customer,
-        // who will tap resend long before then. Both are env-overridable so a
-        // genuinely slow link can be given more without a rebuild.
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(Math.max(1, connectTimeoutSeconds)))
                 .build();
     }
 
-    /**
-     * Sends via MSG91's OTP API. When otp.sms-sending-enabled=false (the dev
-     * default), this only logs the code instead of actually sending/spending
-     * money - lets you test the full login flow before MSG91/DLT are set up.
-     * Real production use REQUIRES setting OTP_SMS_SENDING_ENABLED=true plus
-     * your real MSG91 auth key and DLT-registered template ID.
-     */
     public void sendOtp(String mobileNumber, String otpCode) {
         if (!sendingEnabled) {
-            log.info("[DEV MODE - no SMS sent] OTP for {}: {}", mobileNumber, otpCode);
+            log.info("[DEV MODE - no SMS sent] OTP requested for {}", IndianPhoneNumbers.mask(mobileNumber));
+            return;
+        }
+        if (otpCode == null || otpCode.isBlank()) {
+            log.info("OTP_SEND_FAILURE phone={} reason=missing_code", IndianPhoneNumbers.mask(mobileNumber));
             return;
         }
 
         try {
             String url = "https://control.msg91.com/api/v5/otp"
                     + "?template_id=" + URLEncoder.encode(templateId, StandardCharsets.UTF_8)
-                    + "&mobile=" + URLEncoder.encode(mobileNumber, StandardCharsets.UTF_8)
+                    + "&mobile=" + URLEncoder.encode(IndianPhoneNumbers.normalizeTo91(mobileNumber), StandardCharsets.UTF_8)
                     + "&otp=" + URLEncoder.encode(otpCode, StandardCharsets.UTF_8)
                     + "&sender=" + URLEncoder.encode(senderId, StandardCharsets.UTF_8);
 
@@ -81,15 +75,11 @@ public class SmsService {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
-                log.error("MSG91 OTP send failed for {}: status={}, body={}",
-                        mobileNumber, response.statusCode(), response.body());
+                log.error("MSG91 OTP send failed for {}: status={}",
+                        IndianPhoneNumbers.mask(mobileNumber), response.statusCode());
             }
         } catch (Exception ex) {
-            // Deliberately doesn't throw - a transient SMS provider outage
-            // shouldn't turn into a 500 the customer can't recover from; they
-            // can just tap "resend" (which is rate-limited separately, see
-            // OtpService). The failure IS logged so it's not silently lost.
-            log.error("Failed to send OTP to {}", mobileNumber, ex);
+            log.error("Failed to send OTP to {}", IndianPhoneNumbers.mask(mobileNumber), ex);
         }
     }
 }

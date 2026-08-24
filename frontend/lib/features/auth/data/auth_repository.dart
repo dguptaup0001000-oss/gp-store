@@ -102,23 +102,51 @@ class AuthRepository {
     await tokenStorage.clear();
   }
 
-  /// Sends a login OTP to this phone number - works whether it's a new or
-  /// existing customer (the account itself is only created/found on verify).
-  Future<void> sendOtp({required String mobileNumber}) async {
-    await apiClient.dio.post('/api/auth/otp/send', data: {'mobileNumber': mobileNumber});
+  /// Sends a login OTP. Uses the purpose-separated Part 1 endpoint so a
+  /// LOGIN code cannot later be used to reset a password.
+  Future<void> requestLoginOtp({required String phone}) async {
+    await apiClient.dio.post('/api/auth/otp/login/request', data: {'phone': phone});
   }
 
-  /// Verifies the OTP and logs in - the backend auto-creates a bare account
-  /// if this phone number has never been seen before.
-  Future<AuthResponse> verifyOtp({required String mobileNumber, required String otp}) async {
+  /// Verifies a LOGIN OTP and stores the existing JWT pair.
+  Future<AuthResponse> verifyLoginOtp({required String phone, required String otp}) async {
     final response = await apiClient.dio.post(
-      '/api/auth/otp/verify',
-      data: {'mobileNumber': mobileNumber, 'otp': otp},
+      '/api/auth/otp/login/verify',
+      data: {'phone': phone, 'otp': otp},
     );
 
     final auth = AuthResponse.fromJson(response.data as Map<String, dynamic>);
     await tokenStorage.saveTokens(accessToken: auth.token, refreshToken: auth.refreshToken);
     return auth;
+  }
+
+  Future<void> requestPasswordResetOtp({required String phone}) async {
+    await apiClient.dio.post('/api/auth/password-reset/request', data: {'phone': phone});
+  }
+
+  /// Returns a short-lived reset token. This is not a session JWT and must
+  /// not be written to secure storage or logs.
+  Future<String> verifyPasswordResetOtp({required String phone, required String otp}) async {
+    final response = await apiClient.dio.post(
+      '/api/auth/password-reset/verify',
+      data: {'phone': phone, 'otp': otp},
+    );
+    final body = response.data as Map<String, dynamic>;
+    final token = body['reset_token'] as String? ?? body['resetToken'] as String?;
+    if (token == null || token.isEmpty) {
+      throw ApiException(statusCode: 400, message: 'Invalid or expired OTP');
+    }
+    return token;
+  }
+
+  Future<void> completePasswordReset({
+    required String resetToken,
+    required String newPassword,
+  }) async {
+    await apiClient.dio.post('/api/auth/password-reset/complete', data: {
+      'reset_token': resetToken,
+      'new_password': newPassword,
+    });
   }
 
   Future<bool> hasStoredSession() async {
@@ -136,21 +164,6 @@ class AuthRepository {
   Future<void> changePassword({String? currentPassword, required String newPassword}) async {
     await apiClient.dio.put('/api/auth/change-password', data: {
       'currentPassword': currentPassword,
-      'newPassword': newPassword,
-    });
-  }
-
-  /// Forgot-password flow - proves identity via OTP to the account's own
-  /// mobile number (there's no email infrastructure in this system). No
-  /// auth needed - this IS the "I'm locked out" recovery path.
-  Future<void> resetPasswordWithOtp({
-    required String mobileNumber,
-    required String otp,
-    required String newPassword,
-  }) async {
-    await apiClient.dio.post('/api/auth/reset-password-with-otp', data: {
-      'mobileNumber': mobileNumber,
-      'otp': otp,
       'newPassword': newPassword,
     });
   }

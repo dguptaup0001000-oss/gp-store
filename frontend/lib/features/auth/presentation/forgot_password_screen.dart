@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../auth/presentation/auth_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
+import '../domain/indian_phone.dart';
+import '../domain/otp_user_messages.dart';
+import 'password_reset_providers.dart';
 
 class ForgotPasswordScreen extends ConsumerStatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -15,132 +18,218 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   final _mobileController = TextEditingController();
   final _otpController = TextEditingController();
   final _newPasswordController = TextEditingController();
-
-  bool _otpSent = false;
-  bool _isSending = false;
-  bool _isResetting = false;
+  final _confirmPasswordController = TextEditingController();
+  final _otpFocus = FocusNode();
+  bool _obscureNew = true;
+  bool _obscureConfirm = true;
 
   @override
   void dispose() {
     _mobileController.dispose();
     _otpController.dispose();
     _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
+    _otpFocus.dispose();
     super.dispose();
   }
 
   Future<void> _sendOtp() async {
-    final mobile = _mobileController.text.trim();
-    if (!RegExp(r'^[6-9]\d{9}$').hasMatch(mobile)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid 10-digit mobile number')));
+    final success = await ref.read(passwordResetControllerProvider.notifier).requestOtp(_mobileController.text);
+    if (!mounted) return;
+    if (success) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _otpFocus.requestFocus();
+      });
       return;
     }
-
-    setState(() => _isSending = true);
-
-    try {
-      await ref.read(authRepositoryProvider).sendOtp(mobileNumber: mobile);
-      if (!mounted) return;
-      setState(() => _otpSent = true);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
-    } finally {
-      if (mounted) setState(() => _isSending = false);
-    }
+    _showError();
   }
 
-  Future<void> _resetPassword() async {
+  Future<void> _verifyOtp() async {
     if (_otpController.text.length != 6) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter the 6-digit code')));
       return;
     }
-    if (_newPasswordController.text.length < 8) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password must be at least 8 characters')));
-      return;
-    }
+    final success = await ref.read(passwordResetControllerProvider.notifier).verifyOtp(_otpController.text.trim());
+    if (!mounted || success) return;
+    _showError();
+  }
 
-    setState(() => _isResetting = true);
-
-    try {
-      await ref.read(authRepositoryProvider).resetPasswordWithOtp(
-            mobileNumber: _mobileController.text.trim(),
-            otp: _otpController.text.trim(),
-            newPassword: _newPasswordController.text,
-          );
-      if (!mounted) return;
+  Future<void> _complete() async {
+    final success = await ref.read(passwordResetControllerProvider.notifier).complete(
+          newPassword: _newPasswordController.text,
+          confirmPassword: _confirmPasswordController.text,
+        );
+    if (!mounted) return;
+    if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password reset - you can now log in with your new password')),
+        const SnackBar(content: Text(OtpUserMessages.resetSuccess)),
       );
       Navigator.of(context).pop();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
-    } finally {
-      if (mounted) setState(() => _isResetting = false);
+      return;
     }
+    _showError();
+  }
+
+  void _showError() {
+    final error = ref.read(passwordResetControllerProvider).errorMessage;
+    if (error == null || error.isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
   }
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(passwordResetControllerProvider);
+    final sending = state.step == PasswordResetStep.sendingOtp;
+    final verifying = state.step == PasswordResetStep.verifyingOtp;
+    final completing = state.step == PasswordResetStep.completing;
+    final phoneStep = state.step == PasswordResetStep.enteringPhone || sending;
+    final otpStep = state.step == PasswordResetStep.otpSent || verifying;
+    final passwordStep = state.step == PasswordResetStep.settingPassword || completing;
+    final masked = state.mobileNumber == null ? '******' : IndianPhone.mask(state.mobileNumber!);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Reset Password')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                _otpSent
-                    ? 'Enter the code sent to +91 ${_mobileController.text.trim()}'
-                    : "Enter your account's mobile number - we'll send a code to reset your password",
+                phoneStep
+                    ? "Enter your account's mobile number. If it is eligible, we'll send a reset code."
+                    : otpStep
+                        ? 'Enter the OTP sent to $masked'
+                        : 'Choose a new password',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 24),
-              TextField(
-                controller: _mobileController,
-                enabled: !_otpSent,
-                keyboardType: TextInputType.phone,
-                maxLength: 10,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(labelText: 'Mobile number', prefixText: '+91 ', counterText: ''),
-              ),
-              if (!_otpSent) ...[
+              if (phoneStep) ...[
+                Semantics(
+                  label: 'Indian mobile number',
+                  textField: true,
+                  child: TextField(
+                    controller: _mobileController,
+                    autofocus: true,
+                    enabled: !sending,
+                    keyboardType: TextInputType.phone,
+                    autofillHints: const [AutofillHints.telephoneNumber],
+                    maxLength: 10,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      labelText: 'Mobile number',
+                      prefixText: '+91 ',
+                      counterText: '',
+                    ),
+                    onSubmitted: (_) => _sendOtp(),
+                  ),
+                ),
                 const SizedBox(height: 16),
                 FilledButton(
-                  onPressed: _isSending ? null : _sendOtp,
-                  child: _isSending
+                  onPressed: sending ? null : hapticize(() { _sendOtp(); }),
+                  child: sending
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Send Code'),
+                      : const Text('Send OTP'),
                 ),
-              ] else ...[
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _otpController,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 22, letterSpacing: 6),
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(labelText: '6-digit code', counterText: ''),
+              ] else if (otpStep) ...[
+                Semantics(
+                  label: 'Six digit one time password',
+                  textField: true,
+                  child: TextField(
+                    controller: _otpController,
+                    focusNode: _otpFocus,
+                    keyboardType: TextInputType.number,
+                    autofillHints: const [AutofillHints.oneTimeCode],
+                    maxLength: 6,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 22, letterSpacing: 6),
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(labelText: '6-digit code', counterText: ''),
+                    onChanged: (value) {
+                      if (value.length == 6 && !verifying) _verifyOtp();
+                    },
+                  ),
                 ),
+                if (state.errorMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    state.errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ],
                 const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: verifying ? null : hapticize(() { _verifyOtp(); }),
+                  child: verifying
+                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Verify'),
+                ),
+                const SizedBox(height: 8),
+                if (state.resendSecondsRemaining > 0)
+                  Text(
+                    'Resend code in ${state.resendSecondsRemaining}s',
+                    textAlign: TextAlign.center,
+                  )
+                else
+                  TextButton(
+                    onPressed: verifying ? null : hapticize(() {
+                      _otpController.clear();
+                      ref.read(passwordResetControllerProvider.notifier).resendOtp();
+                    }),
+                    child: const Text('Resend OTP'),
+                  ),
+                TextButton(
+                  onPressed: verifying
+                      ? null
+                      : hapticize(() {
+                          _otpController.clear();
+                          ref.read(passwordResetControllerProvider.notifier).backToPhone();
+                        }),
+                  child: const Text('Use a different number'),
+                ),
+              ] else if (passwordStep) ...[
                 TextField(
                   controller: _newPasswordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'New password'),
+                  obscureText: _obscureNew,
+                  autofillHints: const [AutofillHints.newPassword],
+                  decoration: InputDecoration(
+                    labelText: 'New password',
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscureNew ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                      onPressed: hapticize(() => setState(() => _obscureNew = !_obscureNew)),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _isResetting ? null : _resetPassword,
-                  child: _isResetting
-                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Reset Password'),
+                TextField(
+                  controller: _confirmPasswordController,
+                  obscureText: _obscureConfirm,
+                  decoration: InputDecoration(
+                    labelText: 'Confirm password',
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscureConfirm ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                      onPressed: hapticize(() => setState(() => _obscureConfirm = !_obscureConfirm)),
+                    ),
+                  ),
                 ),
-                TextButton(
-                  onPressed: _isSending ? null : _sendOtp,
-                  child: const Text('Resend code'),
+                if (state.errorMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    state.errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: completing ? null : hapticize(() { _complete(); }),
+                  child: completing
+                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Reset password'),
                 ),
               ],
             ],

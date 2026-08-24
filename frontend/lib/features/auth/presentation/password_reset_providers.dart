@@ -7,31 +7,39 @@ import '../domain/indian_phone.dart';
 import '../domain/otp_user_messages.dart';
 import 'auth_providers.dart';
 
-enum OtpFlowStep { enteringPhone, sendingOtp, otpSent, verifying }
+enum PasswordResetStep {
+  enteringPhone,
+  sendingOtp,
+  otpSent,
+  verifyingOtp,
+  settingPassword,
+  completing,
+  success,
+}
 
-class OtpFlowState {
-  const OtpFlowState({
-    this.step = OtpFlowStep.enteringPhone,
+class PasswordResetState {
+  const PasswordResetState({
+    this.step = PasswordResetStep.enteringPhone,
     this.mobileNumber,
     this.errorMessage,
     this.resendSecondsRemaining = 0,
   });
 
-  final OtpFlowStep step;
+  final PasswordResetStep step;
   final String? mobileNumber;
   final String? errorMessage;
   final int resendSecondsRemaining;
 
   bool get canResend =>
-      step == OtpFlowStep.otpSent && resendSecondsRemaining <= 0;
+      step == PasswordResetStep.otpSent && resendSecondsRemaining <= 0;
 
-  OtpFlowState copyWith({
-    OtpFlowStep? step,
+  PasswordResetState copyWith({
+    PasswordResetStep? step,
     String? mobileNumber,
     String? errorMessage,
     int? resendSecondsRemaining,
   }) {
-    return OtpFlowState(
+    return PasswordResetState(
       step: step ?? this.step,
       mobileNumber: mobileNumber ?? this.mobileNumber,
       errorMessage: errorMessage,
@@ -40,21 +48,20 @@ class OtpFlowState {
   }
 }
 
-/// Screen-local: only governs the phone-entry -> OTP-sent -> verifying flow
-/// itself. Once verification succeeds, it hands off to AuthController (the
-/// single source of truth for "is anyone logged in") via setAuthenticated -
-/// this controller doesn't duplicate that state.
-class OtpFlowController extends StateNotifier<OtpFlowState> {
-  OtpFlowController(this._ref) : super(const OtpFlowState());
+/// Forgot-password flow. The short-lived reset token stays on this
+/// controller only — never in [PasswordResetState], logs, or secure storage.
+class PasswordResetController extends StateNotifier<PasswordResetState> {
+  PasswordResetController(this._ref) : super(const PasswordResetState());
 
   final Ref _ref;
   DateTime? _sentAt;
   Timer? _countdown;
+  String? _resetToken;
 
   static const resendCooldown = Duration(seconds: 45);
   static const otpLifetime = Duration(minutes: 5);
 
-  Future<bool> sendOtp(String mobileNumber) async {
+  Future<bool> requestOtp(String mobileNumber) async {
     final local = IndianPhone.toLocal10(mobileNumber);
     if (local == null) {
       state = state.copyWith(errorMessage: OtpUserMessages.invalidPhone);
@@ -62,16 +69,17 @@ class OtpFlowController extends StateNotifier<OtpFlowState> {
     }
 
     state = state.copyWith(
-      step: OtpFlowStep.sendingOtp,
+      step: PasswordResetStep.sendingOtp,
       mobileNumber: local,
       errorMessage: null,
     );
 
     try {
-      await _ref.read(authRepositoryProvider).requestLoginOtp(phone: local);
+      await _ref.read(authRepositoryProvider).requestPasswordResetOtp(phone: local);
       _sentAt = DateTime.now();
+      _resetToken = null;
       state = state.copyWith(
-        step: OtpFlowStep.otpSent,
+        step: PasswordResetStep.otpSent,
         resendSecondsRemaining: resendCooldown.inSeconds,
       );
       _startCountdown();
@@ -79,7 +87,7 @@ class OtpFlowController extends StateNotifier<OtpFlowState> {
       return true;
     } catch (e) {
       state = state.copyWith(
-        step: OtpFlowStep.enteringPhone,
+        step: PasswordResetStep.enteringPhone,
         errorMessage: OtpUserMessages.fromError(e),
       );
       return false;
@@ -89,40 +97,71 @@ class OtpFlowController extends StateNotifier<OtpFlowState> {
   Future<bool> resendOtp() async {
     final phone = state.mobileNumber;
     if (phone == null || !state.canResend) return false;
-    return sendOtp(phone);
+    return requestOtp(phone);
   }
 
   Future<bool> verifyOtp(String otp) async {
     if (state.mobileNumber == null) return false;
-
-    state = state.copyWith(step: OtpFlowStep.verifying, errorMessage: null);
+    state = state.copyWith(step: PasswordResetStep.verifyingOtp, errorMessage: null);
 
     try {
-      final auth = await _ref.read(authRepositoryProvider).verifyLoginOtp(
+      _resetToken = await _ref.read(authRepositoryProvider).verifyPasswordResetOtp(
             phone: state.mobileNumber!,
             otp: otp,
           );
-
       _countdown?.cancel();
-      _ref.read(authControllerProvider.notifier).setAuthenticated(auth);
-      HapticFeedback.mediumImpact();
+      state = state.copyWith(step: PasswordResetStep.settingPassword);
+      HapticFeedback.lightImpact();
       return true;
     } catch (e) {
       final expired = _sentAt != null && DateTime.now().difference(_sentAt!) >= otpLifetime;
       state = state.copyWith(
-        step: OtpFlowStep.otpSent,
+        step: PasswordResetStep.otpSent,
         errorMessage: OtpUserMessages.fromError(e, treatAsExpired: expired),
       );
       return false;
     }
   }
 
-  /// Lets the user go back and try a different number without carrying over
-  /// stale error state.
-  void resetToPhoneEntry() {
+  Future<bool> complete({required String newPassword, required String confirmPassword}) async {
+    if (newPassword.length < 8) {
+      state = state.copyWith(errorMessage: OtpUserMessages.passwordTooShort);
+      return false;
+    }
+    if (newPassword != confirmPassword) {
+      state = state.copyWith(errorMessage: OtpUserMessages.passwordMismatch);
+      return false;
+    }
+    final token = _resetToken;
+    if (token == null) {
+      state = state.copyWith(errorMessage: OtpUserMessages.resetTokenInvalid);
+      return false;
+    }
+
+    state = state.copyWith(step: PasswordResetStep.completing, errorMessage: null);
+    try {
+      await _ref.read(authRepositoryProvider).completePasswordReset(
+            resetToken: token,
+            newPassword: newPassword,
+          );
+      _resetToken = null;
+      state = state.copyWith(step: PasswordResetStep.success);
+      HapticFeedback.mediumImpact();
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        step: PasswordResetStep.settingPassword,
+        errorMessage: OtpUserMessages.fromError(e),
+      );
+      return false;
+    }
+  }
+
+  void backToPhone() {
     _countdown?.cancel();
     _sentAt = null;
-    state = const OtpFlowState();
+    _resetToken = null;
+    state = const PasswordResetState();
   }
 
   /// Widget tests cannot fake [DateTime.now]; this forces the expiry path.
@@ -146,11 +185,12 @@ class OtpFlowController extends StateNotifier<OtpFlowState> {
   @override
   void dispose() {
     _countdown?.cancel();
+    _resetToken = null;
     super.dispose();
   }
 }
 
-final otpFlowControllerProvider =
-    StateNotifierProvider.autoDispose<OtpFlowController, OtpFlowState>((ref) {
-  return OtpFlowController(ref);
+final passwordResetControllerProvider =
+    StateNotifierProvider.autoDispose<PasswordResetController, PasswordResetState>((ref) {
+  return PasswordResetController(ref);
 });

@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 
 import 'auth_providers.dart';
-import 'forgot_password_screen.dart';
 import '../../../core/util/haptic_widgets.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -207,9 +206,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 const Spacer(),
                                 TextButton(
                                   style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
-                                  onPressed: hapticize(() => Navigator.of(context).push(
-                                    MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
-                                  )),
+                                  onPressed: hapticize(() => context.push('/login/forgot')),
                                   child: const Text('Forgot password?', style: TextStyle(fontSize: 13)),
                                 ),
                               ],

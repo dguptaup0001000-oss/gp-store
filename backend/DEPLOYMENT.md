@@ -90,6 +90,13 @@ variables and *how* you get a public URL - not the application itself.
    looking wrong. Failing at boot is recoverable in minutes; running on it is
    an authentication bypass that could go unnoticed indefinitely.
 
+   Production OTP SMS uses MSG91. Set `MSG91_ENABLED=true` (or
+   `OTP_SMS_SENDING_ENABLED=true`), `MSG91_AUTH_KEY`, and
+   `MSG91_OTP_TEMPLATE_ID` (or `MSG91_TEMPLATE_ID`) in Render. Production
+   refuses to boot on the local mock provider or with a missing Auth Key.
+   Do not put MSG91 credentials in Flutter. Operator steps:
+   `docs/MSG91_OTP_SETUP.md`.
+
    This repository does **not** set Render environment variables. Setting
    `DDL_AUTO=validate` remains a dashboard change. Do it only after the
    `schema-migrate` CI job (below) is green on `main`. Flipping that variable

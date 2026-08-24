@@ -54,6 +54,7 @@ class EmptyDatabaseBootstrapTest {
         assertTrue(tableExists("shedlock"), "V3 creates shedlock");
         assertTrue(tableExists("outbox_events"), "V9 creates outbox_events");
         assertTrue(tableExists("delivery_pricing_settings"), "V21 creates delivery_pricing_settings");
+        assertTrue(tableExists("password_reset_tokens"), "V24 creates password_reset_tokens");
         assertTrue(sequenceExists("order_number_seq"), "V6 creates order_number_seq");
 
         Integer trigram = jdbc.queryForObject(
