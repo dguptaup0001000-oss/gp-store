@@ -89,4 +89,6 @@ Android apps do not use CORS.
 - Change production secrets.
 - Enable Mapbox or PostGIS.
 - Increase Hikari / Tomcat / JVM ceilings.
+- Run 1,000+ VU load tests against the live Render URL. Use
+  `load-tests/run-staged-capacity.sh` locally/staging, smallest stage first.
 - Merge or rewrite Flyway V2–V22.

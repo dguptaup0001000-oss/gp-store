@@ -9,7 +9,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * A browser checkout sends Idempotency-Key. CORS must allow that header on
@@ -62,5 +66,28 @@ class CorsIdempotencyPreflightTest {
         }
         assertNotEquals("*", result.getResponse().getHeader("Access-Control-Allow-Origin"),
                 "credentials mode must never pair with a wildcard origin");
+    }
+
+    @Test
+    @DisplayName("liveness does not need the database and stays a plain string")
+    void livenessIsPublic() throws Exception {
+        mockMvc.perform(get("/api/health"))
+                .andExpect(status().isOk())
+                .andExpect(content().string("GP-STORE Backend Running Successfully!"));
+    }
+
+    @Test
+    @DisplayName("readiness borrows a pool connection and succeeds when Postgres answers")
+    void readinessChecksTheDatabase() throws Exception {
+        mockMvc.perform(get("/api/health/ready"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ready"));
+    }
+
+    @Test
+    @DisplayName("actuator readiness is public so Render does not need an admin token")
+    void actuatorReadinessIsPublic() throws Exception {
+        mockMvc.perform(get("/actuator/health/readiness"))
+                .andExpect(status().isOk());
     }
 }

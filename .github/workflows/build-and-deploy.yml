@@ -187,12 +187,29 @@ jobs:
         # latest APK, or an old one" has repeatedly been the real cause
         # behind reported bugs that were already fixed - this makes it
         # checkable at a glance instead of guessed at from screenshots.
+        # --split-per-abi AND --target-platform without android-x64:
+        # phones install one ABI. The previous fat APK packed arm64-v8a,
+        # armeabi-v7a and x86_64 (the ~73 MB extracted-size audit). x86_64
+        # is emulators; Play's AAB (next step) still contains every ABI and
+        # serves one per device. Sideload artifacts are arm only.
         run: |
           if [ -n "${{ vars.API_BASE_URL }}" ]; then
-            flutter build apk --release --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+            flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           else
-            flutter build apk --release --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+            flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           fi
+
+      - name: Report customer APK sizes
+        run: |
+          echo "### Customer APK sizes (split per ABI)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| APK | Size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          for f in build/app/outputs/flutter-apk/app-*-release.apk; do
+            [ -f "$f" ] || continue
+            size=$(du -h "$f" | cut -f1)
+            echo "| $(basename "$f") | $size |" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Build App Bundle
         # What Google Play actually wants. Play splits an .aab per device, so
@@ -218,7 +235,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-release-apk
-          path: frontend/build/app/outputs/flutter-apk/app-release.apk
+          path: frontend/build/app/outputs/flutter-apk/app-*-release.apk
 
       - name: Upload App Bundle
         uses: actions/upload-artifact@v4
