@@ -56,12 +56,9 @@ export default function () {
   if (health.status === 503) status503.add(1);
   check(health, { 'liveness 200': (r) => r.status === 200 });
 
-  const ready = http.get(`${BASE_URL}/api/health/ready`, { tags: { name: 'readiness' } });
-  if (ready.status === 0) statusNetworkError.add(1);
-  if (ready.status === 502) status502.add(1);
-  if (ready.status === 503) status503.add(1);
-  check(ready, { 'readiness 200': (r) => r.status === 200 });
-
+  // Do not probe /ready on every VU iteration. Ready borrows a DB connection
+  // when the pool has idle ones; 5,000 VUs doing that was enough to starve
+  // catalog requests and produce origin timeouts (Render 502).
   const cats = http.get(`${BASE_URL}/api/categories`, { tags: { name: 'categories' } });
   browseDuration.add(cats.timings.duration);
   if (cats.status === 0) statusNetworkError.add(1);
