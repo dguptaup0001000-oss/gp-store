@@ -17,18 +17,15 @@ class _FakeTerritoryRepository extends TerritoryRepository {
     this.health,
     this.healthError,
     this.zones = const [],
-    this.zonesError,
     this.subzones = const [],
     this.subzonesError,
-    Completer<TerritoryHealth>? healthHold,
-  })  : healthHold = healthHold,
-        super(apiClient: buildTestApiClient(FakeHttpClientAdapter()));
+    this.healthHold,
+  }) : super(apiClient: buildTestApiClient(FakeHttpClientAdapter()));
 
   final TerritoryHealth? health;
   final Object? healthError;
   final Completer<TerritoryHealth>? healthHold;
   final List<TerritoryZone> zones;
-  final Object? zonesError;
   final List<TerritorySubzone> subzones;
   final Object? subzonesError;
 
