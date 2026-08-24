@@ -164,11 +164,13 @@ jobs:
         run: |
           if [ -n "${{ vars.API_BASE_URL }}" ]; then
             ./tool/with_worker_pubspec.sh flutter build appbundle --release \
+              --target-platform android-arm,android-arm64 \
               -t lib/worker_main.dart \
               --dart-define=API_BASE_URL="${{ vars.API_BASE_URL }}" \
               --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           else
             ./tool/with_worker_pubspec.sh flutter build appbundle --release \
+              --target-platform android-arm,android-arm64 \
               -t lib/worker_main.dart \
               --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
           fi
