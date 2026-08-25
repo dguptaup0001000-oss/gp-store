@@ -12,27 +12,34 @@
 // every request either) and the only way to reach real concurrency on the
 // endpoints that AREN'T rate limited the same way (browse, cart).
 //
-// Usage:
-//   BASE_URL=https://your-backend.onrender.com/v1 COUNT=50 node seed-accounts.js
+// Deterministic identities: loadtest_vu_0000@example.com … so a re-run
+// logs in instead of creating a new customer. Never production emails.
+// Never sends SMS: registration is email+password, and OTP_SMS_SENDING_ENABLED
+// must stay false on the test instance.
 //
-// Takes roughly COUNT * 3.5 seconds to run (paced to stay under the 20/60s
-// register limit) - for 50 accounts that's ~3 minutes. Writes accounts.json
-// in this directory; browse-cart-checkout.js reads that file directly.
+// Usage:
+//   BASE_URL=http://localhost:8081/v1 COUNT=160 node seed-accounts.js
+//
+// COUNT is the number of dedicated VU accounts (cart + checkout). Existing
+// timestamp-suffixed accounts are kept but not counted toward COUNT.
+// Takes roughly (missing accounts) * 3.5 seconds.
+
+import fs from 'node:fs';
 
 const BASE_URL = (process.env.BASE_URL || 'http://localhost:8081/v1').replace(/\/$/, '');
-const COUNT = parseInt(process.env.COUNT || '50', 10);
+const COUNT = parseInt(process.env.COUNT || '160', 10);
+const CART_COUNT = parseInt(process.env.CART_COUNT || String(Math.max(0, COUNT - 10)), 10);
 const OUT_FILE = process.env.OUT_FILE || new URL('./accounts.json', import.meta.url);
+const PASSWORD = 'LoadTest123!';
 
 // Matches application.properties store.latitude/longitude (Malhia, UP) and
 // store.max-delivery-radius-km (20). The previous Delhi pin (28.6139, 77.2090)
 // sat ~700 km outside the shop's radius, so every seeded checkout failed
 // deliverability even when the backend was healthy.
-// Override STORE_LATITUDE/STORE_LONGITUDE if the target deployment does.
 const STORE_LAT = parseFloat(process.env.STORE_LATITUDE || '27.162310');
 const STORE_LNG = parseFloat(process.env.STORE_LONGITUDE || '83.940468');
 
 function jitter(center, maxKm) {
-  // ~1 degree latitude is ~111km - keep well inside the radius, not at its edge.
   const deg = maxKm / 111;
   return center + (Math.random() * 2 - 1) * deg * 0.5;
 }
@@ -41,26 +48,66 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function registerOne(index) {
-  const suffix = `${Date.now()}_${index}`;
-  const email = `loadtest_${suffix}@example.com`;
-  // Was deterministic (index-only), so every re-run tried to register the
-  // exact same 10 digits as the last run and got a legitimate duplicate
-  // rejection from the DB - this was never a backend outage, just this
-  // script colliding with its own previous run. Date.now() makes each run
-  // distinct; index keeps accounts distinct within a single run.
-  const phone = '9' + String(Date.now()).slice(-6) + String(index).padStart(3, '0');
-  const password = 'LoadTest123!';
+function vuEmail(index) {
+  return `loadtest_vu_${String(index).padStart(4, '0')}@example.com`;
+}
+
+function vuPhone(index) {
+  // 10-digit, 8-prefix, unique per VU index. Not a real subscriber.
+  return '8' + String(index).padStart(9, '0');
+}
+
+function vuRole(index) {
+  return index < CART_COUNT ? 'cart' : 'checkout';
+}
+
+function readExisting() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(OUT_FILE, 'utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function isVuAccount(account) {
+  return typeof account.email === 'string' && /^loadtest_vu_\d+@example\.com$/.test(account.email);
+}
+
+function vuIndexFromEmail(email) {
+  const m = /^loadtest_vu_(\d+)@example\.com$/.exec(email);
+  return m ? parseInt(m[1], 10) : -1;
+}
+
+async function registerOrLogin(index) {
+  const email = vuEmail(index);
+  const phone = vuPhone(index);
+  const role = vuRole(index);
+  const name = `Load Test VU ${index}`;
 
   const registerRes = await fetch(`${BASE_URL}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: `Load Test ${index}`, email, phone, password }),
+    body: JSON.stringify({ name, email, phone, password: PASSWORD }),
   });
-  if (!registerRes.ok) {
+
+  let auth;
+  if (registerRes.ok) {
+    auth = await registerRes.json();
+  } else if (registerRes.status === 400 || registerRes.status === 409) {
+    // Already created on a previous seed. Login reuses the same customer.
+    const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: PASSWORD }),
+    });
+    if (!loginRes.ok) {
+      throw new Error(`login failed (${loginRes.status}): ${await loginRes.text()}`);
+    }
+    auth = await loginRes.json();
+  } else {
     throw new Error(`register failed (${registerRes.status}): ${await registerRes.text()}`);
   }
-  const auth = await registerRes.json();
 
   const addressRes = await fetch(`${BASE_URL}/api/addresses`, {
     method: 'POST',
@@ -69,7 +116,7 @@ async function registerOne(index) {
       Authorization: `Bearer ${auth.token}`,
     },
     body: JSON.stringify({
-      fullName: `Load Test ${index}`,
+      fullName: name,
       mobileNumber: phone,
       houseNo: `${index} Test House`,
       area: 'Load Test Area',
@@ -84,37 +131,89 @@ async function registerOne(index) {
     }),
   });
   if (!addressRes.ok) {
-    throw new Error(`address creation failed (${addressRes.status}): ${await addressRes.text()}`);
+    // Duplicate default address on re-seed: reuse the existing default.
+    const listRes = await fetch(`${BASE_URL}/api/addresses/mine`, {
+      headers: { Authorization: `Bearer ${auth.token}` },
+    });
+    if (!listRes.ok) {
+      throw new Error(`address creation failed (${addressRes.status}): ${await addressRes.text()}`);
+    }
+    const list = await listRes.json();
+    const addresses = Array.isArray(list) ? list : [];
+    const existing = addresses.find((a) => a.defaultAddress) || addresses[0];
+    if (!existing || !existing.id) {
+      throw new Error(`address creation failed (${addressRes.status}) and no existing address`);
+    }
+    return {
+      email,
+      password: PASSWORD,
+      token: auth.token,
+      refreshToken: auth.refreshToken,
+      customerId: auth.customerId,
+      addressId: existing.id,
+      role,
+      vuIndex: index,
+    };
   }
   const address = await addressRes.json();
 
   return {
     email,
-    password,
+    password: PASSWORD,
     token: auth.token,
     refreshToken: auth.refreshToken,
     customerId: auth.customerId,
     addressId: address.id,
+    role,
+    vuIndex: index,
   };
 }
 
 async function main() {
-  console.log(`Seeding ${COUNT} accounts against ${BASE_URL} (~${Math.ceil(COUNT * 3.5 / 60)} min)...`);
-  const accounts = [];
+  if (COUNT < 1) {
+    throw new Error('COUNT must be >= 1');
+  }
+  const existing = readExisting();
+  const leftover = existing.filter((a) => !isVuAccount(a));
+  const byIndex = new Map();
+  for (const account of existing.filter(isVuAccount)) {
+    byIndex.set(vuIndexFromEmail(account.email), account);
+  }
+
+  const missing = [];
   for (let i = 0; i < COUNT; i++) {
+    if (!byIndex.has(i)) missing.push(i);
+  }
+
+  console.log(
+    `Seeding VU accounts against ${BASE_URL}: have ${byIndex.size}/${COUNT}, ` +
+      `need ${missing.length} (~${Math.ceil((missing.length * 3.5) / 60)} min). ` +
+      `cart=${CART_COUNT} checkout=${Math.max(0, COUNT - CART_COUNT)}. ` +
+      `Leftover non-VU test accounts kept: ${leftover.length}.`,
+  );
+
+  for (let n = 0; n < missing.length; n++) {
+    const i = missing[n];
     try {
-      const account = await registerOne(i);
-      accounts.push(account);
-      process.stdout.write(`\r${accounts.length}/${COUNT} accounts seeded`);
+      const account = await registerOrLogin(i);
+      byIndex.set(i, account);
+      process.stdout.write(`\r${byIndex.size}/${COUNT} VU accounts ready (last index ${i})`);
     } catch (err) {
       console.error(`\naccount ${i} failed: ${err.message}`);
     }
-    // 3.5s between registrations stays under the 20-per-60s AUTH limit
-    // (~17/min) even with clock drift.
-    if (i < COUNT - 1) await sleep(3500);
+    if (n < missing.length - 1) await sleep(3500);
   }
-  await import('node:fs').then((fs) => fs.writeFileSync(OUT_FILE, JSON.stringify(accounts, null, 2)));
-  console.log(`\nWrote ${accounts.length} accounts to ${OUT_FILE}`);
+
+  const vuAccounts = [];
+  for (let i = 0; i < COUNT; i++) {
+    if (byIndex.has(i)) vuAccounts.push(byIndex.get(i));
+  }
+  const all = leftover.concat(vuAccounts);
+  fs.writeFileSync(OUT_FILE, JSON.stringify(all, null, 2));
+  console.log(`\nWrote ${vuAccounts.length} VU accounts (+ ${leftover.length} leftover) to ${OUT_FILE}`);
+  if (vuAccounts.length < COUNT) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch((err) => {
