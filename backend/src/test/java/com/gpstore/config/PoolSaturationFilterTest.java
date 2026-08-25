@@ -26,6 +26,7 @@ class PoolSaturationFilterTest {
 
         assertEquals(503, response.getStatus());
         assertEquals("1", response.getHeader("Retry-After"));
+        assertEquals("pool-saturated", response.getHeader("X-GP-Shed"));
         assertNull(chain.getRequest());
     }
 
@@ -64,6 +65,9 @@ class PoolSaturationFilterTest {
         HikariDataSource hikari = mock(HikariDataSource.class);
         when(hikari.getHikariPoolMXBean()).thenReturn(mx);
         when(hikari.getMaximumPoolSize()).thenReturn(maxPool);
-        return new PoolSaturationFilter(hikari, PoolSaturationFilter.WAITING_SHED_THRESHOLD);
+        return new PoolSaturationFilter(
+                hikari,
+                PoolSaturationFilter.WAITING_SHED_THRESHOLD,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 }

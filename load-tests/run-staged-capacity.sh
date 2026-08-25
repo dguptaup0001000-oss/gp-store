@@ -4,7 +4,7 @@
 # opt-in because they are how the previous production run produced 502s.
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://localhost:8080/v1}"
+BASE_URL="${BASE_URL:-http://localhost:8081/v1}"
 HOLD_TIME="${HOLD_TIME:-20s}"
 STAGES="${STAGES:-10 25 50 100}"
 

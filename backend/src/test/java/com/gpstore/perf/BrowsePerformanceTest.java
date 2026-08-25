@@ -13,6 +13,8 @@ import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 /**
  * Forensic measurement of the BROWSE path - the traffic the distributed load
  * test actually generates (browse VUs, cart/checkout at zero).
@@ -66,6 +68,9 @@ class BrowsePerformanceTest {
 
         System.out.println("[BROWSE] category (" + PRODUCTS_PER_CATEGORY + " products) COLD: " + cold);
         System.out.println("[BROWSE] category (" + PRODUCTS_PER_CATEGORY + " products) WARM: " + warm);
+        assertTrue(cold.queryCount() > 0, "a cold catalog browse must hit PostgreSQL");
+        assertEquals(0L, warm.queryCount(),
+                "a warm L1/Redis catalog hit must not query PostgreSQL on every request");
     }
 
     @Test
@@ -81,6 +86,9 @@ class BrowsePerformanceTest {
 
         System.out.println("[BROWSE] search-instant COLD: " + cold);
         System.out.println("[BROWSE] search-instant WARM: " + warm);
+        assertTrue(cold.queryCount() > 0, "a cold search must hit PostgreSQL");
+        assertEquals(0L, warm.queryCount(),
+                "a warm search cache hit must not query PostgreSQL on every request");
     }
 
     @Test
@@ -101,7 +109,7 @@ class BrowsePerformanceTest {
     }
 
     /**
-     * The full k6 browse iteration: category, then search 40% of the time,
+     * The full k6 browse iteration: category, then search 10% of the time,
      * then one product detail. Reported as the cost of ONE simulated user
      * action, which is the unit that matters when reasoning about how many
      * concurrent users a fixed connection pool can serve.
@@ -149,6 +157,9 @@ class BrowsePerformanceTest {
                 + page.getContent().size() + " products ("
                 + (page.getContent().isEmpty() ? 0 : json.length / page.getContent().size())
                 + " bytes/product)");
+        page.getContent().forEach(product ->
+                assertTrue(product.getVariants() == null || product.getVariants().size() <= 1,
+                        "browse listings must send at most one representative variant"));
     }
 
     private void clearAllCaches() {

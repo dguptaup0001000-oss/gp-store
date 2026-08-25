@@ -51,7 +51,7 @@ public class WishlistResponse {
                 wishlist.getId(),
                 product != null ? product.getId() : null,
                 product != null ? product.getName() : null,
-                ProductResponse.from(product)
+                ProductResponse.fromCard(product)
         );
     }
 

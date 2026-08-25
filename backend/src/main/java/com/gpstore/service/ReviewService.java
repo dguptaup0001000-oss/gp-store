@@ -12,6 +12,7 @@ import com.gpstore.repository.OrderItemRepository;
 import com.gpstore.repository.ProductRepository;
 import com.gpstore.repository.ReviewRepository;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -81,10 +82,16 @@ public class ReviewService {
                     .map(ReviewResponse::from);
         }
 
+    private static final int MY_REVIEWS_CAP = 100;
+
     @Transactional(readOnly = true)
-        public List<ReviewResponse> getMyReviews(Long customerId) {
-            return reviewRepository.findByCustomerId(customerId).stream().map(ReviewResponse::from).toList();
-        }
+    public List<ReviewResponse> getMyReviews(Long customerId) {
+        return reviewRepository
+                .findByCustomerIdOrderByReviewDateDesc(customerId, PageRequest.of(0, MY_REVIEWS_CAP))
+                .stream()
+                .map(ReviewResponse::from)
+                .toList();
+    }
 
     public void deleteOwnReview(Long id, Long customerId) {
         Review review = reviewRepository.findByIdAndCustomerId(id, customerId)

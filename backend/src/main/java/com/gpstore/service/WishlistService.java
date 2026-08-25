@@ -48,9 +48,15 @@ public class WishlistService {
         return wishlistRepository.findAll(pageable).map(WishlistResponse::from);
     }
 
+    private static final int MY_WISHLIST_CAP = 100;
+
     @Transactional(readOnly = true)
     public List<WishlistResponse> getMyWishlist(Long customerId) {
-        return wishlistRepository.findByCustomerId(customerId).stream().map(WishlistResponse::from).toList();
+        List<Wishlist> rows = wishlistRepository.findByCustomerId(customerId);
+        if (rows.size() > MY_WISHLIST_CAP) {
+            rows = rows.subList(0, MY_WISHLIST_CAP);
+        }
+        return rows.stream().map(WishlistResponse::from).toList();
     }
 
     public void removeFromWishlist(Long id, Long customerId) {

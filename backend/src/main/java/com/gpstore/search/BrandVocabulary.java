@@ -1,6 +1,7 @@
 package com.gpstore.search;
 
 import com.gpstore.repository.ProductRepository;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -65,7 +66,8 @@ public class BrandVocabulary {
     }
 
     @Scheduled(fixedDelay = REFRESH_MS)
-    public final void refresh() {
+    @SchedulerLock(name = "brandVocabularyRefresh", lockAtMostFor = "2m", lockAtLeastFor = "30s")
+    public void refresh() {
         try {
             List<String> loaded = new ArrayList<>();
             for (Object[] row : productRepository.findBrandsWithProductCounts()) {

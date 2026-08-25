@@ -118,7 +118,8 @@ class CatalogProductsEndpointTest {
         mockMvc.perform(get("/api/products/feed?page=0&size=20"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
-                .andExpect(jsonPath("$.content.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(20)));
+                .andExpect(jsonPath("$.content.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(20)))
+                .andExpect(jsonPath("$.content[0].variants.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(1)));
 
         mockMvc.perform(get("/api/products/feed?page=0&size=100000"))
                 .andExpect(status().isOk())

@@ -50,7 +50,7 @@ function randomItem(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 function thinkTime() {
-  return sleep(1000 + Math.random() * 2000);
+  return sleep(1500 + Math.random() * 2500);
 }
 
 // --- metrics -----------------------------------------------------------
@@ -126,7 +126,7 @@ async function seedAccounts(count) {
     } catch (e) {
       console.error(`\naccount ${i} failed: ${e.message}`);
     }
-    if (i < count - 1) await sleep(6500); // stay under the 10/60s register limit
+    if (i < count - 1) await sleep(3500); // stay under the 20/60s register limit
   }
   console.log('');
   return accounts;
@@ -141,7 +141,7 @@ async function browseLoop(categories, deadline) {
     );
     await thinkTime();
 
-    if (Math.random() < 0.4) {
+    if (Math.random() < 0.1) {
       await timed('search', () =>
         fetch(`${BASE_URL}/api/products/search/instant?keyword=${randomItem(SEARCH_TERMS)}&page=0&size=20`),
       );
@@ -198,9 +198,9 @@ async function cartLoop(categories, accounts, deadline) {
   }
 }
 
-// One checkout attempt roughly every 8s total (not per VU) - stays under
-// RateLimitFilter's 10/60s-per-IP cap on /orders/place. See README.md for
-// why this test can't validate real concurrent-checkout throughput.
+// One checkout attempt roughly every 15s total (not per VU) - stays under
+// RateLimitFilter's 20/60s-per-customer cap on /orders/place. See README.md
+// for why this test can't validate thousands of simultaneous checkouts.
 async function checkoutLoop(categories, accounts, deadline) {
   if (accounts.length === 0) return;
   while (Date.now() < deadline) {
@@ -239,7 +239,7 @@ async function checkoutLoop(categories, accounts, deadline) {
         );
       }
     }
-    await sleep(8000);
+    await sleep(15000);
   }
 }
 

@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.core.io.ClassPathResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -228,7 +229,8 @@ public class SynonymDictionary {
     }
 
     @Scheduled(fixedDelay = REFRESH_MS)
-    public final void refresh() {
+    @SchedulerLock(name = "searchSynonymRefresh", lockAtMostFor = "2m", lockAtLeastFor = "30s")
+    public void refresh() {
         try {
             Map<String, List<Entry>> rebuilt = new HashMap<>();
             int rows = 0;

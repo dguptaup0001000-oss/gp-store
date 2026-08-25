@@ -1,5 +1,8 @@
 package com.gpstore.payment.gateway;
 
+import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -19,6 +22,8 @@ import org.springframework.stereotype.Component;
 @Component
 @ConfigurationProperties(prefix = "cashfree")
 public class CashfreeProperties {
+
+    private static final Logger log = LoggerFactory.getLogger(CashfreeProperties.class);
 
     private static final String SANDBOX_BASE = "https://sandbox.cashfree.com/pg";
     private static final String PRODUCTION_BASE = "https://api.cashfree.com/pg";
@@ -71,6 +76,22 @@ public class CashfreeProperties {
      */
     public boolean enabled() {
         return !appId.isBlank() && !secretKey.isBlank();
+    }
+
+    /**
+     * Production with appId+secretKey but no dedicated webhook secret still
+     * verifies webhooks (HMAC falls back to secretKey). That is allowed;
+     * it is not the same as accepting unsigned callbacks. Warn so the
+     * missing property is visible in logs instead of silent.
+     */
+    @PostConstruct
+    void warnIfProductionWebhookSecretMissing() {
+        if (isProduction() && enabled() && (webhookSecret == null || webhookSecret.isBlank())) {
+            log.warn("cashfree.environment=production but cashfree.webhook-secret is blank. "
+                    + "Webhook signatures fall back to cashfree.secret-key. Configure a "
+                    + "dedicated webhook secret when Cashfree provides one. Unsigned "
+                    + "callbacks are still rejected.");
+        }
     }
 
     public String getEnvironment() { return environment; }

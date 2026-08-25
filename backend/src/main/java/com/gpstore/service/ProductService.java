@@ -108,7 +108,7 @@ public class ProductService {
     public List<ProductResponse> getAllProducts() {
         return productRepository
                 .findByActiveTrueOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
-                .map(ProductResponse::from)
+                .map(ProductResponse::fromCard)
                 .toList();
     }
 
@@ -128,7 +128,7 @@ public class ProductService {
         return productRepository
                 .findByNameContainingIgnoreCase(keyword, org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
                 .stream()
-                .map(ProductResponse::from)
+                .map(ProductResponse::fromCard)
                 .toList();
     }
 
@@ -308,7 +308,7 @@ public class ProductService {
         for (Long id : orderedIds) {
             Product product = byId.get(id);
             if (product != null) {
-                content.add(ProductResponse.from(product));
+                content.add(ProductResponse.fromCard(product));
             }
         }
         return content;
