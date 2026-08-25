@@ -4,9 +4,9 @@
 /// `--dart-define=API_BASE_URL`. That is the difference between "the URL
 /// happens to be right" and "this build is a production build and says so".
 ///
-/// Hostinger is the VPS that runs Spring Boot. It is not an API and must
-/// never appear in this app as an SDK or extra HTTP client. The APK only
-/// talks to [productionApiBaseUrl] (or an override).
+/// The machine that runs Spring Boot is not an API and must never appear
+/// in this app as an SDK or extra HTTP client. The APK only talks to
+/// [productionApiBaseUrl] (or an override).
 ///
 /// Selected at build time:
 ///   flutter build apk --dart-define=APP_ENV=production
