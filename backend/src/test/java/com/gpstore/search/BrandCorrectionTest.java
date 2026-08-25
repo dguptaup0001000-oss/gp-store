@@ -91,7 +91,7 @@ class BrandCorrectionTest {
             jdbc.update("DELETE FROM products WHERE name = ?", name);
         }
         insertedProducts.clear();
-        brands.refresh();
+        brands.reload();
     }
 
     private void ensureBrandExists(String brand, String productName) {
@@ -109,14 +109,14 @@ class BrandCorrectionTest {
                 VALUES (?, ?, true, false, false, false, false, now())
                 """, productName, brand);
         insertedProducts.add(productName);
-        brands.refresh();
+        brands.reload();
     }
 
     @Test
     @DisplayName("a misheard brand is corrected to the one actually stocked")
     void mishearingIsRepaired() {
         ensureBrandExists("Aachi", "Aachi Turmeric Powder 50 g");
-        brands.refresh();
+        brands.reload();
 
         // The exact transcript Google produced, romanised.
         Optional<String> corrected = brands.closestBrand("ranchi");
@@ -131,7 +131,7 @@ class BrandCorrectionTest {
     @DisplayName("a brand spelled by ear is corrected phonetically")
     void phoneticSpellingIsRepaired() {
         ensureBrandExists("Aashirvaad", "Aashirvaad Atta 5 kg");
-        brands.refresh();
+        brands.reload();
 
         // Different failure from a mishearing: a customer typing what they
         // heard. Edit distance alone is a weaker signal here than sound.
@@ -142,7 +142,7 @@ class BrandCorrectionTest {
     @DisplayName("a word that IS the brand is left alone")
     void exactBrandIsNotRewritten() {
         ensureBrandExists("Aachi", "Aachi Turmeric Powder 50 g");
-        brands.refresh();
+        brands.reload();
 
         assertEquals(Optional.empty(), brands.closestBrand("aachi"),
                 "correcting a brand to itself would report a correction that never happened");
@@ -162,7 +162,7 @@ class BrandCorrectionTest {
     @DisplayName("a one-word query is never rewritten to a brand")
     void singleWordQueriesAreNotRewritten() {
         ensureBrandExists("Catch", "Catch Garam Masala 100 g");
-        brands.refresh();
+        brands.reload();
 
         // THE FALSE POSITIVE THIS FEATURE CREATED ON ITS FIRST DRAFT.
         // "match" is one edit from the stocked brand "Catch", and a kirana
@@ -200,7 +200,7 @@ class BrandCorrectionTest {
                         true, false, false, false, false, now())
                 """);
         insertedProducts.add("Zeppelina Kumquat Marmalade 200 g");
-        brands.refresh();
+        brands.reload();
 
         // One letter wrong, exactly as a recogniser would leave it.
         var result = search.search("zeppelona kumquat", PageRequest.of(0, 5));

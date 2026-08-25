@@ -62,12 +62,16 @@ public class BrandVocabulary {
 
     public BrandVocabulary(ProductRepository productRepository) {
         this.productRepository = productRepository;
-        refresh();
+        reload();
     }
 
-    @Scheduled(fixedDelay = REFRESH_MS)
-    @SchedulerLock(name = "brandVocabularyRefresh", lockAtMostFor = "2m", lockAtLeastFor = "30s")
-    public void refresh() {
+    /**
+     * Rebuild the in-memory brand list from the catalogue. Unlocked so
+     * startup and tests can pick up products inserted after the last
+     * scheduled run. ShedLock's lockAtLeastFor would otherwise skip those
+     * reloads for 30 seconds after any locked refresh in the same JVM.
+     */
+    public void reload() {
         try {
             List<String> loaded = new ArrayList<>();
             for (Object[] row : productRepository.findBrandsWithProductCounts()) {
@@ -84,6 +88,12 @@ public class BrandVocabulary {
             // before this class existed.
             log.warn("Could not refresh brand vocabulary; keeping the previous one.", e);
         }
+    }
+
+    @Scheduled(fixedDelay = REFRESH_MS)
+    @SchedulerLock(name = "brandVocabularyRefresh", lockAtMostFor = "2m", lockAtLeastFor = "30s")
+    public void refresh() {
+        reload();
     }
 
     /** Every stocked brand, as written in the catalogue. */
