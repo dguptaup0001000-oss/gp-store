@@ -120,21 +120,34 @@ public class NotificationService {
         pushNotificationService.sendToTopic(
                 PushNotificationService.ALL_CUSTOMERS_TOPIC, title, message, Map.of("type", "ANNOUNCEMENT"));
 
-        int totalCustomers = 0;
+        // One executor task pages the whole customer list. Submitting one
+        // task per 200-row page used to enqueue a burst of work onto the
+        // same 4-thread/200-slot pool that also writes invoices after
+        // checkout. A 20,000-customer announcement would have been 100
+        // queued tasks, each holding a page of Customer entities, before
+        // any of them ran.
+        int totalCustomers = (int) Math.min(Integer.MAX_VALUE, customerRepository.countByActiveTrue());
+        orderSideEffectsExecutor.submit(() -> {
+            try {
+                persistBroadcastPages(title, message);
+            } catch (Exception ex) {
+                auditLogService.log("BROADCAST_PERSIST_FAILED", "Notification", null, ex.getMessage());
+            }
+        });
+        return totalCustomers;
+    }
+
+    void persistBroadcastPages(String title, String message) {
         int pageNumber = 0;
         Page<Customer> page;
-
         do {
             page = customerRepository.findByActiveTrue(PageRequest.of(pageNumber, BROADCAST_PAGE_SIZE));
             List<Customer> customers = page.getContent();
-            totalCustomers += customers.size();
-
-            orderSideEffectsExecutor.submit(() -> saveNotificationBatch(customers, title, message));
-
+            if (!customers.isEmpty()) {
+                saveNotificationBatch(customers, title, message);
+            }
             pageNumber++;
         } while (page.hasNext());
-
-        return totalCustomers;
     }
 
     // No @Transactional here - it would be a no-op anyway (self-invocation

@@ -336,6 +336,8 @@ public class OtpService {
      * large backlog drains steadily instead of in one long transaction.
      */
     @org.springframework.scheduling.annotation.Scheduled(fixedDelayString = "${otp.cleanup-interval-ms:3600000}", initialDelayString = "${otp.cleanup-initial-delay-ms:60000}")
+    @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(
+            name = "otpCleanupExpired", lockAtMostFor = "10m", lockAtLeastFor = "1m")
     @Transactional
     public void cleanUpExpiredOtps() {
         LocalDateTime cutoff = now().minusDays(1);

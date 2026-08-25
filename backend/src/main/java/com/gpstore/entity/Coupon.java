@@ -1,6 +1,7 @@
 package com.gpstore.entity;
 
 import com.gpstore.enums.DiscountType;
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import jakarta.persistence.*;
@@ -11,7 +12,9 @@ import lombok.Setter;
 @Setter
 @Entity
 @Table(name = "coupons")
-public class Coupon {
+public class Coupon implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

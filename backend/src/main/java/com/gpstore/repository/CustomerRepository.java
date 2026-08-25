@@ -21,6 +21,8 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     // every row.
     Page<Customer> findByActiveTrue(Pageable pageable);
 
+    long countByActiveTrue();
+
     /**
      * Locks the customer row for the duration of the transaction - used by
      * CartService's mutation methods to serialize concurrent cart

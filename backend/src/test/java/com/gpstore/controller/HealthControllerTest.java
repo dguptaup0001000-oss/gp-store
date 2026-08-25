@@ -16,17 +16,47 @@ import static org.mockito.Mockito.*;
 class HealthControllerTest {
 
     @Test
-    void busyPoolIsReadyWithoutBorrowingAConnection() throws SQLException {
+    void busyPoolWithoutAPriorProbeStillRunsSelectOne() throws SQLException {
         HikariPoolMXBean mx = mock(HikariPoolMXBean.class);
         when(mx.getIdleConnections()).thenReturn(0);
+
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        when(connection.createStatement()).thenReturn(statement);
 
         HikariDataSource hikari = mock(HikariDataSource.class);
         when(hikari.isRunning()).thenReturn(true);
         when(hikari.getHikariPoolMXBean()).thenReturn(mx);
+        when(hikari.getConnection()).thenReturn(connection);
 
         HealthController controller = new HealthController(hikari);
         assertEquals(HttpStatus.OK, controller.ready().getStatusCode());
-        verify(hikari, never()).getConnection();
+        verify(statement).execute("SELECT 1");
+    }
+
+    @Test
+    void busyPoolAfterASuccessfulProbeSkipsBorrowing() throws SQLException {
+        HikariPoolMXBean mx = mock(HikariPoolMXBean.class);
+        when(mx.getIdleConnections()).thenReturn(2).thenReturn(0);
+
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        when(connection.createStatement()).thenReturn(statement);
+
+        HikariDataSource hikari = mock(HikariDataSource.class);
+        when(hikari.isRunning()).thenReturn(true);
+        when(hikari.getHikariPoolMXBean()).thenReturn(mx);
+        when(hikari.getConnection()).thenReturn(connection);
+
+        HealthController controller = new HealthController(hikari);
+        assertEquals(HttpStatus.OK, controller.ready().getStatusCode());
+        verify(statement).execute("SELECT 1");
+
+        // Force the 2s ready cache to expire so the busy-skip path is taken.
+        setLastReadyOkFarInThePast(controller);
+
+        assertEquals(HttpStatus.OK, controller.ready().getStatusCode());
+        verify(hikari, times(1)).getConnection();
     }
 
     @Test
@@ -69,5 +99,15 @@ class HealthControllerTest {
         assertEquals(HttpStatus.OK, controller.ready().getStatusCode());
         assertEquals(HttpStatus.OK, controller.ready().getStatusCode());
         verify(dataSource, times(1)).getConnection();
+    }
+
+    private static void setLastReadyOkFarInThePast(HealthController controller) {
+        try {
+            var field = HealthController.class.getDeclaredField("lastReadyOkAt");
+            field.setAccessible(true);
+            ((java.util.concurrent.atomic.AtomicLong) field.get(controller)).set(1L);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

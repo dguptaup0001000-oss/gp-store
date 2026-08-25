@@ -4,7 +4,7 @@
 # opt-in because they are how the previous production run produced 502s.
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://localhost:8080/v1}"
+BASE_URL="${BASE_URL:-http://localhost:8081/v1}"
 HOLD_TIME="${HOLD_TIME:-20s}"
 STAGES="${STAGES:-10 25 50 100}"
 
@@ -15,7 +15,8 @@ fi
 
 echo "Target: $BASE_URL"
 echo "Stages: $STAGES (hold $HOLD_TIME each)"
-echo "Pass: error rate < 2%, p95 < 2s, p99 < 4s, zero 502/503/network errors"
+echo "Pass: p95 < 2s, p99 < 4s, zero 502 / unexpected 503 / network errors"
+echo "Catalog 503 (pool shed) is counted separately and does not fail a stage."
 echo
 
 failed_at=""

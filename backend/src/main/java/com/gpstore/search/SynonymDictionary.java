@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.core.io.ClassPathResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -86,7 +87,7 @@ public class SynonymDictionary {
     public SynonymDictionary(SearchSynonymRepository repository) {
         this.repository = repository;
         seedMissing();
-        refresh();
+        reload();
     }
 
     /**
@@ -227,8 +228,12 @@ public class SynonymDictionary {
         return Optional.of(canonical);
     }
 
-    @Scheduled(fixedDelay = REFRESH_MS)
-    public final void refresh() {
+    /**
+     * Rebuild the in-memory phonetic map from the database. Unlocked so
+     * startup and tests are not skipped by ShedLock's lockAtLeastFor after
+     * a scheduled refresh in the same JVM.
+     */
+    public void reload() {
         try {
             Map<String, List<Entry>> rebuilt = new HashMap<>();
             int rows = 0;
@@ -255,6 +260,12 @@ public class SynonymDictionary {
             // phonetic and trigram layers, which need no data at all.
             log.warn("Could not load search synonyms; Smart Search continues without translation: {}", e.getMessage());
         }
+    }
+
+    @Scheduled(fixedDelay = REFRESH_MS)
+    @SchedulerLock(name = "searchSynonymRefresh", lockAtMostFor = "2m", lockAtLeastFor = "30s")
+    public void refresh() {
+        reload();
     }
 
     /**

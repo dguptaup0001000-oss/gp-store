@@ -26,8 +26,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * waited out the 5s acquisition timeout and Render returned 502.
  *
  * The probe still runs {@code SELECT 1} when a connection is idle. When
- * every connection is busy serving customers, "busy" is ready: we return
- * 200 without queueing behind them. If the pool is not running, 503.
+ * every connection is busy serving customers AND this process has already
+ * proven the database once, "busy" is ready: we return 200 without
+ * queueing behind them. A JVM that has never successfully probed must not
+ * skip the SELECT just because the pool looks full (hung connections to a
+ * dead database would look "ready" forever). If the pool is not running, 503.
  */
 @RestController
 public class HealthController {
@@ -59,10 +62,12 @@ public class HealthController {
         }
         if (hikari != null) {
             HikariPoolMXBean mx = hikari.getHikariPoolMXBean();
-            if (mx != null && mx.getIdleConnections() <= 0) {
+            if (mx != null && mx.getIdleConnections() <= 0 && lastReadyOkAt.get() != 0) {
                 // Serving traffic with a full pool is the healthy overloaded
-                // state. Do not borrow a connection just to prove it.
-                lastReadyOkAt.set(now);
+                // state, but only after this process has actually run SELECT 1
+                // at least once. Do not refresh lastReadyOkAt here: a skip is
+                // not a new proof, and bumping the timestamp would hide a
+                // later dead database behind a 2s "ready" cache forever.
                 return ResponseEntity.ok(Map.of("status", "ready"));
             }
         }

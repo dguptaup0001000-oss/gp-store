@@ -39,6 +39,7 @@ class CatalogProductsEndpointTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private CatalogSeedService seedService;
+    @Autowired private org.springframework.cache.CacheManager cacheManager;
 
     private static boolean seeded = false;
 
@@ -118,7 +119,8 @@ class CatalogProductsEndpointTest {
         mockMvc.perform(get("/api/products/feed?page=0&size=20"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
-                .andExpect(jsonPath("$.content.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(20)));
+                .andExpect(jsonPath("$.content.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(20)))
+                .andExpect(jsonPath("$.content[0].variants.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(1)));
 
         mockMvc.perform(get("/api/products/feed?page=0&size=100000"))
                 .andExpect(status().isOk())
@@ -129,7 +131,14 @@ class CatalogProductsEndpointTest {
     @DisplayName("browsing the catalogue needs no login - it is a shop window")
     void browsingIsPublic() throws Exception {
         mockMvc.perform(get("/api/products?page=0&size=5")).andExpect(status().isOk());
-        mockMvc.perform(get("/api/categories")).andExpect(status().isOk());
+        var categories = cacheManager.getCache("categories");
+        if (categories != null) {
+            categories.clear();
+        }
+        mockMvc.perform(get("/api/categories"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(100)));
     }
 
     @Test

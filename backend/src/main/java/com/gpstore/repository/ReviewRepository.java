@@ -20,6 +20,9 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     @EntityGraph(attributePaths = {"product"})
     List<Review> findByCustomerId(Long customerId);
 
+    @EntityGraph(attributePaths = {"product"})
+    List<Review> findByCustomerIdOrderByReviewDateDesc(Long customerId, Pageable pageable);
+
     Optional<Review> findByCustomerIdAndProductId(Long customerId, Long productId);
 
     Optional<Review> findByIdAndCustomerId(Long id, Long customerId);

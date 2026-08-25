@@ -258,6 +258,36 @@ public class ProductResponse implements Serializable {
         );
     }
 
+    /**
+     * Browse/search/feed/wishlist cards: one representative variant, not
+     * every pack size.
+     *
+     * {@link #from} is still what product detail uses. A twenty-product page
+     * with five sizes each was serialising a hundred variants (prices, MRPs,
+     * image URLs) that the card never draws. The card needs a price and an
+     * add-to-cart target; the cheapest in-stock size is that target. Opening
+     * the product still loads the full variant list.
+     */
+    public static ProductResponse fromCard(Product product) {
+        ProductResponse full = from(product);
+        if (full == null) {
+            return null;
+        }
+        List<VariantResponse> variants = full.getVariants();
+        if (variants == null || variants.size() <= 1) {
+            return full;
+        }
+        VariantResponse pick = variants.stream()
+                .filter(v -> Boolean.TRUE.equals(v.getAvailable()))
+                .min(java.util.Comparator.comparing(VariantResponse::getSellingPrice,
+                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
+                .orElse(variants.get(0));
+        return new ProductResponse(
+                full.getId(), full.getName(), full.getBrand(), full.getCategory(),
+                List.of(pick), full.getActive(), full.getImages(), full.getModel3dUrl(),
+                full.getSubcategory(), full.getBestseller(), full.getFeatured(), full.getTestData());
+    }
+
     public Long getId() { return id; }
     public String getName() { return name; }
     public String getBrand() { return brand; }

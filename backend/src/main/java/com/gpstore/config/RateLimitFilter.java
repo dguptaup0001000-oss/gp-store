@@ -67,11 +67,22 @@ import java.util.List;
  *       leaving impatient double-taps (already made safe by idempotency
  *       keys and row locks) comfortably under the line.
  *
-   *   rate-limit.admin-per-minute             default 30, per admin account
-   *       POST /api/notifications/broadcast and writes under /api/admin/**.
-   *       Broadcasts can fan out to every customer; this is a brake, not the
-   *       RBAC check (that stays in SecurityConfig).
-   *
+ *   rate-limit.admin-per-minute             default 30, per admin account
+ *       POST /api/notifications/broadcast and writes under /api/admin/**.
+ *       Broadcasts can fan out to every customer; this is a brake, not the
+ *       RBAC check (that stays in SecurityConfig).
+ *
+ *   rate-limit.search-per-minute            default 60, per customer or IP
+ *       GET /api/products/search*. Instant search is the expensive read.
+ *       60/min still allows a person typing with debounce; it stops a
+ *       scrape. Authenticated callers are keyed by customer id so CGNAT
+ *       does not share one quota across unrelated shoppers.
+ *
+ * Refresh and logout sit in AUTH (same 20/min as login) because a stolen
+ * refresh token used as a hammer is the same class of abuse as login
+ * stuffing. They are IP-keyed like the rest of AUTH: the refresh endpoint
+ * is unauthenticated (the body carries the token).
+ *
  * None of this replaces the correctness guards (row locks, unique
  * constraints, idempotency keys) - those are what make concurrent requests
  * safe. Rate limiting only stops one client burning capacity that other
@@ -98,6 +109,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final int checkoutPerMinute;
     private final int mutationPerMinute;
     private final int adminPerMinute;
+    private final int searchPerMinute;
 
     public RateLimitFilter(
             StringRedisTemplate redisTemplate,
@@ -105,17 +117,19 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @Value("${rate-limit.auth-per-minute:20}") int authPerMinute,
             @Value("${rate-limit.checkout-per-minute:20}") int checkoutPerMinute,
             @Value("${rate-limit.mutation-per-minute:60}") int mutationPerMinute,
-            @Value("${rate-limit.admin-per-minute:30}") int adminPerMinute) {
+            @Value("${rate-limit.admin-per-minute:30}") int adminPerMinute,
+            @Value("${rate-limit.search-per-minute:60}") int searchPerMinute) {
         this.redisTemplate = redisTemplate;
         this.trustForwardedFor = trustForwardedFor;
         this.authPerMinute = authPerMinute;
         this.checkoutPerMinute = checkoutPerMinute;
         this.mutationPerMinute = mutationPerMinute;
         this.adminPerMinute = adminPerMinute;
+        this.searchPerMinute = searchPerMinute;
     }
 
     /** Which bucket a request falls into, or null if it is not limited at all. */
-    private enum Bucket { AUTH, CHECKOUT, MUTATION, ADMIN }
+    private enum Bucket { AUTH, CHECKOUT, MUTATION, ADMIN, SEARCH }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -132,6 +146,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             case CHECKOUT -> checkoutPerMinute;
             case MUTATION -> mutationPerMinute;
             case ADMIN -> adminPerMinute;
+            case SEARCH -> searchPerMinute;
         };
 
         String clientKey = "ratelimit:" + identity(bucket, request) + ":" + request.getServletPath();
@@ -170,8 +185,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.equals("/api/auth/password-reset/request")
                 || path.equals("/api/auth/password-reset/verify")
                 || path.equals("/api/auth/password-reset/complete")
-                || path.equals("/api/auth/reset-password-with-otp")) {
+                || path.equals("/api/auth/reset-password-with-otp")
+                || path.equals("/api/auth/refresh")
+                || path.equals("/api/auth/logout")
+                || path.equals("/api/auth/logout-all")) {
             return Bucket.AUTH;
+        }
+
+        if (path.startsWith("/api/products/search")) {
+            return Bucket.SEARCH;
         }
 
         if (path.equals("/api/orders/place") || path.equals("/api/payments")) {
@@ -208,6 +230,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * AUTH-bucket requests are always keyed by IP even if a token happens to
      * be present: someone brute-forcing logins while holding a valid token
      * for a different account must not get a fresh quota per account.
+     *
+     * SEARCH is the exception among public GETs: an authenticated shopper
+     * is keyed by customer id so a shared carrier IP does not starve
+     * everyone else's search box.
      */
     private String identity(Bucket bucket, HttpServletRequest request) {
         if (bucket != Bucket.AUTH) {

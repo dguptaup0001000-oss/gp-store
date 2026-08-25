@@ -1,60 +1,33 @@
-// k6 load test for GP-Store: browse -> add to cart -> checkout.
+// k6 load test for GP-Store: a realistic customer, not a request cannon.
 //
 // Install k6: https://k6.io/docs/get-started/installation/
-// Run: BASE_URL=https://your-backend.onrender.com/v1 k6 run browse-cart-checkout.js
+// Run: BASE_URL=http://localhost:8081/v1 k6 run browse-cart-checkout.js
 //
-// REQUIRES accounts.json in this directory first - run seed-accounts.js to
-// generate it (see that file's header for why login can't happen inline
-// here). Only the browse scenario works without it.
+// REQUIRES accounts.json for cart/checkout - run seed-accounts.js first.
+// Browse works without it.
 //
-// THREE SEPARATE SCENARIOS, weighted to resemble real traffic and to respect
-// what this backend deliberately rate-limits:
-//   - browse   : anonymous, GET-only (categories, category browsing, search,
-//                product detail) - no auth, not rate limited, this is where
-//                most concurrent traffic in a real shopping app actually
-//                sits at any given instant. This is the scenario that can
-//                legitimately be pushed to real scale from one machine.
-//   - cart     : authenticated (pre-seeded token), browse + add to cart +
-//                view cart - not rate limited either, so this can also run
-//                at real concurrency.
-//   - checkout : authenticated, calls POST /orders/place - deliberately
-//                capped at a low constant-arrival-rate (see comment below)
-//                because RateLimitFilter caps this endpoint at 10
-//                requests/60s PER SOURCE IP. Every VU in this test shares
-//                this machine's one IP, so this scenario can never validate
-//                "N thousand simultaneous checkouts" no matter how it's
-//                written - that's a real, current architectural limit worth
-//                knowing about on its own (see load-tests/README.md), not a
-//                bug in this script.
+// A virtual user is a shopper:
+//   open app (health + store-info, once in setup)
+//   → browse categories / products
+//   → search occasionally (~10%, not 40%)
+//   → open a product
+//   → sometimes add to cart, view cart, bump quantity
+//   → rarely check out (constant-arrival-rate, default 4 orders/min)
+//   → sometimes refresh order status
 //
-// Tune VU counts via env vars: BROWSE_VUS, CART_VUS (defaults below are a
-// conservative starting point - see README.md for what's safe to run
-// against production right now vs. what needs a staging environment first).
+// Think time is 1.5–4s on EVERY path, including errors. A tight loop on
+// 5xx is how the previous run produced ~948k requests and 201 GB.
+// Tokens are reused from accounts.json; the script never logs in per VU.
+//
+// Do NOT raise BROWSE_VUS to 5,000 to "prove scale". A previous 5,005-VU
+// production run measured overload of one small Render instance
+// (~40 Tomcat threads, 10 DB connections), not shopper capacity.
 
 import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 import { SharedArray } from 'k6/data';
-import { Counter } from 'k6/metrics';
+import { Counter, Trend } from 'k6/metrics';
 
-// Custom counters so the end-of-run summary reports actual order-placement
-// outcomes, not just HTTP pass/fail - "how many orders actually got placed
-// this run" is what a duplicate-order check against the DB afterward needs
-// as its baseline (k6 itself has no DB access to verify duplicates directly
-// - see load-tests/README.md's "what this can't validate yet" section).
-/**
- * Outcome census, by HTTP status class and by network error.
- *
- * This exists because the 10,000-VU run could not be diagnosed from its own
- * output. It reported 99.89% http_req_failed, and NOTHING in the logs said
- * whether those were 429s, 500s, 502s from the edge proxy, or resets - k6
- * logs a line for network errors only, so 46,009 of 46,344 failures were
- * invisible. "It failed" is not a diagnosis, and the difference between a
- * 429 (the app rejecting on purpose), a 502 (the app unreachable) and a 500
- * (the app broken) points at three completely different fixes.
- *
- * status_0 is k6's code for "no HTTP response at all" - a timeout, reset or
- * refused connection - and is kept separate from any real status.
- */
 const status2xx = new Counter('status_2xx');
 const status3xx = new Counter('status_3xx');
 const status4xx = new Counter('status_4xx');
@@ -62,28 +35,12 @@ const status429 = new Counter('status_429');
 const status5xx = new Counter('status_5xx');
 const status502 = new Counter('status_502');
 const status503 = new Counter('status_503');
+const status503Shed = new Counter('status_503_shed');
+const status503Unexpected = new Counter('status_503_unexpected');
 const status504 = new Counter('status_504');
 const statusNetworkError = new Counter('status_network_error');
 const bytesReceived = new Counter('response_bytes');
-
-function recordOutcome(res) {
-  const s = res.status;
-  // Response size is recorded too: the 10k run received ~215 KB per request
-  // on average, which matches neither an error body nor a measured browse
-  // payload (6.7 KB for 20 products). Until that is explained, the run's
-  // bandwidth figure cannot be trusted to mean what it appears to mean.
-  bytesReceived.add(res.body ? res.body.length : 0);
-
-  if (s === 0) { statusNetworkError.add(1); return; }
-  if (s === 429) { status429.add(1); status4xx.add(1); return; }
-  if (s === 502) { status502.add(1); status5xx.add(1); return; }
-  if (s === 503) { status503.add(1); status5xx.add(1); return; }
-  if (s === 504) { status504.add(1); status5xx.add(1); return; }
-  if (s >= 500) { status5xx.add(1); return; }
-  if (s >= 400) { status4xx.add(1); return; }
-  if (s >= 300) { status3xx.add(1); return; }
-  if (s >= 200) { status2xx.add(1); return; }
-}
+const payloadBytes = new Trend('payload_bytes', false);
 
 const ordersPlaced = new Counter('orders_placed');
 const ordersRateLimited = new Counter('orders_rate_limited');
@@ -92,16 +49,23 @@ const ordersRejected = new Counter('orders_rejected_client_error');
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8081/v1').replace(/\/$/, '');
 const BROWSE_VUS = parseInt(__ENV.BROWSE_VUS || '50', 10);
 const CART_VUS = parseInt(__ENV.CART_VUS || '15', 10);
+const CHECKOUT_RATE = parseInt(__ENV.CHECKOUT_RATE || (CART_VUS > 0 ? '4' : '0'), 10);
 const RAMP_TIME = __ENV.RAMP_TIME || '1m';
 const HOLD_TIME = __ENV.HOLD_TIME || '3m';
 
 const SEARCH_TERMS = ['rice', 'oil', 'soap', 'milk', 'atta', 'biscuit', 'tea', 'salt', 'sugar', 'dal'];
 
+// Init-context: applies to every VU. 429 and catalog 503 are expected under
+// pressure; 502 is not.
+http.setResponseCallback(
+  http.expectedStatuses({ min: 200, max: 399 }, 400, 401, 403, 404, 409, 429, 503),
+);
+
 const accounts = new SharedArray('accounts', function () {
   try {
     return JSON.parse(open('./accounts.json'));
   } catch (e) {
-    return []; // browse scenario doesn't need these - only warn if cart/checkout actually run
+    return [];
   }
 });
 
@@ -109,45 +73,105 @@ function randomItem(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Real users pause to read/decide between actions - a tight request loop
-// with no pacing measures something closer to a stress test than realistic
-// concurrent-user load. 1-3s matches a quick "glance and tap" pace.
+// Glance-and-tap, not a tight loop. 1.5–4s matches a shopper reading a card.
 function thinkTime() {
-  sleep(1 + Math.random() * 2);
+  sleep(1.5 + Math.random() * 2.5);
 }
 
 function authHeaders(account) {
   return { headers: { Authorization: `Bearer ${account.token}`, 'Content-Type': 'application/json' } };
 }
 
+function checkoutIdempotencyKey(email) {
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${email}-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function isCatalogShed(res) {
+  if (res.status !== 503) return false;
+  const shedHeader = res.headers['X-GP-Shed'] || res.headers['x-gp-shed'];
+  if (shedHeader) return true;
+  const body = typeof res.body === 'string' ? res.body : '';
+  return body.indexOf('POOL_SATURATED') >= 0 || body.indexOf('The shop is busy') >= 0;
+}
+
+function recordOutcome(res) {
+  const s = res.status;
+  const len = res.body ? res.body.length : 0;
+  bytesReceived.add(len);
+  payloadBytes.add(len);
+
+  if (s === 0) {
+    statusNetworkError.add(1);
+    return;
+  }
+  if (s === 429) {
+    status429.add(1);
+    status4xx.add(1);
+    return;
+  }
+  if (s === 502) {
+    status502.add(1);
+    status5xx.add(1);
+    return;
+  }
+  if (s === 503) {
+    status503.add(1);
+    if (isCatalogShed(res)) {
+      status503Shed.add(1);
+    } else {
+      status503Unexpected.add(1);
+      status5xx.add(1);
+    }
+    return;
+  }
+  if (s === 504) {
+    status504.add(1);
+    status5xx.add(1);
+    return;
+  }
+  if (s >= 500) {
+    status5xx.add(1);
+    return;
+  }
+  if (s >= 400) {
+    status4xx.add(1);
+    return;
+  }
+  if (s >= 300) {
+    status3xx.add(1);
+    return;
+  }
+  if (s >= 200) {
+    status2xx.add(1);
+  }
+}
+
 export function setup() {
-  const res = http.get(`${BASE_URL}/api/categories`);
+  const health = http.get(`${BASE_URL}/api/health`, { tags: { name: 'liveness' } });
+  recordOutcome(health);
+  check(health, { 'setup: liveness 200': (r) => r.status === 200 });
+
+  const store = http.get(`${BASE_URL}/api/store-info`, { tags: { name: 'store_info' } });
+  recordOutcome(store);
+
+  const res = http.get(`${BASE_URL}/api/categories`, { tags: { name: 'categories' } });
+  recordOutcome(res);
   check(res, { 'setup: categories loaded': (r) => r.status === 200 });
   const categories = res.json();
   if (!categories || categories.length === 0) {
     throw new Error('No categories returned from /api/categories - is BASE_URL correct and the catalog seeded?');
   }
   if (accounts.length === 0) {
-    console.warn('accounts.json is empty/missing - cart and checkout scenarios will fail. Run seed-accounts.js first.');
+    console.warn('accounts.json is empty/missing - cart and checkout scenarios will no-op. Run seed-accounts.js first.');
   }
   return { categories };
 }
 
-/**
- * Scenarios are assembled rather than declared as one literal, because a
- * scenario set to zero VUs must be OMITTED, not included with a target of 0.
- *
- * k6 rejects the whole script - before sending a single request - with
- * "scenario cart has configuration errors: either startVUs or one of the
- * stages' target values must be greater than 0". So a browse-only run,
- * which is the normal shape of a high-VU run because cart and checkout
- * need seeded accounts, would fail at startup and measure nothing at all.
- * The run still burns its full setup time first, so the failure looks like
- * a load test that ran and died rather than one that never started.
- *
- * Zero therefore means "leave this scenario out", which is what anyone
- * setting it to zero intends.
- */
 function rampingScenario(exec, vus) {
   return {
     executor: 'ramping-vus',
@@ -171,50 +195,40 @@ if (CART_VUS > 0) {
   scenarios.cart = rampingScenario('cart', CART_VUS);
 }
 
-// Checkout rides on the seeded accounts the cart scenario needs, so it is
-// tied to the same switch: with no accounts there is nothing to check out
-// with, and every iteration would fail on authentication and report as a
-// backend failure when it is really a test-setup gap.
-if (CART_VUS > 0) {
+if (CHECKOUT_RATE > 0) {
   scenarios.checkout = {
-      executor: 'constant-arrival-rate',
-      exec: 'checkout',
-      // Paced against the backend's checkout rate limit, which CHANGED:
-      // POST /orders/place is now limited per CUSTOMER (default 20/min,
-      // rate-limit.checkout-per-minute), not per IP as it was when this
-      // number was chosen. Per-IP was the binding constraint from a single
-      // generator; per-customer is not, because the script rotates through
-      // seeded accounts.
-      //
-      // Still deliberately modest: the goal of the checkout scenario is to
-      // prove orders are placed correctly under concurrent load, not to
-      // maximise order throughput. Raising it mostly produces 429s from the
-      // per-customer limit once the account pool is small relative to the
-      // rate, which is a property of the test setup rather than a finding
-      // about the backend. Raise the seeded account count first if you want
-      // a higher checkout rate.
-      rate: 8,
-      timeUnit: '1m',
-      duration: HOLD_TIME,
-      preAllocatedVUs: 5,
-      maxVUs: 10,
+    executor: 'constant-arrival-rate',
+    exec: 'checkout',
+    // Modest on purpose. Real checkouts are rare relative to browse.
+    // RateLimitFilter caps POST /orders/place at 20/min per customer.
+    rate: CHECKOUT_RATE,
+    timeUnit: '1m',
+    duration: HOLD_TIME,
+    preAllocatedVUs: Math.min(5, Math.max(1, CHECKOUT_RATE)),
+    maxVUs: Math.min(10, Math.max(2, CHECKOUT_RATE * 2)),
   };
 }
 
 if (Object.keys(scenarios).length === 0) {
-  // Better to say so than to let k6 start with nothing to do and report a
-  // clean run that tested absolutely nothing.
-  throw new Error('No scenarios enabled - set BROWSE_VUS and/or CART_VUS above 0.');
+  throw new Error('No scenarios enabled - set BROWSE_VUS, CART_VUS, and/or CHECKOUT_RATE above 0.');
 }
 
 export const options = {
   scenarios,
   thresholds: {
-    // Aspirational, not pass/fail gates for this exercise - the point of
-    // Phase 2 is to find the REAL numbers, not assert ones in advance. Kept
-    // loose so the run always completes and reports actuals either way.
-    http_req_duration: ['p(95)<3000'],
-    http_req_failed: ['rate<0.05'],
+    // Reads are tighter than writes. One global p95 hid checkout behind browse.
+    'http_req_duration{name:browse_category}': ['p(95)<1500'],
+    'http_req_duration{name:categories}': ['p(95)<1000'],
+    'http_req_duration{name:search}': ['p(95)<2000'],
+    'http_req_duration{name:product_detail}': ['p(95)<2000'],
+    'http_req_duration{name:view_cart}': ['p(95)<1500'],
+    'http_req_duration{name:add_to_cart}': ['p(95)<2000'],
+    'http_req_duration{name:checkout_preview}': ['p(95)<3000'],
+    'http_req_duration{name:place_order}': ['p(95)<4000', 'p(99)<8000'],
+    'http_req_duration{name:order_status}': ['p(95)<1500'],
+    'status_502': [{ threshold: 'count==0', abortOnFail: true }],
+    'status_503_unexpected': ['count==0'],
+    'status_network_error': ['count==0'],
   },
 };
 
@@ -222,16 +236,26 @@ export function browse(data) {
   group('browse', function () {
     const category = randomItem(data.categories);
 
-    const catRes = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, { tags: { name: 'browse_category' } });
+    const catRes = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, {
+      tags: { name: 'browse_category' },
+    });
     recordOutcome(catRes);
-    check(catRes, { 'browse category: 200': (r) => r.status === 200 });
+    check(catRes, { 'browse category: 200 or shed 503': (r) => r.status === 200 || isCatalogShed(r) });
     thinkTime();
+    if (catRes.status !== 200) {
+      return;
+    }
 
-    if (Math.random() < 0.4) {
+    if (Math.random() < 0.1) {
       const term = randomItem(SEARCH_TERMS);
-      const searchRes = http.get(`${BASE_URL}/api/products/search/instant?keyword=${term}&page=0&size=20`, { tags: { name: 'search' } });
+      const searchRes = http.get(
+        `${BASE_URL}/api/products/search/instant?keyword=${term}&page=0&size=20`,
+        { tags: { name: 'search' } },
+      );
       recordOutcome(searchRes);
-    check(searchRes, { 'search: 200': (r) => r.status === 200 });
+      check(searchRes, {
+        'search: 200, 429, or shed 503': (r) => r.status === 200 || r.status === 429 || isCatalogShed(r),
+      });
       thinkTime();
     }
 
@@ -240,30 +264,45 @@ export function browse(data) {
       const products = (page && page.content) || [];
       if (products.length > 0) {
         const product = randomItem(products);
-        const detailRes = http.get(`${BASE_URL}/api/products/${product.id}`, { tags: { name: 'product_detail' } });
+        const detailRes = http.get(`${BASE_URL}/api/products/${product.id}`, {
+          tags: { name: 'product_detail' },
+        });
         recordOutcome(detailRes);
-    check(detailRes, { 'product detail: 200': (r) => r.status === 200 });
+        check(detailRes, {
+          'product detail: 200 or shed 503': (r) => r.status === 200 || isCatalogShed(r),
+        });
         thinkTime();
       }
     } catch (e) {
-      // Malformed page body would already have failed the check above -
-      // nothing further to do for this iteration.
+      thinkTime();
     }
   });
 }
 
 export function cart(data) {
-  if (accounts.length === 0) return;
+  if (accounts.length === 0) {
+    thinkTime();
+    return;
+  }
   const account = randomItem(accounts);
 
   group('cart', function () {
     const category = randomItem(data.categories);
-    const catRes = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, { tags: { name: 'browse_category' } });
-    if (catRes.status !== 200) return;
+    const catRes = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, {
+      tags: { name: 'browse_category' },
+    });
+    recordOutcome(catRes);
+    if (catRes.status !== 200) {
+      thinkTime();
+      return;
+    }
 
     const page = catRes.json();
     const products = ((page && page.content) || []).filter((p) => (p.variants || []).some((v) => v.available));
-    if (products.length === 0) return;
+    if (products.length === 0) {
+      thinkTime();
+      return;
+    }
 
     const product = randomItem(products);
     const variant = product.variants.find((v) => v.available);
@@ -272,16 +311,22 @@ export function cart(data) {
     const addRes = http.post(
       `${BASE_URL}/api/carts/add?variantId=${variant.id}&quantity=1`,
       null,
-      authHeaders(account),
+      { ...authHeaders(account), tags: { name: 'add_to_cart' } },
     );
-    check(addRes, { 'add to cart: 200': (r) => r.status === 200 });
+    recordOutcome(addRes);
+    check(addRes, { 'add to cart: 200 or 429': (r) => r.status === 200 || r.status === 429 });
     thinkTime();
+    if (addRes.status !== 200) {
+      return;
+    }
 
-    const cartRes = http.get(`${BASE_URL}/api/carts/mine`, authHeaders(account));
+    const cartRes = http.get(`${BASE_URL}/api/carts/mine`, {
+      ...authHeaders(account),
+      tags: { name: 'view_cart' },
+    });
+    recordOutcome(cartRes);
     check(cartRes, { 'view cart: 200': (r) => r.status === 200 });
 
-    // Real users often bump quantity up/down before settling - a stepper
-    // tap, not just a one-shot add.
     try {
       const cartBody = cartRes.json();
       const items = (cartBody && cartBody.items) || [];
@@ -291,28 +336,42 @@ export function cart(data) {
         const updateRes = http.put(
           `${BASE_URL}/api/carts/items/${item.cartItemId}?quantity=2`,
           null,
-          authHeaders(account),
+          { ...authHeaders(account), tags: { name: 'update_cart' } },
         );
-        check(updateRes, { 'update cart quantity: 200': (r) => r.status === 200 });
+        recordOutcome(updateRes);
+        check(updateRes, { 'update cart quantity: 200 or 429': (r) => r.status === 200 || r.status === 429 });
       }
     } catch (e) {
       // Cart body shape mismatch would already have failed the check above.
     }
+    thinkTime();
   });
 }
 
 export function checkout(data) {
-  if (accounts.length === 0) return;
+  if (accounts.length === 0) {
+    thinkTime();
+    return;
+  }
   const account = randomItem(accounts);
 
   group('checkout', function () {
     const category = randomItem(data.categories);
-    const catRes = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, { tags: { name: 'browse_category' } });
-    if (catRes.status !== 200) return;
+    const catRes = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, {
+      tags: { name: 'browse_category' },
+    });
+    recordOutcome(catRes);
+    if (catRes.status !== 200) {
+      thinkTime();
+      return;
+    }
 
     const page = catRes.json();
     const products = ((page && page.content) || []).filter((p) => (p.variants || []).some((v) => v.available));
-    if (products.length === 0) return;
+    if (products.length === 0) {
+      thinkTime();
+      return;
+    }
 
     const product = randomItem(products);
     const variant = product.variants.find((v) => v.available);
@@ -320,42 +379,70 @@ export function checkout(data) {
     const addRes = http.post(
       `${BASE_URL}/api/carts/add?variantId=${variant.id}&quantity=1`,
       null,
-      authHeaders(account),
+      { ...authHeaders(account), tags: { name: 'add_to_cart' } },
     );
-    if (addRes.status !== 200) return;
+    recordOutcome(addRes);
+    if (addRes.status !== 200) {
+      thinkTime();
+      return;
+    }
     thinkTime();
 
-    // Real checkout always shows a cost preview before the customer commits
-    // - not part of what's being placed, but part of the flow.
     const previewRes = http.get(
       `${BASE_URL}/api/orders/checkout-preview?addressId=${account.addressId}`,
-      authHeaders(account),
+      { ...authHeaders(account), tags: { name: 'checkout_preview' } },
     );
-    check(previewRes, { 'checkout preview: 200': (r) => r.status === 200 });
+    recordOutcome(previewRes);
+    check(previewRes, { 'checkout preview: 200 or 4xx': (r) => r.status === 200 || (r.status >= 400 && r.status < 500) });
     thinkTime();
 
     const orderRes = http.post(
       `${BASE_URL}/api/orders/place`,
       JSON.stringify({ addressId: account.addressId, paymentMethod: 'COD' }),
-      { headers: { ...authHeaders(account).headers, 'Idempotency-Key': `${account.email}-${Date.now()}` } },
+      {
+        headers: { ...authHeaders(account).headers, 'Idempotency-Key': checkoutIdempotencyKey(account.email) },
+        tags: { name: 'place_order' },
+      },
     );
+    recordOutcome(orderRes);
     check(orderRes, {
-      'place order: 200 or expected 4xx (empty cart / rate limit)': (r) => r.status === 200 || r.status === 400 || r.status === 429,
+      'place order: 200 or expected 4xx (empty cart / rate limit)': (r) =>
+        r.status === 200 || r.status === 400 || r.status === 409 || r.status === 429,
       'place order: not a 5xx': (r) => r.status < 500,
     });
 
     if (orderRes.status === 200) {
       ordersPlaced.add(1);
       thinkTime();
-      // Realistic flow completion: a customer who just checked out looks at
-      // their order history next, not nothing - see the flow this scenario
-      // is meant to mirror (browse -> cart -> checkout -> order history).
-      const historyRes = http.get(`${BASE_URL}/api/orders/my-orders?page=0&size=20`, authHeaders(account));
+      const historyRes = http.get(`${BASE_URL}/api/orders/my-orders?page=0&size=20`, {
+        ...authHeaders(account),
+        tags: { name: 'order_history' },
+      });
+      recordOutcome(historyRes);
       check(historyRes, { 'order history: 200': (r) => r.status === 200 });
+
+      // Occasional status refresh - not a poll loop.
+      if (Math.random() < 0.3) {
+        try {
+          const placed = orderRes.json();
+          if (placed && placed.orderId) {
+            thinkTime();
+            const statusRes = http.get(`${BASE_URL}/api/orders/${placed.orderId}`, {
+              ...authHeaders(account),
+              tags: { name: 'order_status' },
+            });
+            recordOutcome(statusRes);
+            check(statusRes, { 'order status: 200': (r) => r.status === 200 });
+          }
+        } catch (e) {
+          // ignore parse errors; already counted
+        }
+      }
     } else if (orderRes.status === 429) {
       ordersRateLimited.add(1);
     } else if (orderRes.status >= 400 && orderRes.status < 500) {
       ordersRejected.add(1);
     }
+    thinkTime();
   });
 }

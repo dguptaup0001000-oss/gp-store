@@ -22,7 +22,7 @@ Phase 2 of the scale roadmap: measure the real breaking point instead of guessin
 ```bash
 # 1. Install k6: https://k6.io/docs/get-started/installation/
 
-# 2. Seed test accounts (takes ~5-6 min for 50 accounts - it's deliberately slow)
+# 2. Seed test accounts (takes ~3 min for 50 accounts - it's deliberately slow)
 cd load-tests
 BASE_URL=https://your-backend.onrender.com/v1 COUNT=50 node seed-accounts.js
 
@@ -44,11 +44,17 @@ graph for the same time window - that combination tells you what actually satura
 first (app CPU, DB connections, Redis, etc.), not just that something did.
 
 **Concurrent users vs. requests per second - these are not the same number.**
-`BROWSE_VUS=1000` means 1,000 virtual users are open at once, each pausing 1-3s
+`BROWSE_VUS=1000` means 1,000 virtual users are open at once, each pausing 1.5–4s
 between actions (`thinkTime()`) - the actual request rate that produces is roughly
 `VUs / average_think_time`, not 1,000 requests/second. k6's summary reports the real
 achieved rate (`http_reqs` / test duration); read that number, don't infer it from the
 VU count.
+
+A previous ~5,005-VU / ~948k-request run transferred ~201 GB because the script
+had almost no think time on error paths, searched 40% of the time, and treated
+every VU as a request cannon. That is a **LOAD-TEST ISSUE**, not proof the API
+returns 200 KB per call. `response_bytes` / `payload_bytes` on the rewritten
+script is the number to read.
 
 ### Staged execution (required order)
 
@@ -57,13 +63,15 @@ A previous production run at ~5,005 VUs produced **95% HTTP failures and
 ~325k 502s**. That is overload of a 40-thread / 10-connection container,
 not a code rating, and it is **not** a reason to raise `DB_POOL_MAX_SIZE`.
 
-Pass/fail for each stage (see `staged-capacity.js`): error rate < 2%,
-p95 < 2s, p99 < 4s, **zero** 502, 503, and network errors. Stop at the
-first failure; that VU count is the measured ceiling for that target.
+Pass/fail for each stage (see `staged-capacity.js`): p95 < 2s,
+p99 < 4s, **zero** 502, unexpected 503 (liveness), and network errors.
+Catalog GET 503 from pool shedding is counted as `status_503_shed` and
+does **not** fail the stage. Stop at the first failure; that VU count is
+the measured ceiling for that target.
 
 | Stage | VUs | How |
 |---|---|---|
-| A–D | 10, 25, 50, 100 | `BASE_URL=http://localhost:8080/v1 ./run-staged-capacity.sh` |
+| A–D | 10, 25, 50, 100 | `BASE_URL=http://localhost:8081/v1 ./run-staged-capacity.sh` |
 | E–G | 250, 500, 1,000 | `STAGES="250" HOLD_TIME=1m ./run-staged-capacity.sh` on staging only |
 
 Browse-only probe (no checkout, no seeded accounts):
@@ -71,14 +79,22 @@ Browse-only probe (no checkout, no seeded accounts):
 ```bash
 cd load-tests
 chmod +x run-staged-capacity.sh
-BASE_URL=http://localhost:8080/v1 HOLD_TIME=20s ./run-staged-capacity.sh
+BASE_URL=http://localhost:8081/v1 HOLD_TIME=20s ./run-staged-capacity.sh
 ```
 
 Record Hikari (`total/active/idle/waiting`), `pg_stat_activity`, CPU and
 RSS in the same window. k6 cannot see the pool.
 
-The older 5k/10k/25k/50k commands remain in `browse-cart-checkout.js` and
-must not be run against the live Render service.
+There is **no** 5k/10k/25k/50k command in `browse-cart-checkout.js`. Do not
+add one. A 5,000-VU run against one small Render instance is overload
+theatre, not a customer scenario.
+
+Realistic customer mix (browse + cart + paced checkout):
+
+```bash
+BASE_URL=http://localhost:8081/v1 BROWSE_VUS=50 CART_VUS=15 CHECKOUT_RATE=4 \
+  k6 run browse-cart-checkout.js
+```
 
 ## Quickstart (phone, using Termux - no k6)
 
@@ -108,16 +124,12 @@ instances behind a coordinator - a generator that can't produce the load can't m
 whether the target can handle it.
 
 **2. The login/register/checkout rate limiter caps this specific test, on purpose.**
-`RateLimitFilter` limits `/api/auth/login`, `/api/auth/register`, and
-`/api/orders/place` to 10 requests/60s **per source IP**. That's correct,
-deliberate anti-abuse behavior and shouldn't be turned off for a test - but it
-also means every VU in a single-machine k6 run shares one IP, so this test can
-prove real concurrency on **browse and cart** (uncapped, and where most real
-traffic sits at any instant) but never on checkout throughput specifically. If
-you need a real number for "how many simultaneous checkouts can this handle,"
-that requires either a distributed generator (many source IPs) or a
-temporary, explicitly-flagged rate-limit exemption for the test's IP range -
-worth doing deliberately, not as a side effect of this script.
+`RateLimitFilter` limits login/register/OTP/refresh to 20 requests/60s **per
+source IP**, checkout to 20/min **per customer**, and search to 60/min.
+That's correct, deliberate anti-abuse behavior and shouldn't be turned off
+for a test. Checkout in this script is a `constant-arrival-rate` of 4
+orders/minute by default (`CHECKOUT_RATE`), which is what a small shop
+actually sees - not a VU-shaped checkout flood.
 
 **3. Testing at 50k scale against today's infrastructure would mostly measure
 today's infrastructure, not the app's actual ceiling.** Backend is a single Render

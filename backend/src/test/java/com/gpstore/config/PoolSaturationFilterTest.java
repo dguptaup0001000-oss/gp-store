@@ -15,14 +15,8 @@ import static org.mockito.Mockito.when;
 class PoolSaturationFilterTest {
 
     @Test
-    void catalogGetIsShedWhenThePoolAlreadyHasAQueue() throws Exception {
-        HikariPoolMXBean mx = mock(HikariPoolMXBean.class);
-        when(mx.getThreadsAwaitingConnection()).thenReturn(PoolSaturationFilter.WAITING_SHED_THRESHOLD);
-
-        HikariDataSource hikari = mock(HikariDataSource.class);
-        when(hikari.getHikariPoolMXBean()).thenReturn(mx);
-
-        PoolSaturationFilter filter = new PoolSaturationFilter(hikari);
+    void catalogGetIsShedWhenThePoolIsFullAndQueued() throws Exception {
+        PoolSaturationFilter filter = filterWith(10, 10, PoolSaturationFilter.WAITING_SHED_THRESHOLD);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/v1/api/products");
         request.setRequestURI("/v1/api/products");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -32,18 +26,27 @@ class PoolSaturationFilterTest {
 
         assertEquals(503, response.getStatus());
         assertEquals("1", response.getHeader("Retry-After"));
+        assertEquals("pool-saturated", response.getHeader("X-GP-Shed"));
         assertNull(chain.getRequest());
     }
 
     @Test
+    void waitingThreadsAloneDoNotShedWhileConnectionsAreStillIdle() throws Exception {
+        PoolSaturationFilter filter = filterWith(4, 10, 20);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/v1/api/products");
+        request.setRequestURI("/v1/api/products");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(request, chain.getRequest());
+        assertEquals(200, response.getStatus());
+    }
+
+    @Test
     void checkoutIsNotShedByThisFilter() throws Exception {
-        HikariPoolMXBean mx = mock(HikariPoolMXBean.class);
-        when(mx.getThreadsAwaitingConnection()).thenReturn(20);
-
-        HikariDataSource hikari = mock(HikariDataSource.class);
-        when(hikari.getHikariPoolMXBean()).thenReturn(mx);
-
-        PoolSaturationFilter filter = new PoolSaturationFilter(hikari);
+        PoolSaturationFilter filter = filterWith(10, 10, 20);
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/v1/api/orders/place");
         request.setRequestURI("/v1/api/orders/place");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -52,5 +55,19 @@ class PoolSaturationFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(request, chain.getRequest());
+    }
+
+    private static PoolSaturationFilter filterWith(int active, int maxPool, int waiting) {
+        HikariPoolMXBean mx = mock(HikariPoolMXBean.class);
+        when(mx.getThreadsAwaitingConnection()).thenReturn(waiting);
+        when(mx.getActiveConnections()).thenReturn(active);
+
+        HikariDataSource hikari = mock(HikariDataSource.class);
+        when(hikari.getHikariPoolMXBean()).thenReturn(mx);
+        when(hikari.getMaximumPoolSize()).thenReturn(maxPool);
+        return new PoolSaturationFilter(
+                hikari,
+                PoolSaturationFilter.WAITING_SHED_THRESHOLD,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 }

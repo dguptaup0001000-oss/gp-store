@@ -40,11 +40,14 @@ public class DeliveryPricingService {
 
     private final DeliveryPricingSettingsRepository settingsRepository;
     private final DeliveryEstimateService estimateService;
+    private final DeliveryPricingService self;
 
     public DeliveryPricingService(DeliveryPricingSettingsRepository settingsRepository,
-                                  DeliveryEstimateService estimateService) {
+                                  DeliveryEstimateService estimateService,
+                                  @org.springframework.context.annotation.Lazy DeliveryPricingService self) {
         this.settingsRepository = settingsRepository;
         this.estimateService = estimateService;
+        this.self = self;
     }
 
     /**
@@ -126,7 +129,7 @@ public class DeliveryPricingService {
     }
 
     private DeliveryQuote quote(List<OrderWeightCalculator.Line> lines, Address address) {
-        DeliveryPricingSettings s = settings();
+        DeliveryPricingSettings s = self.settings();
 
         List<String> warnings = new ArrayList<>();
 

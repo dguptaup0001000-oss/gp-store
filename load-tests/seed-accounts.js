@@ -2,21 +2,21 @@
 // script itself, just plain Node (needs Node 18+ for global fetch).
 //
 // WHY THIS EXISTS: /api/auth/register and /api/auth/login are both rate
-// limited to 10 requests/60s PER SOURCE IP (see RateLimitFilter.java) - that
+// limited to 20 requests/60s PER SOURCE IP (see RateLimitFilter.java) - that
 // limit is correct and should stay on in production, but it also means a k6
 // run firing thousands of virtual users from one machine (one IP) can never
-// register/log in more than 10 accounts a minute no matter how it's written.
+// register/log in more than 20 accounts a minute no matter how it's written.
 // So account creation happens once, slowly, ahead of time here - the actual
 // load test then reuses these pre-issued tokens and never calls
 // register/login itself, which is both realistic (real users don't re-login
 // every request either) and the only way to reach real concurrency on the
-// endpoints that AREN'T rate limited (browse, cart, checkout).
+// endpoints that AREN'T rate limited the same way (browse, cart).
 //
 // Usage:
 //   BASE_URL=https://your-backend.onrender.com/v1 COUNT=50 node seed-accounts.js
 //
-// Takes roughly COUNT * 6.5 seconds to run (paced to stay under the 10/60s
-// register limit) - for 50 accounts that's ~5-6 minutes. Writes accounts.json
+// Takes roughly COUNT * 3.5 seconds to run (paced to stay under the 20/60s
+// register limit) - for 50 accounts that's ~3 minutes. Writes accounts.json
 // in this directory; browse-cart-checkout.js reads that file directly.
 
 const BASE_URL = (process.env.BASE_URL || 'http://localhost:8081/v1').replace(/\/$/, '');
@@ -100,7 +100,7 @@ async function registerOne(index) {
 }
 
 async function main() {
-  console.log(`Seeding ${COUNT} accounts against ${BASE_URL} (~${Math.ceil(COUNT * 6.5 / 60)} min)...`);
+  console.log(`Seeding ${COUNT} accounts against ${BASE_URL} (~${Math.ceil(COUNT * 3.5 / 60)} min)...`);
   const accounts = [];
   for (let i = 0; i < COUNT; i++) {
     try {
@@ -110,10 +110,9 @@ async function main() {
     } catch (err) {
       console.error(`\naccount ${i} failed: ${err.message}`);
     }
-    // 6.5s between registrations stays safely under the 10-per-60s limit
-    // (~9.2/min) even with clock drift, without wasting time being overly
-    // conservative.
-    if (i < COUNT - 1) await sleep(6500);
+    // 3.5s between registrations stays under the 20-per-60s AUTH limit
+    // (~17/min) even with clock drift.
+    if (i < COUNT - 1) await sleep(3500);
   }
   await import('node:fs').then((fs) => fs.writeFileSync(OUT_FILE, JSON.stringify(accounts, null, 2)));
   console.log(`\nWrote ${accounts.length} accounts to ${OUT_FILE}`);

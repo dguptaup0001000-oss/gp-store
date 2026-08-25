@@ -39,6 +39,7 @@ public class DeliveryService {
     private final AuditLogService auditLogService;
     private final PaymentService paymentService;
     private final TerritoryDispatchService territoryDispatchService;
+    private final com.gpstore.config.AfterCommitExecutor afterCommitExecutor;
     private final int bulkOrderItemThreshold;
 
     public DeliveryService(
@@ -52,6 +53,7 @@ public class DeliveryService {
             AuditLogService auditLogService,
             PaymentService paymentService,
             TerritoryDispatchService territoryDispatchService,
+            com.gpstore.config.AfterCommitExecutor afterCommitExecutor,
             @org.springframework.beans.factory.annotation.Value("${delivery.bulk-order-item-threshold}") int bulkOrderItemThreshold) {
 
         this.deliveryRepository = deliveryRepository;
@@ -64,6 +66,7 @@ public class DeliveryService {
         this.auditLogService = auditLogService;
         this.paymentService = paymentService;
         this.territoryDispatchService = territoryDispatchService;
+        this.afterCommitExecutor = afterCommitExecutor;
         this.bulkOrderItemThreshold = bulkOrderItemThreshold;
     }
 
@@ -242,12 +245,12 @@ public class DeliveryService {
 
         Delivery saved = deliveryRepository.save(delivery);
 
-        // Best-effort, same reasoning as autoAssignBestEffort() above - a
-        // notification hiccup must never fail an assignment that already
-        // succeeded. notifyPartnerNewAssignment() catches its own
-        // exceptions internally, so this call can't throw, but the intent
-        // is the same either way: assignment succeeds regardless.
-        notificationService.notifyPartnerNewAssignment(partner, saved);
+        // FCM must not hold this transaction's pool connection for a Google
+        // round trip. Touch lazy fields now, then notify after commit.
+        touchPartnerForPush(partner, saved);
+        afterCommitExecutor.runAfterCommit("Partner assignment notification",
+                saved.getId(),
+                () -> notificationService.notifyPartnerNewAssignment(partner, saved));
 
         return com.gpstore.dto.response.DeliveryResponse.from(saved);
     }
@@ -417,7 +420,9 @@ public class DeliveryService {
         if (target == DeliveryStatus.OUT_FOR_DELIVERY && order != null) {
             order.setOrderStatus(OrderStatus.OUT_FOR_DELIVERY);
             orderRepository.save(order);
-            notificationService.notifyOrderStatusChange(order, OrderStatus.OUT_FOR_DELIVERY);
+            touchOrderForPush(order);
+            afterCommitExecutor.runAfterCommit("Out-for-delivery notification", order.getId(),
+                    () -> notificationService.notifyOrderStatusChange(order, OrderStatus.OUT_FOR_DELIVERY));
         }
 
         if (target == DeliveryStatus.DELIVERED) {
@@ -439,14 +444,12 @@ public class DeliveryService {
             if (order != null) {
                 order.setOrderStatus(OrderStatus.DELIVERED);
                 orderRepository.save(order);
-                notificationService.notifyOrderStatusChange(order, OrderStatus.DELIVERED);
+                touchOrderForPush(order);
+                afterCommitExecutor.runAfterCommit("Delivered notification", order.getId(),
+                        () -> notificationService.notifyOrderStatusChange(order, OrderStatus.DELIVERED));
 
-                // This was never triggered anywhere before - a COD payment
-                // record would stay stuck at COD_PENDING forever, even after
-                // a real, successful delivery, since nothing else in the
-                // app ever called PaymentService.completeCodPayment. Only
-                // acts if it's actually a still-pending COD payment - a UPI
-                // order's delivery completion must not be affected by this.
+                // COD completion stays IN this transaction. It is payment
+                // state, not a push, and must commit with DELIVERED.
                 paymentService.getPaymentByOrderId(order.getId()).ifPresent(payment -> {
                     if (com.gpstore.enums.PaymentMethod.COD.name().equals(payment.getPaymentMethod())
                                     && com.gpstore.enums.PaymentStatus.COD_PENDING.name().equals(payment.getPaymentStatus())) {
@@ -509,5 +512,24 @@ public class DeliveryService {
                 .map(com.gpstore.dto.response.DeliveryResponse::from)
 
                 .collect(java.util.stream.Collectors.toList());
+    }
+
+    private static void touchOrderForPush(Order order) {
+        if (order == null) {
+            return;
+        }
+        order.getOrderNumber();
+        if (order.getCustomer() != null) {
+            order.getCustomer().getFcmToken();
+        }
+    }
+
+    private static void touchPartnerForPush(DeliveryPartner partner, Delivery delivery) {
+        if (partner != null && partner.getAccount() != null) {
+            partner.getAccount().getFcmToken();
+        }
+        if (delivery != null) {
+            touchOrderForPush(delivery.getOrder());
+        }
     }
 }

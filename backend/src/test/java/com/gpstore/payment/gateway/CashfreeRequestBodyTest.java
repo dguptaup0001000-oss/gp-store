@@ -148,6 +148,15 @@ class CashfreeRequestBodyTest {
         assertTrue(production.baseUrl().contains("api.cashfree.com"));
         assertTrue(production.isProduction());
 
+        CashfreeProperties productionNoWebhookSecret = new CashfreeProperties();
+        productionNoWebhookSecret.setEnvironment("production");
+        productionNoWebhookSecret.setAppId("cf_app");
+        productionNoWebhookSecret.setSecretKey("cf_secret");
+        assertTrue(productionNoWebhookSecret.enabled(),
+                "a missing dedicated webhook secret must not disable the gateway; signatures fall back to secretKey");
+        assertTrue(productionNoWebhookSecret.getWebhookSecret().isBlank());
+        productionNoWebhookSecret.warnIfProductionWebhookSecretMissing();
+
         // Anything unrecognised must NOT be treated as production - a typo in
         // an environment variable should degrade to sandbox, never to live
         // money.
