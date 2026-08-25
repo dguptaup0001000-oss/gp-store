@@ -30,6 +30,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -68,6 +70,7 @@ class WorkerDeliveryStatusTest {
     @Autowired private DeliveryRepository deliveryRepository;
     @Autowired private DeliveryBatchRepository batchRepository;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private ExecutorService orderSideEffectsExecutor;
 
     private DeliveryPartner worker;
     private DeliveryPartner otherWorker;
@@ -89,13 +92,22 @@ class WorkerDeliveryStatusTest {
         // they hold a foreign key to the order. Deleting the order first fails
         // with a constraint violation, which is what happened the first time
         // this file ran.
+        //
+        // Wait for AfterCommitExecutor too: a DELIVERED status change queues
+        // the insert asynchronously. CI failed when that insert landed after
+        // the first DELETE FROM notifications and before DELETE FROM orders.
+        awaitSideEffectsIdle();
         jdbc.update("DELETE FROM notifications WHERE order_id IN "
                 + "(SELECT id FROM orders WHERE order_number LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM notifications WHERE customer_id IN "
                 + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
+        jdbc.update("DELETE FROM outbox_events WHERE aggregate_id IN "
+                + "(SELECT id FROM orders WHERE order_number LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM deliveries WHERE order_id IN "
                 + "(SELECT id FROM orders WHERE order_number LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM payments WHERE order_id IN "
+                + "(SELECT id FROM orders WHERE order_number LIKE ?)", PREFIX + "%");
+        jdbc.update("DELETE FROM notifications WHERE order_id IN "
                 + "(SELECT id FROM orders WHERE order_number LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM orders WHERE order_number LIKE ?", PREFIX + "%");
         jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE full_name LIKE ?", MARKER + "%");
@@ -362,5 +374,36 @@ class WorkerDeliveryStatusTest {
         d.setAssignedAt(LocalDateTime.now());
         d.setActive(true);
         return deliveryRepository.save(d);
+    }
+
+    private void awaitSideEffectsIdle() {
+        if (!(orderSideEffectsExecutor instanceof ThreadPoolExecutor pool)) {
+            return;
+        }
+        try {
+            Thread.sleep(50);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        for (int i = 0; i < 100; i++) {
+            if (pool.getActiveCount() == 0 && pool.getQueue().isEmpty()) {
+                try {
+                    Thread.sleep(20);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                if (pool.getActiveCount() == 0 && pool.getQueue().isEmpty()) {
+                    return;
+                }
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 }
