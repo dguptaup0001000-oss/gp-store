@@ -55,6 +55,12 @@ class EmptyDatabaseBootstrapTest {
         assertTrue(tableExists("outbox_events"), "V9 creates outbox_events");
         assertTrue(tableExists("delivery_pricing_settings"), "V21 creates delivery_pricing_settings");
         assertTrue(tableExists("password_reset_tokens"), "V24 creates password_reset_tokens");
+        assertTrue(indexExists("idx_categories_active_name"),
+                "V25 indexes categories (active, name) for the public list");
+        assertTrue(indexExists("idx_products_search_keywords_trgm"),
+                "V25 adds a trigram index for search_keywords ILIKE");
+        assertTrue(indexExists("idx_products_subcategory_trgm"),
+                "V25 adds a trigram index for subcategory ILIKE");
         assertTrue(sequenceExists("order_number_seq"), "V6 creates order_number_seq");
 
         Integer trigram = jdbc.queryForObject(
@@ -69,6 +75,15 @@ class EmptyDatabaseBootstrapTest {
                         + "WHERE table_schema = current_schema() AND table_name = ?",
                 Integer.class,
                 table);
+        return count != null && count == 1;
+    }
+
+    private boolean indexExists(String index) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                        + "WHERE c.relkind = 'i' AND n.nspname = current_schema() AND c.relname = ?",
+                Integer.class,
+                index);
         return count != null && count == 1;
     }
 

@@ -361,7 +361,7 @@ public class ProductService {
     // caching this (product data barely changes) means most views don't hit
     // the database at all.
     @Transactional(readOnly = true)
-    @Cacheable("productDetail")
+    @Cacheable(value = "productDetail", sync = true)
     public ProductResponse getProductById(Long id) {
         Product entity = productRepository.findByIdIn(List.of(id)).stream()
                 .findFirst()

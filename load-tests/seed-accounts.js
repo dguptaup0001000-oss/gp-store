@@ -23,14 +23,13 @@ const BASE_URL = (process.env.BASE_URL || 'http://localhost:8081/v1').replace(/\
 const COUNT = parseInt(process.env.COUNT || '50', 10);
 const OUT_FILE = process.env.OUT_FILE || new URL('./accounts.json', import.meta.url);
 
-// Matches application.properties' store.latitude/longitude defaults
-// (28.6139, 77.2090) and store.max-delivery-radius-km default (8km) - jitter
-// stays well inside that radius so checkout's deliverability check passes.
-// If your Render deployment overrides STORE_LATITUDE/STORE_LONGITUDE, update
-// these two constants to match, or every seeded account's checkout will fail
-// with "outside delivery radius".
-const STORE_LAT = parseFloat(process.env.STORE_LATITUDE || '28.6139');
-const STORE_LNG = parseFloat(process.env.STORE_LONGITUDE || '77.2090');
+// Matches application.properties store.latitude/longitude (Malhia, UP) and
+// store.max-delivery-radius-km (20). The previous Delhi pin (28.6139, 77.2090)
+// sat ~700 km outside the shop's radius, so every seeded checkout failed
+// deliverability even when the backend was healthy.
+// Override STORE_LATITUDE/STORE_LONGITUDE if the target deployment does.
+const STORE_LAT = parseFloat(process.env.STORE_LATITUDE || '27.162310');
+const STORE_LNG = parseFloat(process.env.STORE_LONGITUDE || '83.940468');
 
 function jitter(center, maxKm) {
   // ~1 degree latitude is ~111km - keep well inside the radius, not at its edge.

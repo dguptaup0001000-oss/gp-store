@@ -27,6 +27,7 @@ import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 import { SharedArray } from 'k6/data';
 import { Counter, Trend } from 'k6/metrics';
+import { textSummary } from 'k6/summary';
 
 const status2xx = new Counter('status_2xx');
 const status3xx = new Counter('status_3xx');
@@ -50,8 +51,12 @@ const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8081/v1').replace(/\/$/, '
 const BROWSE_VUS = parseInt(__ENV.BROWSE_VUS || '50', 10);
 const CART_VUS = parseInt(__ENV.CART_VUS || '15', 10);
 const CHECKOUT_RATE = parseInt(__ENV.CHECKOUT_RATE || (CART_VUS > 0 ? '4' : '0'), 10);
+const WARMUP_TIME = __ENV.WARMUP_TIME || '0s';
+const WARMUP_VUS = parseInt(__ENV.WARMUP_VUS || '0', 10);
 const RAMP_TIME = __ENV.RAMP_TIME || '1m';
 const HOLD_TIME = __ENV.HOLD_TIME || '3m';
+const RAMP_DOWN_TIME = __ENV.RAMP_DOWN_TIME || RAMP_TIME;
+const SUMMARY_PATH = __ENV.SUMMARY_PATH || '';
 
 const SEARCH_TERMS = ['rice', 'oil', 'soap', 'milk', 'atta', 'biscuit', 'tea', 'salt', 'sugar', 'dal'];
 
@@ -156,6 +161,10 @@ export function setup() {
   recordOutcome(health);
   check(health, { 'setup: liveness 200': (r) => r.status === 200 });
 
+  const ready = http.get(`${BASE_URL}/api/health/ready`, { tags: { name: 'readiness' } });
+  recordOutcome(ready);
+  check(ready, { 'setup: readiness 200': (r) => r.status === 200 });
+
   const store = http.get(`${BASE_URL}/api/store-info`, { tags: { name: 'store_info' } });
   recordOutcome(store);
 
@@ -173,15 +182,18 @@ export function setup() {
 }
 
 function rampingScenario(exec, vus) {
+  const stages = [];
+  if (WARMUP_VUS > 0 && WARMUP_TIME && WARMUP_TIME !== '0' && WARMUP_TIME !== '0s') {
+    stages.push({ duration: WARMUP_TIME, target: WARMUP_VUS });
+  }
+  stages.push({ duration: RAMP_TIME, target: vus });
+  stages.push({ duration: HOLD_TIME, target: vus });
+  stages.push({ duration: RAMP_DOWN_TIME, target: 0 });
   return {
     executor: 'ramping-vus',
     exec,
     startVUs: 0,
-    stages: [
-      { duration: RAMP_TIME, target: vus },
-      { duration: HOLD_TIME, target: vus },
-      { duration: RAMP_TIME, target: 0 },
-    ],
+    stages,
   };
 }
 
@@ -196,7 +208,7 @@ if (CART_VUS > 0) {
 }
 
 if (CHECKOUT_RATE > 0) {
-  scenarios.checkout = {
+  const checkout = {
     executor: 'constant-arrival-rate',
     exec: 'checkout',
     // Modest on purpose. Real checkouts are rare relative to browse.
@@ -207,6 +219,10 @@ if (CHECKOUT_RATE > 0) {
     preAllocatedVUs: Math.min(5, Math.max(1, CHECKOUT_RATE)),
     maxVUs: Math.min(10, Math.max(2, CHECKOUT_RATE * 2)),
   };
+  if (__ENV.CHECKOUT_START && __ENV.CHECKOUT_START !== '0s') {
+    checkout.startTime = __ENV.CHECKOUT_START;
+  }
+  scenarios.checkout = checkout;
 }
 
 if (Object.keys(scenarios).length === 0) {
@@ -234,6 +250,14 @@ export const options = {
 
 export function browse(data) {
   group('browse', function () {
+    const catsRes = http.get(`${BASE_URL}/api/categories`, { tags: { name: 'categories' } });
+    recordOutcome(catsRes);
+    check(catsRes, { 'categories: 200 or shed 503': (r) => r.status === 200 || isCatalogShed(r) });
+    thinkTime();
+    if (catsRes.status !== 200) {
+      return;
+    }
+
     const category = randomItem(data.categories);
 
     const catRes = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, {
@@ -445,4 +469,74 @@ export function checkout(data) {
     }
     thinkTime();
   });
+}
+
+function metricValues(data, name) {
+  const metric = data.metrics[name];
+  return metric && metric.values ? metric.values : null;
+}
+
+function metricCount(data, name) {
+  const values = metricValues(data, name);
+  if (!values) return 0;
+  if (typeof values.count === 'number') return values.count;
+  if (typeof values.value === 'number') return values.value;
+  return 0;
+}
+
+export function handleSummary(data) {
+  const duration = metricValues(data, 'http_req_duration') || {};
+  const summary = {
+    generatedAt: new Date().toISOString(),
+    baseUrl: BASE_URL,
+    browseVus: BROWSE_VUS,
+    cartVus: CART_VUS,
+    checkoutRate: CHECKOUT_RATE,
+    warmupTime: WARMUP_TIME,
+    rampTime: RAMP_TIME,
+    holdTime: HOLD_TIME,
+    rampDownTime: RAMP_DOWN_TIME,
+    httpReqs: metricCount(data, 'http_reqs'),
+    rps: metricValues(data, 'http_reqs') ? metricValues(data, 'http_reqs').rate : 0,
+    iterations: metricCount(data, 'iterations'),
+    droppedIterations: metricCount(data, 'dropped_iterations'),
+    vusMax: metricValues(data, 'vus_max') ? metricValues(data, 'vus_max').max : null,
+    checks: metricValues(data, 'checks'),
+    httpReqFailed: metricValues(data, 'http_req_failed'),
+    p50: duration['p(50)'] ?? null,
+    p90: duration['p(90)'] ?? null,
+    p95: duration['p(95)'] ?? null,
+    p99: duration['p(99)'] ?? null,
+    maxLatency: duration.max ?? null,
+    dataReceived: metricValues(data, 'data_received'),
+    dataSent: metricValues(data, 'data_sent'),
+    responseBytes: metricCount(data, 'response_bytes'),
+    status_2xx: metricCount(data, 'status_2xx'),
+    status_3xx: metricCount(data, 'status_3xx'),
+    status_4xx: metricCount(data, 'status_4xx'),
+    status_429: metricCount(data, 'status_429'),
+    status_5xx: metricCount(data, 'status_5xx'),
+    status_502: metricCount(data, 'status_502'),
+    status_503: metricCount(data, 'status_503'),
+    status_503_shed: metricCount(data, 'status_503_shed'),
+    status_503_unexpected: metricCount(data, 'status_503_unexpected'),
+    status_504: metricCount(data, 'status_504'),
+    status_network_error: metricCount(data, 'status_network_error'),
+    ordersPlaced: metricCount(data, 'orders_placed'),
+    ordersRateLimited: metricCount(data, 'orders_rate_limited'),
+    ordersRejected: metricCount(data, 'orders_rejected_client_error'),
+    thresholds: Object.fromEntries(
+      Object.entries(data.metrics || {})
+        .filter(([, metric]) => metric.thresholds)
+        .map(([name, metric]) => [name, metric.thresholds]),
+    ),
+  };
+
+  const files = {
+    stdout: textSummary(data, { indent: ' ', enableColors: true }),
+  };
+  if (SUMMARY_PATH) {
+    files[SUMMARY_PATH] = `${JSON.stringify(summary, null, 2)}\n`;
+  }
+  return files;
 }

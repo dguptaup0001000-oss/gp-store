@@ -106,6 +106,9 @@ class BrowsePerformanceTest {
 
         System.out.println("[BROWSE] product-detail COLD: " + cold);
         System.out.println("[BROWSE] product-detail WARM: " + warm);
+        assertTrue(cold.queryCount() > 0, "a cold product detail must hit PostgreSQL");
+        assertEquals(0L, warm.queryCount(),
+                "a warm product-detail cache hit must not query PostgreSQL on every request");
     }
 
     /**

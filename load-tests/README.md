@@ -56,6 +56,35 @@ every VU as a request cannon. That is a **LOAD-TEST ISSUE**, not proof the API
 returns 200 KB per call. `response_bytes` / `payload_bytes` on the rewritten
 script is the number to read.
 
+### Mix test (browse + cart + paced checkout)
+
+Existing k6 thresholds in `browse-cart-checkout.js` (not relaxed by this program):
+
+| Endpoint | Gate |
+|---|---|
+| categories | p95 < 1.0s |
+| browse_category | p95 < 1.5s |
+| search | p95 < 2.0s |
+| product_detail | p95 < 2.0s |
+| view_cart | p95 < 1.5s |
+| add_to_cart | p95 < 2.0s |
+| checkout_preview | p95 < 3.0s |
+| place_order | p95 < 4.0s, p99 < 8.0s |
+| order_status | p95 < 1.5s |
+| 502 / unexpected 503 / network errors | count == 0 |
+
+Recommended production SLO (not used as a silent substitute for the gates above): catalog p95 < 2s, p99 < 4s.
+
+Localhost mix stages (do **not** point this at the live shop):
+
+```bash
+cd load-tests
+chmod +x run-controlled-load.sh
+BASE_URL=http://localhost:8081/v1 STAGES="750" ./run-controlled-load.sh
+```
+
+Default profile: 2m warmup @ 20 VU, 5m ramp, 10m hold, 2m ramp-down. Machine-readable JSON is written to `load-tests/results/stage-{vus}.json`.
+
 ### Staged execution (required order)
 
 Do **not** start at 1,000 or 5,000 VUs against one Render instance.
