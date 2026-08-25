@@ -1,5 +1,6 @@
 # Local laptop development. Publishes Postgres/Redis/API on the host.
-# Production Hostinger Compose (no public 5432/6379/8081) is
+# Do NOT use this file on the Hostinger VPS — it publishes 5432/6379/8081.
+# Production Compose (Traefik, no public database/API ports) is
 # backend/docker-compose.yml — see backend/HOSTINGER_DEPLOYMENT.md.
 
 services:
@@ -37,7 +38,9 @@ services:
       retries: 10
 
   backend:
-    build: .
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8081:8081"
     environment:
@@ -57,14 +60,3 @@ services:
 volumes:
   gpstore_pg_data:
   gpstore_redis_data:
-
-# --- One-time follow-up after your FIRST `docker compose up` ---
-# The products table doesn't exist until the app has started once and
-# Hibernate has created it. After the app is up and running for the first
-# time, run this once to finish the search-indexing setup (see
-# src/main/resources/db/migration/README-search.md for why this is needed):
-#
-#   docker compose exec postgres psql -U gpstore -d gpstore -c "
-#     CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING GIN (name gin_trgm_ops);
-#     CREATE INDEX IF NOT EXISTS idx_products_brand_trgm ON products USING GIN (brand gin_trgm_ops);
-#   "
