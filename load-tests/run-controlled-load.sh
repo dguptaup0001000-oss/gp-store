@@ -57,7 +57,7 @@ for vus in $STAGES; do
       RAMP_TIME="$RAMP_TIME" \
       HOLD_TIME="$HOLD_TIME" \
       RAMP_DOWN_TIME="$RAMP_DOWN_TIME" \
-      CHECKOUT_START="$WARMUP_TIME" \
+      CHECKOUT_START="${CHECKOUT_START:-7m}" \
       SUMMARY_PATH="$summary" \
       k6 run "$ROOT/browse-cart-checkout.js"; then
     failed_at="$vus"

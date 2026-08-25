@@ -177,7 +177,7 @@ export function setup() {
   if (accounts.length === 0) {
     console.warn('accounts.json is empty/missing - cart and checkout scenarios will no-op. Run seed-accounts.js first.');
   }
-  return { categories };
+  return { categories, accounts: accounts.slice() };
 }
 
 function rampingScenario(exec, vus) {
@@ -302,12 +302,18 @@ export function browse(data) {
   });
 }
 
+function accountPool(data) {
+  if (data && data.accounts && data.accounts.length > 0) return data.accounts;
+  return accounts;
+}
+
 export function cart(data) {
-  if (accounts.length === 0) {
+  const pool = accountPool(data);
+  if (pool.length === 0) {
     thinkTime();
     return;
   }
-  const account = randomItem(accounts);
+  const account = randomItem(pool);
 
   group('cart', function () {
     const category = randomItem(data.categories);
@@ -372,11 +378,12 @@ export function cart(data) {
 }
 
 export function checkout(data) {
-  if (accounts.length === 0) {
+  const pool = accountPool(data);
+  if (pool.length === 0) {
     thinkTime();
     return;
   }
-  const account = randomItem(accounts);
+  const account = randomItem(pool);
 
   group('checkout', function () {
     const category = randomItem(data.categories);
