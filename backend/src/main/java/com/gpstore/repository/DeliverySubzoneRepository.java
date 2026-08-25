@@ -11,6 +11,8 @@ public interface DeliverySubzoneRepository extends JpaRepository<DeliverySubzone
 
     Optional<DeliverySubzone> findByCodeIgnoreCase(String code);
 
+    Optional<DeliverySubzone> findFirstByPrimaryPartner_Id(Long partnerId);
+
     List<DeliverySubzone> findByZoneIdOrderByDisplayOrderAscIdAsc(Long zoneId);
 
     /**

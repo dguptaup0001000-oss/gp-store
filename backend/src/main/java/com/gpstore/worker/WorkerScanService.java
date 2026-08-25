@@ -118,6 +118,7 @@ public class WorkerScanService {
     private final SubzoneBackupPartnerRepository backupRepository;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
+    private final com.gpstore.config.AfterCommitExecutor afterCommitExecutor;
 
     public WorkerScanService(OrderRepository orderRepository,
                              OrderScanEventRepository scanRepository,
@@ -127,7 +128,8 @@ public class WorkerScanService {
                              DeliverySubzoneRepository subzoneRepository,
                              SubzoneBackupPartnerRepository backupRepository,
                              NotificationService notificationService,
-                             AuditLogService auditLogService) {
+                             AuditLogService auditLogService,
+                             com.gpstore.config.AfterCommitExecutor afterCommitExecutor) {
         this.orderRepository = orderRepository;
         this.scanRepository = scanRepository;
         this.partnerRepository = partnerRepository;
@@ -137,6 +139,7 @@ public class WorkerScanService {
         this.backupRepository = backupRepository;
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
+        this.afterCommitExecutor = afterCommitExecutor;
     }
 
     // ------------------------------------------------------------------ token
@@ -289,15 +292,15 @@ public class WorkerScanService {
             throw raced;
         }
 
-        // Best effort, deliberately. The scan is committed and the worker is
-        // holding the carton; a notification hiccup must not undo that or make
-        // them scan again.
-        try {
-            notificationService.notifyOrderStatusChange(order, OrderStatus.PACKED);
-        } catch (Exception e) {
-            log.warn("Pack scan recorded for order {} but the customer notification failed. "
-                    + "The order IS packed; only the message did not send.", order.getOrderNumber(), e);
+        // Best effort, after commit, off the request thread. The scan is
+        // already recorded; a Firebase hiccup must not hold this connection.
+        if (order.getCustomer() != null) {
+            order.getCustomer().getFcmToken();
         }
+        order.getOrderNumber();
+        final Order notifyOrder = order;
+        afterCommitExecutor.runAfterCommit("Pack scan notification", order.getId(),
+                () -> notificationService.notifyOrderStatusChange(notifyOrder, OrderStatus.PACKED));
 
         auditLogService.log("ORDER_PACK_SCAN", "Order", order.getId(),
                 worker.getName() + " scanned this order as packed. " + auth.reason());
@@ -466,9 +469,6 @@ public class WorkerScanService {
     /** The territory this worker is primary for, if any. */
     @Transactional(readOnly = true)
     public Optional<DeliverySubzone> territoryOf(DeliveryPartner worker) {
-        return subzoneRepository.findAll().stream()
-                .filter(s -> s.getPrimaryPartner() != null
-                        && s.getPrimaryPartner().getId().equals(worker.getId()))
-                .findFirst();
+        return subzoneRepository.findFirstByPrimaryPartner_Id(worker.getId());
     }
 }

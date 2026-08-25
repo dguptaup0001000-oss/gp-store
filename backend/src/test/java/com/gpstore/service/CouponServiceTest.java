@@ -12,9 +12,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -109,6 +112,16 @@ class CouponServiceTest {
 
         assertThrows(BadRequestException.class,
                 () -> couponService.previewDiscount("LIMIT1", new BigDecimal("100")));
+    }
+
+    @Test
+    void activeListUsesTheOfferQueryNotFindAll() {
+        when(couponRepository.findCurrentlyOfferable(LocalDate.now())).thenReturn(List.of());
+
+        assertTrue(couponService.getActiveCoupons().isEmpty());
+
+        verify(couponRepository).findCurrentlyOfferable(LocalDate.now());
+        verify(couponRepository, never()).findAll();
     }
 
     private Coupon flatCoupon(String code, BigDecimal value) {

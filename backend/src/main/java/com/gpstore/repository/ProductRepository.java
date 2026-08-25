@@ -37,6 +37,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     List<Product> findByCategoryId(Long categoryId);
 
+    boolean existsByCategoryId(Long categoryId);
+
     /**
      * Instant search: matches on name OR brand, tolerates typos via pg_trgm
      * similarity (requires the pg_trgm extension - see

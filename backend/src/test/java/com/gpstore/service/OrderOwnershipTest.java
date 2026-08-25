@@ -56,7 +56,8 @@ class OrderOwnershipTest {
     @Mock private com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepositoryUnused;
     @Mock private com.gpstore.repository.OutboxEventRepository outboxEventRepositoryUnused;
     @Mock private PaymentService paymentServiceUnused;
-    @Mock private java.util.concurrent.ExecutorService orderSideEffectsExecutorUnused;
+    @Mock private com.gpstore.config.AfterCommitExecutor afterCommitExecutorUnused;
+    @Mock private org.springframework.transaction.PlatformTransactionManager transactionManagerUnused;
 
     private OrderService orderService;
 
@@ -76,7 +77,8 @@ class OrderOwnershipTest {
                 deliveryPricingServiceUnused,
                 notificationServiceUnused,
                 auditLogServiceUnused, invoiceServiceUnused, taxServiceUnused, deliveryRepository,
-                deliveryServiceUnused, idempotencyRecordRepositoryUnused, orderSideEffectsExecutorUnused,
+                deliveryServiceUnused, idempotencyRecordRepositoryUnused, afterCommitExecutorUnused,
+                transactionManagerUnused,
                 outboxEventRepositoryUnused,
                 paymentServiceUnused,
                 // requireIdempotencyKey: these tests cover cancellation and

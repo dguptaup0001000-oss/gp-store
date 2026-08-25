@@ -33,7 +33,7 @@ public class CategoryService {
         return categoryRepository.save(category);
     }
 
-    @Cacheable("categories")
+    @Cacheable(value = "categories", sync = true)
     public List<Category> getAllCategories() {
         return categoryRepository.findAll();
     }
@@ -80,7 +80,7 @@ public class CategoryService {
     // stale tile on every customer's home screen.
     @CacheEvict(value = {"categories", "bestsellerTiles"}, allEntries = true)
     public void hardDelete(Long id) {
-        if (!productRepository.findByCategoryId(id).isEmpty()) {
+        if (productRepository.existsByCategoryId(id)) {
             throw new ConflictException(
                     "Cannot delete a category that still has products - deactivate it instead, or move the products first");
         }

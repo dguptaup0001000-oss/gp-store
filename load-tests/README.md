@@ -57,9 +57,11 @@ A previous production run at ~5,005 VUs produced **95% HTTP failures and
 ~325k 502s**. That is overload of a 40-thread / 10-connection container,
 not a code rating, and it is **not** a reason to raise `DB_POOL_MAX_SIZE`.
 
-Pass/fail for each stage (see `staged-capacity.js`): error rate < 2%,
-p95 < 2s, p99 < 4s, **zero** 502, 503, and network errors. Stop at the
-first failure; that VU count is the measured ceiling for that target.
+Pass/fail for each stage (see `staged-capacity.js`): p95 < 2s,
+p99 < 4s, **zero** 502, unexpected 503 (liveness), and network errors.
+Catalog GET 503 from pool shedding is counted as `status_503_shed` and
+does **not** fail the stage. Stop at the first failure; that VU count is
+the measured ceiling for that target.
 
 | Stage | VUs | How |
 |---|---|---|

@@ -39,7 +39,7 @@ public class RecommendationService {
 
     /** "Customers who bought this also bought..." - ranked by real co-purchase count, not guessed. */
     @Transactional(readOnly = true)
-    @Cacheable("frequentlyBought")
+    @Cacheable(value = "frequentlyBought", sync = true)
     public List<ProductResponse> frequentlyBoughtWith(Long productId, int limit) {
         List<Object[]> rows = orderItemRepository.findFrequentlyBoughtWithProductId(
                 productId, PageRequest.of(0, candidatePoolFor(limit)));
@@ -68,7 +68,7 @@ public class RecommendationService {
      * ranked leaderboard for the window.
      */
     @Transactional(readOnly = true)
-    @Cacheable("trending")
+    @Cacheable(value = "trending", sync = true)
     public List<ProductResponse> trending(int days, int limit) {
         LocalDateTime since = LocalDateTime.now().minusDays(days);
         List<Object[]> rows = orderItemRepository.findTrendingProductIds(

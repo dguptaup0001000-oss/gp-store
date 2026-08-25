@@ -120,6 +120,17 @@ function authHeaders(account) {
   return { headers: { Authorization: `Bearer ${account.token}`, 'Content-Type': 'application/json' } };
 }
 
+// One key per checkout attempt. Date.now() on the POST made a retry look
+// like a new order, which is the opposite of what Idempotency-Key is for.
+function checkoutIdempotencyKey(email) {
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${email}-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export function setup() {
   const res = http.get(`${BASE_URL}/api/categories`);
   check(res, { 'setup: categories loaded': (r) => r.status === 200 });
@@ -337,7 +348,7 @@ export function checkout(data) {
     const orderRes = http.post(
       `${BASE_URL}/api/orders/place`,
       JSON.stringify({ addressId: account.addressId, paymentMethod: 'COD' }),
-      { headers: { ...authHeaders(account).headers, 'Idempotency-Key': `${account.email}-${Date.now()}` } },
+      { headers: { ...authHeaders(account).headers, 'Idempotency-Key': checkoutIdempotencyKey(account.email) } },
     );
     check(orderRes, {
       'place order: 200 or expected 4xx (empty cart / rate limit)': (r) => r.status === 200 || r.status === 400 || r.status === 429,

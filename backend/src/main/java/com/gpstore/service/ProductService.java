@@ -104,7 +104,7 @@ public class ProductService {
     // full-catalog-dump-on-every-request risk that only gets worse as the
     // catalog grows, regardless of concurrent user count.
     @Transactional(readOnly = true)
-    @Cacheable("products")
+    @Cacheable(value = "products", sync = true)
     public List<ProductResponse> getAllProducts() {
         return productRepository
                 .findByActiveTrueOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
@@ -150,7 +150,7 @@ public class ProductService {
     // cache hit skips the database round trips entirely, not just the N+1
     // this method already avoids.
     @Transactional(readOnly = true)
-    @Cacheable("productSearch")
+    @Cacheable(value = "productSearch", sync = true)
     public Page<ProductResponse> searchInstant(String keyword, Pageable pageable) {
         if (keyword == null || keyword.isBlank()) {
             throw new BadRequestException("Search keyword is required");
@@ -178,7 +178,7 @@ public class ProductService {
      * catalogue under one key.
      */
     @Transactional(readOnly = true)
-    @Cacheable("productFeed")
+    @Cacheable(value = "productFeed", sync = true)
     public Page<ProductResponse> browseAll(Pageable pageable) {
         return batchFetchWithVariants(productRepository.findByActiveTrue(pageable));
     }
@@ -201,7 +201,7 @@ public class ProductService {
      * requested by every customer who opens the app.
      */
     @Transactional(readOnly = true)
-    @Cacheable("bestsellerTiles")
+    @Cacheable(value = "bestsellerTiles", sync = true)
     public List<BestsellerTileResponse> getBestsellerTiles(int categoryLimit, int perCategory) {
         int categories = clamp(categoryLimit, 1, MAX_BESTSELLER_CATEGORIES);
         int products = clamp(perCategory, 1, MAX_BESTSELLER_PRODUCTS_PER_CATEGORY);
@@ -238,7 +238,7 @@ public class ProductService {
 
     /** Category browsing - the other half of product discovery alongside search. */
     @Transactional(readOnly = true)
-    @Cacheable("categoryProducts")
+    @Cacheable(value = "categoryProducts", sync = true)
     public Page<ProductResponse> browseByCategory(Long categoryId, Pageable pageable) {
         return batchFetchWithVariants(productRepository.findByCategoryIdAndActiveTrue(categoryId, pageable));
     }
@@ -258,7 +258,7 @@ public class ProductService {
 
     /** Real "New Arrivals" - sorted by actual creation time, not fabricated. */
     @Transactional(readOnly = true)
-    @Cacheable("newArrivals")
+    @Cacheable(value = "newArrivals", sync = true)
     public Page<ProductResponse> getNewArrivals(Pageable pageable) {
         return batchFetchWithVariants(productRepository.findByActiveTrueOrderByCreatedAtDesc(pageable));
     }
@@ -315,7 +315,7 @@ public class ProductService {
     }
 
     /** Only brands with at least one active product - guaranteed by the underlying GROUP BY query. */
-    @Cacheable("brands")
+    @Cacheable(value = "brands", sync = true)
     public List<com.gpstore.dto.response.BrandSummary> getBrandsWithCounts() {
         return productRepository.findBrandsWithProductCounts().stream()
                 .map(row -> new com.gpstore.dto.response.BrandSummary((String) row[0], (Long) row[1]))

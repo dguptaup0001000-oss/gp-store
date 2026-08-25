@@ -5,6 +5,8 @@ import com.gpstore.enums.DiscountType;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.CouponRepository;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +26,7 @@ public class CouponService {
         this.auditLogService = auditLogService;
     }
 
+    @CacheEvict(value = "activeCoupons", allEntries = true)
     public Coupon saveCoupon(Coupon coupon) {
         if (coupon.getUsedCount() == null) {
             coupon.setUsedCount(0);
@@ -43,6 +46,7 @@ public class CouponService {
     }
 
     /** Didn't exist before - a coupon could be created but never edited afterward. */
+    @CacheEvict(value = "activeCoupons", allEntries = true)
     public Coupon update(Long id, Coupon updated) {
         Coupon existing = getByIdOrThrow(id);
 
@@ -64,6 +68,7 @@ public class CouponService {
     }
 
     /** Soft-delete only - a hard delete would break every past order that references this coupon by code. */
+    @CacheEvict(value = "activeCoupons", allEntries = true)
     public void deactivate(Long id) {
         Coupon coupon = getByIdOrThrow(id);
         coupon.setActive(false);
@@ -82,13 +87,9 @@ public class CouponService {
      * without already knowing a code - no real storefront can show an
      * "Offers" banner without this.
      */
+    @Cacheable(value = "activeCoupons", sync = true)
     public List<Coupon> getActiveCoupons() {
-        return couponRepository.findAll().stream()
-                .filter(c -> Boolean.TRUE.equals(c.getActive()))
-                .filter(c -> c.getExpiryDate() == null || !c.getExpiryDate().isBefore(java.time.LocalDate.now()))
-                .filter(c -> c.getUsageLimit() == null || c.getUsageLimit() <= 0
-                        || c.getUsedCount() == null || c.getUsedCount() < c.getUsageLimit())
-                .toList();
+        return couponRepository.findCurrentlyOfferable(LocalDate.now());
     }
 
     /** Read-only check used to preview a discount before checkout - does not consume a usage slot. */
@@ -104,6 +105,7 @@ public class CouponService {
      * usedCount - all inside the caller's transaction. This is what prevents two
      * concurrent checkouts from both squeezing past a limited-use coupon.
      */
+    @CacheEvict(value = "activeCoupons", allEntries = true)
     @Transactional
     public BigDecimal redeem(String couponCode, BigDecimal orderAmount) {
         Coupon coupon = couponRepository.findByCouponCodeForUpdate(couponCode)

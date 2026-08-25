@@ -58,7 +58,8 @@ public class OrderService {
     private final com.gpstore.repository.DeliveryRepository deliveryRepository;
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
-    private final java.util.concurrent.ExecutorService orderSideEffectsExecutor;
+    private final com.gpstore.config.AfterCommitExecutor afterCommitExecutor;
+    private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
     private final com.gpstore.repository.OutboxEventRepository outboxEventRepository;
     // @Lazy: PaymentService depends on OrderService already, so this pair is
     // circular and would fail context startup without it - same reason
@@ -90,7 +91,8 @@ public class OrderService {
             // at boot, not just this feature.
             @org.springframework.context.annotation.Lazy DeliveryService deliveryService,
             com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository,
-            java.util.concurrent.ExecutorService orderSideEffectsExecutor,
+            com.gpstore.config.AfterCommitExecutor afterCommitExecutor,
+            org.springframework.transaction.PlatformTransactionManager transactionManager,
             com.gpstore.repository.OutboxEventRepository outboxEventRepository,
             @org.springframework.context.annotation.Lazy PaymentService paymentService,
             @org.springframework.beans.factory.annotation.Value("${orders.require-idempotency-key:true}")
@@ -114,66 +116,13 @@ public class OrderService {
         this.deliveryRepository = deliveryRepository;
         this.deliveryService = deliveryService;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
-        this.orderSideEffectsExecutor = orderSideEffectsExecutor;
+        this.afterCommitExecutor = afterCommitExecutor;
+        this.transactionTemplate = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
         this.outboxEventRepository = outboxEventRepository;
         this.paymentService = paymentService;
         this.requireIdempotencyKey = requireIdempotencyKey;
     }
 
-
-    /**
-     * Runs non-critical work AFTER the current transaction commits, on a
-     * pool thread rather than the request thread.
-     *
-     * Why both halves matter:
-     *
-     * - AFTER COMMIT, because the work must not be able to roll back the
-     *   business operation that triggered it, and because anything reading
-     *   the order needs it to actually exist first.
-     * - OFF THE REQUEST THREAD, because
-     *   TransactionSynchronization.afterCommit() still runs synchronously on
-     *   the SAME thread - just after the commit instead of before it. On its
-     *   own it does NOT stop the caller waiting. Push notification delivery
-     *   goes through FirebaseMessaging.send(), a blocking network call to
-     *   Google; leaving that in the request path made every order status
-     *   change and cancellation wait on an external service before the
-     *   customer's screen could update.
-     *
-     * Nothing here may throw into the caller: by this point the order is
-     * already committed, and an exception escaping afterCommit() would turn
-     * a successful operation into an error response. Throwable, not
-     * Exception, deliberately - the guarantee this enforces is "an
-     * already-successful order never becomes an error", and narrowing it to
-     * Exception would leave Errors able to break exactly that.
-     *
-     * Use this only for work that is safe to LOSE on a crash. Anything
-     * business-critical belongs in the outbox instead, which survives
-     * restarts - see OutboxWorker.
-     */
-    private void runAfterCommitOffRequestThread(String description, Long orderId, Runnable work) {
-        Runnable guarded = () -> {
-            try {
-                work.run();
-            } catch (Throwable t) {
-                log.error("{} failed for order {} - the order itself is unaffected", description, orderId, t);
-            }
-        };
-
-        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
-            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
-                    new org.springframework.transaction.support.TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            orderSideEffectsExecutor.submit(guarded);
-                        }
-                    });
-        } else {
-            // No transaction in progress (a direct call from a test or a
-            // non-transactional caller) - there is nothing to wait for, so
-            // submit straight away rather than silently dropping the work.
-            orderSideEffectsExecutor.submit(guarded);
-        }
-    }
 
     public Order save(Order order) {
         return repository.save(order);
@@ -313,9 +262,19 @@ public class OrderService {
      * an older client build is still in the wild, not as a permanent option
      * - leaving it off returns checkout to having no retry protection.
      */
-    @Transactional
     @io.micrometer.core.annotation.Timed(value = "checkout.place_order", description = "Order placement critical path (locks + commit)", percentiles = {0.5, 0.95, 0.99})
     public PlaceOrderResponse placeOrder(PlaceOrderRequest request, Long customerId, String idempotencyKey) {
+        try {
+            return transactionTemplate.execute(status -> placeOrderInTransaction(request, customerId, idempotencyKey));
+        } catch (IdempotencyRaceException raced) {
+            // The insert TX is already rolled back. Reading the winner here
+            // is a new transaction, so a completed checkout can replay
+            // instead of always 409ing the unique-constraint loser.
+            return replayAfterIdempotencyRace(customerId, idempotencyKey);
+        }
+    }
+
+    private PlaceOrderResponse placeOrderInTransaction(PlaceOrderRequest request, Long customerId, String idempotencyKey) {
 
         if (request == null) {
             throw new BadRequestException("Request cannot be null");
@@ -418,11 +377,10 @@ public class OrderService {
             try {
                 idempotencyRecord = idempotencyRecordRepository.saveAndFlush(idempotencyRecord);
             } catch (org.springframework.dao.DataIntegrityViolationException raceLost) {
-                // Another request with the same key won the race and inserted
-                // first. Report the same "already processing" message rather
-                // than proceeding - we must not create a second order here.
-                throw new ConflictException(
-                        "This order is already being processed. Please wait a moment and check your order history before trying again.");
+                // Another request with the same key won the insert. This TX is
+                // rollback-only, so we cannot replay here - placeOrder()
+                // catches IdempotencyRaceException after rollback and re-reads.
+                throw new IdempotencyRaceException(raceLost);
             }
         }
 
@@ -756,30 +714,7 @@ public class OrderService {
         // real seconds of placeOrder()'s latency in production). Handing
         // the Runnable to the executor is what actually gets it off the
         // request thread.
-        Runnable guardedAfterCommitWork = () -> {
-            try {
-                afterCommitWork.run();
-            } catch (Throwable t) {
-                log.error("Post-order side effects failed for order {} - order itself is unaffected", placedOrderId, t);
-            }
-        };
-        try {
-            if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
-                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
-                        new org.springframework.transaction.support.TransactionSynchronization() {
-                            @Override
-                            public void afterCommit() {
-                                orderSideEffectsExecutor.submit(guardedAfterCommitWork);
-                            }
-                        });
-            } else {
-                // Defensive fallback only - shouldn't happen inside an @Transactional
-                // method, but never silently drop these side effects if it does.
-                orderSideEffectsExecutor.submit(guardedAfterCommitWork);
-            }
-        } catch (Throwable t) {
-            log.error("Failed to register/run post-order side effects for order {} - order itself is unaffected", placedOrderId, t);
-        }
+        afterCommitExecutor.runAfterCommit("Post-order side effects", placedOrderId, afterCommitWork);
 
         PlaceOrderResponse response = new PlaceOrderResponse();
 
@@ -791,6 +726,24 @@ public class OrderService {
         response.setUpiPaymentLink(paymentService.upiLinkFor(order, paymentMethod));
 
         return response;
+    }
+
+    private PlaceOrderResponse replayAfterIdempotencyRace(Long customerId, String idempotencyKey) {
+        return transactionTemplate.execute(status -> {
+            Optional<com.gpstore.entity.IdempotencyRecord> winner =
+                    idempotencyRecordRepository.findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey);
+            if (winner.isPresent() && winner.get().getOrderId() != null) {
+                return buildReplayResponse(winner.get().getOrderId());
+            }
+            throw new ConflictException(
+                    "This order is already being processed. Please wait a moment and check your order history before trying again.");
+        });
+    }
+
+    private static final class IdempotencyRaceException extends RuntimeException {
+        IdempotencyRaceException(Throwable cause) {
+            super(cause);
+        }
     }
 
     /** Paginated - a repeat customer's order history has no natural upper bound over the years. */
@@ -955,7 +908,11 @@ public class OrderService {
         // every status change wait for Google is not.
         final Order notifyOrder = savedOrder;
         final OrderStatus notifyStatus = savedOrder.getOrderStatus();
-        runAfterCommitOffRequestThread("Order status notification", savedOrder.getId(),
+        if (notifyOrder.getCustomer() != null) {
+            notifyOrder.getCustomer().getFcmToken();
+        }
+        notifyOrder.getOrderNumber();
+        afterCommitExecutor.runAfterCommit("Order status notification", savedOrder.getId(),
                 () -> notificationService.notifyOrderStatusChange(notifyOrder, notifyStatus));
 
         var delivery = deliveryRepository.findByOrderId(savedOrder.getId()).orElse(null);
@@ -1059,7 +1016,11 @@ public class OrderService {
         // this order's row lock was still held.
         final Order notifyOrder = savedOrder;
         final OrderStatus notifyStatus = savedOrder.getOrderStatus();
-        runAfterCommitOffRequestThread("Order cancellation notification", savedOrder.getId(),
+        if (notifyOrder.getCustomer() != null) {
+            notifyOrder.getCustomer().getFcmToken();
+        }
+        notifyOrder.getOrderNumber();
+        afterCommitExecutor.runAfterCommit("Order cancellation notification", savedOrder.getId(),
                 () -> notificationService.notifyOrderStatusChange(notifyOrder, notifyStatus));
 
         var delivery = deliveryRepository.findByOrderId(savedOrder.getId()).orElse(null);

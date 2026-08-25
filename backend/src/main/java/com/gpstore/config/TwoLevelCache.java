@@ -68,21 +68,10 @@ final class TwoLevelCache implements Cache {
     @Override
     @Nullable
     public <T> T get(Object key, Callable<T> valueLoader) {
-        ValueWrapper cached = get(key);
-        if (cached != null) {
-            @SuppressWarnings("unchecked")
-            T value = (T) cached.get();
-            return value;
-        }
-        try {
-            T loaded = l2.get(key, valueLoader);
-            if (loaded != null) {
-                l1.put(key, loaded);
-            }
-            return loaded;
-        } catch (RuntimeException ex) {
-            throw ex;
-        }
+        // L1's mapping function is per-key singleflight (Caffeine compute).
+        // Without this, every Tomcat thread that misses the 15s L1 TTL
+        // independently rebuilds the same catalog query against Redis/DB.
+        return l1.get(key, () -> l2.get(key, valueLoader));
     }
 
     @Override

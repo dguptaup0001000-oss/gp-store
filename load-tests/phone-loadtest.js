@@ -23,6 +23,8 @@
 // Tune with env vars: ACCOUNTS (default 15), DURATION_SEC (default 120),
 // BROWSE_VUS (default 20), CART_VUS (default 6).
 
+const { randomUUID } = require('node:crypto');
+
 const BASE_URL = (process.env.BASE_URL || '').replace(/\/$/, '');
 if (!BASE_URL) {
   console.error('Set BASE_URL, e.g. BASE_URL=https://your-backend.onrender.com/v1 node phone-loadtest.js');
@@ -230,7 +232,7 @@ async function checkoutLoop(categories, accounts, deadline) {
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${account.token}`,
-              'Idempotency-Key': `${account.email}-${Date.now()}`,
+              'Idempotency-Key': `${account.email}-${randomUUID()}`,
             },
             body: JSON.stringify({ addressId: account.addressId, paymentMethod: 'COD' }),
           }),

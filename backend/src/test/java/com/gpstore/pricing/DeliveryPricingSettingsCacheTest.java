@@ -76,6 +76,24 @@ class DeliveryPricingSettingsCacheTest {
     }
 
     @Test
+    @DisplayName("a checkout quote uses the cached settings, not a self-invocation miss")
+    void quoteHitsTheSettingsCache() {
+        // quote() used to call this.settings() on the raw instance, which
+        // skips the Spring cache proxy. Preview and placeOrder go through
+        // quote, so a cache that only works for settings() was a miss on
+        // the only path that matters.
+        pricingService.quoteForCart(java.util.List.of(), null);
+        verify(repository, atLeastOnce()).findById(DeliveryPricingSettings.SINGLETON_ID);
+        clearInvocations(repository);
+
+        for (int i = 0; i < 10; i++) {
+            assertNotNull(pricingService.quoteForCart(java.util.List.of(), null));
+        }
+
+        verify(repository, times(0)).findById(DeliveryPricingSettings.SINGLETON_ID);
+    }
+
+    @Test
     @DisplayName("saving new prices makes them visible on the very next quote")
     void anAdminEditIsNotHiddenByTheCache() {
         BigDecimal originalTier1 = pricingService.settings().getDistanceTier1Charge();

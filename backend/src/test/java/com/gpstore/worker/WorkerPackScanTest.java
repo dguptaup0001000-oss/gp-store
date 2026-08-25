@@ -14,6 +14,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -60,6 +62,7 @@ class WorkerPackScanTest {
     @Autowired private DeliverySubzoneRepository subzoneRepository;
     @Autowired private NotificationRepository notificationRepository;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private ExecutorService orderSideEffectsExecutor;
 
     private DeliverySubzone territory;
     private Customer shopper;
@@ -94,6 +97,10 @@ class WorkerPackScanTest {
 
     @AfterEach
     void cleanUp() {
+        // Pack-scan notifications run after commit on the side-effects pool.
+        // If we delete orders while a task is still in flight, the INSERT
+        // lands after DELETE FROM notifications and the FK on orders fails.
+        awaitSideEffectsIdle();
         jdbc.update("DELETE FROM order_scan_events WHERE order_number LIKE ? OR worker_name LIKE ?",
                 PREFIX + "%", PREFIX + "%");
         jdbc.update("DELETE FROM notifications WHERE customer_id IN "
@@ -265,6 +272,7 @@ class WorkerPackScanTest {
         // shop. Any word about delivery would send a customer to wait at the
         // door for something that has not left.
         scanService.packScan(accountOf(primary), issue(order), "req-1");
+        awaitSideEffectsIdle();
 
         List<Notification> sent = notificationRepository.findAll().stream()
                 .filter(n -> n.getCustomer() != null && n.getCustomer().getId().equals(shopper.getId()))
@@ -455,6 +463,7 @@ class WorkerPackScanTest {
                 .count();
         assertEquals(1, accepted, "exactly one scan may be recorded for one physical scan");
 
+        awaitSideEffectsIdle();
         long packedMessages = notificationRepository.findAll().stream()
                 .filter(n -> n.getCustomer() != null && n.getCustomer().getId().equals(shopper.getId()))
                 .filter(n -> "Order Packed".equals(n.getTitle()))
@@ -524,5 +533,22 @@ class WorkerPackScanTest {
 
         assertTrue(result.accepted(), result.message());
         assertNull(result.subzoneCode());
+    }
+
+    private void awaitSideEffectsIdle() {
+        if (!(orderSideEffectsExecutor instanceof ThreadPoolExecutor pool)) {
+            return;
+        }
+        for (int i = 0; i < 50; i++) {
+            if (pool.getActiveCount() == 0 && pool.getQueue().isEmpty()) {
+                return;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 }
