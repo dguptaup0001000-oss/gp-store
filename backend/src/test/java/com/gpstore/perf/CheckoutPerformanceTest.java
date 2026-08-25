@@ -31,6 +31,8 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -106,6 +108,7 @@ class CheckoutPerformanceTest {
     @Autowired private ProductRepository productRepository;
     @Autowired private ProductVariantRepository productVariantRepository;
     @Autowired private InventoryRepository inventoryRepository;
+    @Autowired private ExecutorService orderSideEffectsExecutor;
 
     @Value("${store.latitude}") private double storeLatitude;
     @Value("${store.longitude}") private double storeLongitude;
@@ -326,6 +329,7 @@ class CheckoutPerformanceTest {
         request.setAddressId(fixture.addressId);
         request.setPaymentMethod("COD");
         Long orderId = orderService.placeOrder(request, fixture.customerId, UUID.randomUUID().toString()).getOrderId();
+        awaitSideEffectsIdle();
 
         QueryCounter.Result result = QueryCounter.measure(entityManagerFactory,
                 () -> orderService.updateOrderStatus(orderId, com.gpstore.enums.OrderStatus.PACKING));
@@ -355,6 +359,7 @@ class CheckoutPerformanceTest {
         request.setAddressId(fixture.addressId);
         request.setPaymentMethod("COD");
         Long orderId = orderService.placeOrder(request, fixture.customerId, UUID.randomUUID().toString()).getOrderId();
+        awaitSideEffectsIdle();
 
         QueryCounter.Result result = QueryCounter.measure(entityManagerFactory,
                 () -> orderService.cancelOrder(orderId, fixture.customerId, false));
@@ -511,5 +516,28 @@ class CheckoutPerformanceTest {
         inventoryRepository.save(inventory);
 
         return variant.getId();
+    }
+
+    private void awaitSideEffectsIdle() {
+        if (!(orderSideEffectsExecutor instanceof ThreadPoolExecutor pool)) {
+            return;
+        }
+        try {
+            Thread.sleep(50);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        for (int i = 0; i < 100; i++) {
+            if (pool.getActiveCount() == 0 && pool.getQueue().isEmpty()) {
+                return;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 }

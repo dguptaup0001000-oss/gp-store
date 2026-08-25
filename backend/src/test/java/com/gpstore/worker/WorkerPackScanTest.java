@@ -143,6 +143,8 @@ class WorkerPackScanTest {
             // rows is a far smaller problem than a red suite that says nothing
             // about the code.
         }
+        jdbc.update("DELETE FROM notifications WHERE customer_id IN "
+                + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM customers WHERE full_name LIKE ?", MARKER + "%");
     }
 
@@ -272,11 +274,23 @@ class WorkerPackScanTest {
         // shop. Any word about delivery would send a customer to wait at the
         // door for something that has not left.
         scanService.packScan(accountOf(primary), issue(order), "req-1");
-        awaitSideEffectsIdle();
 
-        List<Notification> sent = notificationRepository.findAll().stream()
-                .filter(n -> n.getCustomer() != null && n.getCustomer().getId().equals(shopper.getId()))
-                .toList();
+        List<Notification> sent = List.of();
+        for (int attempt = 0; attempt < 50; attempt++) {
+            awaitSideEffectsIdle();
+            sent = notificationRepository.findAll().stream()
+                    .filter(n -> n.getCustomer() != null && n.getCustomer().getId().equals(shopper.getId()))
+                    .toList();
+            if (!sent.isEmpty()) {
+                break;
+            }
+            try {
+                Thread.sleep(40);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
 
         assertFalse(sent.isEmpty(), "the customer must be told their order is packed");
 
@@ -539,9 +553,24 @@ class WorkerPackScanTest {
         if (!(orderSideEffectsExecutor instanceof ThreadPoolExecutor pool)) {
             return;
         }
-        for (int i = 0; i < 50; i++) {
+        // afterCommit submits asynchronously relative to the first idle sample.
+        try {
+            Thread.sleep(50);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        for (int i = 0; i < 100; i++) {
             if (pool.getActiveCount() == 0 && pool.getQueue().isEmpty()) {
-                return;
+                try {
+                    Thread.sleep(20);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                if (pool.getActiveCount() == 0 && pool.getQueue().isEmpty()) {
+                    return;
+                }
             }
             try {
                 Thread.sleep(20);
