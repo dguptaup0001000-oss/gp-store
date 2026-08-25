@@ -77,6 +77,11 @@ function randomItem(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+function shoppableProduct(product) {
+  if (!product || product.testData === true) return false;
+  return (product.variants || []).some((v) => v.available);
+}
+
 // Glance-and-tap, not a tight loop. 1.5–4s matches a shopper reading a card.
 function thinkTime() {
   sleep(1.5 + Math.random() * 2.5);
@@ -177,7 +182,13 @@ export function setup() {
   if (accounts.length === 0) {
     console.warn('accounts.json is empty/missing - cart and checkout scenarios will no-op. Run seed-accounts.js first.');
   }
-  return { categories, accounts: accounts.slice() };
+  const shopCategories = (Array.isArray(categories) ? categories : []).filter((c) =>
+    /atta|rice|dal|oil|soap|milk|tea|biscuit|salt|sugar|masala|spice/i.test(c.name || ''),
+  );
+  if (shopCategories.length === 0) {
+    console.warn('No shop-like category names found; cart/checkout will use the full list (may include leftover test SKUs).');
+  }
+  return { categories, shopCategories: shopCategories.length ? shopCategories : categories, accounts: accounts.slice() };
 }
 
 function rampingScenario(exec, vus) {
@@ -316,7 +327,7 @@ export function cart(data) {
   const account = randomItem(pool);
 
   group('cart', function () {
-    const category = randomItem(data.categories);
+    const category = randomItem((data.shopCategories && data.shopCategories.length) ? data.shopCategories : data.categories);
     const catRes = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, {
       tags: { name: 'browse_category' },
     });
@@ -327,7 +338,7 @@ export function cart(data) {
     }
 
     const page = catRes.json();
-    const products = ((page && page.content) || []).filter((p) => (p.variants || []).some((v) => v.available));
+      const products = ((page && page.content) || []).filter(shoppableProduct);
     if (products.length === 0) {
       thinkTime();
       return;
@@ -386,8 +397,9 @@ export function checkout(data) {
   const account = randomItem(pool);
 
   group('checkout', function () {
-    const category = randomItem(data.categories);
-    const catRes = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, {
+    // Search "rice" hits the real seeded kirana catalog (with inventory),
+    // not leftover test categories that occupy the first 100 names.
+    const catRes = http.get(`${BASE_URL}/api/products/search/instant?keyword=rice&page=0&size=20`, {
       tags: { name: 'browse_category' },
     });
     recordOutcome(catRes);
@@ -397,7 +409,7 @@ export function checkout(data) {
     }
 
     const page = catRes.json();
-    const products = ((page && page.content) || []).filter((p) => (p.variants || []).some((v) => v.available));
+      const products = ((page && page.content) || []).filter(shoppableProduct);
     if (products.length === 0) {
       thinkTime();
       return;
@@ -405,6 +417,30 @@ export function checkout(data) {
 
     const product = randomItem(products);
     const variant = product.variants.find((v) => v.available);
+
+    // Cart VUs share these accounts and leave leftover test SKUs in the
+    // basket. Place-order validates the whole cart, so checkout must start
+    // from one in-stock line rather than whatever the browse flood added.
+    const existingCart = http.get(`${BASE_URL}/api/carts/mine`, {
+      ...authHeaders(account),
+      tags: { name: 'view_cart' },
+    });
+    recordOutcome(existingCart);
+    if (existingCart.status === 200) {
+      try {
+        const items = (existingCart.json() && existingCart.json().items) || [];
+        for (let i = 0; i < items.length; i++) {
+          const del = http.del(
+            `${BASE_URL}/api/carts/items/${items[i].cartItemId}`,
+            null,
+            { ...authHeaders(account), tags: { name: 'update_cart' } },
+          );
+          recordOutcome(del);
+        }
+      } catch (e) {
+        // Fall through; add+place will 4xx if the cart is still dirty.
+      }
+    }
 
     const addRes = http.post(
       `${BASE_URL}/api/carts/add?variantId=${variant.id}&quantity=1`,
@@ -472,6 +508,7 @@ export function checkout(data) {
       ordersRateLimited.add(1);
     } else if (orderRes.status >= 400 && orderRes.status < 500) {
       ordersRejected.add(1);
+      console.warn(`place_order HTTP ${orderRes.status}: ${String(orderRes.body || '').slice(0, 220)}`);
     }
     thinkTime();
   });
