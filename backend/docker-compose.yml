@@ -35,7 +35,9 @@ services:
       - gpstore_net
 
   postgres:
-    image: postgres:16
+    # PostgreSQL 17: production dump is from Supabase 17.6. A 16 data
+    # directory cannot start 17; an empty volume must be recreated once.
+    image: postgres:17
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME}

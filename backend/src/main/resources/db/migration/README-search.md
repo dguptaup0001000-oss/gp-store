@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_products_brand_trgm ON products USING GIN (brand 
 ```
 
 Notes:
-- Hostinger production Compose uses official `postgres:16` with a superuser
+- Hostinger production Compose uses official `postgres:17` with a superuser
   owner, so Flyway V5 can run `CREATE EXTENSION IF NOT EXISTS pg_trgm` on
   first boot. There is no manual SQL step after that.
 - If V5 never ran, search fails with undefined function `similarity` /

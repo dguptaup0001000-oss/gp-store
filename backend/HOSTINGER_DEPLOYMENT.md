@@ -7,7 +7,7 @@ Do not run systemd + Nginx next to this stack.
 Internet (HTTPS :443)
    → Traefik (Let's Encrypt for api.gpstore.co.in)
    → Spring Boot container  (8081, context-path /v1, Docker network only)
-   → PostgreSQL container   (5432, Docker network only)
+   → PostgreSQL 17 container (5432, Docker network only)
    → Redis container        (6379, Docker network only)
 ```
 
