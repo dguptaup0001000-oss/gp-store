@@ -1,0 +1,58 @@
+# Optional alternative to systemd on the VPS.
+# Primary production path is systemd + host Redis + host Nginx
+# (see HOSTINGER_DEPLOYMENT.md). This file is for operators who prefer Compose.
+#
+# Postgres is NOT in this file: production data stays on Supabase.
+# Redis is bound to loopback. Spring Boot is bound to loopback; Nginx on the
+# host still terminates HTTPS.
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command:
+      - redis-server
+      - --bind
+      - 127.0.0.1
+      - --protected-mode
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - "60"
+      - "1000"
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - gpstore_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    restart: always
+    env_file:
+      - /opt/gpstore/env.production
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JVM_ACTIVE_PROCESSORS: "2"
+      JVM_GC: "-XX:+UseG1GC"
+      JVM_MAX_RAM_PERCENT: "35"
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  gpstore_redis_data:

@@ -140,7 +140,8 @@ jobs:
           chmod +x tool/with_worker_pubspec.sh
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
-            API_URL="https://gp-store.onrender.com/v1"
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
           fi
           ./tool/with_worker_pubspec.sh flutter build apk --release --split-per-abi \
             --target-platform android-arm,android-arm64 \
@@ -185,7 +186,8 @@ jobs:
           chmod +x tool/with_worker_pubspec.sh
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
-            API_URL="https://gp-store.onrender.com/v1"
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
           fi
           ./tool/with_worker_pubspec.sh flutter build appbundle --release \
             --target-platform android-arm,android-arm64 \
@@ -230,7 +232,8 @@ jobs:
         run: |
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
-            API_URL="https://gp-store.onrender.com/v1"
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
           fi
           flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
             --dart-define=APP_ENV=production \
@@ -277,7 +280,8 @@ jobs:
         run: |
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
-            API_URL="https://gp-store.onrender.com/v1"
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
           fi
           flutter build appbundle --release \
             --dart-define=APP_ENV=production \
@@ -344,12 +348,13 @@ jobs:
         # its UI, but every API call (login, browsing, everything) will
         # fail until you set this. One-time setup: this repo's Settings ->
         # Secrets and variables -> Actions -> Variables tab, name:
-        # API_BASE_URL, value: your deployed backend's URL (e.g. from
-        # Render) + /v1.
+        # API_BASE_URL, value: the public HTTPS API + /v1 (for example
+        # https://api.gpstore.co.in/v1). Never an onrender.com URL.
         run: |
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
-            API_URL="https://gp-store.onrender.com/v1"
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
           fi
           flutter build web --release \
             --base-href "/${{ github.event.repository.name }}/" \

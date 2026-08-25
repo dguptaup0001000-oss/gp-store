@@ -85,7 +85,7 @@ class CorsIdempotencyPreflightTest {
     }
 
     @Test
-    @DisplayName("actuator readiness is public so Render does not need an admin token")
+    @DisplayName("actuator readiness is public so a load balancer does not need an admin token")
     void actuatorReadinessIsPublic() throws Exception {
         mockMvc.perform(get("/actuator/health/readiness"))
                 .andExpect(status().isOk());

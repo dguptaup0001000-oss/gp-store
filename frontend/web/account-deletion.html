@@ -77,7 +77,9 @@
   // the Flutter app, which reads config via --dart-define), so this is the
   // only way it stays accurate if support contact details ever change,
   // without needing someone to remember to hand-edit this file too.
-  fetch('https://gp-store.onrender.com/v1/api/store-info')
+  // Must match AppEnvironment.productionApiBaseUrl. This static page has no
+  // dart-define; GitHub Pages cannot inject API_BASE_URL at build time here.
+  fetch('https://api.gpstore.co.in/v1/api/store-info')
     .then(function (res) { return res.json(); })
     .then(function (data) {
       document.getElementById('contact-box').innerHTML =

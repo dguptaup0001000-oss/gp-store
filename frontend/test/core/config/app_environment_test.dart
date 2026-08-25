@@ -11,6 +11,9 @@ void main() {
         expect(env.baseUrl, startsWith('https://'), reason: '$env must be encrypted');
         expect(env.baseUrl, isNot(contains('localhost')));
         expect(env.baseUrl, isNot(contains('10.0.2.2')));
+        expect(env.baseUrl, isNot(contains('onrender')));
+        expect(env.baseUrl, isNot(contains('render.com')));
+        expect(env.baseUrl, AppEnvironment.productionApiBaseUrl);
       }
     });
 
@@ -47,10 +50,9 @@ void main() {
       expect(AppEnvironment.current, AppEnvironment.development);
     });
 
-    test('the timeout is long enough for a cold start and is bounded', () {
-      // Render's free tier takes 30-60s to wake; a shorter timeout fails the
-      // first request after any quiet period while the backend is merely
-      // booting. It is still a ceiling, not an eternity.
+    test('the timeout is long enough for a slow mobile network and is bounded', () {
+      // Always-on VPS: 15s is enough for a village 4G stall and short enough
+      // that a spinner is not an eternity. Override via API_TIMEOUT_SECONDS.
       for (final env in AppEnvironment.values) {
         expect(env.timeout.inSeconds, greaterThanOrEqualTo(15));
         expect(env.timeout.inSeconds, lessThanOrEqualTo(60));

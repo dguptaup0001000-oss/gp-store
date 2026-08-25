@@ -41,14 +41,14 @@ actually SEND pushes via the Firebase Admin SDK:
 2. Click **Generate new private key** → confirm → downloads a JSON file
    (something like `gp-store-firebase-adminsdk-xxxxx.json`).
 3. This file must become the `FIREBASE_CREDENTIALS_BASE64` env var on
-   Render - base64-encode the WHOLE file content:
+   the VPS (`/opt/gpstore/env.production`) — base64-encode the WHOLE file content:
    - **Termux/Linux/Mac**: `base64 -w0 path/to/that-file.json`
    - **Windows PowerShell**: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("path\to\that-file.json"))`
 4. Copy the long output string, paste it as the value of
-   `FIREBASE_CREDENTIALS_BASE64` in Render's Environment tab.
-5. Also add `FIREBASE_PUSH_ENABLED` = `true` in Render's Environment tab
+   `FIREBASE_CREDENTIALS_BASE64` in `/opt/gpstore/env.production`.
+5. Also add `FIREBASE_PUSH_ENABLED=true` in that same env file
    (it defaults to `false` - see `application.properties`).
-6. Save → Render redeploys. Check the logs for `Firebase Admin SDK
+6. Save → `sudo systemctl restart gpstore-backend`. Check the logs for `Firebase Admin SDK
    initialized - push notifications are live.` to confirm it worked. If you
    see a warning instead, the base64 value is probably malformed (extra
    whitespace/newline from copy-paste is the usual cause).
@@ -63,7 +63,7 @@ actually SEND pushes via the Firebase Admin SDK:
 ```
 flutter clean
 flutter pub get
-flutter run --dart-define=API_BASE_URL=https://gp-store.onrender.com/v1
+flutter run --dart-define=API_BASE_URL=https://api.gpstore.co.in/v1
 ```
 
 If `google-services.json` is missing, the build fails immediately with a

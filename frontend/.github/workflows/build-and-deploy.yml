@@ -65,7 +65,7 @@ jobs:
         # localhost alias) is just as unreachable from a real physical
         # phone as it is from a public website. Set the same repo variable
         # (Settings -> Secrets and variables -> Actions -> Variables,
-        # name: API_BASE_URL) to your deployed backend's URL (Render) once it
+        # name: API_BASE_URL) to your deployed backend's URL once it
         # exists, or this APK will install and open fine but fail on
         # every login/browse attempt.
         run: |
@@ -123,8 +123,7 @@ jobs:
         # its UI, but every API call (login, browsing, everything) will
         # fail until you set this. One-time setup: this repo's Settings ->
         # Secrets and variables -> Actions -> Variables tab, name:
-        # API_BASE_URL, value: your deployed backend's URL (e.g. from
-        # Render) + /v1.
+        # API_BASE_URL, value: your deployed backend's HTTPS URL + /v1.
         run: |
           if [ -n "${{ vars.API_BASE_URL }}" ]; then
             flutter build web --release \

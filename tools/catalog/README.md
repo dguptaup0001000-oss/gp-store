@@ -22,7 +22,9 @@ exactly like a missing endpoint. Note the SecurityConfig rules are written
 Get the token by logging in as a user whose `customers.role` is `ADMIN`:
 
 ```bash
-curl -X POST https://gp-store.onrender.com/v1/api/auth/login \
+API_BASE_URL="${API_BASE_URL:-https://api.gpstore.co.in/v1}"
+
+curl -X POST "$API_BASE_URL/api/auth/login" \
      -H "Content-Type: application/json" \
      -d '{"email":"...","password":"..."}'
 ```
@@ -33,20 +35,20 @@ once directly in the database.
 
 ```bash
 # 1. Seed / refresh the catalogue. Safe to run as many times as you like.
-curl -X POST https://gp-store.onrender.com/v1/api/admin/catalog/seed \
+curl -X POST "$API_BASE_URL/api/admin/catalog/seed" \
      -H "Authorization: Bearer $ADMIN_TOKEN"
 
 # 2. Fetch real product images from Open Food Facts, in batches.
 #    Repeat until "considered" comes back smaller than the limit.
-curl -X POST "https://gp-store.onrender.com/v1/api/admin/catalog/images/backfill?limit=100" \
+curl -X POST "$API_BASE_URL/api/admin/catalog/images/backfill?limit=100" \
      -H "Authorization: Bearer $ADMIN_TOKEN"
 
 # 3. Check the catalogue's health at any time.
-curl https://gp-store.onrender.com/v1/api/admin/catalog/audit \
+curl "$API_BASE_URL/api/admin/catalog/audit" \
      -H "Authorization: Bearer $ADMIN_TOKEN"
 
 # 4. Before launch: remove every test product.
-curl -X DELETE "https://gp-store.onrender.com/v1/api/admin/catalog/test-data?confirm=true" \
+curl -X DELETE "$API_BASE_URL/api/admin/catalog/test-data?confirm=true" \
      -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

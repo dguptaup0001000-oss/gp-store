@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Fast 503 when the database pool is actually exhausted, instead of letting
  * this request occupy a Tomcat thread for the 5s Hikari timeout and then
- * timing out at Render as a 502.
+ * timing out at the reverse proxy as a 502.
  *
  * Waiting threads alone are not enough: a brief GC or one slow query can
  * queue a few waiters while most connections are still idle. Shed only when

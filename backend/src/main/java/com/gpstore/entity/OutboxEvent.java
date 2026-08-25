@@ -12,8 +12,8 @@ import java.time.LocalDateTime;
  * ThreadPoolExecutor. That executor is bounded and has proper backpressure,
  * so it is not a memory risk - but it is not durable. Anything still queued
  * or mid-flight when the JVM stops is gone with no trace. On this
- * deployment that is not a rare event: Render redeploys the service on every
- * push, and the free tier spins the instance down after ~15 minutes idle.
+ * deployment that is not a rare event: the service restarts on every
+ * deploy, and a process crash or OOM is always possible.
  * An order placed seconds before either could keep its money and its stock
  * decrement while permanently losing its invoice - a GST/accounting record
  * the business is legally required to have.

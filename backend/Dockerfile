@@ -54,7 +54,7 @@ ENV MALLOC_ARENA_MAX=2
 # reading there. The other three quarters are metaspace, code cache, thread
 # stacks, GC structures and direct buffers, none of which the heap setting
 # touches and none of which had a ceiling. That is the whole 502 story: the
-# container crosses its memory limit, Render kills it, the proxy has nothing
+# container crosses its memory limit, the supervisor kills it, the proxy has nothing
 # to talk to and answers 502. The two memory dips on the graph are exactly
 # those restarts.
 #

@@ -37,7 +37,7 @@ on:
       base_url:
         description: 'Backend base URL (include /v1)'
         required: true
-        default: 'https://gp-store.onrender.com/v1'
+        default: 'http://127.0.0.1:8081/v1'
       total_browse_vus:
         description: 'TOTAL concurrent browse VUs across all shards'
         required: true
@@ -338,7 +338,7 @@ jobs:
                        "percentiles across generators is not meaningful. Judge the run "
                        "by the worst shard.")
           lines.append("")
-          lines.append("Cross-check against the target's own metrics (Render CPU/memory, "
+          lines.append("Cross-check against the target's own metrics (VPS CPU/memory, "
                        "Supabase connection count, /v1/actuator/prometheus) for the same "
                        "window. Without that, a clean result may only mean the load never "
                        "actually arrived.")

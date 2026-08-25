@@ -35,7 +35,7 @@ before calling MSG91. Flutter must never call MSG91.
    OTP copy only.
 5. Copy the **template ID**.
 6. Copy the MSG91 **Auth Key** from the dashboard. Treat it like `JWT_SECRET`.
-7. In **Render → Environment**, set (no quotes, no git commit):
+7. On the **VPS** (`/opt/gpstore/env.production`), set (no quotes, no git commit):
 
    ```
    APP_PRODUCTION=true
@@ -49,7 +49,7 @@ before calling MSG91. Flutter must never call MSG91.
    ```
 
    You can keep using `OTP_SMS_SENDING_ENABLED` / `MSG91_TEMPLATE_ID` if those
-   are already on Render; `MSG91_ENABLED` and `MSG91_OTP_TEMPLATE_ID` alias them.
+   are already in that env file; `MSG91_ENABLED` and `MSG91_OTP_TEMPLATE_ID` alias them.
 8. Redeploy. If MSG91 is required in production but the Auth Key or template ID
    is missing, the app **refuses to start** (fail closed). It will not silently
    use the mock or a universal code such as `123456`.

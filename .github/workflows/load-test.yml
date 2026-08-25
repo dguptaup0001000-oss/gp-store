@@ -23,7 +23,7 @@ on:
       base_url:
         description: 'Backend base URL (include /v1)'
         required: true
-        default: 'https://gp-store.onrender.com/v1'
+        default: 'http://127.0.0.1:8081/v1'
       accounts:
         description: 'Number of test accounts to seed (takes ~6.5s each, paced to respect the login rate limit)'
         required: true

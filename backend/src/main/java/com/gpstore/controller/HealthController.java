@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@code /api/health/ready} must not take a pooled connection on every
  * probe. A 5,000-VU script that hits ready once per iteration used to
  * spend the entire pool of ten on {@code SELECT 1}, so catalog requests
- * waited out the 5s acquisition timeout and Render returned 502.
+ * waited out the 5s acquisition timeout and the reverse proxy returned 502.
  *
  * The probe still runs {@code SELECT 1} when a connection is idle. When
  * every connection is busy serving customers AND this process has already

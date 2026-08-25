@@ -18,7 +18,7 @@
 // Usage (in Termux):
 //   pkg update -y && pkg install -y nodejs
 //   curl -o phone-loadtest.js https://raw.githubusercontent.com/dguptaup0001000-oss/gp-store/main/load-tests/phone-loadtest.js
-//   BASE_URL=https://your-backend.onrender.com/v1 node phone-loadtest.js
+//   BASE_URL=http://127.0.0.1:8081/v1 node phone-loadtest.js
 //
 // Tune with env vars: ACCOUNTS (default 15), DURATION_SEC (default 120),
 // BROWSE_VUS (default 20), CART_VUS (default 6).
@@ -27,7 +27,7 @@ const { randomUUID } = require('node:crypto');
 
 const BASE_URL = (process.env.BASE_URL || '').replace(/\/$/, '');
 if (!BASE_URL) {
-  console.error('Set BASE_URL, e.g. BASE_URL=https://your-backend.onrender.com/v1 node phone-loadtest.js');
+  console.error('Set BASE_URL, e.g. BASE_URL=http://127.0.0.1:8081/v1 node phone-loadtest.js');
   process.exit(1);
 }
 const ACCOUNT_COUNT = parseInt(process.env.ACCOUNTS || '15', 10);
@@ -286,7 +286,7 @@ async function main() {
         String(percentile(s.latencies, 99)),
     );
   }
-  console.log('\nCross-check this against Render\'s CPU/memory graph and Supabase\'s connection-count graph for this same time window - that combination shows what actually strained first.');
+  console.log('\nCross-check this against the VPS CPU/memory graph and Supabase\'s connection-count graph for this same time window - that combination shows what actually strained first.');
 }
 
 main().catch((err) => {

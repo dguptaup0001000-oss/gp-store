@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_products_brand_trgm ON products USING GIN (brand 
 ```
 
 Notes:
-- Most managed Postgres providers (RDS, Supabase, Neon, Render, Railway) allow
+- Most managed Postgres providers (RDS, Supabase, Neon) allow
   `CREATE EXTENSION pg_trgm` without extra permissions. Self-hosted Postgres
   may need a superuser to run it once.
 - If you skip this step, the search endpoint will fail with a Postgres error

@@ -10,7 +10,7 @@ import java.util.concurrent.Callable;
  *
  * A 5,000-VU browse run was still a Redis round trip per catalog GET even
  * when the entry was hot. That kept forty Tomcat threads waiting on the
- * network instead of serving JSON, the queue overflowed, and Render answered
+ * network instead of serving JSON, the queue overflowed, and the proxy answered
  * 502 because the origin never responded. L1 is the same objects Redis
  * already stores; eviction still goes to both layers so an admin edit is
  * not stuck in this JVM.
