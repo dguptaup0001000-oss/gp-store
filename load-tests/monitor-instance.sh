@@ -8,7 +8,7 @@ INTERVAL="${INTERVAL:-5}"
 JAVA_PID="${JAVA_PID:-}"
 
 if [ -z "$JAVA_PID" ]; then
-  JAVA_PID="$(pgrep -f 'com.gpstore.BackendApplication' | head -n1 || true)"
+  JAVA_PID="$(pgrep -f 'backend-0.0.1-SNAPSHOT.jar|com.gpstore.BackendApplication' | head -n1 || true)"
 fi
 
 echo -e "ts\tcpu_pct\tmem_used_mb\tjava_rss_mb\tpg_backends\tpg_active\tredis_ops\tredis_clients" > "$OUT"

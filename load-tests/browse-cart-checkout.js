@@ -27,7 +27,6 @@ import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 import { SharedArray } from 'k6/data';
 import { Counter, Trend } from 'k6/metrics';
-import { textSummary } from 'k6/summary';
 
 const status2xx = new Counter('status_2xx');
 const status3xx = new Counter('status_3xx');
@@ -532,11 +531,11 @@ export function handleSummary(data) {
     ),
   };
 
-  const files = {
-    stdout: textSummary(data, { indent: ' ', enableColors: true }),
-  };
+  const files = {};
+  const body = `${JSON.stringify(summary, null, 2)}\n`;
+  files.stdout = body;
   if (SUMMARY_PATH) {
-    files[SUMMARY_PATH] = `${JSON.stringify(summary, null, 2)}\n`;
+    files[SUMMARY_PATH] = body;
   }
   return files;
 }
