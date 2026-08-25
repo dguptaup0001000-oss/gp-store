@@ -24,6 +24,7 @@ services:
       - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
       - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
       - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      # Dashboard / API not enabled. Do not add --api.insecure.
     ports:
       - "80:80"
       - "443:443"
@@ -135,11 +136,12 @@ services:
       start_period: 90s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.gpstore.rule=Host(`${API_DOMAIN}`)
+      - traefik.http.routers.gpstore.rule=Host(`${API_DOMAIN:-api.gpstore.co.in}`)
       - traefik.http.routers.gpstore.entrypoints=websecure
       - traefik.http.routers.gpstore.tls.certresolver=le
       - traefik.http.services.gpstore.loadbalancer.server.port=8081
       - traefik.http.services.gpstore.loadbalancer.server.scheme=http
+    stop_grace_period: 40s
     networks:
       - gpstore_net
     # Intentionally no host `ports:` — Traefik reaches 8081 on the Docker network.

@@ -21,12 +21,10 @@ enum AppEnvironment {
 
   static const _envName = String.fromEnvironment('APP_ENV', defaultValue: 'development');
 
-  /// Documented production API origin. Must stay HTTPS and end with `/v1`.
+  /// Canonical production API. Must stay HTTPS and end with `/v1`.
   ///
-  /// Already the GitHub Actions `API_BASE_URL` example in
-  /// `PRODUCTION_CHECKLIST.md`. If DNS uses a different hostname, pass
-  /// `--dart-define=API_BASE_URL=...` (CI: repo variable `API_BASE_URL`)
-  /// rather than scattering URLs through repositories.
+  /// Hostinger + Traefik. Never Railway, Render, or localhost.
+  /// Override only for a laptop/debug build via `--dart-define=API_BASE_URL`.
   static const String productionApiBaseUrl = 'https://api.gpstore.co.in/v1';
 
   /// The environment this build was compiled for.

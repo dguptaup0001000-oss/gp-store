@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
-# Hostinger KVM 2 first-boot packages + users for GP-STORE.
-# Run as root on Ubuntu LTS. Does NOT start the shop until env.production
-# is filled and the jar is in place — see HOSTINGER_DEPLOYMENT.md.
+# LEGACY Hostinger first-boot (systemd + Nginx + host Redis).
+# Canonical production is backend/docker-compose.yml + Traefik.
+# See backend/HOSTINGER_DEPLOYMENT.md and deploy/hostinger/README.md.
+#
+# Refuses to run unless FORCE_LEGACY_SYSTEMD=1 so a new VPS cannot install
+# Nginx on :80/:443 next to Traefik by accident.
 set -euo pipefail
+
+if [[ "${FORCE_LEGACY_SYSTEMD:-}" != "1" ]]; then
+  echo "This script installs the OLD systemd + Nginx stack." >&2
+  echo "Canonical production: backend/docker-compose.yml (Traefik)." >&2
+  echo "If you really need the legacy layout: FORCE_LEGACY_SYSTEMD=1 $0" >&2
+  exit 1
+fi
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root (sudo)." >&2

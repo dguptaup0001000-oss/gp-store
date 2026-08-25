@@ -94,6 +94,11 @@ Android apps do not use CORS.
 - Treat **Render** as a production dependency. It is removed.
 
 Release Android/web builds must pass `--dart-define=APP_ENV=production` (CI
-does this). Point them at the live API host by setting the GitHub variable
-`API_BASE_URL` to `https://YOUR_API_DOMAIN/v1` without changing Flutter
-repositories. If that variable is empty, CI uses `AppEnvironment.productionApiBaseUrl`.
+does this). The coded production API is `https://api.gpstore.co.in/v1`.
+GitHub `vars.API_BASE_URL` must stay that URL or empty (CI uses the same
+default). Do not set it to Railway, Render, or localhost.
+
+As of 2026-08-25 `api.gpstore.co.in` still CNAME'd to Railway
+(`s1z20khv.up.railway.app`) and HTTPS health returned 404. Point the A
+record at the Hostinger VPS **before** treating the APK as production-ready.
+See `backend/HOSTINGER_DEPLOYMENT.md`.

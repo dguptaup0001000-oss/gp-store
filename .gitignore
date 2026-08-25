@@ -38,6 +38,8 @@ build/
 !.env.example
 .env.production
 deploy/hostinger/env.production
+acme.json
+**/acme.json
 firebase_base64.txt
 *firebase*credential*
 *service-account*.json
