@@ -33,9 +33,23 @@ public class CategoryService {
         return categoryRepository.save(category);
     }
 
+    /**
+     * Storefront (and the admin picker that shares this URL): active
+     * categories only, newest-name order, hard cap.
+     *
+     * findAll() used to serialise every row, including deactivated ones and
+     * leftover test fixtures. A polluted database with thousands of
+     * categories turned GET /api/categories into a multi-megabyte payload
+     * on every home-screen open - the same shape as the 201 GB load-test
+     * transfer, without any 5,000-VU story. A real shop has a few dozen
+     * departments, not thousands.
+     */
+    private static final int STOREFRONT_CATEGORY_CAP = 100;
+
     @Cacheable(value = "categories", sync = true)
     public List<Category> getAllCategories() {
-        return categoryRepository.findAll();
+        return categoryRepository.findByActiveTrueOrderByNameAsc(
+                org.springframework.data.domain.PageRequest.of(0, STOREFRONT_CATEGORY_CAP));
     }
 
     public Category getById(Long id) {

@@ -105,9 +105,7 @@ export function setup() {
   return { categories: list };
 }
 
-export default function (data) {
-  const category = data.categories[Math.floor(Math.random() * data.categories.length)];
-
+export default function () {
   const cats = http.get(`${BASE_URL}/api/categories`, { tags: { name: 'categories' } });
   browseDuration.add(cats.timings.duration);
   record(cats, true);
@@ -115,7 +113,8 @@ export default function (data) {
 
   sleep(1.5 + Math.random() * 2.5);
 
-  const page = http.get(`${BASE_URL}/api/products/category/${category.id}?page=0&size=20`, {
+  // Home feed, not a random possibly-empty leftover test category.
+  const page = http.get(`${BASE_URL}/api/products/feed?page=0&size=20`, {
     tags: { name: 'browse_category' },
   });
   browseDuration.add(page.timings.duration);
