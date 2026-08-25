@@ -48,8 +48,10 @@ public class SmsService {
     }
 
     public void sendOtp(String mobileNumber, String otpCode) {
-        if (!sendingEnabled) {
-            log.info("[DEV MODE - no SMS sent] OTP requested for {}", IndianPhoneNumbers.mask(mobileNumber));
+        if (!sendingEnabled || authKey == null || authKey.isBlank()
+                || templateId == null || templateId.isBlank()) {
+            log.info("OTP_SEND_FAILURE phone={} provider=unconfigured",
+                    IndianPhoneNumbers.mask(mobileNumber));
             return;
         }
         if (otpCode == null || otpCode.isBlank()) {

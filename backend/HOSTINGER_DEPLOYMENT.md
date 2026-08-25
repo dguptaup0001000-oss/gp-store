@@ -110,7 +110,7 @@ Compose sets `DB_URL=jdbc:postgresql://postgres:5432/${DB_NAME}` and `REDIS_HOST
 
 `SPRING_PROFILES_ACTIVE=prod` → `APP_PRODUCTION=true`, `DDL_AUTO=validate`, forwarded-header trust.
 
-Optional vendor keys: Cashfree, MSG91, Firebase, Cloudinary. Production OTP refuses the mock when `APP_PRODUCTION=true`.
+Optional vendor keys: Cashfree, MSG91, Firebase, Cloudinary. Production never uses the mock OTP provider. Missing MSG91 credentials do not block boot; SMS OTP send fails closed until they are set.
 
 ## 5. Database — do not destroy shop data
 
@@ -254,7 +254,7 @@ CI already defaults to `https://api.gpstore.co.in/v1` when `vars.API_BASE_URL` i
 | Certificate pending / CN is `*.up.railway.app` | DNS still the Railway CNAME. Fix the A record. |
 | 404 Application not found | You are still hitting Railway, not the VPS. |
 | 502 | `docker compose ps` — backend healthy? `docker compose logs backend` |
-| App refuses to start | `JWT_SECRET` still the repo default, or MSG91 missing with `APP_PRODUCTION=true` |
+| App refuses to start | `JWT_SECRET` still the repo default, or `DDL_AUTO` is not `validate` |
 | Search errors `similarity` | V5 should create `pg_trgm`. Confirm Flyway in logs |
 | Login rate-limit all from one IP | `RATE_LIMIT_TRUST_FORWARDED_FOR=true` is set in Compose |
 | Port 80/443 already in use | leftover Nginx/systemd from `deploy/hostinger/`. Stop them. |

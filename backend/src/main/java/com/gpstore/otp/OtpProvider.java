@@ -6,8 +6,9 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * SMS OTP transport. Production uses MSG91; local/CI uses {@link MockOtpProvider}.
- * Implementations must never log OTP values or auth keys.
+ * SMS OTP transport. Production uses MSG91 when credentials are set, otherwise
+ * {@link UnconfiguredOtpProvider} (fail-closed, no mock). Local/CI uses
+ * {@link MockOtpProvider}. Implementations must never log OTP values or auth keys.
  */
 public interface OtpProvider {
 
