@@ -1,10 +1,10 @@
 # GP-STORE production checklist
 
-Live architecture: **Hostinger KVM 2 VPS** (Nginx → Spring Boot, Redis on
-localhost) + **Supabase** (PostgreSQL). The Flutter apps are built by GitHub
+Live architecture: **Hostinger VPS** (Traefik → Spring Boot Docker, Postgres
+and Redis on the Docker network only). The Flutter apps are built by GitHub
 Actions; they talk only to the HTTPS API host.
 
-Exact commands: [`HOSTINGER_DEPLOYMENT.md`](HOSTINGER_DEPLOYMENT.md).
+Exact commands: [`backend/HOSTINGER_DEPLOYMENT.md`](backend/HOSTINGER_DEPLOYMENT.md).
 Deploy file inventory: [`deploy/hostinger/MIGRATION_INVENTORY.md`](deploy/hostinger/MIGRATION_INVENTORY.md).
 Flyway / empty-database CI: `backend/src/main/resources/db/migration/README.md`.
 
@@ -13,12 +13,12 @@ Flyway / empty-database CI: `backend/src/main/resources/db/migration/README.md`.
 | Change | Where it lives | Who applies it |
 |---|---|---|
 | Java / Flutter / Flyway SQL / CI workflows | this git repository | merge to `main` |
-| `DDL_AUTO`, `JWT_SECRET`, `DB_*`, Redis, Cashfree, SMS, Firebase, Cloudinary | `/opt/gpstore/env.production` on the VPS, plus vendor dashboards | a person with SSH / dashboard access |
-| Supabase schema beyond what Flyway already applied | not done from this repo | never rewrite `flyway_schema_history` by hand |
+| `DDL_AUTO`, `JWT_SECRET`, `DB_*`, Redis, Cashfree, SMS, Firebase, Cloudinary | `backend/.env` on the VPS (never git) plus vendor dashboards | a person with SSH / dashboard access |
+| Postgres schema beyond what Flyway already applied | not done from this repo | never rewrite `flyway_schema_history` by hand |
 
-This repository does **not** set VPS or Supabase environment variable
-**values**. Do not put passwords, JWT secrets, database URLs with
-credentials, Cashfree keys, Firebase JSON, or SMS tokens in git.
+This repository does **not** set VPS environment variable **values**. Do not
+put passwords, JWT secrets, database URLs with credentials, Cashfree keys,
+Firebase JSON, or SMS tokens in git.
 
 ## Required GitHub CI on `main` (before flipping `DDL_AUTO`)
 
@@ -37,11 +37,11 @@ has V2 onward.
 deploy. After `schema-migrate` is green on `main` and a deploy of that commit
 has booted successfully:
 
-1. SSH to the VPS → edit `/opt/gpstore/env.production`.
+1. SSH to the VPS → edit `backend/.env` (Compose reads it).
 2. Set `DDL_AUTO=validate` (create the line if it is missing).
-3. Leave `FLYWAY_ENABLED=true`. Do not change `DB_URL`, pool size, Tomcat
+3. Leave `FLYWAY_ENABLED=true`. Do not change pool size, Tomcat
    threads, or JVM flags as part of this step.
-4. `sudo systemctl restart gpstore-backend`.
+4. `docker compose up -d backend`
 5. Confirm `GET /v1/api/health` and `GET /v1/actuator/health`.
 
 ### Rollback if the new deploy does not start
@@ -51,26 +51,22 @@ as it was.
 
 1. Set `DDL_AUTO` back to `update`, or comment the line so the app uses its
    default.
-2. `sudo systemctl restart gpstore-backend`.
+2. `docker compose up -d backend`
 3. Do **not** rewrite Flyway history and do **not** restore
    `backend/docs/production-schema-reference.sql` as a bootstrap script
    (it is a 2026-08-19 snapshot and is missing later columns).
 
 ## Environment variables (names only — values stay on the VPS)
 
-Required for a real shop — see `deploy/hostinger/env.production.example`:
+Required for a real shop — see `backend/.env.example`:
 
-- `DB_URL` — JDBC URL to **your** Supabase Postgres with `sslmode=require`.
-  Use `jdbc:postgresql://db.<project-ref>.supabase.co:5432/postgres?sslmode=require`
-  (direct) or the transaction pooler URL with `prepareThreshold=0` if you
-  outgrow the direct connection ceiling.
-- `DB_USERNAME`, `DB_PASSWORD`
-- `FLYWAY_ENABLED=true`
+- `API_DOMAIN`, `ACME_EMAIL`
+- `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` (Compose Postgres, not public)
+- `FLYWAY_ENABLED=true`, `DDL_AUTO=validate`, `SPRING_PROFILES_ACTIVE=prod`
 - `JWT_SECRET` — long random string; never the repo default
 - `APP_PRODUCTION=true`
-- `REDIS_HOST=127.0.0.1`, `REDIS_PORT=6379`, `REDIS_PASSWORD`
-- `RATE_LIMIT_TRUST_FORWARDED_FOR=true` when Nginx is in front
-- `CORS_ALLOWED_ORIGINS` — real frontend origin(s), comma-separated
+- `REDIS_PASSWORD` (Compose sets `REDIS_HOST=redis`)
+- `CORS_ALLOWED_ORIGINS` — real frontend origin(s), comma-separated, not `*`
 - `STORE_LATITUDE`, `STORE_LONGITUDE`
 
 Optional, fail-closed if unset: Cashfree, SMS/OTP, Firebase, Cloudinary.
@@ -99,6 +95,5 @@ Android apps do not use CORS.
 
 Release Android/web builds must pass `--dart-define=APP_ENV=production` (CI
 does this). Point them at the live API host by setting the GitHub variable
-`API_BASE_URL` (for example `https://api.gpstore.co.in/v1`) without changing
-Flutter repositories. If that variable is empty, CI uses the same documented
-host as `AppEnvironment.productionApiBaseUrl`.
+`API_BASE_URL` to `https://YOUR_API_DOMAIN/v1` without changing Flutter
+repositories. If that variable is empty, CI uses `AppEnvironment.productionApiBaseUrl`.

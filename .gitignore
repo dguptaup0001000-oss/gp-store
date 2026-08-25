@@ -34,6 +34,8 @@ build/
 
 ### Environment secrets ###
 .env
+*.env
+!.env.example
 .env.production
 deploy/hostinger/env.production
 firebase_base64.txt

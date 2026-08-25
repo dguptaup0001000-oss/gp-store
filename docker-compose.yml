@@ -1,3 +1,7 @@
+# Local laptop development. Publishes Postgres/Redis/API on the host.
+# Production Hostinger Compose (no public 5432/6379/8081) is
+# backend/docker-compose.yml — see backend/HOSTINGER_DEPLOYMENT.md.
+
 services:
   postgres:
     image: postgres:16
