@@ -61,7 +61,7 @@ jobs:
           set -Eeuo pipefail
           python3 -m py_compile .github/scripts/automerge_eligible_pr.py
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            python3 .github/scripts/automerge_eligible_pr.py --pr "$PR_NUMBER"
+            python3 .github/scripts/automerge_eligible_pr.py --pr "$PR_NUMBER" --wait-seconds 2700
           else
-            python3 .github/scripts/automerge_eligible_pr.py --sha "$HEAD_SHA" --ci-already-green
+            python3 .github/scripts/automerge_eligible_pr.py --sha "$HEAD_SHA" --ci-already-green --wait-seconds 180
           fi

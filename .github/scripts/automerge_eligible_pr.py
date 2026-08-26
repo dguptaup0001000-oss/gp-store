@@ -332,6 +332,8 @@ def main() -> None:
     while True:
         result = merge_eligible_pr(number, ci_already_green=args.ci_already_green)
         if result != "wait" or time.time() >= deadline:
+            if result == "wait":
+                log("Timed out waiting for required CI; not merging.")
             return
         log("Waiting for required checks to appear in the rollup")
         time.sleep(15)
