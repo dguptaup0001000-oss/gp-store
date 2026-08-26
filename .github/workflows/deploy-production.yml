@@ -60,10 +60,10 @@ jobs:
   wait-for-ci:
     name: Wait for backend CI
     needs: [syntax]
-    # Do not reference `inputs.*` in this if: GitHub evaluates both sides of
-    # || / &&, and `inputs` on a push event previously skipped this job before
-    # syntax finished, which aborted the production deploy.
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Wait for syntax to finish before this job can skip. Skipping
+    # wait-for-ci/deploy while syntax is still queued aborted #94's
+    # production deploy as a 19s failure.
+    if: always() && needs.syntax.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,10 +73,15 @@ jobs:
       - name: Wait until workflow CI succeeds for this SHA
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
           TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.sha }}
           SKIP_CI_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_ci_gate || false }}
         run: |
           set -Eeuo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "PR run is syntax-only; not waiting for CI and not deploying"
+            exit 0
+          fi
           if [ "$SKIP_CI_GATE" = "true" ]; then
             echo "skip_ci_gate=true; not waiting for CI (emergency dispatch)"
             exit 0

@@ -193,9 +193,14 @@ jobs:
   build-and-push-image:
     needs: [build-and-test, schema-migrate]
     runs-on: ubuntu-latest
-    # Only publish an image from main - a PR branch shouldn't produce a
-    # "real" versioned image until it's actually merged.
-    if: github.ref == 'refs/heads/main'
+    # Only publish an image from main. The condition references needs.* so
+    # GitHub cannot skip this job while build-and-test is still queued
+    # (that pattern was aborting PR CI as startup_failure).
+    if: |
+      always() &&
+      needs.build-and-test.result == 'success' &&
+      needs.schema-migrate.result == 'success' &&
+      github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write

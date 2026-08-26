@@ -368,14 +368,18 @@ jobs:
           path: frontend/build/app/outputs/bundle/release/app-release.aab
 
   build-and-deploy-web:
+    needs: [build-apk]
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
-    # Only deploy the LIVE site from main - a PR branch's preview build
-    # still gets built and tested above, it just doesn't overwrite the
-    # real public site.
-    if: github.ref == 'refs/heads/main'
+    # Only deploy the LIVE site from main. Reference needs.* so this job
+    # cannot skip while build-apk is still queued (that aborted PR checks
+    # as startup_failure and blocked auto-merge).
+    if: |
+      always() &&
+      needs.build-apk.result == 'success' &&
+      github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
