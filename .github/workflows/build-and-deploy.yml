@@ -1,14 +1,16 @@
-# NOTE: this file assumes the repo root IS the frontend/ folder (matching
-# the structure of the zips this project has been shipped in). If your
-# actual GitHub repo has frontend/ as a subfolder instead, move this
-# .github/ folder to the true repo root and add `working-directory: frontend`
-# to every run/step below that doesn't already have one.
+# Canonical production APK + worker APK + GitHub Pages workflow for the
+# monorepo. Jobs use `working-directory: frontend`. Do not build release
+# APKs from frontend/.github/workflows (that copy is a disabled stub).
 #
 # What this gives you, with ZERO extra accounts beyond GitHub itself:
 # - An APK you can download directly from the Actions run's "Artifacts"
 #   section after every push - install it on an Android phone to test.
 # - A live, clickable web URL at https://<your-username>.github.io/<repo>/,
 #   rebuilt automatically on every push to main.
+#
+# Production builds always pass --dart-define=APP_ENV=production.
+# Customer applicationId: com.gpstore.app
+# Worker applicationId:   com.gpstore.worker
 #
 # One-time setup after you push this to GitHub:
 # 1. Go to your repo's Settings -> Pages -> Source -> select "GitHub Actions".

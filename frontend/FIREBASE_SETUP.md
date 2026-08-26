@@ -21,7 +21,7 @@ backend and the try/catch around `Firebase.initializeApp()` in
 
 1. In the new project, click the Android icon ("Add app").
 2. **Android package name**: `com.gpstore.app` (must match exactly - see
-   `android/app/build.gradle`'s `applicationId`).
+   `android/app/build.gradle`'s customer `applicationId`).
 3. Download the `google-services.json` file it offers you.
 4. Put that file at `android/app/google-services.json` in this project
    (same folder as `android/app/build.gradle`). This file is
@@ -30,6 +30,14 @@ backend and the try/catch around `Firebase.initializeApp()` in
 5. Skip the rest of Firebase's setup wizard (SDK snippets, etc.) - the
    `firebase_core`/`firebase_messaging` packages already handle that; you
    only needed the JSON file.
+
+The **delivery worker** APK uses a different `applicationId`:
+`com.gpstore.worker`. Worker slim builds do not apply the Google Services
+plugin, so they do not need a second `google-services.json` entry today.
+If you later add Firebase to the worker app, register a second Android
+app in the same Firebase project with package `com.gpstore.worker` and
+include both clients in `google-services.json`. Do not reuse
+`com.gpstore.app` for the worker APK.
 
 ## 3. Get a service account key for the backend
 

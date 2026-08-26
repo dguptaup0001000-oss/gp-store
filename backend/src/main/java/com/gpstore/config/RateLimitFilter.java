@@ -77,12 +77,14 @@ import java.util.concurrent.TimeUnit;
  *
  *   rate-limit.checkout-per-minute        default 20, per customer
  *       orders/place, POST /api/payments, checkout-session, payment
- *       verify. No human places 20 orders a minute, so this only ever
+ *       verify, refund/COD/UPI confirm writes, coupon validate.
+ *       No human places 20 orders a minute, so this only ever
  *       catches a stuck retry loop or a script, while leaving impatient
  *       double-taps (already made safe by idempotency keys and row locks)
- *       comfortably under the line. Checkout-session and verify share one
- *       normalised path so hammering many order ids does not multiply the
- *       quota.
+ *       comfortably under the line. Checkout-session, verify, and other
+ *       per-order payment writes share one normalised path so hammering
+ *       many order ids does not multiply the quota. Coupon validate is
+ *       here so brute-forcing offer codes is capped the same way.
  *
  *   rate-limit.admin-per-minute             default 30, per admin account
  *       POST /api/notifications/broadcast and writes under /api/admin/**.
@@ -243,8 +245,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         if (path.equals("/api/orders/place")
                 || path.equals("/api/payments")
+                || path.equals("/api/coupons/validate")
                 || isCheckoutSession(path)
-                || isPaymentVerify(path)) {
+                || isPaymentVerify(path)
+                || isPaymentSensitiveWrite(path)) {
             return Bucket.CHECKOUT;
         }
 
@@ -274,6 +278,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
         return path != null && path.matches("/api/payments/order/\\d+/verify");
     }
 
+    static boolean isPaymentSensitiveWrite(String path) {
+        return path != null && path.matches(
+                "/api/payments/order/\\d+/(refund|refund/complete|cod/complete|upi/confirm)");
+    }
+
     /**
      * Collapses per-order payment paths so one customer cannot multiply
      * their quota by rotating order ids.
@@ -284,6 +293,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
         if (isPaymentVerify(path)) {
             return "/api/payments/order/*/verify";
+        }
+        if (isPaymentSensitiveWrite(path)) {
+            return path.replaceFirst("/api/payments/order/\\d+/", "/api/payments/order/*/");
         }
         return path;
     }

@@ -65,17 +65,16 @@ public class JwtFilter extends OncePerRequestFilter {
                 // status here for every role (customer, worker, admin) -
                 // they are all Customer rows with the same active flag.
                 //
-                // /api/auth/** is excluded so logout/refresh can still run:
-                // those endpoints authenticate with the refresh token in the
-                // body, not with this access JWT. Blocking them would leave
-                // a banned user unable to drop their session.
+                // Refresh/logout still run: those endpoints authenticate
+                // with the refresh token in the body. Blocking them would
+                // leave a banned user unable to drop their session. Other
+                // /api/auth/** calls (change-password) must still reject
+                // an inactive account.
                 String path = request.getServletPath();
-                if (path == null || !path.startsWith("/api/auth/")) {
-                    if (!accountIsUsable(customerId)) {
-                        SecurityContextHolder.clearContext();
-                        rejectInactive(response);
-                        return;
-                    }
+                if (!isSessionLifecycleAuthPath(path) && !accountIsUsable(customerId)) {
+                    SecurityContextHolder.clearContext();
+                    rejectInactive(response);
+                    return;
                 }
 
                 AuthenticatedUser principal =
@@ -97,6 +96,12 @@ public class JwtFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    static boolean isSessionLifecycleAuthPath(String path) {
+        return "/api/auth/refresh".equals(path)
+                || "/api/auth/logout".equals(path)
+                || "/api/auth/logout-all".equals(path);
     }
 
     private boolean accountIsUsable(Long customerId) {

@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""Fail if a release APK is unsigned or not zip-aligned.
+"""Fail if a release APK is unsigned, not zip-aligned, or has the wrong package.
 
 Prints the signer DN so CI logs distinguish Android Debug from a Play key.
 Does not re-sign. Do not unzip/modify/sign APKs by hand.
+
+Customer APKs must be com.gpstore.app. Worker APKs must be com.gpstore.worker.
+Sharing one applicationId would make installing one replace the other.
 """
 from __future__ import annotations
 
 import glob
 import os
+import re
 import subprocess
 import sys
+
+
+CUSTOMER_PACKAGE = "com.gpstore.app"
+WORKER_PACKAGE = "com.gpstore.worker"
 
 
 def sdk_tool(name: str) -> str:
@@ -22,13 +30,37 @@ def sdk_tool(name: str) -> str:
     return matches[-1]
 
 
+def expected_package(apk: str) -> str | None:
+    name = os.path.basename(apk).lower()
+    if "worker" in name:
+        return WORKER_PACKAGE
+    if name.startswith("app-") and name.endswith("-release.apk"):
+        return CUSTOMER_PACKAGE
+    return None
+
+
+def package_name(aapt: str, apk: str) -> str:
+    result = subprocess.run(
+        [aapt, "dump", "badging", apk],
+        capture_output=True,
+        text=True,
+    )
+    blob = result.stdout or result.stderr
+    match = re.search(r"package: name='([^']+)'", blob)
+    if result.returncode != 0 or not match:
+        raise RuntimeError(f"aapt dump badging failed for {apk}: {blob.strip()}")
+    return match.group(1)
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("usage: verify_apk_release.py <apk>...", file=sys.stderr)
         sys.exit(2)
     apksigner = sdk_tool("apksigner")
     zipalign = sdk_tool("zipalign")
+    aapt = sdk_tool("aapt")
     failed = False
+    seen: dict[str, str] = {}
     for apk in sys.argv[1:]:
         if not os.path.isfile(apk):
             print(f"MISSING {apk}")
@@ -63,6 +95,19 @@ def main() -> None:
             )
         else:
             print("SIGNER=release (not Android Debug)")
+        try:
+            pkg = package_name(aapt, apk)
+        except RuntimeError as ex:
+            print(ex)
+            failed = True
+            pkg = ""
+        print(f"PACKAGE {os.path.basename(apk)}={pkg}")
+        expected = expected_package(apk)
+        if expected and pkg != expected:
+            print(f"WRONG_PACKAGE {apk}: got {pkg!r}, expected {expected!r}")
+            failed = True
+        if pkg:
+            seen[os.path.basename(apk)] = pkg
         z = subprocess.run(
             [zipalign, "-c", "-P", "16", "4", apk],
             capture_output=True,
@@ -74,6 +119,18 @@ def main() -> None:
             failed = True
         else:
             print(f"ZIPALIGN_OK {os.path.basename(apk)} (16 KiB page / 4-byte)")
+
+    worker_pkgs = {pkg for name, pkg in seen.items() if "worker" in name.lower()}
+    customer_pkgs = {
+        pkg for name, pkg in seen.items()
+        if name.startswith("app-") and name.endswith("-release.apk")
+    }
+    if worker_pkgs and customer_pkgs and worker_pkgs & customer_pkgs:
+        print(
+            "SHARED_APPLICATION_ID worker and customer APKs must not use "
+            f"the same package: {sorted(worker_pkgs & customer_pkgs)}"
+        )
+        failed = True
     sys.exit(1 if failed else 0)
 
 

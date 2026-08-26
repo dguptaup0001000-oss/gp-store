@@ -114,6 +114,16 @@ class RateLimitFilterTest {
         MockHttpServletResponse placeResponse = new MockHttpServletResponse();
         filter.doFilter(place, placeResponse, new MockFilterChain());
         assertEquals(429, placeResponse.getStatus());
+
+        MockHttpServletRequest refund = request("PUT", "/api/payments/order/42/refund");
+        MockHttpServletResponse refundResponse = new MockHttpServletResponse();
+        filter.doFilter(refund, refundResponse, new MockFilterChain());
+        assertEquals(429, refundResponse.getStatus());
+
+        MockHttpServletRequest coupon = request("GET", "/api/coupons/validate");
+        MockHttpServletResponse couponResponse = new MockHttpServletResponse();
+        filter.doFilter(coupon, couponResponse, new MockFilterChain());
+        assertEquals(429, couponResponse.getStatus());
     }
 
     @Test
