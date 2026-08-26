@@ -185,9 +185,10 @@ services:
       STORE_LATITUDE: ${STORE_LATITUDE:-27.162310}
       STORE_LONGITUDE: ${STORE_LONGITUDE:-83.940468}
       # Contact Us. `:-` keeps placeholders if the VPS .env keys are empty.
-      STORE_SUPPORT_PHONE: ${STORE_SUPPORT_PHONE:-+91XXXXXXXXXX}
-      STORE_SUPPORT_WHATSAPP: ${STORE_SUPPORT_WHATSAPP:-+91XXXXXXXXXX}
-      STORE_SUPPORT_EMAIL: ${STORE_SUPPORT_EMAIL:-support@example.com}
+      STORE_SUPPORT_PHONE: ${STORE_SUPPORT_PHONE:-}
+      STORE_SUPPORT_WHATSAPP: ${STORE_SUPPORT_WHATSAPP:-}
+      STORE_SUPPORT_EMAIL: ${STORE_SUPPORT_EMAIL:-}
+      STORE_SUPPORT_URL: ${STORE_SUPPORT_URL:-}
       CASHFREE_ENVIRONMENT: ${CASHFREE_ENVIRONMENT:-production}
       CASHFREE_APP_ID: ${CASHFREE_APP_ID:-}
       CASHFREE_SECRET_KEY: ${CASHFREE_SECRET_KEY:-}
@@ -261,6 +262,12 @@ services:
       - gpstore_pg_backups:/backups
       - ./docker/backup/backup.sh:/backup.sh:ro
     entrypoint: ["/bin/sh", "/backup.sh", "daemon"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /backups/LATEST && test -f /backups/$(cat /backups/LATEST) && find /backups -maxdepth 1 \\( -name 'gpstore-*.dump' -o -name 'gpstore-*.sql.gz' \\) -mmin -2880 | grep -q ."]
+      interval: 10m
+      timeout: 10s
+      retries: 3
+      start_period: 15m
     depends_on:
       postgres:
         condition: service_healthy

@@ -23,7 +23,7 @@ fi
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-docker compose -f "$COMPOSE_FILE" exec -T backup sh -c 'ls -1t /backups/gpstore-*.sql.gz 2>/dev/null | head -1' \
+docker compose -f "$COMPOSE_FILE" exec -T backup sh -c 'ls -1t /backups/gpstore-*.dump /backups/gpstore-*.sql.gz 2>/dev/null | head -1' \
   | tr -d '\r' > "$WORKDIR/latest.name"
 LATEST="$(cat "$WORKDIR/latest.name")"
 if [[ -z "$LATEST" ]]; then
@@ -32,6 +32,18 @@ if [[ -z "$LATEST" ]]; then
 fi
 
 docker compose -f "$COMPOSE_FILE" exec -T backup cat "/backups/$LATEST" > "$WORKDIR/$LATEST"
-gzip -t "$WORKDIR/$LATEST"
+case "$LATEST" in
+  *.sql.gz)
+    gzip -t "$WORKDIR/$LATEST"
+    ;;
+  *.dump)
+    docker compose -f "$COMPOSE_FILE" exec -T backup pg_restore --list "/backups/$LATEST" >/dev/null
+    ;;
+esac
 scp "$WORKDIR/$LATEST" "$TARGET/"
+docker compose -f "$COMPOSE_FILE" exec -T backup cat "/backups/${LATEST}.sha256" \
+  > "$WORKDIR/${LATEST}.sha256" 2>/dev/null || true
+if [[ -s "$WORKDIR/${LATEST}.sha256" ]]; then
+  scp "$WORKDIR/${LATEST}.sha256" "$TARGET/" || true
+fi
 echo "Copied $LATEST to $TARGET"

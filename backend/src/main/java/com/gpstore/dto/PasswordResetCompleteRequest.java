@@ -17,7 +17,7 @@ public class PasswordResetCompleteRequest {
     private String resetToken;
 
     @NotBlank(message = "New password is required")
-    @Size(min = 8, message = "Password must be at least 8 characters")
+    @Size(min = 10, message = "Password must be at least 10 characters")
     @JsonProperty("new_password")
     @JsonAlias("newPassword")
     private String newPassword;

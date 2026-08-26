@@ -11,7 +11,8 @@ class PasswordPolicyTest {
     @Test
     void acceptsALetterAndADigit() {
         assertTrue(PasswordPolicy.isAcceptable("Passw0rd!23"));
-        assertTrue(PasswordPolicy.isAcceptable("grocery9"));
+        assertTrue(PasswordPolicy.isAcceptable("grocery99x"));
+        assertFalse(PasswordPolicy.isAcceptable("grocery9"), "8 characters is no longer enough for a new password");
     }
 
     @Test

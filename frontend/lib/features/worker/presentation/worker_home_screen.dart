@@ -265,6 +265,16 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
                 ),
               ),
 
+              if (_location.isRunning) ...[
+                const SizedBox(height: 16),
+                const _Notice(
+                  icon: Icons.gps_fixed,
+                  text:
+                      'Location is shared only while this screen is open. '
+                      'It stops if you leave the app or have no active delivery.',
+                ),
+              ],
+
               if (_locationProblem != null) ...[
                 const SizedBox(height: 16),
                 _Notice(

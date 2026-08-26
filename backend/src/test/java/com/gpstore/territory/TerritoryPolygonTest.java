@@ -137,4 +137,22 @@ class TerritoryPolygonTest {
         assertTrue(south.contains(28.610, 77.210));
         assertFalse(north.contains(28.610, 77.210));
     }
+
+    @Test
+    @DisplayName("adjacent territories are not treated as overlapping")
+    void adjacentSquaresDoNotOverlapInterior() {
+        TerritoryPolygon west = TerritoryPolygon.parse("[[0,0],[0,1],[1,1],[1,0]]", mapper);
+        TerritoryPolygon east = TerritoryPolygon.parse("[[0,1],[0,2],[1,2],[1,1]]", mapper);
+        assertFalse(west.overlapsInterior(east));
+        assertFalse(east.overlapsInterior(west));
+    }
+
+    @Test
+    @DisplayName("one square covering another is an overlap")
+    void nestedSquaresOverlap() {
+        TerritoryPolygon outer = TerritoryPolygon.parse("[[0,0],[0,4],[4,4],[4,0]]", mapper);
+        TerritoryPolygon inner = TerritoryPolygon.parse("[[1,1],[1,2],[2,2],[2,1]]", mapper);
+        assertTrue(outer.overlapsInterior(inner));
+        assertTrue(inner.overlapsInterior(outer));
+    }
 }

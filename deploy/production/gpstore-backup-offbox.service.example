@@ -1,0 +1,12 @@
+[Unit]
+Description=Copy latest GP-STORE Postgres backup off this VPS
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/gp-store
+Environment=BACKUP_OFFBOX_TARGET=
+# Set BACKUP_OFFBOX_TARGET in /etc/gpstore/backup-offbox.env (mode 600).
+EnvironmentFile=-/etc/gpstore/backup-offbox.env
+ExecStart=/opt/gp-store/deploy/production/backup-offbox-sync.sh

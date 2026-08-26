@@ -9,6 +9,8 @@ import '../../address/presentation/address_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../../core/util/idempotency_key.dart';
 import '../../cart/presentation/cart_providers.dart';
+import '../../support/domain/store_info_model.dart';
+import '../../support/presentation/support_providers.dart';
 import '../data/cashfree_checkout_service.dart';
 import '../domain/checkout_models.dart';
 import 'checkout_providers.dart';
@@ -106,6 +108,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     }
   }
 
+  String _effectivePaymentMethod() {
+    final info = ref.read(storeInfoProvider).valueOrNull;
+    return StoreInfo.coercePaymentMethodFor(_paymentMethod, info);
+  }
+
   Future<void> _fetchPreview() async {
     final address = _selectedAddress;
     if (address?.id == null) return;
@@ -188,7 +195,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
       final orderResult = await repository.placeOrder(
         addressId: address!.id!,
-        paymentMethod: _paymentMethod,
+        paymentMethod: _effectivePaymentMethod(),
         idempotencyKey: _idempotencyKey!,
         couponCode: _couponController.text.trim(),
       );
@@ -211,7 +218,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       if (orderResult.paymentStatus == null) {
         final paymentResult = await repository.initiatePayment(
           orderId: createdOrderId,
-          paymentMethod: _paymentMethod,
+          paymentMethod: _effectivePaymentMethod(),
         );
         upiPaymentLink = paymentResult.upiPaymentLink;
       }
@@ -228,7 +235,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       // rather than one that says "confirmed" and is then contradicted.
       String? verifiedPaymentStatus;
       try {
-        if (_paymentMethod == 'ONLINE') {
+        if (_effectivePaymentMethod() == 'ONLINE') {
           verifiedPaymentStatus = await _payOnline(createdOrderId);
         }
       } catch (paymentError) {
@@ -253,7 +260,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           builder: (_) => OrderConfirmationScreen(
             orderId: createdOrderId,
             orderNumber: orderResult.orderNumber ?? '',
-            paymentMethod: _paymentMethod,
+            paymentMethod: _effectivePaymentMethod(),
             upiPaymentLink: upiPaymentLink,
             verifiedPaymentStatus: verifiedPaymentStatus,
           ),
@@ -393,9 +400,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   ),
                   const SizedBox(height: 20),
                   _sectionLabel('Payment Method'),
+                  Builder(builder: (context) {
+                    final storeInfo = ref.watch(storeInfoProvider).valueOrNull;
+                    final selected = StoreInfo.coercePaymentMethodFor(
+                        _paymentMethod, storeInfo);
+                    return Column(
+                      children: [
                   RadioListTile<String>(
                     value: 'COD',
-                    groupValue: _paymentMethod,
+                    groupValue: selected,
                     onChanged: hapticizeValue(
                         (value) => setState(() => _paymentMethod = value!)),
                     secondary: const Icon(Icons.money_outlined,
@@ -403,9 +416,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     title: const Text('Cash on Delivery'),
                     contentPadding: EdgeInsets.zero,
                   ),
+                  if (storeInfo?.upiConfigured == true)
                   RadioListTile<String>(
                     value: 'UPI',
-                    groupValue: _paymentMethod,
+                    groupValue: selected,
                     onChanged: hapticizeValue(
                         (value) => setState(() => _paymentMethod = value!)),
                     secondary: const Icon(Icons.qr_code_scanner_outlined,
@@ -415,9 +429,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         'Pay the shop directly, confirmed by the shop'),
                     contentPadding: EdgeInsets.zero,
                   ),
+                  if (storeInfo?.onlinePaymentEnabled == true)
                   RadioListTile<String>(
                     value: 'ONLINE',
-                    groupValue: _paymentMethod,
+                    groupValue: selected,
                     onChanged: hapticizeValue(
                         (value) => setState(() => _paymentMethod = value!)),
                     secondary: const Icon(Icons.credit_card_outlined,
@@ -427,6 +442,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         'Card, UPI or netbanking, confirmed instantly'),
                     contentPadding: EdgeInsets.zero,
                   ),
+                      ],
+                    );
+                  }),
                   const SizedBox(height: 20),
                   if (_isLoadingPreview)
                     const Center(

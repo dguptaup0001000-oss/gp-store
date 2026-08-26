@@ -325,6 +325,11 @@ public class PaymentService {
                 throw new BadRequestException("Online payment is not available right now.");
             }
         }
+        if (method == PaymentMethod.UPI) {
+            if (upiPaymentService == null || !upiPaymentService.configured()) {
+                throw new BadRequestException("UPI payment is not available right now.");
+            }
+        }
         return method;
     }
 

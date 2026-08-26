@@ -202,4 +202,21 @@ public final class TerritoryPolygon {
         }
         return new double[]{sumLat / lat.length, sumLng / lng.length};
     }
+
+    /**
+     * True when the two outlines share interior, not merely a boundary road.
+     * Adjacent territories that meet at an edge must still be allowed.
+     */
+    public boolean overlapsInterior(TerritoryPolygon other) {
+        if (other == null) {
+            return false;
+        }
+        if (maxLat < other.minLat || minLat > other.maxLat
+                || maxLng < other.minLng || minLng > other.maxLng) {
+            return false;
+        }
+        double[] here = approximateCentre();
+        double[] there = other.approximateCentre();
+        return other.contains(here[0], here[1]) || contains(there[0], there[1]);
+    }
 }

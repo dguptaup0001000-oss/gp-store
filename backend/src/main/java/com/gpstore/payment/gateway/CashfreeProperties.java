@@ -1,5 +1,6 @@
 package com.gpstore.payment.gateway;
 
+import com.gpstore.config.PlaceholderValues;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,7 +76,8 @@ public class CashfreeProperties {
      * about that to a customer at checkout.
      */
     public boolean enabled() {
-        return !appId.isBlank() && !secretKey.isBlank();
+        return !PlaceholderValues.isBlankOrPlaceholder(appId)
+                && !PlaceholderValues.isBlankOrPlaceholder(secretKey);
     }
 
     /**

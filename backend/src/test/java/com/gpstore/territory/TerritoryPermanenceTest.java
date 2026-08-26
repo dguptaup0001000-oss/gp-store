@@ -240,5 +240,7 @@ class TerritoryPermanenceTest {
         assertEquals(2, matches.size(),
                 "both territories contain this point and an administrator needs to be told; "
                         + "matched: " + matches);
+        assertTrue(resolver.resolve(WEST_LAT, WEST_LNG).isEmpty(),
+                "overlapping polygons must fail closed rather than pick a winner");
     }
 }

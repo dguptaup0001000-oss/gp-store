@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.config.PlaceholderValues;
 import com.gpstore.entity.Role;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
@@ -49,16 +50,10 @@ public class JwtService {
         }
 
         if (production) {
-            // Refusing to start is the whole point. A production app running
-            // on the repository's own published dev secret lets anyone who
-            // has read this source forge a token for ANY customer id and
-            // role - including ADMIN - and nothing in the logs would look
-            // wrong. Failing loudly at boot is recoverable in minutes;
-            // silently accepting it is a total authentication bypass that
-            // could run unnoticed indefinitely.
-            if (DEV_FALLBACK_SECRET.equals(secret)) {
+            if (DEV_FALLBACK_SECRET.equals(secret)
+                    || PlaceholderValues.isSecretPlaceholder(secret)) {
                 throw new IllegalStateException(
-                        "Refusing to start in production with the built-in development JWT secret. "
+                        "Refusing to start in production with a missing, published, or CHANGE_ME JWT secret. "
                                 + "Set JWT_SECRET to a real random 64+ character value.");
             }
             if (secret.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < MIN_SECRET_BYTES) {

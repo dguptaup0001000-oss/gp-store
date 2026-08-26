@@ -61,3 +61,8 @@ load-tests/accounts.json
 # Build artifact, not source, and can be large.
 dump.rdb
 **/dump.rdb
+
+# Postgres dumps must never enter git (credentials live in the dump).
+*.dump
+gpstore-*.sql.gz
+/backups/

@@ -1,5 +1,6 @@
 import '../../../core/api/api_client.dart';
 import '../../../core/api/error_messages.dart';
+import 'password_policy.dart';
 
 /// Customer-facing OTP copy. Maps backend messages without exposing MSG91
 /// internals, stack traces, or OTP values.
@@ -12,7 +13,7 @@ class OtpUserMessages {
   static const wrongOtp = 'Incorrect OTP. Please try again.';
   static const sendFailure = 'Unable to send OTP right now. Please try again.';
   static const network = 'You appear to be offline. Check your connection and try again.';
-  static const passwordTooShort = 'Password must be at least 8 characters.';
+  static const passwordTooShort = AppPasswordPolicy.tooShortMessage;
   static const passwordMismatch = 'The two passwords do not match.';
   static const resetTokenInvalid = 'This reset step has expired. Please request a new OTP.';
   static const resetSuccess = 'Password reset - you can now log in with your new password.';
@@ -39,7 +40,10 @@ class OtpUserMessages {
     if (lower.contains('expired reset') || lower.contains('invalid or expired reset')) {
       return resetTokenInvalid;
     }
-    if (lower.contains('at least 8')) {
+    if (lower.contains('at least 8') ||
+        lower.contains('at least 10') ||
+        lower.contains('10–128') ||
+        lower.contains('10-128')) {
       return passwordTooShort;
     }
     if (lower.contains('offline') || lower.contains('could not reach')) {

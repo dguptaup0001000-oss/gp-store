@@ -8,22 +8,18 @@ import java.util.Set;
 /**
  * Passwords accepted by this shop.
  *
- * Length 8 was the only rule. That lets {@code 12345678} and {@code password}
- * through. Registration, password change, reset, and any other path that
- * stores a new password go through {@link #requireAcceptable(String)}.
- *
- * Kept deliberately modest: a letter and a digit, 8–128 characters, and a
- * short denylist of the passwords attackers try first. Stricter composition
- * rules (symbols, mixed case) push people into reused phrases and do not
- * earn their keep on a neighbourhood grocery login.
+ * Length 10 is the floor for any NEW password (register, change, reset).
+ * Existing accounts with shorter passwords still sign in; they are asked
+ * for 10+ only when they next set a password. A letter and a digit, 10–128
+ * characters, and a short denylist of the passwords attackers try first.
  */
 public final class PasswordPolicy {
 
-    public static final int MIN_LENGTH = 8;
+    public static final int MIN_LENGTH = 10;
     public static final int MAX_LENGTH = 128;
 
     public static final String MESSAGE =
-            "Password must be 8–128 characters and contain at least one letter and one number.";
+            "Password must be 10–128 characters and contain at least one letter and one number.";
 
     private static final Set<String> DENYLIST = Set.of(
             "password",

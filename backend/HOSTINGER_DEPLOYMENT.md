@@ -123,6 +123,11 @@ If you already have a dump:
 
 ```bash
 # After `docker compose up -d` and postgres is healthy:
+# custom format (current backups):
+docker compose exec -T postgres \
+  pg_restore --clean --if-exists --no-owner --no-acl -U "$DB_USERNAME" -d "$DB_NAME" \
+  < gpstore-YYYYMMDDThhmmssZ.dump
+# legacy gzip SQL:
 gunzip -c gpstore-YYYY-MM-DD.sql.gz | docker compose exec -T postgres psql -U "$DB_USERNAME" -d "$DB_NAME"
 ```
 
@@ -221,35 +226,39 @@ Do **not** run `docker compose down -v`. That deletes shop data.
 
 ## 13. Backup
 
-The `backup` Compose service dumps Postgres every 6 hours into the
-`gpstore_pg_backups` volume, keeps 14 days, and never deletes the latest
-successful file. Each run inserts a row into `ops_backup_runs`. Admins can
-read status at `GET /v1/api/admin/ops/backups` (JWT, ADMIN role).
+See **[deploy/production/BACKUPS.md](../deploy/production/BACKUPS.md)** for the
+full restore procedure.
 
-Off-box copy (required — the volume is still on this VPS until you copy it):
+The `backup` Compose service dumps Postgres every 6 hours as custom-format
+`gpstore-YYYYMMDDThhmmssZ.dump` files into the `gpstore_pg_backups` volume,
+keeps 14 days, and never deletes the latest successful file. Failed dumps
+are not promoted to `LATEST`. Each run inserts a row into `ops_backup_runs`.
+Admins can read status at `GET /v1/api/admin/ops/backups` (JWT, ADMIN role).
+
+That volume is still on this VPS until you copy it off-box:
 
 ```bash
-# from the VPS, after a dump exists
+# systemd timer (recommended) — see deploy/production/gpstore-backup-offbox.*.example
 BACKUP_OFFBOX_TARGET=user@other-host:/safe/gpstore-backups \
   ./deploy/production/backup-offbox-sync.sh
 # or copy by hand:
 docker compose exec -T backup ls -l /backups
-# scp the latest gzip to another machine you control.
-# Do not keep the only copy on the same disk.
+# scp the latest .dump (and .sha256) to another machine you control.
 ```
 
-Restore drill (isolated database, never production):
+Restore drill (isolated database named `gpstore_restore_probe`, never `gpstore`):
 
 ```bash
-# on a laptop / CI runner, not against the live volume
-deploy/production/backup-restore-drill.sh /path/to/gpstore-....sql.gz \
+deploy/production/backup-restore-drill.sh /path/to/gpstore-....dump \
   127.0.0.1 5432 gpstore gpstore_restore_probe 'the-password'
 ```
 
 Emergency restore onto production is a last resort and replaces live data:
 
 ```bash
-gunzip -c gpstore-YYYYMMDDThhmmssZ.sql.gz | docker compose exec -T postgres psql -U "$DB_USERNAME" -d "$DB_NAME"
+docker compose exec -T postgres \
+  pg_restore --clean --if-exists --no-owner --no-acl -U "$DB_USERNAME" -d "$DB_NAME" \
+  < gpstore-YYYYMMDDThhmmssZ.dump
 ```
 
 Do **not** treat a manual `pg_dump` one-liner as the backup system. The sidecar
@@ -262,7 +271,9 @@ Application: previous git commit, then `docker compose build backend && docker c
 Database: restore a dump from section 13. Flyway is forward-only; do not edit applied SQL.
 
 ```bash
-gunzip -c gpstore-YYYY-MM-DD.sql.gz | docker compose exec -T postgres psql -U "$DB_USERNAME" -d "$DB_NAME"
+docker compose exec -T postgres \
+  pg_restore --clean --if-exists --no-owner --no-acl -U "$DB_USERNAME" -d "$DB_NAME" \
+  < gpstore-YYYYMMDDThhmmssZ.dump
 ```
 
 ## 15. Flutter APK

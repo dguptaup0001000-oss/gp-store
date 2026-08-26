@@ -195,7 +195,21 @@ class _DeliveryDashboardScreenState
           ),
         ],
       ),
-      body: assignmentsAsync.when(
+      body: Column(
+        children: [
+          if (_isTracking)
+            Material(
+              color: AppColors.primary.withValues(alpha: 0.08),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Text(
+                  'Location is shared only while this screen is open. '
+                  'It stops if you leave the app. We do not track in the background.',
+                ),
+              ),
+            ),
+          Expanded(
+            child: assignmentsAsync.when(
         loading: () =>
             const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         error: (error, stackTrace) => Center(
@@ -233,6 +247,9 @@ class _DeliveryDashboardScreenState
             ),
           );
         },
+            ),
+          ),
+        ],
       ),
     );
   }

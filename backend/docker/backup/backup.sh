@@ -5,8 +5,9 @@
 #   once     take one backup and exit (CI restore drill, cron one-shot)
 #   daemon   take one backup, then sleep BACKUP_INTERVAL_SECONDS (default 6h)
 #
-# Writes gzipped SQL to BACKUP_DIR (default /backups) and records a row in
-# ops_backup_runs when that table exists. Never deletes the last SUCCESS dump.
+# Writes pg_dump custom-format compressed files to BACKUP_DIR (default
+# /backups). Never deletes the last SUCCESS dump. Failed/partial files stay
+# named *.partial and are never promoted to LATEST.
 set -eu
 
 MODE="${1:-once}"
@@ -38,17 +39,33 @@ record() {
 
 take_backup() {
   mkdir -p "$BACKUP_DIR"
+  chmod 700 "$BACKUP_DIR" 2>/dev/null || true
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  filename="gpstore-${stamp}.sql.gz"
+  filename="gpstore-${stamp}.dump"
   dest="${BACKUP_DIR}/${filename}"
   tmp="${dest}.partial"
 
+  avail="$(df -Pk "$BACKUP_DIR" 2>/dev/null | awk 'NR==2 {print $4}')"
+  if [ "${avail:-0}" -lt 51200 ]; then
+    record FAILURE "$filename" 0 "" "disk almost full (${avail:-0} KiB free)"
+    log "ERROR not enough free space in ${BACKUP_DIR} (${avail:-0} KiB)"
+    return 1
+  fi
+
   log "starting backup ${filename}"
+  rm -f "$tmp"
   if ! pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
-      --format=plain --no-owner --no-acl | gzip -c > "$tmp"; then
+      --format=custom --compress=9 --no-owner --no-acl -f "$tmp"; then
     rm -f "$tmp"
     record FAILURE "$filename" 0 "" "pg_dump failed"
     log "ERROR pg_dump failed"
+    return 1
+  fi
+
+  if ! pg_restore --list "$tmp" >/dev/null 2>&1; then
+    rm -f "$tmp"
+    record FAILURE "$filename" 0 "" "pg_restore --list failed integrity check"
+    log "ERROR dump failed integrity check"
     return 1
   fi
 
@@ -62,6 +79,7 @@ take_backup() {
 
   sha="$(sha256sum "$tmp" | awk '{print $1}')"
   mv "$tmp" "$dest"
+  printf '%s  %s\n' "$sha" "$filename" > "${dest}.sha256"
   printf '%s\n' "$filename" > "${BACKUP_DIR}/LATEST"
   printf 'taken_at=%s\nbytes=%s\nsha256=%s\nfilename=%s\nstatus=SUCCESS\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$bytes" "$sha" "$filename" \
@@ -69,12 +87,11 @@ take_backup() {
   record SUCCESS "$filename" "$bytes" "$sha" "ok"
   log "wrote ${dest} (${bytes} bytes sha256=${sha})"
 
-  # Keep at least one SUCCESS file. Delete gzip dumps older than retention
-  # only when a newer one exists.
   newest="$(cat "${BACKUP_DIR}/LATEST")"
-  find "$BACKUP_DIR" -maxdepth 1 -name 'gpstore-*.sql.gz' -mtime "+${RETENTION_DAYS}" \
-    ! -name "$newest" -print -delete | while read -r gone; do
+  find "$BACKUP_DIR" -maxdepth 1 \( -name 'gpstore-*.dump' -o -name 'gpstore-*.sql.gz' \) \
+    -mtime "+${RETENTION_DAYS}" ! -name "$newest" -print | while read -r gone; do
       log "expired ${gone}"
+      rm -f "$gone" "${gone}.sha256"
     done
   return 0
 }

@@ -114,6 +114,20 @@ public class TerritoryAdminService {
                         "That boundary could not be read. It must be a JSON array of at least three "
                                 + "[latitude, longitude] pairs, e.g. [[28.61,77.20],[28.62,77.20],[28.62,77.21]].");
             }
+            for (DeliverySubzone existing : subzoneRepository.findAll()) {
+                if (incoming.getId() != null && incoming.getId().equals(existing.getId())) {
+                    continue;
+                }
+                if (existing.getBoundary() == null || existing.getBoundary().isBlank()) {
+                    continue;
+                }
+                TerritoryPolygon other = TerritoryPolygon.parse(existing.getBoundary(), objectMapper);
+                if (other != null && polygon.overlapsInterior(other)) {
+                    throw new BadRequestException(
+                            "That outline overlaps territory " + existing.getCode()
+                                    + ". Redraw so each house is in exactly one territory.");
+                }
+            }
         }
 
         incoming.setZone(zone);

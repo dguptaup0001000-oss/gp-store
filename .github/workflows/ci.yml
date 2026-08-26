@@ -196,7 +196,7 @@ jobs:
             -v "$PWD/docker/backup/backup.sh:/backup.sh:ro" \
             postgres:17 \
             /bin/sh /backup.sh once
-          DUMP="$(ls -1t /tmp/gp-backups/gpstore-*.sql.gz | head -1)"
+          DUMP="$(ls -1t /tmp/gp-backups/gpstore-*.dump /tmp/gp-backups/gpstore-*.sql.gz 2>/dev/null | head -1)"
           test -n "$DUMP"
           docker run --rm --network=host \
             -e PGPASSWORD=gpstore_test_password \

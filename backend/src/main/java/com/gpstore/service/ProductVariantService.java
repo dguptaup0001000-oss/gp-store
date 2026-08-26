@@ -71,6 +71,11 @@ public class ProductVariantService {
     }
 
     private void validatePrices(ProductVariant variant, boolean allowBelowCost) {
+        if (variant.getSellingPrice() == null
+                || variant.getSellingPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Selling price must be greater than 0");
+        }
+
         if (variant.getCostPrice() != null && variant.getCostPrice().compareTo(BigDecimal.ZERO) < 0) {
             throw new BadRequestException("Cost price cannot be negative");
         }

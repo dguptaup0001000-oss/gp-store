@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../auth/domain/password_policy.dart';
 import '../../auth/presentation/auth_providers.dart';
 
 class ChangePasswordScreen extends ConsumerStatefulWidget {
@@ -69,12 +70,12 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
                 TextFormField(
                   controller: _newPasswordController,
                   obscureText: true,
-                  decoration: const InputDecoration(labelText: 'New password'),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) return 'New password is required';
-                    if (value.length < 8) return 'Password must be at least 8 characters';
-                    return null;
-                  },
+                  decoration: const InputDecoration(
+                    labelText: 'New password',
+                    helperText: 'At least 10 characters, with a letter and a number',
+                    helperMaxLines: 2,
+                  ),
+                  validator: AppPasswordPolicy.validateNewPassword,
                 ),
                 const SizedBox(height: 24),
                 FilledButton(

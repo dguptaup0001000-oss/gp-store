@@ -2,7 +2,7 @@
 # Restore a GP-STORE pg_dump into an isolated Postgres and verify it.
 #
 # Usage:
-#   backup-restore-drill.sh <dump.sql.gz> <target-host> <target-port> <user> <db> <password>
+#   backup-restore-drill.sh <dump.dump|dump.sql.gz> <target-host> <target-port> <user> <db> <password>
 #
 # The target database is dropped and recreated. Never point this at production.
 set -eu
@@ -16,6 +16,26 @@ export PGPASSWORD="${6:?password required}"
 
 [ -f "$DUMP" ] || { echo "dump not found: $DUMP" >&2; exit 1; }
 
+case "$HOST" in
+  *gpstore.co.in*)
+    echo "Refusing to restore against production host $HOST" >&2
+    exit 1
+    ;;
+esac
+
+case "$DB" in
+  gpstore|postgres|template0|template1)
+    echo "Refusing to drop/restore database '$DB' (looks like production or a system database)." >&2
+    echo "Use a dedicated drill name such as gpstore_restore_probe." >&2
+    exit 1
+    ;;
+esac
+
+if [ -f "${DUMP}.sha256" ]; then
+  echo "checking sha256 for $DUMP"
+  (cd "$(dirname "$DUMP")" && sha256sum -c "$(basename "$DUMP").sha256")
+fi
+
 echo "restoring $DUMP into ${HOST}:${PORT}/${DB}"
 
 psql -h "$HOST" -p "$PORT" -U "$USER" -d postgres -v ON_ERROR_STOP=1 \
@@ -26,7 +46,19 @@ psql -h "$HOST" -p "$PORT" -U "$USER" -d postgres -v ON_ERROR_STOP=1 \
 psql -h "$HOST" -p "$PORT" -U "$USER" -d postgres -v ON_ERROR_STOP=1 \
   -c "CREATE DATABASE ${DB};"
 
-gunzip -c "$DUMP" | psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DB" -v ON_ERROR_STOP=1 >/tmp/restore-drill.log
+case "$DUMP" in
+  *.dump)
+    pg_restore --list "$DUMP" >/dev/null
+    pg_restore -h "$HOST" -p "$PORT" -U "$USER" -d "$DB" --no-owner --no-acl "$DUMP"
+    ;;
+  *.sql.gz)
+    gunzip -c "$DUMP" | psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DB" -v ON_ERROR_STOP=1 >/tmp/restore-drill.log
+    ;;
+  *)
+    echo "unrecognised dump format: $DUMP (want .dump or .sql.gz)" >&2
+    exit 1
+    ;;
+esac
 
 psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DB" -v ON_ERROR_STOP=1 -c "SELECT 1 FROM flyway_schema_history LIMIT 1;" \
   >/dev/null || {
