@@ -33,7 +33,10 @@ esac
 
 if [ -f "${DUMP}.sha256" ]; then
   echo "checking sha256 for $DUMP"
-  (cd "$(dirname "$DUMP")" && sha256sum -c "$(basename "$DUMP").sha256")
+  if ! (cd "$(dirname "$DUMP")" && sha256sum -c "$(basename "$DUMP").sha256"); then
+    echo "sha256 check failed for $DUMP" >&2
+    exit 1
+  fi
 fi
 
 echo "restoring $DUMP into ${HOST}:${PORT}/${DB}"

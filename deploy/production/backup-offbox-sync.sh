@@ -23,9 +23,9 @@ fi
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-docker compose -f "$COMPOSE_FILE" exec -T backup sh -c 'ls -1t /backups/gpstore-*.dump /backups/gpstore-*.sql.gz 2>/dev/null | head -1' \
-  | tr -d '\r' > "$WORKDIR/latest.name"
-LATEST="$(cat "$WORKDIR/latest.name")"
+LATEST="$(docker compose -f "$COMPOSE_FILE" exec -T backup sh -c \
+  'find /backups -maxdepth 1 \( -name "gpstore-*.dump" -o -name "gpstore-*.sql.gz" \) -type f -printf "%T@ %f\n" | sort -nr | awk "{print \$2; exit}"' \
+  | tr -d '\r')"
 if [[ -z "$LATEST" ]]; then
   echo "No backup file found in the sidecar volume." >&2
   exit 1
