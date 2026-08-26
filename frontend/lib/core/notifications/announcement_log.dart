@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'key_value_store.dart';
 import '../logging/app_log.dart';
 

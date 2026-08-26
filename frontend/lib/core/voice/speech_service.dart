@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'speech_engine.dart';
 import '../logging/app_log.dart';
 
