@@ -193,31 +193,41 @@ jobs:
   build-and-push-image:
     needs: [build-and-test, schema-migrate]
     runs-on: ubuntu-latest
-    # Only publish an image from main - a PR branch shouldn't produce a
-    # "real" versioned image until it's actually merged.
-    if: github.ref == 'refs/heads/main'
+    # Do not put github.ref in this if: GitHub treats it as statically false
+    # on PRs and skips immediately while build-and-test is still queued,
+    # which aborts the whole workflow as startup_failure.
+    if: |
+      always() &&
+      needs.build-and-test.result == 'success' &&
+      needs.schema-migrate.result == 'success'
     permissions:
       contents: read
       packages: write
 
     steps:
+      - name: Skip GHCR publish on pull requests
+        if: github.ref != 'refs/heads/main'
+        run: echo "Not publishing GHCR images from a pull request."
+
       - name: Checkout code
+        if: github.ref == 'refs/heads/main'
         uses: actions/checkout@v4
 
       - name: Log in to GitHub Container Registry
+        if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          # GITHUB_TOKEN is provided automatically by GitHub Actions - no
-          # separate secret to create or manage.
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute lowercase image name
+        if: github.ref == 'refs/heads/main'
         id: image
         run: echo "name=$(echo ghcr.io/${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Build and push image
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: ./backend
@@ -226,3 +236,36 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:latest
             ${{ steps.image.outputs.name }}:${{ github.sha }}
+
+  automerge:
+    name: Auto-merge eligible PR
+    needs: [build-and-test, schema-migrate]
+    # Job if must not mention pull_request vs push: a statically false if
+    # skips immediately and aborts sibling jobs that are still queued.
+    if: |
+      always() &&
+      needs.build-and-test.result == 'success' &&
+      needs.schema-migrate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Enable native auto-merge or merge after CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile .github/scripts/automerge_eligible_pr.py
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Not a pull_request event; nothing to merge."
+            exit 0
+          fi
+          python3 .github/scripts/automerge_eligible_pr.py --pr "${{ github.event.pull_request.number }}" --ci-already-green --wait-seconds 60

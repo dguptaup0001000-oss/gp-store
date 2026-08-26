@@ -48,6 +48,8 @@ jobs:
         run: |
           bash -n deploy/production/deploy.sh
           bash -n deploy/production/prepare-vps.sh
+          python3 -m py_compile .github/scripts/wait_for_ci.py
+          python3 -m py_compile .github/scripts/automerge_eligible_pr.py
           test -x deploy/production/deploy.sh || chmod +x deploy/production/deploy.sh
           grep -F 'set -Eeuo pipefail' deploy/production/deploy.sh
           if grep -vE '^[[:space:]]*#' deploy/production/deploy.sh | grep -E 'compose[[:space:]]+down[[:space:]]+(-v|--volumes)'; then
@@ -58,53 +60,44 @@ jobs:
   wait-for-ci:
     name: Wait for backend CI
     needs: [syntax]
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.skip_ci_gate == false)
+    # No job-level if. A false if while syntax is still queued aborts the
+    # workflow as startup_failure (seen on #94 and on this PR).
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Wait until workflow CI succeeds for this SHA
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
           TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.sha }}
+          SKIP_CI_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_ci_gate || false }}
         run: |
           set -Eeuo pipefail
-          SHA="$TARGET_SHA"
-          if [ -z "$SHA" ]; then SHA="${GITHUB_SHA}"; fi
-          echo "Waiting for CI on $SHA"
-          for _ in $(seq 1 90); do
-            json="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow CI --json conclusion,status,event,headBranch --limit 20)"
-            echo "$json"
-            conclusion="$(printf '%s' "$json" | python3 -c 'import json,sys; raw=sys.stdin.read().strip(); runs=json.loads(raw) if raw else []; wanted=[r for r in runs if r.get("event")=="push" and r.get("headBranch")=="main"] or runs; print((wanted[0].get("conclusion") or wanted[0].get("status") or "unknown") if wanted else "missing")')"
-            case "$conclusion" in
-              success) echo "CI green"; exit 0 ;;
-              failure|cancelled|timed_out|startup_failure)
-                echo "CI $conclusion — refusing to deploy" >&2
-                exit 1
-                ;;
-              missing|in_progress|queued|waiting|requested|pending|"")
-                echo "CI not finished ($conclusion); sleeping"
-                sleep 20
-                ;;
-              *)
-                echo "CI status $conclusion; sleeping"
-                sleep 20
-                ;;
-            esac
-          done
-          echo "Timed out waiting for CI" >&2
-          exit 1
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "PR run is syntax-only; not waiting for CI and not deploying"
+            exit 0
+          fi
+          if [ "$SKIP_CI_GATE" = "true" ]; then
+            echo "skip_ci_gate=true; not waiting for CI (emergency dispatch)"
+            exit 0
+          fi
+          python3 .github/scripts/wait_for_ci.py
 
   deploy:
     name: Deploy backend to VPS
     needs: [syntax, wait-for-ci]
-    if: |
-      always() &&
-      needs.syntax.result == 'success' &&
-      (needs.wait-for-ci.result == 'success' || needs.wait-for-ci.result == 'skipped') &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Skip deploy on pull requests
+        if: github.event_name == 'pull_request'
+        run: echo "PR run is syntax-only; not deploying."
+
       - name: Resolve target SHA
+        if: github.event_name != 'pull_request'
         id: sha
         env:
           DISPATCH_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
@@ -117,6 +110,7 @@ jobs:
           fi
 
       - name: Require VPS SSH secrets
+        if: github.event_name != 'pull_request'
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
           PROD_USER: ${{ secrets.PROD_USER }}
@@ -133,6 +127,7 @@ jobs:
           exit "$missing"
 
       - name: SSH deploy
+        if: github.event_name != 'pull_request'
         uses: appleboy/ssh-action@v1.2.0
         env:
           TARGET_SHA: ${{ steps.sha.outputs.sha }}

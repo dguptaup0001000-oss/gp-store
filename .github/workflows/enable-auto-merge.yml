@@ -1,0 +1,53 @@
+# Auto-merge eligible PRs into main, then production deploy follows.
+#
+# After required CI is green this workflow:
+#   1. Enables GitHub-native auto-merge when the repo setting is on.
+#   2. Otherwise merges the PR itself (only after CI is green).
+# It never merges drafts, forks, conflicted PRs, failing checks, or PRs that
+# still require review. It does not approve reviews or bypass protection.
+#
+# This token cannot change repository settings (Allow auto-merge, Actions
+# write, secrets, rulesets). If merge returns 403, the job fails with the
+# exact Settings path that an admin must enable.
+
+# Backup auto-merge when workflow CI completes on a PR branch.
+# The CI workflow's Auto-merge eligible PR job is the primary path so this
+# file does not occupy a runner on every pull_request synchronize.
+
+name: Auto-merge eligible PRs
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+concurrency:
+  group: enable-automerge-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: write
+
+jobs:
+  automerge:
+    name: Auto-merge eligible PR
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch != 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Enable auto-merge if required CI is already green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile .github/scripts/automerge_eligible_pr.py
+          python3 .github/scripts/automerge_eligible_pr.py --sha "$HEAD_SHA" --ci-already-green --wait-seconds 60

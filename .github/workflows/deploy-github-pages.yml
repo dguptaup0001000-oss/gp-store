@@ -1,0 +1,73 @@
+# GitHub Pages for the Flutter web app. Push to main only.
+#
+# Kept in a separate workflow so the APK PR workflow has no job whose
+# `if: github.ref == main` skips immediately while build-apk is still
+# queued (that aborted checks as startup_failure).
+
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.7'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate freezed/json_serializable code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Build web
+        run: |
+          API_URL="${{ vars.API_BASE_URL }}"
+          if [ -z "$API_URL" ]; then
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
+          fi
+          flutter build web --release \
+            --base-href "/${{ github.event.repository.name }}/" \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_URL"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/build/web
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
