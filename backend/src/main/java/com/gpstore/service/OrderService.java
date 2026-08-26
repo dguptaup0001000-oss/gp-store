@@ -953,6 +953,11 @@ public class OrderService {
             throw new ConflictException("Order is already cancelled");
         }
 
+        if (!isAdmin && !customerMayCancel(order.getOrderStatus())) {
+            throw new ConflictException(
+                    "This order can no longer be cancelled. Contact the shop if you need help.");
+        }
+
         order.setOrderStatus(OrderStatus.CANCELLED);
 
         // ORDER (already locked above) -> PAYMENT -> INVENTORY. Locking the
@@ -1030,6 +1035,16 @@ public class OrderService {
         // one query per item. This is one extra query that removes several.
         Order forResponse = repository.findByIdWithDetails(savedOrder.getId()).orElse(savedOrder);
         return com.gpstore.dto.response.OrderDetailResponse.from(forResponse, delivery);
+    }
+
+    /**
+     * Customers may cancel only while the shop has not started packing.
+     * PACKING and later are operational: stock is already being picked, a
+     * rider may already have the bag. Admin/staff can still cancel those
+     * with the usual audit trail.
+     */
+    static boolean customerMayCancel(OrderStatus status) {
+        return status == OrderStatus.PENDING_CONFIRMATION || status == OrderStatus.CONFIRMED;
     }
 
     /**

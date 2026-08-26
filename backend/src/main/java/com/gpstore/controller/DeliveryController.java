@@ -57,12 +57,14 @@ public class DeliveryController {
 
     @GetMapping("/{id}")
     public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryById(@PathVariable Long id) {
-        return deliveryService.getDeliveryById(id);
+        boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
+        return deliveryService.getDeliveryById(id, currentUser.customerId(), isAdmin);
     }
 
     @GetMapping("/order/{orderId}")
     public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryByOrderId(@PathVariable Long orderId) {
-        return deliveryService.getDeliveryByOrderId(orderId);
+        boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
+        return deliveryService.getDeliveryByOrderId(orderId, currentUser.customerId(), isAdmin);
     }
 
     // Lets a customer check their own order's delivery status/ETA.

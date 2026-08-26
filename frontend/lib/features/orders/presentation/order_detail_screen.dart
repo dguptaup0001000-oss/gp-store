@@ -7,7 +7,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
+import '../../checkout/presentation/checkout_providers.dart';
+import '../domain/online_payment_recovery.dart';
 import '../domain/order_models.dart';
+import '../domain/payment_status.dart';
 import 'invoice_screen.dart';
 import 'orders_providers.dart';
 import '../../../core/images/gp_network_image.dart';
@@ -25,7 +28,8 @@ class OrderDetailScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Order Details')),
       body: orderAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        loading: () =>
+            const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         error: (error, stackTrace) => Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -35,7 +39,8 @@ class OrderDetailScreen extends ConsumerWidget {
               // of one static string.
               Text("Couldn't load this order: ${extractErrorMessage(error)}"),
               TextButton(
-                onPressed: hapticize(() => ref.invalidate(orderDetailProvider(orderId))),
+                onPressed: hapticize(
+                    () => ref.invalidate(orderDetailProvider(orderId))),
                 child: const Text('Retry'),
               ),
             ],
@@ -59,16 +64,23 @@ class _OrderDetailBody extends ConsumerStatefulWidget {
 class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
   bool _isCancelling = false;
   bool _isBuyingAgain = false;
+  bool _isPaying = false;
+  String? _payError;
+  String _payPhase = '';
 
   Future<void> _buyAgain() async {
     final items = widget.order.items;
 
-    final reorderable = items.where((item) => item.variantId != null && item.currentlyAvailable == true).toList();
+    final reorderable = items
+        .where(
+            (item) => item.variantId != null && item.currentlyAvailable == true)
+        .toList();
     final skippedCount = items.length - reorderable.length;
 
     if (reorderable.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('None of these items are available anymore')),
+        const SnackBar(
+            content: Text('None of these items are available anymore')),
       );
       return;
     }
@@ -95,11 +107,14 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
     if (!mounted) return;
     setState(() => _isBuyingAgain = false);
 
-    final messageParts = <String>['$addedCount item${addedCount == 1 ? '' : 's'} added to cart'];
+    final messageParts = <String>[
+      '$addedCount item${addedCount == 1 ? '' : 's'} added to cart'
+    ];
     if (skippedCount > 0) messageParts.add('$skippedCount no longer available');
     if (failedCount > 0) messageParts.add('$failedCount failed');
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(messageParts.join(', '))));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(messageParts.join(', '))));
   }
 
   Future<void> _cancelOrder() async {
@@ -109,8 +124,12 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
         title: const Text('Cancel this order?'),
         content: const Text('This cannot be undone.'),
         actions: [
-          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('No')),
-          TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Yes, cancel')),
+          TextButton(
+              onPressed: hapticize(() => Navigator.of(context).pop(false)),
+              child: const Text('No')),
+          TextButton(
+              onPressed: hapticize(() => Navigator.of(context).pop(true)),
+              child: const Text('Yes, cancel')),
         ],
       ),
     );
@@ -119,11 +138,14 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
     setState(() => _isCancelling = true);
 
     try {
-      await ref.read(ordersRepositoryProvider).cancelOrder(widget.order.orderId);
+      await ref
+          .read(ordersRepositoryProvider)
+          .cancelOrder(widget.order.orderId);
       ref.invalidate(orderDetailProvider(widget.order.orderId));
       ref.invalidate(myOrdersProvider);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Order cancelled')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Order cancelled')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -131,6 +153,54 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
       );
     } finally {
       if (mounted) setState(() => _isCancelling = false);
+    }
+  }
+
+  Future<void> _payNow() async {
+    if (_isPaying) return;
+    setState(() {
+      _isPaying = true;
+      _payError = null;
+      _payPhase = 'Preparing payment...';
+    });
+
+    try {
+      final status = await OnlinePaymentRecovery(
+        repository: ref.read(checkoutRepositoryProvider),
+      ).pay(
+        orderId: widget.order.orderId,
+        onPhase: (phase) {
+          if (!mounted) return;
+          setState(() {
+            _payPhase = switch (phase) {
+              'preparing' => 'Preparing payment...',
+              'gateway' => 'Opening payment...',
+              'verifying' => 'Verifying payment...',
+              _ => 'Working...',
+            };
+          });
+        },
+      );
+
+      ref.invalidate(orderDetailProvider(widget.order.orderId));
+      ref.invalidate(myOrdersProvider);
+      if (!mounted) return;
+      if (PaymentStatusInfo.isSettled(status)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Payment received')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content:
+                  Text('Payment status: ${PaymentStatusInfo.label(status)}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _payError = extractErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _isPaying = false);
     }
   }
 
@@ -144,14 +214,15 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('#${order.orderNumber}', style: Theme.of(context).textTheme.titleLarge),
+            Text('#${order.orderNumber}',
+                style: Theme.of(context).textTheme.titleLarge),
             _StatusBadge(status: order.orderStatus),
           ],
         ),
         const SizedBox(height: 16),
-
-        if (order.delivery != null) _DeliveryTrackingCard(delivery: order.delivery!, orderId: order.orderId),
-
+        if (order.delivery != null)
+          _DeliveryTrackingCard(
+              delivery: order.delivery!, orderId: order.orderId),
         const SizedBox(height: 16),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -160,7 +231,10 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
             TextButton.icon(
               onPressed: _isBuyingAgain ? null : _buyAgain,
               icon: _isBuyingAgain
-                  ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      height: 14,
+                      width: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.replay, size: 16),
               label: const Text('Buy Again'),
             ),
@@ -168,65 +242,128 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
         ),
         const SizedBox(height: 8),
         ...order.items.map((item) => _OrderItemTile(item: item)),
-
         const SizedBox(height: 16),
         if (order.address != null) ...[
-          Text('Delivery Address', style: Theme.of(context).textTheme.titleMedium),
+          Text('Delivery Address',
+              style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(
+                color: AppColors.cardBackground,
+                borderRadius: BorderRadius.circular(12)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(order.address!.fullName, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(order.address!.fullName,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 4),
-                Text(order.address!.fullAddress, style: Theme.of(context).textTheme.bodyMedium),
+                Text(order.address!.fullAddress,
+                    style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 4),
-                Text(order.address!.mobileNumber, style: Theme.of(context).textTheme.bodyMedium),
+                Text(order.address!.mobileNumber,
+                    style: Theme.of(context).textTheme.bodyMedium),
               ],
             ),
           ),
           const SizedBox(height: 16),
         ],
-
         Text('Bill Details', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         Container(
           padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+          decoration: BoxDecoration(
+              color: AppColors.cardBackground,
+              borderRadius: BorderRadius.circular(12)),
           child: Column(
             children: [
               if (order.discountAmount != null && order.discountAmount! > 0)
-                _billRow('Discount${order.appliedCouponCode != null ? ' (${order.appliedCouponCode})' : ''}',
+                _billRow(
+                    'Discount${order.appliedCouponCode != null ? ' (${order.appliedCouponCode})' : ''}',
                     '-₹${order.discountAmount!.toStringAsFixed(0)}'),
               if (order.deliveryFee != null)
-                _billRow('Delivery Fee',
-                    order.deliveryFee == 0 ? 'FREE' : '₹${order.deliveryFee!.toStringAsFixed(0)}'),
+                _billRow(
+                    'Delivery Fee',
+                    order.deliveryFee == 0
+                        ? 'FREE'
+                        : '₹${order.deliveryFee!.toStringAsFixed(0)}'),
               const Divider(height: 20),
-              _billRow('Total Paid', '₹${order.totalAmount.toStringAsFixed(0)}', bold: true),
+              _billRow('Total Paid', '₹${order.totalAmount.toStringAsFixed(0)}',
+                  bold: true),
               const SizedBox(height: 4),
-              Text('Payment: ${order.paymentStatus.replaceAll('_', ' ')}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12)),
+              Text('Payment: ${PaymentStatusInfo.label(order.paymentStatus)}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(fontSize: 12)),
             ],
           ),
         ),
+        if (order.needsOnlinePayment) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'This order is waiting for payment (${PaymentStatusInfo.label(order.paymentStatus)}).',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                if (_payError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_payError!,
+                      style: const TextStyle(
+                          color: AppColors.error, fontSize: 12)),
+                ],
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: _isPaying ? null : hapticize(_payNow),
+                  child: _isPaying
+                      ? Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(_payPhase),
+                          ],
+                        )
+                      : const Text('Pay now'),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: hapticize(() => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => InvoiceScreen(orderId: order.orderId)),
-          )),
+                MaterialPageRoute(
+                    builder: (_) => InvoiceScreen(orderId: order.orderId)),
+              )),
           icon: const Icon(Icons.receipt_outlined, size: 18),
           label: const Text('View Invoice'),
         ),
-
         if (order.isCancellable) ...[
           const SizedBox(height: 24),
           OutlinedButton(
             onPressed: _isCancelling ? null : _cancelOrder,
-            style: OutlinedButton.styleFrom(foregroundColor: AppColors.error, side: const BorderSide(color: AppColors.error)),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.error,
+                side: const BorderSide(color: AppColors.error)),
             child: _isCancelling
-                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('Cancel Order'),
           ),
         ],
@@ -241,8 +378,12 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
-          Text(value, style: TextStyle(fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
+          Text(label,
+              style: TextStyle(
+                  fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
+          Text(value,
+              style: TextStyle(
+                  fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
         ],
       ),
     );
@@ -256,7 +397,8 @@ class _DeliveryTrackingCard extends ConsumerStatefulWidget {
   final int orderId;
 
   @override
-  ConsumerState<_DeliveryTrackingCard> createState() => _DeliveryTrackingCardState();
+  ConsumerState<_DeliveryTrackingCard> createState() =>
+      _DeliveryTrackingCardState();
 }
 
 class _DeliveryTrackingCardState extends ConsumerState<_DeliveryTrackingCard> {
@@ -307,16 +449,20 @@ class _DeliveryTrackingCardState extends ConsumerState<_DeliveryTrackingCard> {
 
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+          color: AppColors.cardBackground,
+          borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.local_shipping_outlined, color: AppColors.primary),
+              const Icon(Icons.local_shipping_outlined,
+                  color: AppColors.primary),
               const SizedBox(width: 8),
               Text(
-                delivery.deliveryStatus?.replaceAll('_', ' ') ?? 'Preparing your order',
+                delivery.deliveryStatus?.replaceAll('_', ' ') ??
+                    'Preparing your order',
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ],
@@ -330,7 +476,8 @@ class _DeliveryTrackingCardState extends ConsumerState<_DeliveryTrackingCard> {
           ],
           if (delivery.deliveryPersonName != null) ...[
             const SizedBox(height: 8),
-            Text('Delivery partner: ${delivery.deliveryPersonName}', style: Theme.of(context).textTheme.bodyMedium),
+            Text('Delivery partner: ${delivery.deliveryPersonName}',
+                style: Theme.of(context).textTheme.bodyMedium),
           ],
 
           // Live GPS section - only shown once the order is actually out for
@@ -339,12 +486,16 @@ class _DeliveryTrackingCardState extends ConsumerState<_DeliveryTrackingCard> {
             const SizedBox(height: 10),
             Consumer(
               builder: (context, ref, _) {
-                final liveAsync = ref.watch(liveTrackingProvider(widget.orderId));
+                final liveAsync =
+                    ref.watch(liveTrackingProvider(widget.orderId));
 
                 return liveAsync.when(
                   loading: () => const Padding(
                     padding: EdgeInsets.symmetric(vertical: 4),
-                    child: SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                    child: SizedBox(
+                        height: 14,
+                        width: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
                   ),
                   // Silent on error - this is a background poll, not the
                   // main content of the screen. The status/ETA above still
@@ -354,7 +505,10 @@ class _DeliveryTrackingCardState extends ConsumerState<_DeliveryTrackingCard> {
                     if (!live.hasLocation) {
                       return Text(
                         "Waiting for your delivery partner's location...",
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(color: AppColors.textSecondary),
                       );
                     }
 
@@ -362,12 +516,20 @@ class _DeliveryTrackingCardState extends ConsumerState<_DeliveryTrackingCard> {
                       children: [
                         Expanded(
                           child: Text(
-                            live.locationUpdatedAt != null ? _timeAgo(live.locationUpdatedAt!) : 'Live location available',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary, fontSize: 12),
+                            live.locationUpdatedAt != null
+                                ? _timeAgo(live.locationUpdatedAt!)
+                                : 'Live location available',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                    color: AppColors.textSecondary,
+                                    fontSize: 12),
                           ),
                         ),
                         OutlinedButton.icon(
-                          onPressed: hapticize(() => _navigateToPartner(live.partnerLatitude!, live.partnerLongitude!)),
+                          onPressed: hapticize(() => _navigateToPartner(
+                              live.partnerLatitude!, live.partnerLongitude!)),
                           icon: const Icon(Icons.map_outlined, size: 16),
                           label: const Text('View on map'),
                         ),
@@ -389,12 +551,16 @@ class _DeliveryTrackingCardState extends ConsumerState<_DeliveryTrackingCard> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline, size: 16, color: AppColors.error),
+                  const Icon(Icons.info_outline,
+                      size: 16, color: AppColors.error),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       "This delivery took longer than our promised time - we're sorry about that.",
-                      style: const TextStyle(fontSize: 12, color: AppColors.error, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.error,
+                          fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
@@ -430,7 +596,9 @@ class _OrderItemTile extends StatelessWidget {
           Container(
             width: 44,
             height: 44,
-            decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(
+                color: AppColors.cardBackground,
+                borderRadius: BorderRadius.circular(8)),
             child: GpNetworkImage(
               url: item.imageUrl,
               renderWidth: 44,
@@ -444,17 +612,27 @@ class _OrderItemTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(item.productName ?? 'Product', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                Text('Qty ${item.quantity}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12)),
+                Text(item.productName ?? 'Product',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 13)),
+                Text('Qty ${item.quantity}',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(fontSize: 12)),
                 if (item.currentlyAvailable == false)
                   const Text(
                     'No longer available',
-                    style: TextStyle(fontSize: 11, color: AppColors.error, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.error,
+                        fontWeight: FontWeight.w600),
                   ),
               ],
             ),
           ),
-          Text('₹${item.totalPrice.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text('₹${item.totalPrice.toStringAsFixed(0)}',
+              style: const TextStyle(fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -473,12 +651,16 @@ class _StatusBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: (isPositive ? AppColors.success : AppColors.error).withValues(alpha: 0.12),
+        color: (isPositive ? AppColors.success : AppColors.error)
+            .withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
         status.replaceAll('_', ' '),
-        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11, color: isPositive ? AppColors.success : AppColors.error),
+        style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 11,
+            color: isPositive ? AppColors.success : AppColors.error),
       ),
     );
   }

@@ -16,16 +16,22 @@ class TokenStorage {
   // returns null (same as "never logged in") instead of throwing forever.
   // encryptedSharedPreferences avoids the older, more failure-prone Keystore
   // storage path entirely on Android versions that support it.
-  TokenStorage()
+  TokenStorage({this.keyPrefix = ''})
       : _storage = const FlutterSecureStorage(
-          aOptions: AndroidOptions(resetOnError: true, encryptedSharedPreferences: true),
+          aOptions: AndroidOptions(
+              resetOnError: true, encryptedSharedPreferences: true),
         );
+
+  /// Isolates worker tokens from the customer app when both are installed.
+  /// Different applicationIds already sandbox storage; the prefix is extra
+  /// protection if a build ever shared an id by mistake.
+  final String keyPrefix;
 
   final FlutterSecureStorage _storage;
 
-  static const _accessTokenKey = 'access_token';
-  static const _refreshTokenKey = 'refresh_token';
-  static const _rememberMeKey = 'remember_me';
+  String get _accessTokenKey => '${keyPrefix}access_token';
+  String get _refreshTokenKey => '${keyPrefix}refresh_token';
+  String get _rememberMeKey => '${keyPrefix}remember_me';
 
   /// In-memory copy of the access token.
   ///
@@ -54,6 +60,22 @@ class TokenStorage {
   /// request looking for a token that is not there.
   bool _accessTokenLoaded = false;
 
+  /// Refresh token held only in memory until [saveTokens] persists it.
+  /// Used by worker login so a failed /me cannot leave credentials on disk.
+  String? _heldRefreshToken;
+
+  /// Makes the access token available to the API client without writing it
+  /// to secure storage. Persist with [saveTokens] only after the session is
+  /// verified; [clear] drops both memory and disk.
+  void holdTokensInMemory({
+    required String accessToken,
+    required String refreshToken,
+  }) {
+    _cachedAccessToken = accessToken;
+    _accessTokenLoaded = true;
+    _heldRefreshToken = refreshToken;
+  }
+
   Future<void> saveTokens({
     required String accessToken,
     required String refreshToken,
@@ -64,6 +86,7 @@ class TokenStorage {
     await _storage.write(key: _refreshTokenKey, value: refreshToken);
     _cachedAccessToken = accessToken;
     _accessTokenLoaded = true;
+    _heldRefreshToken = null;
   }
 
   Future<String?> getAccessToken() async {
@@ -75,7 +98,10 @@ class TokenStorage {
     return _cachedAccessToken;
   }
 
-  Future<String?> getRefreshToken() => _storage.read(key: _refreshTokenKey);
+  Future<String?> getRefreshToken() async {
+    if (_heldRefreshToken != null) return _heldRefreshToken;
+    return _storage.read(key: _refreshTokenKey);
+  }
 
   /// Whether the current session should survive an app restart. Tokens are
   /// always written on login so in-progress API calls keep working either
@@ -84,9 +110,11 @@ class TokenStorage {
   /// session from before this flag existed, or the OTP/register flows which
   /// don't expose the toggle) defaults to true, matching the app's prior
   /// always-remember behavior.
-  Future<void> setRememberMe(bool remember) => _storage.write(key: _rememberMeKey, value: remember.toString());
+  Future<void> setRememberMe(bool remember) =>
+      _storage.write(key: _rememberMeKey, value: remember.toString());
 
-  Future<bool> getRememberMe() async => (await _storage.read(key: _rememberMeKey)) != 'false';
+  Future<bool> getRememberMe() async =>
+      (await _storage.read(key: _rememberMeKey)) != 'false';
 
   Future<void> clear() async {
     // Cache first here, deliberately the opposite order to saveTokens: if a
@@ -96,6 +124,7 @@ class TokenStorage {
     // the reverse is only a redundant storage read.
     _cachedAccessToken = null;
     _accessTokenLoaded = true;
+    _heldRefreshToken = null;
 
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);

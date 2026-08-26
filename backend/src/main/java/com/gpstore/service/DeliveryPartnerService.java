@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.config.PageRequests;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.entity.Role;
@@ -8,7 +9,9 @@ import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliveryRepository;
+import com.gpstore.security.CustomerAccountStatusService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +26,7 @@ public class DeliveryPartnerService {
     private final DeliveryPartnerRepository repository;
     private final DeliveryRepository deliveryRepository;
     private final CustomerRepository customerRepository;
+    private final CustomerAccountStatusService accountStatusService;
 
     /**
      * How vague a GPS fix may be and still be worth recording, in metres.
@@ -39,10 +43,12 @@ public class DeliveryPartnerService {
             DeliveryPartnerRepository repository,
             DeliveryRepository deliveryRepository,
             CustomerRepository customerRepository,
+            CustomerAccountStatusService accountStatusService,
             @Value("${delivery.max-location-accuracy-meters:500}") double maxLocationAccuracyMeters) {
         this.repository = repository;
         this.deliveryRepository = deliveryRepository;
         this.customerRepository = customerRepository;
+        this.accountStatusService = accountStatusService;
         this.maxLocationAccuracyMeters = maxLocationAccuracyMeters;
     }
 
@@ -87,6 +93,7 @@ public class DeliveryPartnerService {
                 account.setRole(Role.DELIVERY_BOY);
             }
             account = customerRepository.save(account);
+            accountStatusService.invalidate(account.getId());
 
             saved.setAccount(account);
             saved = repository.save(saved);
@@ -95,12 +102,12 @@ public class DeliveryPartnerService {
         return saved;
     }
 
-    public List<DeliveryPartner> getAll() {
-        return repository.findAll();
+    public List<DeliveryPartner> getAll(Pageable pageable) {
+        return repository.findAll(pageable).getContent();
     }
 
     public List<DeliveryPartner> getAvailablePartners() {
-        return repository.findByAvailable(true);
+        return repository.findByAvailable(true, PageRequests.of(0, PageRequests.MAX_PAGE_SIZE)).getContent();
     }
 
     public DeliveryPartner update(DeliveryPartner partner) {

@@ -288,9 +288,18 @@ public class SecurityConfig {
                 // Batch management is a dispatch/admin concern - a delivery
                 // partner interacts with their OWN deliveries, never batches directly.
                 .requestMatchers("/api/delivery-batches/**").hasRole("ADMIN")
+                // Fleet-wide delivery lists, breach review, and assignment are
+                // dispatch/admin work. A partner may only see and update their
+                // own rows (status, my-assignments, and a scoped GET by id).
+                .requestMatchers(HttpMethod.GET, "/api/deliveries/breached").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/deliveries").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/deliveries/assign").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/deliveries/auto-assign").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/deliveries/assign-vehicle").hasRole("ADMIN")
                 .requestMatchers("/api/deliveries/**").hasAnyRole("ADMIN", "DELIVERY_BOY")
                 .requestMatchers("/api/coupons/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/notifications/mine").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/notifications/unread-count").authenticated()
                 // Same ordering reason as /mine above - these must come
                 // before the broader /api/notifications/** admin-only rule.
                 .requestMatchers(HttpMethod.PUT, "/api/notifications/*/read").authenticated()

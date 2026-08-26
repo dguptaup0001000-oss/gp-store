@@ -1,0 +1,14 @@
+# Superseded for new installs.
+#
+# Hostinger production Compose is backend/docker-compose.yml
+# (Traefik + Spring Boot + Postgres + Redis, no public 5432/6379/8081).
+# See backend/HOSTINGER_DEPLOYMENT.md.
+#
+# This file is kept only so old operator notes that `docker compose -f
+# deploy/hostinger/docker-compose.yml` still fail loudly instead of starting
+# a partial stack. Do not `up` this file.
+services:
+  do-not-use:
+    image: tianon/true
+    profiles: ["unused"]
+    command: ["true"]

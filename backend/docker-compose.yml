@@ -1,45 +1,174 @@
+# Hostinger production Compose.
+# Traefik owns 80/443. Spring Boot stays on 8081 inside the Docker network.
+# PostgreSQL and Redis are not published to the host.
+#
+# Laptop development (published 5432/8081) is docker-compose.dev.yml.
+#
+# Copy .env.example to .env and fill real values before `docker compose up`.
+
+name: gpstore
+
 services:
+  traefik:
+    # v3.6.1+ negotiates Docker API with Engine 29 (min API 1.40).
+    # v3.3 spoke API 1.24 and could not read container labels, so ACME never ran.
+    image: traefik:v3.6.7
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=gpstore_net
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      # Internal /ping for Docker HEALTHCHECK. Do not publish 8080.
+      - --ping=true
+      # Dashboard / API not enabled. Do not add --api.insecure.
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - gpstore_net
+
   postgres:
-    image: postgres:16
+    # PostgreSQL 17: production dump is from Supabase 17.6. A 16 data
+    # directory cannot start 17; an empty volume must be recreated once.
+    image: postgres:17
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
-    ports:
-      - "5432:5432"
     volumes:
       - gpstore_pg_data:/var/lib/postgresql/data
-      - ./docker/postgres-init:/docker-entrypoint-initdb.d
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 10
+    # Intentionally no `ports:` — Postgres is Docker-network only.
+    networks:
+      - gpstore_net
+
+  redis:
+    # Required by spring.cache.type=redis and RateLimitFilter. Not optional.
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --protected-mode
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - "60"
+      - "1000"
+    volumes:
+      - gpstore_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    # Intentionally no `ports:` — Redis is Docker-network only.
+    networks:
+      - gpstore_net
 
   backend:
-    build: .
-    ports:
-      - "8081:8081"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
+      PORT: "8081"
+      SPRING_PROFILES_ACTIVE: prod
+      APP_PRODUCTION: "true"
+      FLYWAY_ENABLED: "true"
+      # Default validate. SchemaSafetyGuard refuses update/create/drop when
+      # APP_PRODUCTION=true, so a mistyped .env cannot silently mutate schema.
+      DDL_AUTO: ${DDL_AUTO:-validate}
       DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME}
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RATE_LIMIT_TRUST_FORWARDED_FOR: "true"
+      STORE_LATITUDE: ${STORE_LATITUDE:-27.162310}
+      STORE_LONGITUDE: ${STORE_LONGITUDE:-83.940468}
+      # Contact Us. `:-` keeps placeholders if the VPS .env keys are empty.
+      STORE_SUPPORT_PHONE: ${STORE_SUPPORT_PHONE:-+91XXXXXXXXXX}
+      STORE_SUPPORT_WHATSAPP: ${STORE_SUPPORT_WHATSAPP:-+91XXXXXXXXXX}
+      STORE_SUPPORT_EMAIL: ${STORE_SUPPORT_EMAIL:-support@example.com}
+      CASHFREE_ENVIRONMENT: ${CASHFREE_ENVIRONMENT:-production}
+      CASHFREE_APP_ID: ${CASHFREE_APP_ID:-}
+      CASHFREE_SECRET_KEY: ${CASHFREE_SECRET_KEY:-}
+      CASHFREE_WEBHOOK_SECRET: ${CASHFREE_WEBHOOK_SECRET:-}
+      CASHFREE_NOTIFY_URL: ${CASHFREE_NOTIFY_URL:-}
+      CASHFREE_RETURN_URL: ${CASHFREE_RETURN_URL:-}
+      MSG91_ENABLED: ${MSG91_ENABLED:-false}
+      OTP_SMS_SENDING_ENABLED: ${OTP_SMS_SENDING_ENABLED:-false}
+      MSG91_AUTH_KEY: ${MSG91_AUTH_KEY:-}
+      MSG91_OTP_TEMPLATE_ID: ${MSG91_OTP_TEMPLATE_ID:-}
+      MSG91_TEMPLATE_ID: ${MSG91_TEMPLATE_ID:-}
+      MSG91_SENDER_ID: ${MSG91_SENDER_ID:-GPSTOR}
+      FIREBASE_PUSH_ENABLED: ${FIREBASE_PUSH_ENABLED:-false}
+      FIREBASE_CREDENTIALS_BASE64: ${FIREBASE_CREDENTIALS_BASE64:-}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      JVM_ACTIVE_PROCESSORS: "2"
+      JVM_GC: "-XX:+UseG1GC"
+      JVM_MAX_RAM_PERCENT: "35"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/v1/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.gpstore.rule=Host(`${API_DOMAIN:-api.gpstore.co.in}`)
+      - traefik.http.routers.gpstore.entrypoints=websecure
+      - traefik.http.routers.gpstore.tls.certresolver=le
+      - traefik.http.services.gpstore.loadbalancer.server.port=8081
+      - traefik.http.services.gpstore.loadbalancer.server.scheme=http
+    stop_grace_period: 40s
+    networks:
+      - gpstore_net
+    # Intentionally no host `ports:` — Traefik reaches 8081 on the Docker network.
 
 volumes:
   gpstore_pg_data:
+  gpstore_redis_data:
+  traefik_letsencrypt:
 
-# --- One-time follow-up after your FIRST `docker compose up` ---
-# The products table doesn't exist until the app has started once and
-# Hibernate has created it. After the app is up and running for the first
-# time, run this once to finish the search-indexing setup (see
-# src/main/resources/db/migration/README-search.md for why this is needed):
-#
-#   docker compose exec postgres psql -U gpstore -d gpstore -c "
-#     CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING GIN (name gin_trgm_ops);
-#     CREATE INDEX IF NOT EXISTS idx_products_brand_trgm ON products USING GIN (brand gin_trgm_ops);
-#   "
+networks:
+  gpstore_net:
+    name: gpstore_net

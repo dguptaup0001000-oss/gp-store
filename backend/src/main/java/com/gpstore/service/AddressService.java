@@ -1,6 +1,7 @@
 package com.gpstore.service;
 
 import com.gpstore.entity.Address;
+import com.gpstore.entity.Customer;
 import com.gpstore.entity.DeliverySubzone;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.AddressRepository;
@@ -25,7 +26,27 @@ public class AddressService {
         this.subzoneRepository = subzoneRepository;
     }
 
+    /**
+     * Customer address create. Always INSERTs: a body that carries someone
+     * else's id must not become an UPDATE of that row.
+     */
+    public Address createOwned(Customer owner, Address address) {
+        address.setId(null);
+        address.setCustomer(owner);
+        address.setSubzoneLocked(false);
+        address.setSubzone(null);
+        stampTerritory(address);
+        return repository.save(address);
+    }
+
     public Address save(Address address) {
+        // New addresses never trust a client-supplied lock or subzone.
+        // Only TerritoryAdminService.pinAddress may lock a row, and it
+        // writes through the repository, not this method.
+        if (address.getId() == null) {
+            address.setSubzoneLocked(false);
+            address.setSubzone(null);
+        }
         stampTerritory(address);
         return repository.save(address);
     }

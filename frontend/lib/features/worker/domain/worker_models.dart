@@ -52,7 +52,8 @@ class WorkerProfile {
         status: (json['status'] ?? 'OFFLINE') as String,
         todaysOrders: (json['todaysOrders'] as num?)?.toInt() ?? 0,
         activeTasks: (json['activeTasks'] as List?)
-                ?.map((e) => WorkerTask.fromJson(Map<String, dynamic>.from(e as Map)))
+                ?.map((e) =>
+                    WorkerTask.fromJson(Map<String, dynamic>.from(e as Map)))
                 .toList(growable: false) ??
             const [],
       );
@@ -114,7 +115,8 @@ class ScanOutcome {
   static const ScanOutcome offline = ScanOutcome(
     accepted: false,
     outcome: 'QUEUED',
-    message: 'Connection unavailable. Scan will be submitted when connection returns.',
+    message:
+        'Connection unavailable. Scan will be submitted when connection returns.',
     queued: true,
   );
 }
@@ -196,7 +198,8 @@ class WorkerOrder {
         longitude: (json['longitude'] as num?)?.toDouble(),
         totalItems: (json['totalItems'] as num?)?.toInt() ?? 0,
         items: (json['items'] as List?)
-                ?.map((e) => WorkerOrderLine.fromJson(e as Map<String, dynamic>))
+                ?.map(
+                    (e) => WorkerOrderLine.fromJson(e as Map<String, dynamic>))
                 .toList(growable: false) ??
             const [],
         amountToCollect: json['amountToCollect'] as num?,
@@ -210,7 +213,8 @@ class WorkerOrder {
 
 /// One line on the packing list: what it is, what size, how many.
 class WorkerOrderLine {
-  const WorkerOrderLine({required this.name, this.pack, required this.quantity});
+  const WorkerOrderLine(
+      {required this.name, this.pack, required this.quantity});
 
   final String name;
 
@@ -219,7 +223,8 @@ class WorkerOrderLine {
   final String? pack;
   final int quantity;
 
-  factory WorkerOrderLine.fromJson(Map<String, dynamic> json) => WorkerOrderLine(
+  factory WorkerOrderLine.fromJson(Map<String, dynamic> json) =>
+      WorkerOrderLine(
         name: (json['name'] ?? 'Item') as String,
         pack: json['pack'] as String?,
         quantity: (json['quantity'] as num?)?.toInt() ?? 0,

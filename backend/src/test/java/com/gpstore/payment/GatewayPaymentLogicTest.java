@@ -65,6 +65,8 @@ class GatewayPaymentLogicTest {
         assertEquals(State.FAILED, GatewayPaymentService.mapPaymentStatus("FAILED"));
         assertEquals(State.FAILED, GatewayPaymentService.mapPaymentStatus("USER_DROPPED"));
         assertEquals(State.CANCELLED, GatewayPaymentService.mapPaymentStatus("CANCELLED"));
+        assertEquals(State.CANCELLED, GatewayPaymentService.mapPaymentStatus("TERMINATED"));
+        assertEquals(State.EXPIRED, GatewayPaymentService.mapPaymentStatus("EXPIRED"));
     }
 
     @Test

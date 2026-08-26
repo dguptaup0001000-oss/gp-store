@@ -35,6 +35,7 @@ public class OtpProviderConfiguration {
 
     /**
      * Visible for fail-closed unit tests. Production never receives the mock.
+     * Missing MSG91 credentials do not block boot; SMS OTP stays fail-closed.
      */
     static OtpProvider create(
             boolean production,
@@ -46,34 +47,25 @@ public class OtpProviderConfiguration {
             Duration connectTimeout,
             Duration requestTimeout,
             ObjectMapper objectMapper) {
-        if (production) {
-            if (!msg91Enabled) {
-                throw new IllegalStateException(
-                        "Refusing to start in production with MSG91 disabled. "
-                                + "Set MSG91_ENABLED=true (or OTP_SMS_SENDING_ENABLED=true) "
-                                + "and configure MSG91_AUTH_KEY plus MSG91_OTP_TEMPLATE_ID / MSG91_TEMPLATE_ID. "
-                                + "The mock OTP provider cannot run in production.");
-            }
-            requireCredentials(authKey, templateId);
+        boolean credentialsPresent = present(authKey) && present(templateId);
+        if (msg91Enabled && credentialsPresent) {
             return new Msg91OtpProvider(
                     baseUrl, authKey, templateId, senderId, requestTimeout,
                     new JdkOtpHttpExecutor(connectTimeout), objectMapper);
+        }
+        if (production) {
+            return new UnconfiguredOtpProvider();
         }
         if (msg91Enabled) {
-            requireCredentials(authKey, templateId);
-            return new Msg91OtpProvider(
-                    baseUrl, authKey, templateId, senderId, requestTimeout,
-                    new JdkOtpHttpExecutor(connectTimeout), objectMapper);
-        }
-        return new MockOtpProvider();
-    }
-
-    private static void requireCredentials(String authKey, String templateId) {
-        if (authKey == null || authKey.isBlank() || templateId == null || templateId.isBlank()) {
             throw new IllegalStateException(
                     "MSG91 is enabled but MSG91_AUTH_KEY or the OTP template ID is missing. "
                             + "Set MSG91_AUTH_KEY and MSG91_OTP_TEMPLATE_ID (or MSG91_TEMPLATE_ID). "
                             + "Refusing to start rather than sending OTPs that can never be delivered.");
         }
+        return new MockOtpProvider();
+    }
+
+    private static boolean present(String value) {
+        return value != null && !value.isBlank();
     }
 }

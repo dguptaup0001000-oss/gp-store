@@ -19,9 +19,10 @@ before calling MSG91. Flutter must never call MSG91.
     (this token is **not** a login JWT and is held only in memory until complete)
   - `POST /v1/api/auth/password-reset/complete` `{ "reset_token", "new_password" }`
 - LOGIN OTPs cannot reset a password. PASSWORD_RESET OTPs cannot log in.
-- OTPs are never stored in plaintext. Production verification uses MSG91.
+- OTPs are never stored in plaintext. Production verification uses MSG91 when it is configured.
 - Local/CI uses an in-memory mock (`MSG91_ENABLED=false`). The mock cannot
-  start when `APP_PRODUCTION=true`.
+  start when `APP_PRODUCTION=true`; production without MSG91 credentials uses a
+  fail-closed unconfigured provider so the shop can boot without fake SMS.
 
 ## Manual MSG91 / DLT steps
 
@@ -35,7 +36,7 @@ before calling MSG91. Flutter must never call MSG91.
    OTP copy only.
 5. Copy the **template ID**.
 6. Copy the MSG91 **Auth Key** from the dashboard. Treat it like `JWT_SECRET`.
-7. In **Render → Environment**, set (no quotes, no git commit):
+7. On the **VPS** (`/opt/gpstore/env.production`), set (no quotes, no git commit):
 
    ```
    APP_PRODUCTION=true
@@ -49,10 +50,11 @@ before calling MSG91. Flutter must never call MSG91.
    ```
 
    You can keep using `OTP_SMS_SENDING_ENABLED` / `MSG91_TEMPLATE_ID` if those
-   are already on Render; `MSG91_ENABLED` and `MSG91_OTP_TEMPLATE_ID` alias them.
-8. Redeploy. If MSG91 is required in production but the Auth Key or template ID
-   is missing, the app **refuses to start** (fail closed). It will not silently
-   use the mock or a universal code such as `123456`.
+   are already in that env file; `MSG91_ENABLED` and `MSG91_OTP_TEMPLATE_ID` alias them.
+8. Redeploy. Production **starts** without MSG91 credentials; LOGIN and
+   password-reset OTP then fail closed (generic send error, no mock, no
+   universal code such as `123456`). Set the Auth Key and template ID when
+   you have a real MSG91 account, then redeploy to enable SMS OTP.
 9. Test real Indian delivery: request a LOGIN OTP to a handset you control.
 10. Confirm verification: the same number + code logs in and returns the usual
     `token` / `refreshToken` body.

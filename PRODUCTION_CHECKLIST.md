@@ -1,24 +1,24 @@
 # GP-STORE production checklist
 
-Live architecture: **Render** (Spring Boot Docker web service) + **Supabase**
-(PostgreSQL) + **Redis** (Render Key Value or equivalent). The Flutter apps
-are built by GitHub Actions; they are not hosted on Railway.
+Live architecture: **Hostinger VPS** (Traefik → Spring Boot Docker, Postgres
+and Redis on the Docker network only). The Flutter apps are built by GitHub
+Actions; they talk only to the HTTPS API host.
 
-This file is the operator checklist. Deploy how-to with placeholders:
-`backend/DEPLOYMENT.md`. Flyway / empty-database CI:
-`backend/src/main/resources/db/migration/README.md`.
+Exact commands: [`backend/HOSTINGER_DEPLOYMENT.md`](backend/HOSTINGER_DEPLOYMENT.md).
+Deploy file inventory: [`deploy/hostinger/MIGRATION_INVENTORY.md`](deploy/hostinger/MIGRATION_INVENTORY.md).
+Flyway / empty-database CI: `backend/src/main/resources/db/migration/README.md`.
 
-## Code vs dashboard
+## Code vs server
 
 | Change | Where it lives | Who applies it |
 |---|---|---|
 | Java / Flutter / Flyway SQL / CI workflows | this git repository | merge to `main` |
-| `DDL_AUTO`, `JWT_SECRET`, `DB_*`, Redis, Cashfree, SMS, Firebase, Cloudinary | Render / vendor dashboards | a person with dashboard access |
-| Supabase schema beyond what Flyway already applied | not done from this repo | never rewrite `flyway_schema_history` by hand |
+| `DDL_AUTO`, `JWT_SECRET`, `DB_*`, Redis, Cashfree, SMS, Firebase, Cloudinary | `backend/.env` on the VPS (never git) plus vendor dashboards | a person with SSH / dashboard access |
+| Postgres schema beyond what Flyway already applied | not done from this repo | never rewrite `flyway_schema_history` by hand |
 
-This repository does **not** set Render or Supabase environment variables.
-Do not put passwords, JWT secrets, database URLs with credentials, Cashfree
-keys, Firebase JSON, or SMS tokens in git.
+This repository does **not** set VPS environment variable **values**. Do not
+put passwords, JWT secrets, database URLs with credentials, Cashfree keys,
+Firebase JSON, or SMS tokens in git.
 
 ## Required GitHub CI on `main` (before flipping `DDL_AUTO`)
 
@@ -31,54 +31,51 @@ keys, Firebase JSON, or SMS tokens in git.
 There is **no V1** Flyway file. Do not add one. Production history already
 has V2 onward.
 
-## Manual Render step: `DDL_AUTO=validate`
+## Manual VPS step: `DDL_AUTO=validate`
 
 **Not a code migration.** Hibernate in production must not alter tables on
 deploy. After `schema-migrate` is green on `main` and a deploy of that commit
 has booted successfully:
 
-1. Render → GP-STORE web service → **Environment**.
-2. Set `DDL_AUTO` to `validate` (create the variable if it is missing).
-3. Leave `FLYWAY_ENABLED=true`. Do not change `DB_URL`, pool size, Tomcat
+1. SSH to the VPS → edit `backend/.env` (Compose reads it).
+2. Set `DDL_AUTO=validate` (create the line if it is missing).
+3. Leave `FLYWAY_ENABLED=true`. Do not change pool size, Tomcat
    threads, or JVM flags as part of this step.
-4. Save and wait for the service to restart.
-5. Confirm `/v1/actuator/health` is healthy.
+4. `docker compose up -d backend`
+5. Confirm `GET /v1/api/health` and `GET /v1/actuator/health`.
 
 ### Rollback if the new deploy does not start
 
 `validate` never writes to the database. A failed boot leaves customer data
 as it was.
 
-1. Render → Environment → set `DDL_AUTO` back to `update`, or **delete** the
-   variable so the app uses its default.
-2. Redeploy / restart.
+1. Set `DDL_AUTO` back to `update`, or comment the line so the app uses its
+   default.
+2. `docker compose up -d backend`
 3. Do **not** rewrite Flyway history and do **not** restore
    `backend/docs/production-schema-reference.sql` as a bootstrap script
    (it is a 2026-08-19 snapshot and is missing later columns).
 
-## Environment variables (names only — values stay in the dashboard)
+## Environment variables (names only — values stay on the VPS)
 
-Required for a real shop:
+Required for a real shop — see `backend/.env.example`:
 
-- `DB_URL` — JDBC URL to **your** Supabase Postgres with `sslmode=require`.
-  Use `jdbc:postgresql://db.<project-ref>.supabase.co:5432/postgres?sslmode=require`
-  (direct) or the transaction pooler URL with `prepareThreshold=0` if you
-  outgrow the direct connection ceiling.
-- `DB_USERNAME`, `DB_PASSWORD`
-- `FLYWAY_ENABLED=true`
+- `API_DOMAIN`, `ACME_EMAIL`
+- `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` (Compose Postgres, not public)
+- `FLYWAY_ENABLED=true`, `DDL_AUTO=validate`, `SPRING_PROFILES_ACTIVE=prod`
 - `JWT_SECRET` — long random string; never the repo default
 - `APP_PRODUCTION=true`
-- `REDIS_HOST`, `REDIS_PORT`, and `REDIS_PASSWORD` if the instance has one
-- `CORS_ALLOWED_ORIGINS` — real frontend origin(s), comma-separated
+- `REDIS_PASSWORD` (Compose sets `REDIS_HOST=redis`)
+- `CORS_ALLOWED_ORIGINS` — real frontend origin(s), comma-separated, not `*`
 - `STORE_LATITUDE`, `STORE_LONGITUDE`
 
 Optional, fail-closed if unset: Cashfree, SMS/OTP, Firebase, Cloudinary.
 
 **Do not raise** `DB_POOL_MAX_SIZE` (default 10), `TOMCAT_MAX_THREADS`
 (default 40), or JVM memory to “fix” 502s. Those ceilings were set on
-purpose. Latency is not solved by a bigger pool on the same Render plan.
+purpose. Latency is not solved by a bigger pool on the same 2 vCPU VPS.
 
-## CORS (code, already in this repo when Phase 3 is merged)
+## CORS (code, already in this repo)
 
 Browser checkout sends `Idempotency-Key`. Allowed request headers are
 exactly `Authorization`, `Content-Type`, and `Idempotency-Key`. Native
@@ -89,13 +86,19 @@ Android apps do not use CORS.
 - Change production secrets.
 - Enable Mapbox or PostGIS.
 - Increase Hikari / Tomcat / JVM ceilings.
-- Run 1,000+ VU load tests against the live Render URL. Use
-  `load-tests/run-staged-capacity.sh` locally/staging, smallest stage first.
+- Run 1,000+ VU load tests against the live API URL. Use
+  `load-tests/browse-cart-checkout.js` locally/staging, smallest stage first.
 - Merge or rewrite Flyway V2–V22.
-- Treat a leftover **Railway** GitHub status (`brilliant-spontaneity`) as a
-  required check. Disconnect that integration; production is Render.
+- Require leftover third-party PaaS GitHub status checks. Production is the
+  Hostinger VPS.
+- Treat **Render** as a production dependency. It is removed.
 
 Release Android/web builds must pass `--dart-define=APP_ENV=production` (CI
-does this). Point them at a stable API host later by setting the GitHub
-variable `API_BASE_URL` (for example `https://api.gpstore.co.in/v1`) without
-changing Flutter repositories.
+does this). The coded production API is `https://api.gpstore.co.in/v1`.
+GitHub `vars.API_BASE_URL` must stay that URL or empty (CI uses the same
+default). Do not set it to Render, localhost, or any other host.
+
+As of 2026-08-26 `api.gpstore.co.in` is **A `187.127.173.192`** with a Let's
+Encrypt certificate. Confirm `https://api.gpstore.co.in/v1/api/health` returns
+200 before treating an APK as production-ready.
+See `backend/HOSTINGER_DEPLOYMENT.md`.

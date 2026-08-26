@@ -127,6 +127,21 @@ class OrderStatusStateMachineTest {
     }
 
     @Test
+    @DisplayName("A customer cannot cancel once packing has started; staff still can")
+    void customerCannotCancelOncePackingHasStarted() {
+        Long orderId = newOrder(OrderStatus.PACKING);
+        Long customerId = orderRepository.findById(orderId).orElseThrow().getCustomer().getId();
+
+        ConflictException refused = assertThrows(ConflictException.class,
+                () -> orderService.cancelOrder(orderId, customerId, false));
+        assertTrue(refused.getMessage().contains("no longer be cancelled"));
+        assertEquals(OrderStatus.PACKING, statusOf(orderId));
+
+        orderService.cancelOrder(orderId, customerId, true);
+        assertEquals(OrderStatus.CANCELLED, statusOf(orderId));
+    }
+
+    @Test
     @DisplayName("Every transition outside the one legal path is refused")
     void everyOtherTransitionIsRefused() {
         // Enumerated rather than sampled: the rule is a single boolean

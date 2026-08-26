@@ -24,11 +24,8 @@ CREATE INDEX IF NOT EXISTS idx_products_brand_trgm ON products USING GIN (brand 
 ```
 
 Notes:
-- Most managed Postgres providers (RDS, Supabase, Neon, Render, Railway) allow
-  `CREATE EXTENSION pg_trgm` without extra permissions. Self-hosted Postgres
-  may need a superuser to run it once.
-- If you skip this step, the search endpoint will fail with a Postgres error
-  the first time it's called (undefined function `similarity`/undefined
-  operator `%`) - it's a hard requirement, not an optimization.
-- This is unrelated to the ddl-auto/Flyway migration discussion from before -
-  extensions and indexes aren't something `ddl-auto=update` manages.
+- Hostinger production Compose uses official `postgres:17` with a superuser
+  owner, so Flyway V5 can run `CREATE EXTENSION IF NOT EXISTS pg_trgm` on
+  first boot. There is no manual SQL step after that.
+- If V5 never ran, search fails with undefined function `similarity` /
+  undefined operator `%` — it is a hard requirement, not an optimization.

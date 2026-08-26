@@ -1,14 +1,16 @@
-# NOTE: this file assumes the repo root IS the frontend/ folder (matching
-# the structure of the zips this project has been shipped in). If your
-# actual GitHub repo has frontend/ as a subfolder instead, move this
-# .github/ folder to the true repo root and add `working-directory: frontend`
-# to every run/step below that doesn't already have one.
+# Canonical production APK + worker APK + GitHub Pages workflow for the
+# monorepo. Jobs use `working-directory: frontend`. Do not build release
+# APKs from frontend/.github/workflows (that copy is a disabled stub).
 #
 # What this gives you, with ZERO extra accounts beyond GitHub itself:
 # - An APK you can download directly from the Actions run's "Artifacts"
 #   section after every push - install it on an Android phone to test.
 # - A live, clickable web URL at https://<your-username>.github.io/<repo>/,
 #   rebuilt automatically on every push to main.
+#
+# Production builds always pass --dart-define=APP_ENV=production.
+# Customer applicationId: com.gpstore.app
+# Worker applicationId:   com.gpstore.worker
 #
 # One-time setup after you push this to GitHub:
 # 1. Go to your repo's Settings -> Pages -> Source -> select "GitHub Actions".
@@ -96,15 +98,49 @@ jobs:
         # pure Dart unit tests (no device, no emulator), so they cost seconds.
         run: flutter test
 
+      - name: Require release keystore on main
+        if: github.ref == 'refs/heads/main'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::main branch APK/AAB artifacts require ANDROID_KEYSTORE_BASE64"
+            exit 1
+          fi
+
+      - name: Require full keystore secrets on main
+        if: github.ref == 'refs/heads/main'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          for v in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD ANDROID_KEY_ALIAS; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is required on main"
+              exit 1
+            fi
+          done
+
       - name: Decode google-services.json
-        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > android/app/google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > android/app/google-services.json
+            python3 tool/verify_google_services.py android/app/google-services.json
+          elif [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            echo "::error::GOOGLE_SERVICES_JSON_BASE64 is required for production APKs on main"
+            exit 1
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON_BASE64 unset; using the committed placeholder (push/Crashlytics will not work)"
+            cp android/app/google-services.placeholder.json android/app/google-services.json
+          fi
 
       - name: Install Play upload keystore if configured
-        # Optional. Without these secrets, assembleRelease uses the Android
-        # Debug key (valid signature, not uploadable to Play). Add repo
-        # secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
-        # ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS. Do not generate a keystore
-        # in CI. Do not unzip/sign APKs by hand.
+        # Required on main (see the two gate steps above). PRs may omit these
+        # secrets and produce a debug-signed APK that verify_apk_release.py
+        # will not treat as a Play artifact.
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -140,7 +176,8 @@ jobs:
           chmod +x tool/with_worker_pubspec.sh
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
-            API_URL="https://gp-store.onrender.com/v1"
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
           fi
           ./tool/with_worker_pubspec.sh flutter build apk --release --split-per-abi \
             --target-platform android-arm,android-arm64 \
@@ -178,14 +215,16 @@ jobs:
           path: frontend/build/app/outputs/flutter-apk/gpstore-worker-*.apk
 
       - name: Build Delivery Worker App Bundle
-        # Play serves one ABI from an AAB. Same applicationId as the customer
-        # app (com.gpstore.app) — this is a size/packaging artifact, not a
-        # second Play listing. Do not treat the universal APK as the Play size.
+        # Play serves one ABI from an AAB. Worker applicationId is
+        # com.gpstore.worker (see android/app/build.gradle when
+        # GPSTORE_WORKER_SLIM=1). It must not share com.gpstore.app with the
+        # customer APK or installing one replaces the other.
         run: |
           chmod +x tool/with_worker_pubspec.sh
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
-            API_URL="https://gp-store.onrender.com/v1"
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
           fi
           ./tool/with_worker_pubspec.sh flutter build appbundle --release \
             --target-platform android-arm,android-arm64 \
@@ -230,7 +269,8 @@ jobs:
         run: |
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
-            API_URL="https://gp-store.onrender.com/v1"
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
           fi
           flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
             --dart-define=APP_ENV=production \
@@ -252,9 +292,10 @@ jobs:
       - name: Verify APK signatures and zip alignment
         # assembleRelease already signs (debug key unless key.properties exists)
         # and zip-aligns. This step fails the job if an artifact is actually
-        # unsigned or unaligned. It does not re-sign. A debug signer is printed
-        # as a warning: Play still needs a real keystore on the machine/CI that
-        # produces the upload AAB.
+        # unsigned or unaligned. It does not re-sign. On main, a debug signer
+        # is a hard failure so Play-bound artifacts cannot ship unsigned-for-Play.
+        env:
+          REQUIRE_RELEASE_SIGNING: ${{ github.ref == 'refs/heads/main' && '1' || '0' }}
         run: |
           chmod +x tool/verify_apk_release.py
           python3 tool/verify_apk_release.py \
@@ -277,7 +318,8 @@ jobs:
         run: |
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
-            API_URL="https://gp-store.onrender.com/v1"
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
           fi
           flutter build appbundle --release \
             --dart-define=APP_ENV=production \
@@ -327,6 +369,12 @@ jobs:
       - name: Generate freezed/json_serializable code
         run: dart run build_runner build --delete-conflicting-outputs
 
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run Flutter tests
+        run: flutter test
+
       - name: Build web
         # --base-href must match the GitHub Pages subpath
         # (https://<user>.github.io/<repo>/) or every asset/route request
@@ -344,12 +392,13 @@ jobs:
         # its UI, but every API call (login, browsing, everything) will
         # fail until you set this. One-time setup: this repo's Settings ->
         # Secrets and variables -> Actions -> Variables tab, name:
-        # API_BASE_URL, value: your deployed backend's URL (e.g. from
-        # Render) + /v1.
+        # API_BASE_URL, value: the public HTTPS API + /v1 (for example
+        # https://api.gpstore.co.in/v1). Never an onrender.com URL.
         run: |
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
-            API_URL="https://gp-store.onrender.com/v1"
+            API_URL="https://api.gpstore.co.in/v1"
+            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
           fi
           flutter build web --release \
             --base-href "/${{ github.event.repository.name }}/" \

@@ -78,12 +78,16 @@ public class AuthService {
     @Transactional
     public AuthResponse register(RegisterRequest request) {
 
-        customerRepository.findByEmail(request.getEmail()).ifPresent(existing -> {
-            throw new ConflictException("An account with this email already exists");
-        });
-        customerRepository.findByMobileNumber(request.getPhone()).ifPresent(existing -> {
-            throw new ConflictException("An account with this phone number already exists");
-        });
+        // Same wording for email and phone collisions on purpose: telling the
+        // caller WHICH identifier is taken is account enumeration. A person
+        // who mistyped their own details still gets a conflict they can act
+        // on (try a different email or phone) without confirming to an
+        // attacker that a specific address is registered.
+        if (customerRepository.findByEmail(request.getEmail()).isPresent()
+                || customerRepository.findByMobileNumber(request.getPhone()).isPresent()) {
+            throw new ConflictException(
+                    "Unable to create this account. Try a different email or phone.");
+        }
 
         Customer customer = new Customer();
         customer.setFullName(request.getName());
@@ -106,7 +110,7 @@ public class AuthService {
                 .findByEmail(request.getEmail())
                 .orElseThrow(() -> new AuthException(INVALID_CREDENTIALS));
 
-        if (Boolean.FALSE.equals(customer.getActive())) {
+        if (!com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer)) {
             throw new AuthException(INVALID_CREDENTIALS);
         }
 
@@ -152,8 +156,8 @@ public class AuthService {
                         return customerRepository.save(newCustomer);
                     });
 
-            if (Boolean.FALSE.equals(customer.getActive())) {
-                throw new AuthException("This account is not active");
+            if (!com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer)) {
+                throw new AuthException("This account is no longer active");
             }
 
             return issueTokens(customer);
@@ -162,7 +166,12 @@ public class AuthService {
 
     public String requestPasswordResetOtp(String phone) {
         String local10 = IndianPhoneNumbers.toLocal10(phone);
-        boolean deliver = findByPhone(local10).isPresent();
+        // Deactivated/disabled accounts are treated like unknown numbers:
+        // no SMS, same generic message. Sending a reset code to a banned
+        // phone is wasted cost and a path back into the account.
+        boolean deliver = findByPhone(local10)
+                .filter(com.gpstore.security.CustomerAccountStatusService::isCustomerUsable)
+                .isPresent();
         otpService.requestOtp(phone, OtpPurpose.PASSWORD_RESET, deliver);
         return GENERIC_OTP_REQUEST;
     }
@@ -174,6 +183,9 @@ public class AuthService {
         return transactionTemplate.execute(status -> {
             Customer customer = findByPhone(local10)
                     .orElseThrow(() -> new BadRequestException(OtpService.INVALID_OTP_MESSAGE));
+            if (!com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer)) {
+                throw new BadRequestException(OtpService.INVALID_OTP_MESSAGE);
+            }
 
             byte[] randomBytes = new byte[32];
             secureRandom.nextBytes(randomBytes);
@@ -203,6 +215,9 @@ public class AuthService {
         }
 
         Customer customer = token.getCustomer();
+        if (!com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer)) {
+            throw new BadRequestException(INVALID_RESET_TOKEN);
+        }
         customer.setPassword(passwordEncoder.encode(newPassword));
         customerRepository.save(customer);
 
@@ -229,6 +244,9 @@ public class AuthService {
     public void changePassword(Long customerId, String currentPassword, String newPassword) {
         Customer customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+        if (!com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer)) {
+            throw new AuthException("This account is no longer active");
+        }
 
         if (customer.getPassword() != null) {
             if (currentPassword == null || !passwordEncoder.matches(currentPassword, customer.getPassword())) {
@@ -258,7 +276,8 @@ public class AuthService {
 
         transactionTemplate.executeWithoutResult(status -> {
             Optional<Customer> customer = findByPhone(mobileNumber);
-            if (customer.isEmpty()) {
+            if (customer.isEmpty()
+                    || !com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer.get())) {
                 throw new BadRequestException(OtpService.INVALID_OTP_MESSAGE);
             }
             if (newPassword == null || newPassword.length() < 8) {

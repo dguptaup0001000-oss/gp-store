@@ -1,6 +1,5 @@
-import 'package:flutter/foundation.dart';
-
 import 'key_value_store.dart';
+import '../logging/app_log.dart';
 
 /// Whether the shop wants new orders spoken aloud.
 ///
@@ -27,7 +26,8 @@ class VoiceSettings {
       // has never touched the setting, which means ON.
       return raw != 'false';
     } catch (e) {
-      debugPrint('Could not read the voice announcement setting, defaulting to on: $e');
+      appLog(
+          'Could not read the voice announcement setting, defaulting to on: $e');
       return true;
     }
   }
@@ -39,7 +39,7 @@ class VoiceSettings {
       // Surfaced to the caller so the settings screen can tell the shop the
       // choice did not stick, rather than showing a toggle that silently
       // reverts on the next launch.
-      debugPrint('Could not persist the voice announcement setting: $e');
+      appLog('Could not persist the voice announcement setting: $e');
       rethrow;
     }
   }

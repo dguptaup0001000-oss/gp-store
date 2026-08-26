@@ -48,6 +48,13 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
 
   Future<void> _signIn() async {
     if (_busy) return;
+    final email = _identifier.text.trim();
+    if (!email.contains('@') || email.contains(' ')) {
+      setState(() {
+        _error = 'Enter the email address for this worker account.';
+      });
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -57,27 +64,40 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
       final response = await widget.apiClient.dio.post(
         '/api/auth/login',
         data: {
-          'email': _identifier.text.trim(),
+          'email': email,
           'password': _password.text,
         },
       );
       final body = Map<String, dynamic>.from(response.data as Map);
-      await widget.tokenStorage.saveTokens(
-        accessToken: body['token'] as String,
-        refreshToken: body['refreshToken'] as String,
-      );
-      await widget.tokenStorage.setRememberMe(true);
+      final accessToken = body['token'] as String;
+      final refreshToken = body['refreshToken'] as String;
 
-      // Signing in is not the same as being a worker. Asking the server who
-      // this account is turns "logged in as a customer" into a sentence the
-      // person can act on, instead of an empty home screen.
-      final profile = await widget.repository.me();
-      if (!mounted) return;
-      widget.onSignedIn(profile);
+      // Hold in memory only until /api/worker/me confirms this account is a
+      // worker. Persisting first left a customer (or disabled) session on
+      // disk when me() failed.
+      widget.tokenStorage.holdTokensInMemory(
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+      );
+
+      try {
+        final profile = await widget.repository.me();
+        await widget.tokenStorage.saveTokens(
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+        );
+        await widget.tokenStorage.setRememberMe(true);
+        if (!mounted) return;
+        widget.onSignedIn(profile);
+      } catch (e) {
+        await widget.tokenStorage.clear();
+        rethrow;
+      }
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } catch (_) {
-      setState(() => _error = 'Could not sign in. Check the connection and try again.');
+      setState(() =>
+          _error = 'Could not sign in. Check the connection and try again.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -94,13 +114,12 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('GP-STORE', style: Theme.of(context).textTheme.headlineLarge),
+                Text('GP-STORE',
+                    style: Theme.of(context).textTheme.headlineLarge),
                 const SizedBox(height: 4),
                 Text('Delivery Worker',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(color: Theme.of(context).colorScheme.primary)),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Theme.of(context).colorScheme.primary)),
                 const SizedBox(height: 40),
                 TextField(
                   controller: _identifier,
@@ -109,7 +128,7 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
                   decoration: const InputDecoration(
-                    labelText: 'Email or mobile number',
+                    labelText: 'Email',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -128,7 +147,8 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
                   const SizedBox(height: 16),
                   Text(
                     _error!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error),
                   ),
                 ],
                 const SizedBox(height: 24),
@@ -142,7 +162,8 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
                             width: 22,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('SIGN IN', style: TextStyle(fontSize: 17, letterSpacing: 1)),
+                        : const Text('SIGN IN',
+                            style: TextStyle(fontSize: 17, letterSpacing: 1)),
                   ),
                 ),
               ],

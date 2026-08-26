@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * reserved 1179 MB with no ceiling, the code cache 240 MB with no ceiling, and
  * the Dockerfile passed the JVM no memory arguments at all - so the heap took
  * the default 25% of the limit and every non-heap region took whatever it
- * liked. Render kills a container over its limit, its proxy then has nothing
+ * liked. A supervisor kills a process over its limit, the proxy then has nothing
  * to talk to, and that is what a 502 is. The two memory dips on the graph are
  * those restarts.
  *
@@ -94,8 +94,8 @@ class ResourceCeilingTest {
     @DisplayName("glibc is stopped from inflating RSS with per-thread arenas")
     void mallocArenasAreCapped() throws IOException {
         // Not a JVM setting and not visible from inside the JVM at all.
-        // glibc gives each thread its own arena, and RSS - the number Render
-        // kills on - counts every one of them.
+        // glibc gives each thread its own arena, and RSS - the number a
+        // supervisor kills on - counts every one of them.
         assertTrue(dockerfile().contains("MALLOC_ARENA_MAX"),
                 "MALLOC_ARENA_MAX is unset: glibc arenas inflate RSS, which is the number that gets killed");
     }

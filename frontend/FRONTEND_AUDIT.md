@@ -105,7 +105,7 @@ for making the router react instantly to logout/session-expiry.
   output. Run `flutter analyze` and `flutter test` yourself before
   submission for a second, tool-based pass this audit couldn't do.
 - Did not audit `android/`, `web/`, or CI YAML files line-by-line beyond
-  what was already reviewed during the Render migration and account
+  what was already reviewed during earlier hosting migrations and account
   deletion work earlier in this project.
 - Did not review UI/UX, accessibility (screen reader labels, contrast
   ratios), or visual design - this was a code-correctness audit, not a

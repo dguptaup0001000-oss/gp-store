@@ -10,7 +10,12 @@ final ordersRepositoryProvider = Provider<OrdersRepository>((ref) {
   return OrdersRepository(apiClient: ref.watch(apiClientProvider));
 });
 
-typedef MyOrdersPage = ({List<OrderSummary> orders, int page, int totalPages});
+typedef MyOrdersPage = ({
+  List<OrderSummary> orders,
+  int page,
+  int totalPages,
+  bool loadMoreFailed,
+});
 
 /// Paginated - a repeat customer's order history has no natural upper bound,
 /// so this loads one page at a time instead of the whole history at once.
@@ -21,7 +26,12 @@ class MyOrdersController extends AutoDisposeAsyncNotifier<MyOrdersPage> {
   @override
   Future<MyOrdersPage> build() async {
     final result = await ref.read(ordersRepositoryProvider).getMyOrders(page: 0);
-    return (orders: result.orders, page: 0, totalPages: result.totalPages);
+    return (
+      orders: result.orders,
+      page: 0,
+      totalPages: result.totalPages,
+      loadMoreFailed: false,
+    );
   }
 
   bool get hasMore {
@@ -34,12 +44,23 @@ class MyOrdersController extends AutoDisposeAsyncNotifier<MyOrdersPage> {
     if (current == null || current.page + 1 >= current.totalPages) return;
 
     final nextPage = current.page + 1;
-    final result = await ref.read(ordersRepositoryProvider).getMyOrders(page: nextPage);
-    state = AsyncData((
-      orders: [...current.orders, ...result.orders],
-      page: nextPage,
-      totalPages: result.totalPages,
-    ));
+    try {
+      final result =
+          await ref.read(ordersRepositoryProvider).getMyOrders(page: nextPage);
+      state = AsyncData((
+        orders: [...current.orders, ...result.orders],
+        page: nextPage,
+        totalPages: result.totalPages,
+        loadMoreFailed: false,
+      ));
+    } catch (_) {
+      state = AsyncData((
+        orders: current.orders,
+        page: current.page,
+        totalPages: current.totalPages,
+        loadMoreFailed: true,
+      ));
+    }
   }
 }
 

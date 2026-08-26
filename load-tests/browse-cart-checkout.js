@@ -20,7 +20,7 @@
 // Tokens are reused from accounts.json; the script never logs in per VU.
 //
 // Do NOT raise BROWSE_VUS to 5,000 to "prove scale". A previous 5,005-VU
-// production run measured overload of one small Render instance
+// production run measured overload of one small instance
 // (~40 Tomcat threads, 10 DB connections), not shopper capacity.
 
 import http from 'k6/http';

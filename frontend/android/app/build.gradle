@@ -9,7 +9,9 @@ plugins {
 // compile Firebase Dart and must not require google-services.json. The
 // customer entrypoint still applies both plugins below.
 def workerSlim = (System.getenv("GPSTORE_WORKER_SLIM") ?: "0") == "1"
-if (!workerSlim) {
+def workerApplicationId = (project.findProperty("gpstore.applicationId") ?: "").toString()
+def workerApk = workerSlim || workerApplicationId == "com.gpstore.worker"
+if (!workerApk) {
     // Needs android/app/google-services.json to exist (see
     // FIREBASE_SETUP.md) - without it, this line makes the build fail
     // loudly with a clear "File google-services.json is missing" error
@@ -70,7 +72,10 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.gpstore.app"
+        // Worker slim builds MUST use a different applicationId. Sharing
+        // com.gpstore.app with the customer app made installing the worker
+        // APK replace the shop app (and collide on token/storage).
+        applicationId workerApk ? "com.gpstore.worker" : "com.gpstore.app"
         // geolocator, flutter_secure_storage, url_launcher, and
         // firebase_messaging all work at Flutter's own recommended minSdk -
         // no need to raise it further for anything this app uses. If a
@@ -145,6 +150,12 @@ android {
         resources {
             excludes += ["**/BLEServer.exe", "**/win_ble/assets/**"]
         }
+    }
+}
+
+tasks.register("printApplicationId") {
+    doLast {
+        println(android.defaultConfig.applicationId)
     }
 }
 

@@ -4,8 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/config/app_environment.dart';
 import 'core/lifecycle/session_refresh.dart';
+import 'core/logging/app_log.dart';
 import 'core/monitoring/crash_reporter.dart';
+import 'core/monitoring/firebase_crash_reporter.dart';
 import 'core/notifications/push_notification_providers.dart';
 import 'core/notifications/push_notification_service.dart';
 import 'core/notifications/voice_announcement_providers.dart';
@@ -24,6 +27,7 @@ final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  AppEnvironment.assertReleaseBuildIsConfigured(isReleaseMode: kReleaseMode);
 
   try {
     await Firebase.initializeApp();
@@ -45,7 +49,9 @@ Future<void> main() async {
     // The app must still run and be fully usable without push or crash
     // reporting in the meantime, so this is deliberately swallowed, not
     // rethrown.
-    debugPrint('Firebase not configured yet - push and crash reporting disabled: $e');
+    appLog(
+        'Firebase not configured yet - push and crash reporting disabled: $e');
+    await installCrashHandlers(const NoOpCrashReporter());
   }
 
   runApp(const ProviderScope(child: GpStoreApp()));
@@ -70,7 +76,8 @@ class GpStoreApp extends ConsumerWidget {
       final navigator = rootNavigatorKey.currentState;
       if (navigator == null) return;
 
-      navigator.push(MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId)));
+      navigator.push(MaterialPageRoute(
+          builder: (_) => OrderDetailScreen(orderId: orderId)));
     }
   }
 
@@ -83,7 +90,8 @@ class GpStoreApp extends ConsumerWidget {
   /// way. Only fires while the app is in the foreground; a killed/fully
   /// backgrounded app can't run Dart code to print, so this only covers the
   /// "app open on the counter" case, not true background printing.
-  Future<void> _autoPrintIfNewOrder(WidgetRef ref, RemoteMessage message) async {
+  Future<void> _autoPrintIfNewOrder(
+      WidgetRef ref, RemoteMessage message) async {
     if (message.data['type'] != 'NEW_ORDER') return;
 
     final orderIdRaw = message.data['orderId'];
@@ -91,10 +99,12 @@ class GpStoreApp extends ConsumerWidget {
     if (orderId == null) return;
 
     try {
-      final order = await ref.read(ordersRepositoryProvider).getOrderDetail(orderId);
+      final order =
+          await ref.read(ordersRepositoryProvider).getOrderDetail(orderId);
       await ref.read(printerServiceProvider).printOrderReceipt(order);
     } catch (e) {
-      debugPrint('Auto-print for order $orderId failed (order itself is unaffected): $e');
+      appLog(
+          'Auto-print for order $orderId failed (order itself is unaffected): $e');
     }
   }
 
@@ -143,7 +153,8 @@ class GpStoreApp extends ConsumerWidget {
 
     scaffoldMessengerKey.currentState?.showSnackBar(
       SnackBar(
-        content: Text([title, body].where((s) => s != null && s.isNotEmpty).join(' - ')),
+        content: Text(
+            [title, body].where((s) => s != null && s.isNotEmpty).join(' - ')),
         duration: const Duration(seconds: 4),
       ),
     );
@@ -170,7 +181,8 @@ class GpStoreApp extends ConsumerWidget {
                 _autoPrintIfNewOrder(ref, message);
                 _announceIfNewOrder(ref, message);
               },
-              onNotificationTap: (message) => _handleNotificationTap(ref, message),
+              onNotificationTap: (message) =>
+                  _handleNotificationTap(ref, message),
             );
       } else if (!isAuthenticated && wasAuthenticated) {
         ref.read(pushNotificationServiceProvider).stop();

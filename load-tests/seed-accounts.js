@@ -13,7 +13,7 @@
 // endpoints that AREN'T rate limited the same way (browse, cart).
 //
 // Usage:
-//   BASE_URL=https://your-backend.onrender.com/v1 COUNT=50 node seed-accounts.js
+//   BASE_URL=http://127.0.0.1:8081/v1 COUNT=50 node seed-accounts.js
 //
 // Takes roughly COUNT * 3.5 seconds to run (paced to stay under the 20/60s
 // register limit) - for 50 accounts that's ~3 minutes. Writes accounts.json
@@ -26,7 +26,7 @@ const OUT_FILE = process.env.OUT_FILE || new URL('./accounts.json', import.meta.
 // Matches application.properties' store.latitude/longitude defaults
 // (28.6139, 77.2090) and store.max-delivery-radius-km default (8km) - jitter
 // stays well inside that radius so checkout's deliverability check passes.
-// If your Render deployment overrides STORE_LATITUDE/STORE_LONGITUDE, update
+// If production overrides STORE_LATITUDE/STORE_LONGITUDE, update
 // these two constants to match, or every seeded account's checkout will fail
 // with "outside delivery radius".
 const STORE_LAT = parseFloat(process.env.STORE_LATITUDE || '28.6139');

@@ -3,6 +3,7 @@
 import 'package:flutter/foundation.dart' hide Category;
 
 import '../domain/product_models.dart';
+import '../../../core/logging/app_log.dart';
 
 /// Fetches one page of one category. Injected so the controller can be tested
 /// without a network, mirroring BrandFeedController.
@@ -290,7 +291,7 @@ class CategoryFeedController extends ChangeNotifier {
   }
 
   String _describe(Object error) {
-    debugPrint('Category feed page failed: $error');
+    appLog('Category feed page failed: $error');
     return 'Could not load more products. Check your connection and try again.';
   }
 }

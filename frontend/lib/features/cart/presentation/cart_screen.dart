@@ -19,9 +19,19 @@ class CartScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cartAsync = ref.watch(cartControllerProvider);
 
+    ref.listen(cartControllerProvider, (previous, next) {
+      if (next.hasError && next.hasValue) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(extractErrorMessage(next.error!))),
+        );
+      }
+    });
+
     return Scaffold(
       appBar: AppBar(title: const Text('My Cart')),
       body: cartAsync.when(
+        skipError: true,
+        skipLoadingOnReload: true,
         loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         error: (error, stackTrace) => Center(
           child: Column(

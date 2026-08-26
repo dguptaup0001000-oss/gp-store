@@ -72,23 +72,56 @@
 </p>
 
 <script>
-  // Fetches live support contact info from the backend rather than
-  // hardcoding it here - this page has no build step of its own (unlike
-  // the Flutter app, which reads config via --dart-define), so this is the
-  // only way it stays accurate if support contact details ever change,
-  // without needing someone to remember to hand-edit this file too.
-  fetch('https://gp-store.onrender.com/v1/api/store-info')
+  function isPlaceholder(value) {
+    if (!value) return true;
+    var v = String(value);
+    return v.indexOf('XXXX') !== -1 || v.indexOf('example.com') !== -1;
+  }
+
+  fetch('https://api.gpstore.co.in/v1/api/store-info')
     .then(function (res) { return res.json(); })
     .then(function (data) {
-      document.getElementById('contact-box').innerHTML =
-        '<p><strong>Email:</strong> <a href="mailto:' + data.supportEmail + '?subject=Account%20Deletion%20Request">' +
-        data.supportEmail + '</a></p>' +
-        '<p><strong>Phone:</strong> ' + data.supportPhone + '</p>';
+      var box = document.getElementById('contact-box');
+      box.replaceChildren();
+
+      var email = data && data.supportEmail;
+      var phone = data && data.supportPhone;
+
+      if (!isPlaceholder(email)) {
+        var p = document.createElement('p');
+        var strong = document.createElement('strong');
+        strong.textContent = 'Email: ';
+        var a = document.createElement('a');
+        a.setAttribute('href', 'mailto:' + email + '?subject=Account%20Deletion%20Request');
+        a.textContent = email;
+        p.appendChild(strong);
+        p.appendChild(a);
+        box.appendChild(p);
+      }
+
+      if (!isPlaceholder(phone)) {
+        var phoneP = document.createElement('p');
+        var phoneStrong = document.createElement('strong');
+        phoneStrong.textContent = 'Phone: ';
+        phoneP.appendChild(phoneStrong);
+        phoneP.appendChild(document.createTextNode(phone));
+        box.appendChild(phoneP);
+      }
+
+      if (box.childNodes.length === 0) {
+        var fallback = document.createElement('p');
+        fallback.textContent =
+          'Use Profile → Delete Account in the app, or the in-app Contact Us screen, to reach support.';
+        box.appendChild(fallback);
+      }
     })
     .catch(function () {
-      document.getElementById('contact-box').innerHTML =
-        '<p>Could not load contact details right now. Please check the ' +
-        'in-app Contact Us screen instead, or try reloading this page.</p>';
+      var box = document.getElementById('contact-box');
+      box.replaceChildren();
+      var p = document.createElement('p');
+      p.textContent =
+        'Could not load contact details right now. Please check the in-app Contact Us screen instead, or try reloading this page.';
+      box.appendChild(p);
     });
 </script>
 

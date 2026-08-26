@@ -10,6 +10,8 @@ public interface DeliveryPartnerRepository extends JpaRepository<DeliveryPartner
 
     List<DeliveryPartner> findByAvailable(Boolean available);
 
+    org.springframework.data.domain.Page<DeliveryPartner> findByAvailable(Boolean available, org.springframework.data.domain.Pageable pageable);
+
     /** Resolves a logged-in Customer (role=DELIVERY_BOY) back to their operational roster record. */
     Optional<DeliveryPartner> findByAccountId(Long customerId);
 }

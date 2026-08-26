@@ -1,5 +1,6 @@
 package com.gpstore.controller;
 
+import com.gpstore.config.PageRequests;
 import com.gpstore.entity.Coupon;
 import com.gpstore.service.CouponService;
 
@@ -25,10 +26,15 @@ public class CouponController {
         return couponService.saveCoupon(coupon);
     }
 
-    // Admin only (enforced in SecurityConfig).
+    // Admin only (enforced in SecurityConfig). Still a JSON list so the
+    // existing admin UI keeps working; page/size cap the query so findAll()
+    // cannot dump the table. Default size is the max so a store with a
+    // normal number of offers still sees every row on the first request.
     @GetMapping
-    public List<Coupon> getAllCoupons() {
-        return couponService.getAllCoupons();
+    public List<Coupon> getAllCoupons(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        return couponService.getAllCoupons(PageRequests.of(page, size));
     }
 
     // Admin only - couponCode and usedCount are intentionally not editable

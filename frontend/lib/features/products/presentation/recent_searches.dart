@@ -1,6 +1,5 @@
-import 'package:flutter/foundation.dart';
-
 import '../../../core/notifications/key_value_store.dart';
+import '../../../core/logging/app_log.dart';
 
 /// The last few things this customer searched for, kept on the device.
 ///
@@ -12,7 +11,8 @@ import '../../../core/notifications/key_value_store.dart';
 /// Reuses the KeyValueStore the voice feature already introduced rather than
 /// adding a preferences package for six short strings.
 class RecentSearches {
-  RecentSearches({KeyValueStore? storage}) : _storage = storage ?? const SecureKeyValueStore();
+  RecentSearches({KeyValueStore? storage})
+      : _storage = storage ?? const SecureKeyValueStore();
 
   static const _key = 'recent_searches';
 
@@ -30,7 +30,7 @@ class RecentSearches {
       return raw.split(_separator).where((e) => e.trim().isNotEmpty).toList();
     } catch (e) {
       // A convenience feature must never break the screen it decorates.
-      debugPrint('Could not read recent searches: $e');
+      appLog('Could not read recent searches: $e');
       return const [];
     }
   }
@@ -55,7 +55,7 @@ class RecentSearches {
       await _storage.write(_key, updated.join(_separator));
       return updated;
     } catch (e) {
-      debugPrint('Could not save a recent search: $e');
+      appLog('Could not save a recent search: $e');
       return load();
     }
   }
@@ -64,7 +64,7 @@ class RecentSearches {
     try {
       await _storage.delete(_key);
     } catch (e) {
-      debugPrint('Could not clear recent searches: $e');
+      appLog('Could not clear recent searches: $e');
     }
   }
 }
