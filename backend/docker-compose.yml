@@ -94,14 +94,20 @@ services:
       - gpstore_net
 
   backend:
+    image: gp-store-backend:${BACKEND_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        APP_VERSION: ${APP_VERSION:-0.0.1-SNAPSHOT}
     restart: unless-stopped
     environment:
       PORT: "8081"
       SPRING_PROFILES_ACTIVE: prod
       APP_PRODUCTION: "true"
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
+      APP_VERSION: ${APP_VERSION:-0.0.1-SNAPSHOT}
       FLYWAY_ENABLED: "true"
       # Default validate. SchemaSafetyGuard refuses update/create/drop when
       # APP_PRODUCTION=true, so a mistyped .env cannot silently mutate schema.

@@ -203,16 +203,21 @@ docker compose up -d
 
 ## 12. Update / redeploy
 
-Keep the previous image until health is confirmed:
+**Normal path:** push to `main`. GitHub Actions workflow **Deploy Production**
+SSHs to the VPS and runs `deploy/production/deploy.sh`. Do not SSH just to
+`git pull` / `docker compose build`.
+
+One-time secrets and VPS layout: **[deploy/production/README.md](../deploy/production/README.md)**.
+
+Emergency on the VPS (same checks as CI):
 
 ```bash
-cd gp-store
-git pull origin main
-cd backend
-docker compose build backend
-docker compose up -d backend
-curl -fsS https://api.gpstore.co.in/v1/api/health
+cd /opt/gp-store   # or $DEPLOY_ROOT
+git fetch origin
+./deploy/production/deploy.sh "$(git rev-parse origin/main)"
 ```
+
+Do **not** run `docker compose down -v`. That deletes shop data.
 
 ## 13. Backup
 
@@ -248,4 +253,7 @@ CI already defaults to `https://api.gpstore.co.in/v1` when `vars.API_BASE_URL` i
 | Login rate-limit all from one IP | `RATE_LIMIT_TRUST_FORWARDED_FOR=true` is set in Compose |
 | Port 80/443 already in use | leftover Nginx/systemd from `deploy/hostinger/`. Stop them. |
 
-GitHub Actions does **not** SSH to Hostinger. There is no automatic Hostinger deploy in CI (that would need a VPS key stored as a GitHub secret — not in this repository).
+GitHub Actions **does** SSH to Hostinger when secrets `PROD_HOST`,
+`PROD_USER`, and `PROD_SSH_PRIVATE_KEY` are set (workflow
+`deploy-production.yml`). Until those secrets exist, a green `main` build
+does not change the VPS. See `deploy/production/README.md`.

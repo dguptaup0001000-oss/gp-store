@@ -12,7 +12,7 @@ Flyway / empty-database CI: `backend/src/main/resources/db/migration/README.md`.
 
 | Change | Where it lives | Who applies it |
 |---|---|---|
-| Java / Flutter / Flyway SQL / CI workflows | this git repository | merge to `main` |
+| Java / Flutter / Flyway SQL / CI workflows | this git repository | merge to `main` (backend auto-deploys when `PROD_*` GitHub secrets exist) |
 | `DDL_AUTO`, `JWT_SECRET`, `DB_*`, Redis, Cashfree, SMS, Firebase, Cloudinary | `backend/.env` on the VPS (never git) plus vendor dashboards | a person with SSH / dashboard access |
 | Postgres schema beyond what Flyway already applied | not done from this repo | never rewrite `flyway_schema_history` by hand |
 
