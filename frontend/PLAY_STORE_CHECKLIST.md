@@ -7,9 +7,10 @@ something is done when it isn't.
 ## Already technically ready
 
 - **Android manifest permissions** match each APK: the customer app
-  (`com.gpstore.app`) does not declare CAMERA; the worker app
-  (`com.gpstore.worker`) uses a separate manifest with camera +
-  foreground location only.
+  (`com.gpstore.app`) strips CAMERA from the merged manifest (worker QR
+  scan lives in a separate APK). The worker app (`com.gpstore.worker`)
+  uses camera + foreground location only. Neither app requests
+  `ACCESS_BACKGROUND_LOCATION`.
 - **Release signing** fails the Gradle build unless `android/key.properties`
   exists. Sideload CI may set `ALLOW_DEBUG_RELEASE_SIGNING=1`; those APKs
   must not be uploaded to Play.
@@ -55,11 +56,11 @@ today:
 | Name | Yes | App functionality, account management | Required at registration |
 | Email address | Optional | Account management (alternate login) | Only if the customer adds one - OTP-only accounts have none |
 | Phone number | Yes | Account management, OTP verification | Core to login |
-| Precise location | Yes | App functionality | Only for the "use my location" address-capture feature - not collected in the background |
+| Precise location | Yes | App functionality | Customer: one-shot GPS when adding an address. Delivery partners using this same app: foreground GPS while the delivery dashboard is open. Not collected in the background. |
 | Address | Yes | App functionality | Delivery address(es) the customer saves |
 | Order history | Yes | App functionality, analytics | Customer's own purchase history |
 | Payment info | No | N/A | This app never sees card/bank details - UPI payments go directly between the customer and their own UPI app; COD involves no data at all |
-| Photos/media | No | N/A | Not collected |
+| Photos/media | Shop catalogue only | App functionality | Administrators upload product photos to Cloudinary. The app does not collect customer personal photos. |
 | Contacts | No | N/A | Not collected |
 | App activity (in-app actions) | Yes | Analytics, personalization | Used for "Recommended for you" / "Frequently bought together" |
 

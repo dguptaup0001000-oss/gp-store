@@ -50,8 +50,17 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"/>
 
-    <!-- Merged-in from plugins. A grocery app must not require NFC to install,
-         and DUMP is a privileged permission we never use. -->
+    <!-- Merged-in from plugins. Customer Dart never opens a camera; CAMERA
+         arrives only because lib/ still contains worker scan screens that
+         import mobile_scanner. Strip it so Play Data Safety matches the
+         customer APK. Worker APK uses src/worker/AndroidManifest.xml. -->
+    <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false" tools:node="remove"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove"/>
+
+    <!-- A grocery app must not require NFC to install, and DUMP is a
+         privileged permission we never use. -->
     <uses-permission android:name="android.permission.DUMP" tools:node="remove"/>
     <uses-permission android:name="android.permission.NFC" tools:node="remove"/>
     <uses-feature android:name="android.hardware.nfc" android:required="false" tools:replace="android:required"/>

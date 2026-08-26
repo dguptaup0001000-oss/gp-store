@@ -45,6 +45,13 @@ class PrivacyPolicyScreen extends StatelessWidget {
             'A push-notification token, if Firebase is configured, so we can send order updates.',
             'Optional voice search uses the phone\'s on-device recogniser. We do not record or upload the audio.',
           ]),
+          _section('Delivery partners', [
+            'If you deliver for the shop using this app, GPS is read only while the delivery dashboard is open. It stops when you leave that screen, background the app, or sign out. We do not request background location.',
+          ]),
+          _section('Store staff', [
+            'Shop administrators may connect a paired Bluetooth thermal printer for receipts. Bluetooth is not used to scan for people.',
+            'Catalogue photos that an administrator picks are uploaded to our image host (Cloudinary) as shop product pictures, not as customer personal photos.',
+          ]),
           _section('How We Use Your Information', [
             'To fulfil and deliver your orders inside our delivery areas.',
             'To send order status updates.',
@@ -75,11 +82,14 @@ class PrivacyPolicyScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          Text(title,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
           const SizedBox(height: 8),
           ...points.map((p) => Padding(
                 padding: const EdgeInsets.only(bottom: 6),
-                child: Text('•  $p', style: const TextStyle(fontSize: 13, height: 1.4)),
+                child: Text('•  $p',
+                    style: const TextStyle(fontSize: 13, height: 1.4)),
               )),
         ],
       ),

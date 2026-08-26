@@ -5,6 +5,11 @@ A merge commit on main often has no CI run of its own when the merger is a
 GitHub App token. In that case this accepts a successful pull_request CI run
 on the second parent (the PR head) after a short wait to see whether main CI
 starts.
+
+Flutter APK/AAB builds are a separate workflow. Backend deploy does not wait
+for them: a backend security fix must not be blocked on an Android keystore
+or placeholder google-services.json. Play artifacts are gated in
+build-and-deploy.yml.
 """
 
 from __future__ import annotations

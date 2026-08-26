@@ -52,12 +52,19 @@
   <li>Optional voice search uses the on-device speech recogniser. Audio is not stored or uploaded by GP-Store.</li>
 </ul>
 
-<h2>Delivery workers</h2>
+<h2>Delivery workers and delivery partners</h2>
 <p>
-  The worker app may read location only while a delivery screen is open
-  (foreground). There is no background location permission. Tracking stops when
-  the worker leaves that screen or signs out. Camera is used only to scan the
-  QR code on a packed order label.
+  Packing staff use a separate app, <code>com.gpstore.worker</code>. That app
+  may read location only while a delivery screen is open (foreground). There
+  is no background location permission. Tracking stops when the worker leaves
+  that screen or signs out. Camera is used only to scan the QR code on a packed
+  order label.
+</p>
+<p>
+  Delivery partners who sign in to the customer app (<code>com.gpstore.app</code>)
+  share GPS only while the delivery dashboard is open and in the foreground.
+  Tracking stops when that screen is left, the app is backgrounded, or they
+  sign out. The customer app does not use the camera.
 </p>
 
 <h2>Store administration</h2>

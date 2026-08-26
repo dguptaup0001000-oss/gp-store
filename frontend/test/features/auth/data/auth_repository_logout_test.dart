@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/core/api/api_client.dart';
 import 'package:gpstore/core/storage/token_storage.dart';
 import 'package:gpstore/features/auth/data/auth_repository.dart';
+import 'package:gpstore/features/auth/presentation/auth_providers.dart';
 
 import '../../../support/test_api_client.dart';
 
@@ -18,11 +19,14 @@ class _FakeSecureStorage {
 
   void install() {
     TestWidgetsFlutterBinding.ensureInitialized();
-    const channel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+    const channel =
+        MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
       channel,
       (call) async {
-        final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? const {};
+        final args =
+            (call.arguments as Map?)?.cast<String, dynamic>() ?? const {};
         switch (call.method) {
           case 'read':
             return values[args['key'] as String];
@@ -55,7 +59,8 @@ void main() {
 
     adapter.on('DELETE', '/api/customers/me/fcm-token', (options) {
       requests.add('DELETE fcm-token');
-      if (fcmDeleteFails) return const FakeResponse({'error': 'nope'}, statusCode: 500);
+      if (fcmDeleteFails)
+        return const FakeResponse({'error': 'nope'}, statusCode: 500);
       return const FakeResponse(null);
     });
     adapter.on('POST', '/api/auth/logout', (options) {
@@ -96,14 +101,16 @@ void main() {
       // that looks like it works.
       await buildRepository().logout();
 
-      expect(requests.indexOf('DELETE fcm-token'), lessThan(requests.indexOf('POST logout')));
+      expect(requests.indexOf('DELETE fcm-token'),
+          lessThan(requests.indexOf('POST logout')));
     });
 
     test('logging out of every device releases it too', () async {
       await buildRepository().logoutAllDevices();
 
       expect(requests, contains('DELETE fcm-token'));
-      expect(requests.indexOf('DELETE fcm-token'), lessThan(requests.indexOf('POST logout-all')));
+      expect(requests.indexOf('DELETE fcm-token'),
+          lessThan(requests.indexOf('POST logout-all')));
     });
 
     test('a failed release still signs the customer out locally', () async {
@@ -111,13 +118,31 @@ void main() {
       // signed in on their own phone.
       await buildRepository(fcmDeleteFails: true).logout();
 
-      expect(storage.values, isEmpty, reason: 'the session must be cleared regardless');
+      expect(storage.values, isEmpty,
+          reason: 'the session must be cleared regardless');
     });
 
     test('a successful logout clears every stored credential', () async {
       await buildRepository().logout();
 
       expect(storage.values, isEmpty);
+    });
+
+    test('clearLocalSession drops tokens without calling the server', () async {
+      await buildRepository().clearLocalSession();
+      expect(storage.values, isEmpty);
+      expect(requests, isEmpty);
+    });
+
+    test('forceLogout clears tokens without a logout API call', () async {
+      final repo = buildRepository();
+      final controller = AuthController(repo);
+      await Future<void>.delayed(Duration.zero);
+      controller.forceLogout();
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.status, AuthStatus.unauthenticated);
+      expect(storage.values, isEmpty);
+      expect(requests, isEmpty);
     });
   });
 }

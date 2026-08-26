@@ -1,7 +1,6 @@
-# NOTE: this file assumes the repo root IS the backend/ folder (matching the
-# structure of the zip this came in). If your actual GitHub repo has backend/
-# as a subfolder instead, move this .github/ folder to the true repo root
-# and add `working-directory: backend` to the run steps below.
+# Canonical backend CI for this monorepo. Job run steps use
+# working-directory: backend. Artifact paths are repo-relative
+# (backend/target/...). Do not copy this file into backend/.github.
 
 name: CI
 
@@ -102,7 +101,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: surefire-reports
-          path: target/surefire-reports/
+          path: backend/target/surefire-reports/
 
   # Flyway against a CLEAN database. The job above deliberately sets
   # FLYWAY_ENABLED=false and builds the schema with ddl-auto=update, so it
@@ -186,7 +185,7 @@ jobs:
       - name: Backup and restore drill
         run: |
           set -Eeuo pipefail
-          chmod +x docker/backup/backup.sh ../../deploy/production/backup-restore-drill.sh
+          chmod +x docker/backup/backup.sh ../deploy/production/backup-restore-drill.sh
           mkdir -p /tmp/gp-backups
           docker run --rm --network=host \
             -e PGHOST=localhost -e PGPORT=5432 \
@@ -202,7 +201,7 @@ jobs:
           docker run --rm --network=host \
             -e PGPASSWORD=gpstore_test_password \
             -v /tmp/gp-backups:/backups \
-            -v "$PWD/../../deploy/production/backup-restore-drill.sh:/drill.sh:ro" \
+            -v "$PWD/../deploy/production/backup-restore-drill.sh:/drill.sh:ro" \
             postgres:17 \
             /bin/sh /drill.sh "/backups/$(basename "$DUMP")" localhost 5432 gpstore gpstore_restore_probe gpstore_test_password
 
@@ -211,7 +210,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: schema-migrate-surefire-reports
-          path: target/surefire-reports/
+          path: backend/target/surefire-reports/
 
   build-and-push-image:
     needs: [build-and-test, schema-migrate]

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -33,7 +35,8 @@ final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((ref) {
   );
 });
 
-final Provider<AuthRepository> authRepositoryProvider = Provider<AuthRepository>((ref) {
+final Provider<AuthRepository> authRepositoryProvider =
+    Provider<AuthRepository>((ref) {
   return AuthRepository(
     apiClient: ref.watch(apiClientProvider),
     tokenStorage: ref.watch(tokenStorageProvider),
@@ -49,7 +52,8 @@ class AuthState {
   final AuthResponse? user;
   final String? errorMessage;
 
-  AuthState copyWith({AuthStatus? status, AuthResponse? user, String? errorMessage}) {
+  AuthState copyWith(
+      {AuthStatus? status, AuthResponse? user, String? errorMessage}) {
     return AuthState(
       status: status ?? this.status,
       user: user ?? this.user,
@@ -62,7 +66,8 @@ class AuthState {
 /// router (app_router.dart) watches this to decide whether to show the
 /// login screen or the main app.
 class AuthController extends StateNotifier<AuthState> {
-  AuthController(this._repository) : super(const AuthState(status: AuthStatus.unknown)) {
+  AuthController(this._repository)
+      : super(const AuthState(status: AuthStatus.unknown)) {
     _restoreSession();
   }
 
@@ -82,13 +87,19 @@ class AuthController extends StateNotifier<AuthState> {
       state = const AuthState(status: AuthStatus.unauthenticated);
       return;
     }
-    state = AuthState(status: hasSession ? AuthStatus.authenticated : AuthStatus.unauthenticated);
+    state = AuthState(
+        status:
+            hasSession ? AuthStatus.authenticated : AuthStatus.unauthenticated);
   }
 
-  Future<bool> login({required String email, required String password, bool rememberMe = true}) async {
+  Future<bool> login(
+      {required String email,
+      required String password,
+      bool rememberMe = true}) async {
     state = state.copyWith(status: AuthStatus.unknown, errorMessage: null);
     try {
-      final auth = await _repository.login(email: email, password: password, rememberMe: rememberMe);
+      final auth = await _repository.login(
+          email: email, password: password, rememberMe: rememberMe);
       state = AuthState(status: AuthStatus.authenticated, user: auth);
       HapticFeedback.mediumImpact();
       return true;
@@ -147,8 +158,11 @@ class AuthController extends StateNotifier<AuthState> {
 
   /// Called by the API client when even the refresh token has expired/been
   /// revoked - no server call here (it would just fail again), just reset
-  /// local state so the UI reacts.
+  /// local state so the UI reacts. Tokens are cleared even if the caller
+  /// skipped ApiClient's own clear, so a future forceLogout cannot leave a
+  /// refresh token on disk.
   void forceLogout() {
+    unawaited(_repository.clearLocalSession());
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
 }

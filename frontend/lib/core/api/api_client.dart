@@ -10,7 +10,8 @@ import 'retry_policy.dart';
 /// ApiError.java) so error messages shown to the user are the real backend
 /// message, not a generic "something went wrong".
 class ApiException implements Exception {
-  ApiException({required this.statusCode, required this.message, this.fieldErrors});
+  ApiException(
+      {required this.statusCode, required this.message, this.fieldErrors});
 
   final int? statusCode;
   final String message;
@@ -18,6 +19,21 @@ class ApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// Pulls the rotated JWT pair out of `/api/auth/refresh`.
+///
+/// Returns null when the body is not the expected JSON object. Callers must
+/// treat that as a transient parse failure, not as proof the refresh token
+/// is revoked — an HTML error page from a proxy would otherwise sign the
+/// customer out.
+({String access, String refresh})? parseRefreshPayload(Object? data) {
+  if (data is! Map) return null;
+  final token = data['token'];
+  final refresh = data['refreshToken'];
+  if (token is! String || token.isEmpty) return null;
+  if (refresh is! String || refresh.isEmpty) return null;
+  return (access: token, refresh: refresh);
 }
 
 class ApiClient {
@@ -95,7 +111,8 @@ class ApiClient {
     handler.next(options);
   }
 
-  Future<void> _handleError(DioException error, ErrorInterceptorHandler handler) async {
+  Future<void> _handleError(
+      DioException error, ErrorInterceptorHandler handler) async {
     final response = error.response;
 
     // The refresh-once guard is load-bearing, not defensive tidying. The
@@ -116,7 +133,15 @@ class ApiClient {
     if (response?.statusCode == 401 &&
         error.requestOptions.path != '/api/auth/refresh' &&
         !alreadyRefreshed) {
-      final newAccessToken = await _refreshAccessToken();
+      String? newAccessToken;
+      try {
+        newAccessToken = await _refreshAccessToken();
+      } catch (_) {
+        // Refresh failed for a transient reason (timeout, 5xx, malformed
+        // body). Keep the stored session and surface the original 401.
+        handler.next(_mapToApiException(error));
+        return;
+      }
 
       if (newAccessToken != null) {
         // Retry the original request once, with the new token.
@@ -152,7 +177,8 @@ class ApiClient {
   /// The attempt count rides on the RequestOptions' own extra map, so it
   /// survives into the retried request and a failing endpoint cannot loop
   /// forever by presenting each attempt as a fresh one.
-  Future<bool> _retryIfSafe(DioException error, ErrorInterceptorHandler handler) async {
+  Future<bool> _retryIfSafe(
+      DioException error, ErrorInterceptorHandler handler) async {
     final options = error.requestOptions;
     final attempt = (options.extra[_attemptKey] as int? ?? 0) + 1;
 
@@ -171,7 +197,7 @@ class ApiClient {
     return true;
   }
 
-  Future<String?> _refreshAccessToken() async {
+  Future<String?> _refreshAccessToken() {
     // If a refresh is already in flight, wait for it instead of starting a
     // second one - prevents a burst of concurrent 401s from each rotating
     // the refresh token and invalidating each other (see backend
@@ -184,34 +210,45 @@ class ApiClient {
     final completer = Completer<String?>();
     _refreshCompleter = completer;
 
-    try {
-      final refreshToken = await tokenStorage.getRefreshToken();
-      if (refreshToken == null) {
-        completer.complete(null);
-        return null;
+    unawaited(() async {
+      try {
+        final refreshToken = await tokenStorage.getRefreshToken();
+        if (refreshToken == null) {
+          completer.complete(null);
+          return;
+        }
+
+        final response = await _dio.post(
+          '/api/auth/refresh',
+          data: {'refreshToken': refreshToken},
+        );
+
+        final parsed = parseRefreshPayload(response.data);
+        if (parsed == null) {
+          throw const FormatException('refresh response was not a JWT pair');
+        }
+
+        await tokenStorage.saveTokens(
+          accessToken: parsed.access,
+          refreshToken: parsed.refresh,
+        );
+
+        completer.complete(parsed.access);
+      } on DioException catch (e) {
+        final status = e.response?.statusCode;
+        if (status == 401 || status == 403) {
+          completer.complete(null);
+        } else {
+          completer.completeError(e);
+        }
+      } catch (e, st) {
+        completer.completeError(e, st);
+      } finally {
+        _refreshCompleter = null;
       }
+    }());
 
-      final response = await _dio.post(
-        '/api/auth/refresh',
-        data: {'refreshToken': refreshToken},
-      );
-
-      final newAccessToken = response.data['token'] as String;
-      final newRefreshToken = response.data['refreshToken'] as String;
-
-      await tokenStorage.saveTokens(
-        accessToken: newAccessToken,
-        refreshToken: newRefreshToken,
-      );
-
-      completer.complete(newAccessToken);
-      return newAccessToken;
-    } catch (_) {
-      completer.complete(null);
-      return null;
-    } finally {
-      _refreshCompleter = null;
-    }
+    return completer.future;
   }
 
   DioException _mapToApiException(DioException error) {

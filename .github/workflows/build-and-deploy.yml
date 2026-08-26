@@ -104,6 +104,9 @@ jobs:
         # pure Dart unit tests (no device, no emulator), so they cost seconds.
         run: flutter test
 
+      - name: Verify APK permission policy (no device)
+        run: python3 tool/verify_apk_release.py --self-test
+
       - name: Detect Play upload keystore
         # Analyze + flutter test above already ran. Missing Play secrets must
         # not fail the job: there is no keystore in git and CI must not invent
@@ -148,10 +151,14 @@ jobs:
       - name: Decode google-services.json
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          PLAY_SIGNING: ${{ steps.play_signing.outputs.enabled }}
         run: |
           if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
             echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > android/app/google-services.json
             python3 tool/verify_google_services.py android/app/google-services.json
+          elif [ "$PLAY_SIGNING" = "true" ]; then
+            echo "::error::GOOGLE_SERVICES_JSON_BASE64 is required for Play-signed artifacts. Do not ship the placeholder google-services.json to Play."
+            exit 1
           else
             echo "::warning::GOOGLE_SERVICES_JSON_BASE64 unset; using the committed placeholder (push/Crashlytics will not work). Sideload APKs still compile."
             cp android/app/google-services.placeholder.json android/app/google-services.json

@@ -4,11 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../auth/presentation/auth_providers.dart' show extractErrorMessage;
 import '../../products/domain/product_models.dart';
 import '../data/admin_products_repository.dart';
+import '../domain/variant_save_action.dart';
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
 
 class AdminVariantFormDialog extends ConsumerStatefulWidget {
-  const AdminVariantFormDialog({super.key, required this.productId, this.variant});
+  const AdminVariantFormDialog(
+      {super.key, required this.productId, this.variant});
 
   final int productId;
 
@@ -16,10 +18,12 @@ class AdminVariantFormDialog extends ConsumerStatefulWidget {
   final ProductVariant? variant;
 
   @override
-  ConsumerState<AdminVariantFormDialog> createState() => _AdminVariantFormDialogState();
+  ConsumerState<AdminVariantFormDialog> createState() =>
+      _AdminVariantFormDialogState();
 }
 
-class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog> {
+class _AdminVariantFormDialogState
+    extends ConsumerState<AdminVariantFormDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _quantityController;
   late final TextEditingController _unitController;
@@ -43,16 +47,22 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
   /// price edit does not rewrite the photo rows for nothing.
   bool _imagesChanged = false;
 
+  /// Set after the first successful create so a retry after a later photo
+  /// failure updates that variant instead of inserting a duplicate.
+  int? _createdVariantId;
+
   bool get _isEditing => widget.variant != null;
 
   @override
   void initState() {
     super.initState();
     final v = widget.variant;
-    _quantityController = TextEditingController(text: v?.quantity?.toString() ?? '');
+    _quantityController =
+        TextEditingController(text: v?.quantity?.toString() ?? '');
     _unitController = TextEditingController(text: v?.unit ?? '');
     _mrpController = TextEditingController(text: v?.mrp?.toString() ?? '');
-    _sellingPriceController = TextEditingController(text: v?.sellingPrice.toString() ?? '');
+    _sellingPriceController =
+        TextEditingController(text: v?.sellingPrice.toString() ?? '');
     // costPrice is deliberately never populated for edit - the backend never
     // returns it (WRITE_ONLY, see ProductVariant.costPrice), so there's
     // nothing to prefill. Leaving it blank means "no change" is NOT what
@@ -64,7 +74,9 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
     // one-image variant opens showing the photo it already has, rather than
     // an empty strip that reads as "this product has no picture". The real
     // list is then loaded from the server below and replaces it.
-    _images = (v?.imageUrl != null && v!.imageUrl!.isNotEmpty) ? [v.imageUrl!] : const [];
+    _images = (v?.imageUrl != null && v!.imageUrl!.isNotEmpty)
+        ? [v.imageUrl!]
+        : const [];
     if (_isEditing) {
       _loadExistingImages();
     }
@@ -118,8 +130,12 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
       // first photo is what makes the new photos show up in all of them
       // without a single client change.
       final imageUrl = _images.isEmpty ? null : _images.first;
+      final action = variantSaveAction(
+        isEditing: _isEditing,
+        createdVariantId: _createdVariantId,
+      );
 
-      if (_isEditing) {
+      if (action == VariantSaveAction.update && _isEditing) {
         await repository.updateVariant(
           variantId: widget.variant!.id,
           quantity: quantity,
@@ -134,6 +150,21 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
         if (_imagesChanged) {
           await repository.setVariantImages(widget.variant!.id, _images);
         }
+      } else if (action == VariantSaveAction.update) {
+        await repository.updateVariant(
+          variantId: _createdVariantId!,
+          quantity: quantity,
+          unit: _unitController.text.trim(),
+          imageUrl: imageUrl,
+          mrp: mrp,
+          sellingPrice: sellingPrice,
+          costPrice: costPrice,
+          available: _available,
+          allowBelowCost: allowBelowCost,
+        );
+        if (_images.length > 1 || _imagesChanged) {
+          await repository.setVariantImages(_createdVariantId!, _images);
+        }
       } else {
         final newVariantId = await repository.createVariant(
           productId: widget.productId,
@@ -145,6 +176,7 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
           costPrice: costPrice,
           allowBelowCost: allowBelowCost,
         );
+        _createdVariantId = newVariantId;
 
         // Photos go in a second call because they live in their own table and
         // need a variant to point at. Only when there is more than the
@@ -171,10 +203,15 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('Selling price is below cost'),
-            content: const Text('This means you\'d lose money on every sale. Save anyway?'),
+            content: const Text(
+                'This means you\'d lose money on every sale. Save anyway?'),
             actions: [
-              TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
-              TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Save anyway')),
+              TextButton(
+                  onPressed: hapticize(() => Navigator.of(context).pop(false)),
+                  child: const Text('Cancel')),
+              TextButton(
+                  onPressed: hapticize(() => Navigator.of(context).pop(true)),
+                  child: const Text('Save anyway')),
             ],
           ),
         );
@@ -184,7 +221,9 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Couldn't save variant - please check the values and try again")),
+          const SnackBar(
+              content: Text(
+                  "Couldn't save variant - please check the values and try again")),
         );
       }
     } finally {
@@ -224,7 +263,8 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
       // photos are there.
       if (result.skipped > 0) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${result.skipped} photo${result.skipped == 1 ? '' : 's'} not added - '
+          content: Text(
+              '${result.skipped} photo${result.skipped == 1 ? '' : 's'} not added - '
               'a variant can have at most ${AdminProductsRepository.maxVariantImages}.'),
         ));
       }
@@ -253,17 +293,23 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
                   Expanded(
                     child: TextFormField(
                       controller: _quantityController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(labelText: 'Pack size'),
-                      validator: (v) => (v == null || double.tryParse(v) == null) ? 'Required' : null,
+                      validator: (v) =>
+                          (v == null || double.tryParse(v) == null)
+                              ? 'Required'
+                              : null,
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: TextFormField(
                       controller: _unitController,
-                      decoration: const InputDecoration(labelText: 'Unit (kg, g, L...)'),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      decoration: const InputDecoration(
+                          labelText: 'Unit (kg, g, L...)'),
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Required' : null,
                     ),
                   ),
                 ],
@@ -274,18 +320,27 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
                   Expanded(
                     child: TextFormField(
                       controller: _mrpController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(labelText: 'MRP (₹)'),
-                      validator: (v) => (v == null || double.tryParse(v) == null) ? 'Required' : null,
+                      validator: (v) =>
+                          (v == null || double.tryParse(v) == null)
+                              ? 'Required'
+                              : null,
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: TextFormField(
                       controller: _sellingPriceController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Selling Price (₹)'),
-                      validator: (v) => (v == null || double.tryParse(v) == null) ? 'Required' : null,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      decoration:
+                          const InputDecoration(labelText: 'Selling Price (₹)'),
+                      validator: (v) =>
+                          (v == null || double.tryParse(v) == null)
+                              ? 'Required'
+                              : null,
                     ),
                   ),
                 ],
@@ -293,7 +348,8 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
               const SizedBox(height: 12),
               TextFormField(
                 controller: _costPriceController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
                   labelText: 'Your cost price (₹)',
                   helperText: _isEditing
@@ -311,18 +367,24 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Product photos (${_images.length}/${AdminProductsRepository.maxVariantImages})',
+                  Text(
+                      'Product photos (${_images.length}/${AdminProductsRepository.maxVariantImages})',
                       style: Theme.of(context).textTheme.titleSmall),
                   TextButton.icon(
                     onPressed: (_isUploadingImage ||
-                            _images.length >= AdminProductsRepository.maxVariantImages)
+                            _images.length >=
+                                AdminProductsRepository.maxVariantImages)
                         ? null
                         : hapticize(_addPhotos),
                     icon: _isUploadingImage
                         ? const SizedBox(
-                            height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.add_photo_alternate_outlined, size: 20),
-                    label: Text(_isUploadingImage ? 'Uploading...' : 'Add photos'),
+                            height: 16,
+                            width: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.add_photo_alternate_outlined,
+                            size: 20),
+                    label:
+                        Text(_isUploadingImage ? 'Uploading...' : 'Add photos'),
                   ),
                 ],
               ),
@@ -347,9 +409,9 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
                       url: _images[index],
                       isPrimary: index == 0,
                       onRemove: hapticize(() => setState(() {
-                        _images = [..._images]..removeAt(index);
-                        _imagesChanged = true;
-                      })),
+                            _images = [..._images]..removeAt(index);
+                            _imagesChanged = true;
+                          })),
                       // REORDERING, REDUCED TO THE ONE MOVE THAT MATTERS.
                       // Drag-to-reorder inside a horizontal strip inside a
                       // scrolling dialog is fiddly on a phone and the only
@@ -374,7 +436,8 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Available'),
                   value: _available,
-                  onChanged: hapticizeValue((value) => setState(() => _available = value)),
+                  onChanged: hapticizeValue(
+                      (value) => setState(() => _available = value)),
                 ),
               ],
             ],
@@ -382,18 +445,22 @@ class _AdminVariantFormDialogState extends ConsumerState<AdminVariantFormDialog>
         ),
       ),
       actions: [
-        TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
+        TextButton(
+            onPressed: hapticize(() => Navigator.of(context).pop(false)),
+            child: const Text('Cancel')),
         FilledButton(
           onPressed: _isSaving ? null : () => _save(),
           child: _isSaving
-              ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  height: 16,
+                  width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Save'),
         ),
       ],
     );
   }
 }
-
 
 /// One photo in the strip: the picture, whether it is the main one, and the
 /// two things you can do to it.
