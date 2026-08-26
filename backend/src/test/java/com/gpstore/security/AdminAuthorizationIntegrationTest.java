@@ -63,10 +63,23 @@ class AdminAuthorizationIntegrationTest {
 
     @Test
     @WithMockUser(roles = "DELIVERY_BOY")
+    void fleetDeliveryListRejectsDeliveryBoyRole() throws Exception {
+        mockMvc.perform(get("/api/deliveries"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/deliveries/breached"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/deliveries/assign")
+                        .param("orderId", "1")
+                        .param("deliveryPartnerId", "1"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "DELIVERY_BOY")
     void adminOnlyDeliveryBatchEndpointRejectsDeliveryBoyRole() throws Exception {
-        // Delivery partners can act on individual deliveries (/api/deliveries/**)
-        // but batch management is admin-only - a distinct role boundary this
-        // pins down separately from the plain CUSTOMER-vs-ADMIN cases above.
+        // Delivery partners can act on their own deliveries, but batch
+        // management and the fleet-wide delivery list are admin-only.
         mockMvc.perform(get("/api/delivery-batches"))
                 .andExpect(status().isForbidden());
     }

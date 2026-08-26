@@ -93,6 +93,9 @@ def main() -> None:
                 "Play upload needs android/key.properties from a real keystore "
                 "(see android/key.properties.example). Do not sign a modified APK by hand."
             )
+            if os.environ.get("REQUIRE_RELEASE_SIGNING") == "1":
+                print(f"DEBUG_SIGNER_NOT_ALLOWED {apk}")
+                failed = True
         else:
             print("SIGNER=release (not Android Debug)")
         try:

@@ -43,6 +43,13 @@ class CustomerAccountStatusServiceTest {
     }
 
     @Test
+    void disabledCustomerIsNotUsableEvenWhenActive() {
+        when(customerRepository.findById(7L)).thenReturn(Optional.of(customer(true, false)));
+
+        assertFalse(service.isUsable(7L));
+    }
+
+    @Test
     void missingCustomerIsNotUsable() {
         when(customerRepository.findById(7L)).thenReturn(Optional.empty());
 

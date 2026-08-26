@@ -27,7 +27,11 @@ backend and the try/catch around `Firebase.initializeApp()` in
    (same folder as `android/app/build.gradle`). This file is
    project-specific and already gitignored - never commit it, it's tied to
    your Firebase project.
-5. Skip the rest of Firebase's setup wizard (SDK snippets, etc.) - the
+5. For GitHub Actions production APKs, also store the same file as repo
+   secret `GOOGLE_SERVICES_JSON_BASE64` (`base64 -w0 android/app/google-services.json`).
+   `main` builds fail without it. Pull requests fall back to
+   `google-services.placeholder.json` (not a real Firebase project).
+6. Skip the rest of Firebase's setup wizard (SDK snippets, etc.) - the
    `firebase_core`/`firebase_messaging` packages already handle that; you
    only needed the JSON file.
 

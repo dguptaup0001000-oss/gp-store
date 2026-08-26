@@ -66,7 +66,7 @@ public class CustomerAccountStatusService {
         }
     }
 
-    static boolean isCustomerUsable(Customer customer) {
+    public static boolean isCustomerUsable(Customer customer) {
         if (customer == null) {
             return false;
         }

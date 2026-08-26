@@ -1,6 +1,8 @@
 package com.gpstore.security;
 
 import com.gpstore.service.CustomerService;
+import com.gpstore.repository.CustomerRepository;
+import com.gpstore.entity.Customer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +43,7 @@ class DeactivatedCustomerJwtTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private CustomerService customerService;
+    @Autowired private CustomerRepository customerRepository;
     @Autowired private ObjectMapper objectMapper;
 
     @Test
@@ -84,6 +87,22 @@ class DeactivatedCustomerJwtTest {
     }
 
     @Test
+    @DisplayName("a deactivated account cannot mint a new access JWT from its refresh token")
+    void deactivatedRefreshTokenCannotMintNewAccessJwt() throws Exception {
+        long stamp = System.nanoTime();
+        JsonNode body = register("refresh-deact-" + stamp + "@example.com", phone(stamp));
+        String refreshToken = body.get("refreshToken").asText();
+        long customerId = body.get("customerId").asLong();
+
+        customerService.setAccountActive(customerId, false);
+
+        mockMvc.perform(post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"%s\"}".formatted(refreshToken)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("deactivating one customer does not reject a different active account")
     void otherActiveAccountsAreUnaffected() throws Exception {
         long stamp = System.nanoTime();
@@ -94,6 +113,25 @@ class DeactivatedCustomerJwtTest {
 
         mockMvc.perform(get(PROTECTED).header("Authorization", "Bearer " + other.get("token").asText()))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("a disabled account cannot log in even if it is still marked active")
+    void disabledAccountCannotLogin() throws Exception {
+        long stamp = System.nanoTime();
+        String email = "disabled-" + stamp + "@example.com";
+        JsonNode body = register(email, phone(stamp));
+        long customerId = body.get("customerId").asLong();
+
+        Customer stored = customerRepository.findById(customerId).orElseThrow();
+        stored.setEnabled(false);
+        customerRepository.save(stored);
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"%s\",\"password\":\"Passw0rd!23\"}".formatted(email)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid email or password"));
     }
 
     private JsonNode register(String email, String phone) throws Exception {

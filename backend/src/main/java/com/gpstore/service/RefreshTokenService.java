@@ -92,6 +92,10 @@ public class RefreshTokenService {
         repository.save(existing);
 
         Customer customer = existing.getCustomer();
+        if (!com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer)) {
+            repository.revokeAllForCustomer(customer.getId());
+            throw new AuthException(INVALID_REFRESH_TOKEN);
+        }
         String familyId = existing.getFamilyId();
         if (familyId == null || familyId.isBlank()) {
             familyId = UUID.randomUUID().toString();

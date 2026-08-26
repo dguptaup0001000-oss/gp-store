@@ -18,7 +18,8 @@ abstract class KeyValueStore {
 /// Production implementation: flutter_secure_storage, already a dependency of
 /// this app, so this adds no new package.
 class SecureKeyValueStore implements KeyValueStore {
-  const SecureKeyValueStore({FlutterSecureStorage storage = const FlutterSecureStorage()})
+  const SecureKeyValueStore(
+      {FlutterSecureStorage storage = const FlutterSecureStorage()})
       : _storage = storage;
 
   final FlutterSecureStorage _storage;
@@ -27,7 +28,8 @@ class SecureKeyValueStore implements KeyValueStore {
   Future<String?> read(String key) => _storage.read(key: key);
 
   @override
-  Future<void> write(String key, String value) => _storage.write(key: key, value: value);
+  Future<void> write(String key, String value) =>
+      _storage.write(key: key, value: value);
 
   @override
   Future<void> delete(String key) => _storage.delete(key: key);

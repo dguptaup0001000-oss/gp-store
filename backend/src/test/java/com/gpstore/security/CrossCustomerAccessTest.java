@@ -166,4 +166,51 @@ class CrossCustomerAccessTest {
         assertThrows(ResourceNotFoundException.class,
                 () -> addressService.getOwnedAddress(id, mallory.getId()));
     }
+
+    @Test
+    @DisplayName("creating an address ignores a client-supplied subzone lock")
+    void createCannotLockTerritory() {
+        Address incoming = new Address();
+        incoming.setCustomer(alice);
+        incoming.setFullName("lock-probe");
+        incoming.setMobileNumber("9000000000");
+        incoming.setHouseNo("1");
+        incoming.setArea("A");
+        incoming.setCity("C");
+        incoming.setState("S");
+        incoming.setPincode("110001");
+        incoming.setCountry("India");
+        incoming.setSubzoneLocked(true);
+
+        Address saved = addressService.createOwned(alice, incoming);
+        assertNotEquals(Boolean.TRUE, saved.getSubzoneLocked(),
+                "a customer must not be able to freeze territory by posting subzoneLocked");
+    }
+
+    @Test
+    @DisplayName("creating an address with someone else's id inserts a new row")
+    void createCannotOverwriteAnotherCustomersRow() {
+        Address incoming = new Address();
+        incoming.setId(aliceAddress.getId());
+        incoming.setCustomer(mallory);
+        incoming.setFullName("stolen");
+        incoming.setMobileNumber("9111111111");
+        incoming.setHouseNo("99");
+        incoming.setArea("Elsewhere");
+        incoming.setCity("Elsewhere");
+        incoming.setState("Elsewhere");
+        incoming.setPincode("999999");
+        incoming.setCountry("India");
+
+        Address saved = addressService.createOwned(mallory, incoming);
+
+        assertNotEquals(aliceAddress.getId(), saved.getId(),
+                "a client-supplied id must not become an UPDATE of another customer's address");
+        assertEquals(mallory.getId(), saved.getCustomer().getId());
+
+        Address aliceReloaded = addressRepository.findById(aliceAddress.getId()).orElseThrow();
+        assertEquals(alice.getId(), aliceReloaded.getCustomer().getId(),
+                "the original address must still belong to its owner");
+        assertEquals(alice.getFullName(), aliceReloaded.getFullName());
+    }
 }

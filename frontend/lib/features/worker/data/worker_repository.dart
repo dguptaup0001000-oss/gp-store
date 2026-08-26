@@ -1,11 +1,11 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../../core/api/api_client.dart';
 import '../domain/worker_models.dart';
+import '../../../core/logging/app_log.dart';
 
 /// Everything the worker app asks the server for.
 ///
@@ -26,7 +26,8 @@ class WorkerRepository {
 
   Future<WorkerProfile> me() async {
     final response = await apiClient.dio.get('/api/worker/me');
-    return WorkerProfile.fromJson(Map<String, dynamic>.from(response.data as Map));
+    return WorkerProfile.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
   }
 
   // myOrders() - the worker's own scan history - was removed from this app
@@ -46,7 +47,8 @@ class WorkerRepository {
   /// worker tapped a task on the home list.
   Future<WorkerOrder> order(int orderId) async {
     final response = await apiClient.dio.get('/api/worker/orders/$orderId');
-    return WorkerOrder.fromJson(Map<String, dynamic>.from(response.data as Map));
+    return WorkerOrder.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
   }
 
   /// Moves a delivery to its next status.
@@ -97,13 +99,14 @@ class WorkerRepository {
       );
       return true;
     } on DioException catch (e) {
-      debugPrint('Location update not stored: ${e.message}');
+      appLog('Location update not stored: ${e.message}');
       return false;
     }
   }
 
   Future<void> setAvailable(bool available) async {
-    await apiClient.dio.post('/api/worker/status', data: {'available': available});
+    await apiClient.dio
+        .post('/api/worker/status', data: {'available': available});
   }
 
   /// Submits one scan.
@@ -121,7 +124,8 @@ class WorkerRepository {
         '/api/worker/scans/pack',
         data: {'qrToken': qrToken, 'clientRequestId': clientRequestId},
       );
-      return ScanOutcome.fromJson(Map<String, dynamic>.from(response.data as Map));
+      return ScanOutcome.fromJson(
+          Map<String, dynamic>.from(response.data as Map));
     } on DioException catch (e) {
       if (_isConnectivity(e)) {
         await _enqueue(qrToken: qrToken, clientRequestId: clientRequestId);
@@ -153,7 +157,8 @@ class WorkerRepository {
 
   // ------------------------------------------------------------ the queue
 
-  Future<void> _enqueue({required String qrToken, required String clientRequestId}) async {
+  Future<void> _enqueue(
+      {required String qrToken, required String clientRequestId}) async {
     final pending = await pendingScans();
     // Same physical scan, retried: it is already waiting.
     if (pending.any((p) => p['clientRequestId'] == clientRequestId)) {
@@ -177,7 +182,7 @@ class WorkerRepository {
     } catch (_) {
       // A queue we cannot read is worse than no queue: it would fail on every
       // flush forever. Drop it and say so in debug.
-      debugPrint('Worker scan queue was unreadable and has been cleared.');
+      appLog('Worker scan queue was unreadable and has been cleared.');
       await _storage.delete(key: _queueKey);
       return [];
     }
@@ -213,7 +218,8 @@ class WorkerRepository {
             'clientRequestId': item['clientRequestId'],
           },
         );
-        results.add(ScanOutcome.fromJson(Map<String, dynamic>.from(response.data as Map)));
+        results.add(ScanOutcome.fromJson(
+            Map<String, dynamic>.from(response.data as Map)));
       } on DioException catch (e) {
         if (_isConnectivity(e)) {
           connectionDown = true;

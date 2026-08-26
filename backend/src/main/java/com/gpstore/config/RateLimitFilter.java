@@ -75,21 +75,18 @@ import java.util.concurrent.TimeUnit;
  *       SMS-cost targets. 20/min still allows a real person to mistype a
  *       password several times and request a fresh OTP.
  *
- *   rate-limit.checkout-per-minute        default 20, per customer
- *       orders/place, POST /api/payments, checkout-session, payment
- *       verify, refund/COD/UPI confirm writes, coupon validate.
- *       No human places 20 orders a minute, so this only ever
- *       catches a stuck retry loop or a script, while leaving impatient
- *       double-taps (already made safe by idempotency keys and row locks)
- *       comfortably under the line. Checkout-session, verify, and other
- *       per-order payment writes share one normalised path so hammering
- *       many order ids does not multiply the quota. Coupon validate is
- *       here so brute-forcing offer codes is capped the same way.
- *
- *   rate-limit.admin-per-minute             default 30, per admin account
- *       POST /api/notifications/broadcast and writes under /api/admin/**.
- *       Broadcasts can fan out to every customer; this is a brake, not the
- *       RBAC check (that stays in SecurityConfig).
+   *   rate-limit.checkout-per-minute        default 20, per customer
+   *       orders/place, GET checkout-preview, POST /api/payments, checkout-session,
+   *       payment verify, refund/COD/UPI confirm writes, coupon validate.
+   *       Preview is here because a coupon code on the query string is the
+   *       same brute-force surface as /coupons/validate.
+   *
+   *   rate-limit.admin-per-minute             default 30, per admin/worker account
+   *       POST /api/notifications/broadcast, writes under /api/admin/**,
+   *       and writes under /api/worker/**, /api/deliveries, /api/inventory,
+   *       /api/products, /api/categories, /api/product-variants, and
+   *       /api/orders (except place, which is CHECKOUT).
+   *       DELETE /api/customers/me is AUTH (account destruction).
  *
  *   rate-limit.search-per-minute            default 60, per customer or IP
  *       GET /api/products/search*. Instant search is the expensive read.
@@ -244,12 +241,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         if (path.equals("/api/orders/place")
+                || path.equals("/api/orders/checkout-preview")
                 || path.equals("/api/payments")
                 || path.equals("/api/coupons/validate")
                 || isCheckoutSession(path)
                 || isPaymentVerify(path)
                 || isPaymentSensitiveWrite(path)) {
             return Bucket.CHECKOUT;
+        }
+
+        if (path.equals("/api/customers/me") && method.equals("DELETE")) {
+            return Bucket.AUTH;
         }
 
         // Only mutations - browsing a cart or reading reviews is not abuse,
@@ -263,7 +265,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         if (isWrite && (path.equals("/api/notifications/broadcast")
-                || path.startsWith("/api/admin/"))) {
+                || path.startsWith("/api/admin/")
+                || path.startsWith("/api/worker/")
+                || path.startsWith("/api/deliveries")
+                || path.startsWith("/api/inventory")
+                || path.startsWith("/api/products")
+                || path.startsWith("/api/categories")
+                || path.startsWith("/api/product-variants")
+                || (path.startsWith("/api/orders") && !path.equals("/api/orders/place")))) {
             return Bucket.ADMIN;
         }
 

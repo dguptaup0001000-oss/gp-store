@@ -1,8 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
-
 import 'speech_engine.dart';
+import '../logging/app_log.dart';
 
 /// What happened when the customer tapped the microphone.
 enum VoiceOutcome {
@@ -83,7 +82,8 @@ class VoiceResult {
 /// PRIVACY. Audio never leaves the recogniser. This class receives text and
 /// nothing else - no recording, no file, no upload, nothing to delete.
 class SpeechService {
-  SpeechService({SpeechEngine? engine}) : _engine = engine ?? PluginSpeechEngine();
+  SpeechService({SpeechEngine? engine})
+      : _engine = engine ?? PluginSpeechEngine();
 
   final SpeechEngine _engine;
 
@@ -131,7 +131,7 @@ class SpeechService {
         onError: _onError,
       );
     } catch (e) {
-      debugPrint('Speech init failed: $e');
+      appLog('Speech init failed: $e');
       _available = false;
     }
 
@@ -159,7 +159,9 @@ class SpeechService {
       // UI offers Settings or explains the device cannot do this at all.
       final permitted = await _hasPermission();
       return VoiceResult(
-        permitted ? VoiceOutcome.recognizerUnavailable : VoiceOutcome.permissionDenied,
+        permitted
+            ? VoiceOutcome.recognizerUnavailable
+            : VoiceOutcome.permissionDenied,
       );
     }
 
@@ -174,7 +176,7 @@ class SpeechService {
         listenFor: listenFor,
       );
     } catch (e) {
-      debugPrint('Speech listen failed: $e');
+      appLog('Speech listen failed: $e');
       _session = null;
       return const VoiceResult(VoiceOutcome.failed);
     }
@@ -231,7 +233,7 @@ class SpeechService {
       return;
     }
 
-    debugPrint('Speech error: $code');
+    appLog('Speech error: $code');
     session.complete(const VoiceResult(VoiceOutcome.failed));
   }
 
@@ -241,7 +243,7 @@ class SpeechService {
     try {
       await _engine.stop();
     } catch (e) {
-      debugPrint('Speech stop failed: $e');
+      appLog('Speech stop failed: $e');
     }
     // Do not wait for a status that may not come: a customer who tapped Done
     // has finished, and the transcript so far is the answer.
@@ -254,7 +256,7 @@ class SpeechService {
     try {
       await _engine.cancel();
     } catch (e) {
-      debugPrint('Speech cancel failed: $e');
+      appLog('Speech cancel failed: $e');
     }
     session?.complete(const VoiceResult(VoiceOutcome.cancelled));
     _session = null;
@@ -323,7 +325,8 @@ class _Session {
       complete(VoiceResult(VoiceOutcome.heard, transcript: text));
       return;
     }
-    complete(VoiceResult(_started ? VoiceOutcome.noSpeech : VoiceOutcome.failed));
+    complete(
+        VoiceResult(_started ? VoiceOutcome.noSpeech : VoiceOutcome.failed));
   }
 
   void complete(VoiceResult result) {

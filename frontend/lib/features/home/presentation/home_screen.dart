@@ -316,17 +316,15 @@ class HomeScreen extends ConsumerWidget {
                       ),
                     ),
 
-                    categoriesAsync.when(
-                      loading: () => const SizedBox.shrink(),
-                      error: (e, s) => const SizedBox.shrink(),
+                    categoriesAsync.maybeWhen(
                       data: (categories) =>
                           BestsellersSection(categories: categories),
+                      orElse: () => const SizedBox.shrink(),
                     ),
 
-                    brandsAsync.when(
-                      loading: () => const SizedBox.shrink(),
-                      error: (e, s) => const SizedBox.shrink(),
+                    brandsAsync.maybeWhen(
                       data: (brands) => BuyByBrandBanner(brands: brands),
+                      orElse: () => const SizedBox.shrink(),
                     ),
 
                     // SECOND WAVE, from here down.

@@ -223,6 +223,27 @@ class OtpAuthenticationIntegrationTest {
     }
 
     @Test
+    @DisplayName("a deactivated account cannot reset its password")
+    void deactivatedAccountCannotResetPassword() {
+        String phone = uniquePhone();
+        Customer customer = existingCustomer(phone);
+        customer.setActive(false);
+        customerRepository.save(customer);
+
+        String msg = authService.requestPasswordResetOtp(phone);
+        assertEquals(OtpService.GENERIC_REQUEST_MESSAGE, msg);
+        assertFalse(otpProvider.peekIssuedOtpForTests(
+                com.gpstore.auth.IndianPhoneNumbers.normalizeTo91(phone), OtpPurpose.PASSWORD_RESET).isPresent(),
+                "a banned phone must not receive a reset SMS");
+
+        otpService.requestOtp(phone, OtpPurpose.PASSWORD_RESET, true);
+        assertThrows(BadRequestException.class,
+                () -> authService.verifyPasswordResetOtp(phone, peek(phone, OtpPurpose.PASSWORD_RESET)));
+        assertTrue(passwordEncoder.matches("OldPassw0rd",
+                customerRepository.findById(customer.getId()).orElseThrow().getPassword()));
+    }
+
+    @Test
     @DisplayName("password reset verify/complete hashes the new password and refuses token reuse")
     void passwordResetCompletesAndCannotReuseToken() {
         String phone = uniquePhone();

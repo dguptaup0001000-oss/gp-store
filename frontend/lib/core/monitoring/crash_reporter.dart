@@ -1,7 +1,8 @@
 import 'dart:ui';
 
-import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
+
+import '../logging/app_log.dart';
 
 /// Where a crash goes once something has caught it.
 ///
@@ -22,22 +23,19 @@ abstract class CrashReporter {
   void recordFatal(Object error, StackTrace? stack);
 }
 
-class FirebaseCrashReporter implements CrashReporter {
-  const FirebaseCrashReporter();
-
-  FirebaseCrashlytics get _crashlytics => FirebaseCrashlytics.instance;
-
-  @override
-  Future<void> setEnabled(bool enabled) =>
-      _crashlytics.setCrashlyticsCollectionEnabled(enabled);
+/// Worker / tests: record nowhere. Still installs handlers so a grey screen
+/// is not the only signal of an uncaught error.
+class NoOpCrashReporter implements CrashReporter {
+  const NoOpCrashReporter();
 
   @override
-  void recordFlutterError(FlutterErrorDetails details) =>
-      _crashlytics.recordFlutterError(details);
+  Future<void> setEnabled(bool enabled) async {}
 
   @override
-  void recordFatal(Object error, StackTrace? stack) =>
-      _crashlytics.recordError(error, stack, fatal: true);
+  void recordFlutterError(FlutterErrorDetails details) {}
+
+  @override
+  void recordFatal(Object error, StackTrace? stack) {}
 }
 
 /// Installs the two handlers that decide whether a release crash is ever
@@ -83,7 +81,7 @@ Future<void> installCrashHandlers(
     // crashes land in is how that stream stops being read.
     await reporter.setEnabled(!inDebugMode);
   } catch (e) {
-    debugPrint('Crash reporting could not be enabled, continuing without it: $e');
+    appLog('Crash reporting could not be enabled, continuing without it: $e');
     return;
   }
 
@@ -96,9 +94,11 @@ Future<void> installCrashHandlers(
     reporter.recordFlutterError(details);
   };
 
+  final recordsExternally = reporter is! NoOpCrashReporter;
   PlatformDispatcher.instance.onError = (error, stack) {
     reporter.recordFatal(error, stack);
-    // true: reported, so the platform should not also print it as unhandled.
-    return true;
+    // Firebase already recorded it. A no-op reporter must not swallow the
+    // engine dump or worker crashes disappear entirely.
+    return recordsExternally;
   };
 }

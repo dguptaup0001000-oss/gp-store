@@ -229,6 +229,17 @@ class WorkerDeliveryStatusTest {
     }
 
     @Test
+    @DisplayName("a worker cannot read a delivery that is not theirs")
+    void anotherWorkersDeliveryIsHiddenOnRead() {
+        assertTrue(deliveryService.getDeliveryById(delivery.getId(), accountOf(worker), false).isPresent(),
+                "the assigned worker must still be able to open their own delivery");
+        assertTrue(deliveryService.getDeliveryById(delivery.getId(), accountOf(otherWorker), false).isEmpty(),
+                "a stranger's delivery must read as missing, not as someone else's row");
+        assertTrue(deliveryService.getDeliveryById(delivery.getId(), accountOf(otherWorker), true).isPresent(),
+                "an admin can still open any delivery");
+    }
+
+    @Test
     @DisplayName("authorisation is checked before the transition rule")
     void ownershipOutranksTheStateMachine() {
         // A stranger sending an ILLEGAL transition must be told not-found, not

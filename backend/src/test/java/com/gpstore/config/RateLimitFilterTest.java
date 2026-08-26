@@ -188,6 +188,23 @@ class RateLimitFilterTest {
         assertNotNull(chain.getRequest(), "a Redis outage must not freeze the cart");
     }
 
+    @Test
+    void checkoutPreviewAndAccountDeletionAreRateLimited() throws Exception {
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(31L);
+
+        MockHttpServletResponse preview = new MockHttpServletResponse();
+        filter.doFilter(request("GET", "/api/orders/checkout-preview"), preview, new MockFilterChain());
+        assertEquals(429, preview.getStatus());
+
+        MockHttpServletResponse deleteMe = new MockHttpServletResponse();
+        filter.doFilter(request("DELETE", "/api/customers/me"), deleteMe, new MockFilterChain());
+        assertEquals(429, deleteMe.getStatus());
+
+        MockHttpServletResponse pack = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/worker/scans/pack"), pack, new MockFilterChain());
+        assertEquals(429, pack.getStatus());
+    }
+
     private static MockHttpServletRequest request(String method, String path) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
         request.setServletPath(path);

@@ -98,8 +98,30 @@ jobs:
         # pure Dart unit tests (no device, no emulator), so they cost seconds.
         run: flutter test
 
+      - name: Require release keystore on main
+        if: github.ref == 'refs/heads/main'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::main branch APK/AAB artifacts require ANDROID_KEYSTORE_BASE64"
+            exit 1
+          fi
+
       - name: Decode google-services.json
-        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > android/app/google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > android/app/google-services.json
+            python3 tool/verify_google_services.py android/app/google-services.json
+          elif [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            echo "::error::GOOGLE_SERVICES_JSON_BASE64 is required for production APKs on main"
+            exit 1
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON_BASE64 unset; using the committed placeholder (push/Crashlytics will not work)"
+            cp android/app/google-services.placeholder.json android/app/google-services.json
+          fi
 
       - name: Install Play upload keystore if configured
         # Optional. Without these secrets, assembleRelease uses the Android
@@ -258,9 +280,10 @@ jobs:
       - name: Verify APK signatures and zip alignment
         # assembleRelease already signs (debug key unless key.properties exists)
         # and zip-aligns. This step fails the job if an artifact is actually
-        # unsigned or unaligned. It does not re-sign. A debug signer is printed
-        # as a warning: Play still needs a real keystore on the machine/CI that
-        # produces the upload AAB.
+        # unsigned or unaligned. It does not re-sign. On main, a debug signer
+        # is a hard failure so Play-bound artifacts cannot ship unsigned-for-Play.
+        env:
+          REQUIRE_RELEASE_SIGNING: ${{ github.ref == 'refs/heads/main' && '1' || '0' }}
         run: |
           chmod +x tool/verify_apk_release.py
           python3 tool/verify_apk_release.py \
