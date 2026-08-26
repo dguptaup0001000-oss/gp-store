@@ -62,18 +62,30 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
         },
       );
       final body = Map<String, dynamic>.from(response.data as Map);
-      await widget.tokenStorage.saveTokens(
-        accessToken: body['token'] as String,
-        refreshToken: body['refreshToken'] as String,
-      );
-      await widget.tokenStorage.setRememberMe(true);
+      final accessToken = body['token'] as String;
+      final refreshToken = body['refreshToken'] as String;
 
-      // Signing in is not the same as being a worker. Asking the server who
-      // this account is turns "logged in as a customer" into a sentence the
-      // person can act on, instead of an empty home screen.
-      final profile = await widget.repository.me();
-      if (!mounted) return;
-      widget.onSignedIn(profile);
+      // Hold in memory only until /api/worker/me confirms this account is a
+      // worker. Persisting first left a customer (or disabled) session on
+      // disk when me() failed.
+      widget.tokenStorage.holdTokensInMemory(
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+      );
+
+      try {
+        final profile = await widget.repository.me();
+        await widget.tokenStorage.saveTokens(
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+        );
+        await widget.tokenStorage.setRememberMe(true);
+        if (!mounted) return;
+        widget.onSignedIn(profile);
+      } catch (e) {
+        await widget.tokenStorage.clear();
+        rethrow;
+      }
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } catch (_) {

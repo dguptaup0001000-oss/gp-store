@@ -3,27 +3,40 @@ import 'package:gpstore/core/config/app_environment.dart';
 
 void main() {
   group('AppEnvironment', () {
-    test('production and staging point at a real https host, never localhost', () {
+    test('production points at a real https host, never localhost', () {
       // The mistake this catches is a shipped APK talking to 10.0.2.2, which
       // fails on every real phone while working perfectly on the emulator the
       // developer tested on.
-      for (final env in [AppEnvironment.production, AppEnvironment.staging]) {
-        expect(env.baseUrl, startsWith('https://'), reason: '$env must be encrypted');
-        expect(env.baseUrl, isNot(contains('localhost')));
-        expect(env.baseUrl, isNot(contains('10.0.2.2')));
-        expect(env.baseUrl, isNot(contains('onrender')));
-        expect(env.baseUrl, isNot(contains('render.com')));
-        expect(env.baseUrl, AppEnvironment.productionApiBaseUrl);
-        expect(env.baseUrl, 'https://api.gpstore.co.in/v1');
-      }
+      expect(AppEnvironment.production.baseUrl, startsWith('https://'));
+      expect(AppEnvironment.production.baseUrl, isNot(contains('localhost')));
+      expect(AppEnvironment.production.baseUrl, isNot(contains('10.0.2.2')));
+      expect(AppEnvironment.production.baseUrl, isNot(contains('onrender')));
+      expect(AppEnvironment.production.baseUrl, isNot(contains('render.com')));
+      expect(AppEnvironment.production.baseUrl, AppEnvironment.productionApiBaseUrl);
+      expect(AppEnvironment.production.baseUrl, 'https://api.gpstore.co.in/v1');
     });
 
-    test('every environment targets the versioned API path', () {
+    test('staging without an API_BASE_URL override refuses to target production', () {
+      expect(
+        () => AppEnvironment.staging.baseUrl,
+        throwsA(isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          contains('API_BASE_URL'),
+        )),
+      );
+    });
+
+    test('staging must not be identified as the live production host', () {
+      expect(AppEnvironment.isProductionApiUrl(AppEnvironment.productionApiBaseUrl), isTrue);
+      expect(AppEnvironment.isProductionApiUrl('https://staging.example.com/v1'), isFalse);
+    });
+
+    test('development and production target the versioned API path', () {
       // The backend serves under context-path /v1; a base URL without it
-      // 404s every single request.
-      for (final env in AppEnvironment.values) {
-        expect(env.baseUrl, endsWith('/v1'), reason: '$env is missing the API version');
-      }
+      // 404s every single request. Staging has no default URL by design.
+      expect(AppEnvironment.production.baseUrl, endsWith('/v1'));
+      expect(AppEnvironment.development.baseUrl, endsWith('/v1'));
     });
 
     test('development points at the host machine, not at production', () {

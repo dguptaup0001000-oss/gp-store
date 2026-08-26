@@ -149,8 +149,19 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
               ),
             ),
           profileAsync.when(
-            loading: () => const SizedBox.shrink(),
-            error: (error, stackTrace) => const SizedBox.shrink(),
+            loading: () => const SizedBox(
+              width: 24,
+              height: 24,
+              child: Padding(
+                padding: EdgeInsets.all(8),
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+            error: (error, stackTrace) => IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: "Couldn't load duty status — retry",
+              onPressed: hapticize(() => ref.invalidate(myDeliveryProfileProvider)),
+            ),
             data: (profile) => Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(

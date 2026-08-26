@@ -1,7 +1,12 @@
 package com.gpstore.controller;
 
+import com.gpstore.config.PageRequests;
 import com.gpstore.dto.response.InventoryResponse;
+import com.gpstore.entity.Coupon;
+import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.security.CurrentUser;
+import com.gpstore.service.CouponService;
+import com.gpstore.service.DeliveryPartnerService;
 import com.gpstore.service.InventoryService;
 import com.gpstore.service.OrderService;
 
@@ -35,14 +40,20 @@ class PaginationCapTest {
     @Mock private OrderService orderService;
     @Mock private CurrentUser currentUser;
     @Mock private InventoryService inventoryService;
+    @Mock private CouponService couponService;
+    @Mock private DeliveryPartnerService deliveryPartnerService;
 
     private OrderController orderController;
     private InventoryController inventoryController;
+    private CouponController couponController;
+    private DeliveryPartnerController deliveryPartnerController;
 
     @BeforeEach
     void setUp() {
         orderController = new OrderController(orderService, currentUser);
         inventoryController = new InventoryController(inventoryService);
+        couponController = new CouponController(couponService);
+        deliveryPartnerController = new DeliveryPartnerController(deliveryPartnerService, currentUser);
     }
 
     @Test
@@ -93,5 +104,27 @@ class PaginationCapTest {
         verify(orderService).getMyOrders(eq(1L), captor.capture());
         assertEquals(20, captor.getValue().getPageSize(),
                 "capping should only kick in above the limit - a normal page size shouldn't be silently altered");
+    }
+
+    @Test
+    void adminCouponListCapsRequestedPageSizeAt100() {
+        when(couponService.getAllCoupons(any())).thenReturn(java.util.List.<Coupon>of());
+
+        couponController.getAllCoupons(0, 50_000);
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(couponService).getAllCoupons(captor.capture());
+        assertEquals(PageRequests.MAX_PAGE_SIZE, captor.getValue().getPageSize());
+    }
+
+    @Test
+    void adminDeliveryPartnerListCapsRequestedPageSizeAt100() {
+        when(deliveryPartnerService.getAll(any())).thenReturn(java.util.List.<DeliveryPartner>of());
+
+        deliveryPartnerController.getAll(0, Integer.MAX_VALUE);
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(deliveryPartnerService).getAll(captor.capture());
+        assertEquals(PageRequests.MAX_PAGE_SIZE, captor.getValue().getPageSize());
     }
 }

@@ -78,12 +78,16 @@ public class AuthService {
     @Transactional
     public AuthResponse register(RegisterRequest request) {
 
-        customerRepository.findByEmail(request.getEmail()).ifPresent(existing -> {
-            throw new ConflictException("An account with this email already exists");
-        });
-        customerRepository.findByMobileNumber(request.getPhone()).ifPresent(existing -> {
-            throw new ConflictException("An account with this phone number already exists");
-        });
+        // Same wording for email and phone collisions on purpose: telling the
+        // caller WHICH identifier is taken is account enumeration. A person
+        // who mistyped their own details still gets a conflict they can act
+        // on (try a different email or phone) without confirming to an
+        // attacker that a specific address is registered.
+        if (customerRepository.findByEmail(request.getEmail()).isPresent()
+                || customerRepository.findByMobileNumber(request.getPhone()).isPresent()) {
+            throw new ConflictException(
+                    "Unable to create this account. Try a different email or phone.");
+        }
 
         Customer customer = new Customer();
         customer.setFullName(request.getName());

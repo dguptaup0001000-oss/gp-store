@@ -28,6 +28,7 @@ import '../../../shared/widgets/see_all_products_screen.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../../shared/widgets/section_load_error.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -233,7 +234,10 @@ class HomeScreen extends ConsumerWidget {
 
             categoriesAsync.when(
               loading: () => const SizedBox.shrink(),
-              error: (e, s) => const SizedBox.shrink(),
+              error: (e, s) => SectionLoadError(
+                message: "Couldn't load categories",
+                onRetry: () => ref.invalidate(categoriesProvider),
+              ),
               data: (categories) => Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: CategoryTabsBar(categories: categories),
@@ -247,7 +251,10 @@ class HomeScreen extends ConsumerWidget {
                 height: CategoriesRow.shelfHeight,
                 child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
               ),
-              error: (e, s) => const SizedBox.shrink(),
+              error: (e, s) => SectionLoadError(
+                message: "Couldn't load the category shelf",
+                onRetry: () => ref.invalidate(categoriesProvider),
+              ),
               data: (categories) => Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: CategoriesRow(
@@ -261,7 +268,10 @@ class HomeScreen extends ConsumerWidget {
 
             brandsAsync.when(
               loading: () => const SizedBox.shrink(),
-              error: (e, s) => const SizedBox.shrink(),
+              error: (e, s) => SectionLoadError(
+                message: "Couldn't load brands",
+                onRetry: () => ref.invalidate(brandsProvider),
+              ),
               data: (brands) => BrandsRow(
                 brands: brands,
                 onBrandTap: (brand) => Navigator.of(context).push(
@@ -272,7 +282,10 @@ class HomeScreen extends ConsumerWidget {
 
             offersAsync.when(
               loading: () => const SizedBox.shrink(),
-              error: (e, s) => const SizedBox.shrink(),
+              error: (e, s) => SectionLoadError(
+                message: "Couldn't load offers",
+                onRetry: () => ref.invalidate(activeOffersProvider),
+              ),
               data: (offers) => Padding(
                 padding: const EdgeInsets.only(top: 16),
                 child: OffersBanner(offers: offers),

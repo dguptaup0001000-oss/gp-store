@@ -1,5 +1,6 @@
 package com.gpstore.controller;
 
+import com.gpstore.config.PageRequests;
 import com.gpstore.dto.request.LocationUpdateRequest;
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.security.CurrentUser;
@@ -27,10 +28,13 @@ public class DeliveryPartnerController {
         return service.save(partner);
     }
 
-    // Admin only (enforced in SecurityConfig).
+    // Admin only (enforced in SecurityConfig). List JSON for the existing
+    // admin UI; page/size cap the query so findAll() cannot dump the roster.
     @GetMapping
-    public List<DeliveryPartner> getAll() {
-        return service.getAll();
+    public List<DeliveryPartner> getAll(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        return service.getAll(PageRequests.of(page, size));
     }
 
     @GetMapping("/available")

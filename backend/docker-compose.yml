@@ -103,6 +103,8 @@ services:
       SPRING_PROFILES_ACTIVE: prod
       APP_PRODUCTION: "true"
       FLYWAY_ENABLED: "true"
+      # Default validate. SchemaSafetyGuard refuses update/create/drop when
+      # APP_PRODUCTION=true, so a mistyped .env cannot silently mutate schema.
       DDL_AUTO: ${DDL_AUTO:-validate}
       DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME}
       DB_USERNAME: ${DB_USERNAME}

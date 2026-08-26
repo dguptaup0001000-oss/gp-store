@@ -4,16 +4,20 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../orders/domain/payment_status.dart';
+import '../../orders/presentation/order_detail_screen.dart';
 
 class OrderConfirmationScreen extends StatelessWidget {
   const OrderConfirmationScreen({
     super.key,
     required this.orderNumber,
     required this.paymentMethod,
+    this.orderId,
     this.upiPaymentLink,
     this.verifiedPaymentStatus,
   });
 
+  final int? orderId;
   final String orderNumber;
   final String paymentMethod;
   final String? upiPaymentLink;
@@ -27,7 +31,9 @@ class OrderConfirmationScreen extends StatelessWidget {
   final String? verifiedPaymentStatus;
 
   bool get _onlinePaymentIncomplete =>
-      paymentMethod == 'ONLINE' && verifiedPaymentStatus != null && verifiedPaymentStatus != 'SUCCESS';
+      paymentMethod == 'ONLINE' &&
+      verifiedPaymentStatus != null &&
+      !PaymentStatusInfo.isSettled(verifiedPaymentStatus);
 
   Future<void> _openUpiApp(BuildContext context) async {
     if (upiPaymentLink == null) return;
@@ -52,6 +58,7 @@ class OrderConfirmationScreen extends StatelessWidget {
     // an error screen either.
     if (_onlinePaymentIncomplete) {
       return _IncompletePaymentView(
+        orderId: orderId,
         orderNumber: orderNumber,
         status: verifiedPaymentStatus!,
       );
@@ -124,17 +131,24 @@ class OrderConfirmationScreen extends StatelessWidget {
 /// history. Treating this as a failure screen would suggest the basket was
 /// lost, which is both untrue and the thing people fear at this moment.
 class _IncompletePaymentView extends StatelessWidget {
-  const _IncompletePaymentView({required this.orderNumber, required this.status});
+  const _IncompletePaymentView({
+    required this.orderNumber,
+    required this.status,
+    this.orderId,
+  });
 
+  final int? orderId;
   final String orderNumber;
   final String status;
 
-  String get _explanation => switch (status) {
+  String get _explanation => switch (PaymentStatusInfo.normalize(status)) {
         'CANCELLED' => 'The payment was cancelled before it completed.',
         'EXPIRED' => 'The payment window closed before it completed.',
         'FAILED' => 'The payment did not go through.',
-        // PENDING: the customer may genuinely still be paying in their bank
-        // app, so this must not claim it failed.
+        'UNPAID' => 'This order is waiting for payment.',
+        'SUCCESS' || 'PAID' => 'Payment received.',
+        // PENDING / ACTIVE: the customer may genuinely still be paying in
+        // their bank app, so this must not claim it failed.
         _ => 'We have not received confirmation of this payment yet.',
       };
 
@@ -157,12 +171,22 @@ class _IncompletePaymentView extends StatelessWidget {
                 Text(_explanation, textAlign: TextAlign.center),
                 const SizedBox(height: 6),
                 const Text(
-                  'Your items are held. You can pay for this order from My Orders.',
+                  'Your items are held. You can pay for this order now or from My Orders.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppColors.textSecondary),
                 ),
                 const SizedBox(height: 24),
-                FilledButton(
+                if (orderId != null)
+                  FilledButton(
+                    onPressed: hapticize(() => Navigator.of(context).pushReplacement(
+                          MaterialPageRoute(
+                            builder: (_) => OrderDetailScreen(orderId: orderId!),
+                          ),
+                        )),
+                    child: const Text('Pay now'),
+                  ),
+                if (orderId != null) const SizedBox(height: 12),
+                TextButton(
                   onPressed: hapticize(() => Navigator.of(context).popUntil((route) => route.isFirst)),
                   child: const Text('Back to shopping'),
                 ),

@@ -15,6 +15,7 @@ import 'checkout_providers.dart';
 import 'order_cancellation_countdown_screen.dart';
 import 'order_confirmation_screen.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../orders/presentation/order_detail_screen.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
@@ -186,6 +187,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         throw Exception(orderResult.message ?? 'Could not place order');
       }
 
+      final createdOrderId = orderResult.orderId!;
+
       // The backend now creates the payment inside the order transaction and
       // returns its status (and the UPI link) with the order itself, so the
       // second HTTP request is only needed for older backends that did not.
@@ -197,7 +200,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       String? upiPaymentLink = orderResult.upiPaymentLink;
       if (orderResult.paymentStatus == null) {
         final paymentResult = await repository.initiatePayment(
-          orderId: orderResult.orderId!,
+          orderId: createdOrderId,
           paymentMethod: _paymentMethod,
         );
         upiPaymentLink = paymentResult.upiPaymentLink;
@@ -214,14 +217,31 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       // customer lands on a screen that already knows the real answer
       // rather than one that says "confirmed" and is then contradicted.
       String? verifiedPaymentStatus;
-      if (_paymentMethod == 'ONLINE') {
-        verifiedPaymentStatus = await _payOnline(orderResult.orderId!);
+      try {
+        if (_paymentMethod == 'ONLINE') {
+          verifiedPaymentStatus = await _payOnline(createdOrderId);
+        }
+      } catch (paymentError) {
+        // The ORDER exists. Losing it behind a snackbar is the failure this
+        // recovery path exists to prevent - take the customer to the order
+        // so they can tap Pay now.
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(extractErrorMessage(paymentError))),
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => OrderDetailScreen(orderId: createdOrderId),
+          ),
+        );
+        return;
       }
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => OrderConfirmationScreen(
+            orderId: createdOrderId,
             orderNumber: orderResult.orderNumber ?? '',
             paymentMethod: _paymentMethod,
             upiPaymentLink: upiPaymentLink,

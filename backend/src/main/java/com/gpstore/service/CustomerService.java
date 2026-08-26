@@ -9,6 +9,7 @@ import com.gpstore.repository.CartRepository;
 import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.NotificationRepository;
 import com.gpstore.repository.WishlistRepository;
+import com.gpstore.security.CustomerAccountStatusService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +28,7 @@ public class CustomerService {
     private final WishlistRepository wishlistRepository;
     private final NotificationRepository notificationRepository;
     private final PushNotificationService pushNotificationService;
+    private final CustomerAccountStatusService accountStatusService;
 
     public CustomerService(
             CustomerRepository customerRepository,
@@ -36,7 +38,8 @@ public class CustomerService {
             CartRepository cartRepository,
             WishlistRepository wishlistRepository,
             NotificationRepository notificationRepository,
-            PushNotificationService pushNotificationService) {
+            PushNotificationService pushNotificationService,
+            CustomerAccountStatusService accountStatusService) {
         this.customerRepository = customerRepository;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
@@ -45,6 +48,7 @@ public class CustomerService {
         this.cartRepository = cartRepository;
         this.wishlistRepository = wishlistRepository;
         this.notificationRepository = notificationRepository;
+        this.accountStatusService = accountStatusService;
     }
 
     /**
@@ -115,6 +119,13 @@ public class CustomerService {
         if (!active) {
             refreshTokenService.revokeAllForCustomer(customerId);
         }
+
+        // Drop the short-lived JWT status cache immediately so a just-banned
+        // access token is refused on the next request rather than for up to
+        // CustomerAccountStatusService.TTL_MS. Reactivation is the same:
+        // without this, a reactivated customer would still get 401 until
+        // the cached "unusable" entry expired.
+        accountStatusService.invalidate(customerId);
 
         return saved;
     }
@@ -271,5 +282,6 @@ public class CustomerService {
         customer.setActive(false);
 
         customerRepository.save(customer);
+        accountStatusService.invalidate(customerId);
     }
 }

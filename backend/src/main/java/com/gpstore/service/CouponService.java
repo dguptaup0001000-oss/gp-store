@@ -10,6 +10,8 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.Pageable;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -17,6 +19,14 @@ import java.util.List;
 
 @Service
 public class CouponService {
+
+    /**
+     * Customer-facing validation must not distinguish "this code does not
+     * exist" from "this code exists but cannot be used". That distinction is
+     * how an attacker harvests live offer codes. Admin getByIdOrThrow keeps
+     * the specific not-found message because staff already know the ids.
+     */
+    static final String GENERIC_INVALID_COUPON = "This coupon cannot be applied.";
 
     private final CouponRepository couponRepository;
     private final AuditLogService auditLogService;
@@ -76,8 +86,8 @@ public class CouponService {
         auditLogService.log("COUPON_DEACTIVATED", "Coupon", coupon.getId(), "code=" + coupon.getCouponCode());
     }
 
-    public List<Coupon> getAllCoupons() {
-        return couponRepository.findAll();
+    public List<Coupon> getAllCoupons(Pageable pageable) {
+        return couponRepository.findAll(pageable).getContent();
     }
 
     /**
@@ -95,7 +105,7 @@ public class CouponService {
     /** Read-only check used to preview a discount before checkout - does not consume a usage slot. */
     public BigDecimal previewDiscount(String couponCode, BigDecimal orderAmount) {
         Coupon coupon = couponRepository.findByCouponCodeIgnoreCase(couponCode)
-                .orElseThrow(() -> new ResourceNotFoundException("Coupon not found"));
+                .orElseThrow(() -> new BadRequestException(GENERIC_INVALID_COUPON));
         validate(coupon, orderAmount);
         return calculateDiscount(coupon, orderAmount);
     }
@@ -109,7 +119,7 @@ public class CouponService {
     @Transactional
     public BigDecimal redeem(String couponCode, BigDecimal orderAmount) {
         Coupon coupon = couponRepository.findByCouponCodeForUpdate(couponCode)
-                .orElseThrow(() -> new ResourceNotFoundException("Coupon not found"));
+                .orElseThrow(() -> new BadRequestException(GENERIC_INVALID_COUPON));
 
         validate(coupon, orderAmount);
 
@@ -123,18 +133,21 @@ public class CouponService {
 
     private void validate(Coupon coupon, BigDecimal orderAmount) {
         if (Boolean.FALSE.equals(coupon.getActive())) {
-            throw new BadRequestException("This coupon is no longer active");
+            throw new BadRequestException(GENERIC_INVALID_COUPON);
         }
 
         if (coupon.getExpiryDate() != null && coupon.getExpiryDate().isBefore(LocalDate.now())) {
-            throw new BadRequestException("This coupon has expired");
+            throw new BadRequestException(GENERIC_INVALID_COUPON);
         }
 
         if (coupon.getUsageLimit() != null && coupon.getUsageLimit() > 0
                 && coupon.getUsedCount() != null && coupon.getUsedCount() >= coupon.getUsageLimit()) {
-            throw new BadRequestException("This coupon has reached its usage limit");
+            throw new BadRequestException(GENERIC_INVALID_COUPON);
         }
 
+        // Minimum-order is the one failure that is useful to a shopper who
+        // already has a real code, and it does not confirm existence of an
+        // unknown code (that path already returned GENERIC_INVALID_COUPON).
         if (coupon.getMinimumOrderAmount() != null
                 && orderAmount.compareTo(coupon.getMinimumOrderAmount()) < 0) {
             throw new BadRequestException(

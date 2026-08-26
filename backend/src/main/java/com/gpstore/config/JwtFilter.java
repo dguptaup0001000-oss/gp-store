@@ -1,11 +1,14 @@
 package com.gpstore.config;
 
 import com.gpstore.security.AuthenticatedUser;
+import com.gpstore.security.CustomerAccountStatusService;
 import com.gpstore.service.JwtService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -19,10 +22,14 @@ import java.util.List;
 @Component
 public class JwtFilter extends OncePerRequestFilter {
 
-    private final JwtService jwtService;
+    private static final Logger log = LoggerFactory.getLogger(JwtFilter.class);
 
-    public JwtFilter(JwtService jwtService) {
+    private final JwtService jwtService;
+    private final CustomerAccountStatusService accountStatusService;
+
+    public JwtFilter(JwtService jwtService, CustomerAccountStatusService accountStatusService) {
         this.jwtService = jwtService;
+        this.accountStatusService = accountStatusService;
     }
 
     @Override
@@ -52,6 +59,25 @@ public class JwtFilter extends OncePerRequestFilter {
                 Long customerId = claims.get("customerId", Long.class);
                 String role = claims.get("role", String.class);
 
+                // A valid signature is not enough. Deactivating an account
+                // revokes refresh tokens but an already-issued access JWT
+                // would otherwise keep working until expiry. Re-check live
+                // status here for every role (customer, worker, admin) -
+                // they are all Customer rows with the same active flag.
+                //
+                // /api/auth/** is excluded so logout/refresh can still run:
+                // those endpoints authenticate with the refresh token in the
+                // body, not with this access JWT. Blocking them would leave
+                // a banned user unable to drop their session.
+                String path = request.getServletPath();
+                if (path == null || !path.startsWith("/api/auth/")) {
+                    if (!accountIsUsable(customerId)) {
+                        SecurityContextHolder.clearContext();
+                        rejectInactive(response);
+                        return;
+                    }
+                }
+
                 AuthenticatedUser principal =
                         new AuthenticatedUser(customerId, email, role);
 
@@ -71,5 +97,24 @@ public class JwtFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private boolean accountIsUsable(Long customerId) {
+        try {
+            return accountStatusService.isUsable(customerId);
+        } catch (RuntimeException ex) {
+            // Fail closed: if we cannot confirm the account is live, do not
+            // authenticate. A database blip already breaks checkout; it must
+            // not be a window in which a banned JWT is accepted.
+            log.warn("Account status check failed for customerId={}: {}", customerId, ex.getMessage());
+            return false;
+        }
+    }
+
+    private static void rejectInactive(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setContentType("application/json");
+        response.getWriter().write(
+                "{\"status\":401,\"error\":\"Unauthorized\",\"message\":\"This account is no longer active\"}");
     }
 }

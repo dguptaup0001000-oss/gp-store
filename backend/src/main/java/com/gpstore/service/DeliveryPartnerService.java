@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.config.PageRequests;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.entity.Role;
@@ -9,6 +10,7 @@ import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliveryRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -95,12 +97,12 @@ public class DeliveryPartnerService {
         return saved;
     }
 
-    public List<DeliveryPartner> getAll() {
-        return repository.findAll();
+    public List<DeliveryPartner> getAll(Pageable pageable) {
+        return repository.findAll(pageable).getContent();
     }
 
     public List<DeliveryPartner> getAvailablePartners() {
-        return repository.findByAvailable(true);
+        return repository.findByAvailable(true, PageRequests.of(0, PageRequests.MAX_PAGE_SIZE)).getContent();
     }
 
     public DeliveryPartner update(DeliveryPartner partner) {

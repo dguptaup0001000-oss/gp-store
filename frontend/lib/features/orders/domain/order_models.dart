@@ -1,5 +1,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import 'payment_status.dart';
+
 part 'order_models.freezed.dart';
 part 'order_models.g.dart';
 
@@ -94,4 +96,18 @@ class OrderDetail with _$OrderDetail {
   /// reject cancellation server-side regardless, this is just so the UI
   /// doesn't show a button that would obviously fail).
   bool get isCancellable => orderStatus != 'DELIVERED' && orderStatus != 'CANCELLED';
+}
+
+extension OrderSummaryPayment on OrderSummary {
+  bool get needsOnlinePayment => PaymentStatusInfo.needsOnlineRetry(
+        paymentStatus: paymentStatus,
+        orderStatus: orderStatus,
+      );
+}
+
+extension OrderDetailPayment on OrderDetail {
+  bool get needsOnlinePayment => PaymentStatusInfo.needsOnlineRetry(
+        paymentStatus: paymentStatus,
+        orderStatus: orderStatus,
+      );
 }

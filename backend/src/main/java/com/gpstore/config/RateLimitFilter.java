@@ -17,6 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Brute-force and abuse protection on the endpoints worth protecting.
@@ -24,8 +25,21 @@ import java.util.List;
  * Redis-backed (a fixed-window counter via one atomic INCR+EXPIRE) so every
  * backend instance shares the same count - an in-memory counter would make
  * the real limit (limit x number of instances) the moment more than one
- * instance runs. Fails OPEN if Redis is unreachable: a Redis outage should
- * degrade rate limiting, not take down login and checkout.
+ * instance runs.
+ *
+ * TWO FAILURE MODES, on purpose:
+ *
+ *   AUTH / CHECKOUT / ADMIN  -> fail CLOSED via a local in-memory window.
+ *       A Redis outage must not silently disable brute-force protection on
+ *       login, OTP, payments or admin writes. The local limiter is per-JVM
+ *       so the real ceiling under an outage is (limit × instances), which
+ *       is still a ceiling. If even the local limiter throws, the request
+ *       is rejected with 429 rather than allowed through.
+ *
+ *   SEARCH / MUTATION        -> fail OPEN.
+ *       Instant search and cart writes are availability-critical. A Redis
+ *       blip must not take the shop offline; scraping during an outage is
+ *       the lesser harm. Catalog browsing is not limited at all.
  *
  * IDENTITY STRATEGY - the important part, and what changed.
  *
@@ -62,10 +76,13 @@ import java.util.List;
  *       password several times and request a fresh OTP.
  *
  *   rate-limit.checkout-per-minute        default 20, per customer
- *       orders/place, payments. No human places 20 orders a minute, so
- *       this only ever catches a stuck retry loop or a script, while
- *       leaving impatient double-taps (already made safe by idempotency
- *       keys and row locks) comfortably under the line.
+ *       orders/place, POST /api/payments, checkout-session, payment
+ *       verify. No human places 20 orders a minute, so this only ever
+ *       catches a stuck retry loop or a script, while leaving impatient
+ *       double-taps (already made safe by idempotency keys and row locks)
+ *       comfortably under the line. Checkout-session and verify share one
+ *       normalised path so hammering many order ids does not multiply the
+ *       quota.
  *
  *   rate-limit.admin-per-minute             default 30, per admin account
  *       POST /api/notifications/broadcast and writes under /api/admin/**.
@@ -110,6 +127,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final int mutationPerMinute;
     private final int adminPerMinute;
     private final int searchPerMinute;
+    private final LocalFixedWindowRateLimiter localLimiter =
+            new LocalFixedWindowRateLimiter(TimeUnit.SECONDS.toMillis(WINDOW_SECONDS));
 
     public RateLimitFilter(
             StringRedisTemplate redisTemplate,
@@ -129,7 +148,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     /** Which bucket a request falls into, or null if it is not limited at all. */
-    private enum Bucket { AUTH, CHECKOUT, MUTATION, ADMIN, SEARCH }
+    enum Bucket { AUTH, CHECKOUT, MUTATION, ADMIN, SEARCH }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -149,30 +168,55 @@ public class RateLimitFilter extends OncePerRequestFilter {
             case SEARCH -> searchPerMinute;
         };
 
-        String clientKey = "ratelimit:" + identity(bucket, request) + ":" + request.getServletPath();
+        String clientKey = "ratelimit:" + identity(bucket, request) + ":" + limitPath(request.getServletPath());
 
-        Long count;
-        try {
-            count = redisTemplate.execute(
-                    INCREMENT_AND_EXPIRE, List.of(clientKey), String.valueOf(WINDOW_SECONDS));
-        } catch (Exception ex) {
-            log.warn("Rate limiter unavailable (Redis unreachable?) - allowing request through: {}", ex.getMessage());
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        if (count != null && count > limit) {
-            response.setStatus(429); // 429 Too Many Requests
-            response.setContentType("application/json");
-            response.getWriter().write(
-                    "{\"error\":\"Too Many Requests\",\"message\":\"Too many attempts - please wait a minute and try again.\"}");
+        if (!allow(bucket, clientKey, limit)) {
+            writeTooManyRequests(response);
             return;
         }
 
         filterChain.doFilter(request, response);
     }
 
-    private Bucket classify(HttpServletRequest request) {
+    /**
+     * Redis first. Security buckets fall back to a local window. Availability
+     * buckets (search, cart writes) fail open so a Redis blip does not take
+     * the shop down.
+     */
+    private boolean allow(Bucket bucket, String clientKey, int limit) {
+        try {
+            Long count = redisTemplate.execute(
+                    INCREMENT_AND_EXPIRE, List.of(clientKey), String.valueOf(WINDOW_SECONDS));
+            return count == null || count <= limit;
+        } catch (Exception ex) {
+            if (failsOpen(bucket)) {
+                log.warn("Rate limiter unavailable (Redis unreachable?) - allowing {} through: {}",
+                        bucket, ex.getMessage());
+                return true;
+            }
+            log.warn("Rate limiter unavailable (Redis unreachable?) - using local fallback for {}: {}",
+                    bucket, ex.getMessage());
+            try {
+                return localLimiter.allow(clientKey, limit);
+            } catch (Exception localEx) {
+                log.error("Local security rate limiter failed - rejecting {}: {}", bucket, localEx.getMessage());
+                return false;
+            }
+        }
+    }
+
+    private static boolean failsOpen(Bucket bucket) {
+        return bucket == Bucket.SEARCH || bucket == Bucket.MUTATION;
+    }
+
+    private static void writeTooManyRequests(HttpServletResponse response) throws IOException {
+        response.setStatus(429);
+        response.setContentType("application/json");
+        response.getWriter().write(
+                "{\"error\":\"Too Many Requests\",\"message\":\"Too many attempts - please wait a minute and try again.\"}");
+    }
+
+    Bucket classify(HttpServletRequest request) {
         String path = request.getServletPath();
         String method = request.getMethod();
 
@@ -188,7 +232,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.equals("/api/auth/reset-password-with-otp")
                 || path.equals("/api/auth/refresh")
                 || path.equals("/api/auth/logout")
-                || path.equals("/api/auth/logout-all")) {
+                || path.equals("/api/auth/logout-all")
+                || path.equals("/api/auth/change-password")) {
             return Bucket.AUTH;
         }
 
@@ -196,7 +241,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return Bucket.SEARCH;
         }
 
-        if (path.equals("/api/orders/place") || path.equals("/api/payments")) {
+        if (path.equals("/api/orders/place")
+                || path.equals("/api/payments")
+                || isCheckoutSession(path)
+                || isPaymentVerify(path)) {
             return Bucket.CHECKOUT;
         }
 
@@ -216,6 +264,28 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         return null;
+    }
+
+    static boolean isCheckoutSession(String path) {
+        return path != null && path.matches("/api/payments/order/\\d+/checkout-session");
+    }
+
+    static boolean isPaymentVerify(String path) {
+        return path != null && path.matches("/api/payments/order/\\d+/verify");
+    }
+
+    /**
+     * Collapses per-order payment paths so one customer cannot multiply
+     * their quota by rotating order ids.
+     */
+    static String limitPath(String path) {
+        if (isCheckoutSession(path)) {
+            return "/api/payments/order/*/checkout-session";
+        }
+        if (isPaymentVerify(path)) {
+            return "/api/payments/order/*/verify";
+        }
+        return path;
     }
 
     /**

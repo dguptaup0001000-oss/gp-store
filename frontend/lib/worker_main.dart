@@ -33,14 +33,44 @@ void main() {
   // holds a carton - a landscape layout would be a rotation nobody asked for.
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-  final tokenStorage = TokenStorage();
-  final apiClient = ApiClient(tokenStorage: tokenStorage);
+  runApp(const WorkerAppBootstrap());
+}
 
-  runApp(WorkerApp(
-    apiClient: apiClient,
-    tokenStorage: tokenStorage,
-    repository: WorkerRepository(apiClient: apiClient),
-  ));
+class WorkerAppBootstrap extends StatefulWidget {
+  const WorkerAppBootstrap({super.key});
+
+  @override
+  State<WorkerAppBootstrap> createState() => _WorkerAppBootstrapState();
+}
+
+class _WorkerAppBootstrapState extends State<WorkerAppBootstrap> {
+  late final TokenStorage _tokenStorage;
+  late final ApiClient _apiClient;
+  late final WorkerRepository _repository;
+  int _sessionEpoch = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _tokenStorage = TokenStorage(keyPrefix: 'worker_');
+    _apiClient = ApiClient(
+      tokenStorage: _tokenStorage,
+      onSessionExpired: () {
+        if (mounted) setState(() => _sessionEpoch++);
+      },
+    );
+    _repository = WorkerRepository(apiClient: _apiClient);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return WorkerApp(
+      key: ValueKey(_sessionEpoch),
+      apiClient: _apiClient,
+      tokenStorage: _tokenStorage,
+      repository: _repository,
+    );
+  }
 }
 
 class WorkerApp extends StatelessWidget {

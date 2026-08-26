@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../domain/order_models.dart';
+import '../domain/payment_status.dart';
 import 'order_detail_screen.dart';
 import 'orders_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -86,6 +88,25 @@ class OrderHistoryScreen extends ConsumerWidget {
                         const SizedBox(height: 8),
                         Text('₹${order.totalAmount.toStringAsFixed(0)}',
                             style: const TextStyle(fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Payment: ${PaymentStatusInfo.label(order.paymentStatus)}',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
+                        ),
+                        if (order.needsOnlinePayment) ...[
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: FilledButton(
+                              onPressed: hapticize(() => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => OrderDetailScreen(orderId: order.orderId),
+                                    ),
+                                  )),
+                              child: const Text('Pay now'),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

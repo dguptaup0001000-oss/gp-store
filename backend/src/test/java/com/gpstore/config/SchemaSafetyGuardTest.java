@@ -28,11 +28,15 @@ class SchemaSafetyGuardTest {
     }
 
     @Test
-    @DisplayName("Production starts on update - loudly, but it starts")
-    void productionStillStartsOnUpdate() {
-        // Deliberate: a hard failure here would take a running deployment
-        // offline on its next deploy. See the class comment.
-        assertDoesNotThrow(() -> new SchemaSafetyGuard(true, "update").checkSchemaManagementIsSafeForProduction());
+    @DisplayName("Production refuses to start on ddl-auto=update")
+    void productionRefusesUpdate() {
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> new SchemaSafetyGuard(true, "update").checkSchemaManagementIsSafeForProduction());
+
+        assertTrue(thrown.getMessage().contains("DDL_AUTO=validate"),
+                "The failure has to say what to set instead. Was: " + thrown.getMessage());
+        assertTrue(thrown.getMessage().toLowerCase().contains("update"),
+                "The failure must name the setting that was refused. Was: " + thrown.getMessage());
     }
 
     @Test

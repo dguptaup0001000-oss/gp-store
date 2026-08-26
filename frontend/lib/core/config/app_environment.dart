@@ -46,17 +46,38 @@ enum AppEnvironment {
 
   bool get isProduction => this == AppEnvironment.production;
 
+  /// True when [url] is the live shop API. Staging must never use this host.
+  static bool isProductionApiUrl(String url) {
+    final normalized = url.trim().toLowerCase();
+    return normalized.contains('api.gpstore.co.in');
+  }
+
   /// Where this build's API lives.
   ///
   /// Override with `--dart-define=API_BASE_URL=https://your-host/v1`.
+  ///
+  /// Staging has no default on purpose: a missing override used to silently
+  /// target the live shop. A staging build must pass a non-production URL.
   String get baseUrl {
     const override = String.fromEnvironment('API_BASE_URL');
-    if (override.isNotEmpty) return override;
+    if (override.isNotEmpty) {
+      if (this == AppEnvironment.staging && isProductionApiUrl(override)) {
+        throw StateError(
+          'APP_ENV=staging must not target the production API '
+          '(${productionApiBaseUrl}). Pass a staging host via --dart-define=API_BASE_URL.',
+        );
+      }
+      return override;
+    }
 
     switch (this) {
       case AppEnvironment.production:
-      case AppEnvironment.staging:
         return productionApiBaseUrl;
+      case AppEnvironment.staging:
+        throw StateError(
+          'APP_ENV=staging requires --dart-define=API_BASE_URL pointing at a '
+          'non-production host. Refusing to default staging to the live shop.',
+        );
       case AppEnvironment.development:
         // 10.0.2.2 is the Android emulator's alias for the host machine's
         // own localhost - not a typo. Use the machine's LAN IP for a

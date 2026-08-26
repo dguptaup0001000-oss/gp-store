@@ -74,6 +74,17 @@ class CouponServiceTest {
     }
 
     @Test
+    void unknownCouponDoesNotRevealWhetherTheCodeExists() {
+        when(couponRepository.findByCouponCodeIgnoreCase("NOPE")).thenReturn(Optional.empty());
+
+        BadRequestException thrown = assertThrows(BadRequestException.class,
+                () -> couponService.previewDiscount("NOPE", new BigDecimal("100")));
+
+        assertEquals(CouponService.GENERIC_INVALID_COUPON, thrown.getMessage());
+        assertFalse(thrown.getMessage().toLowerCase().contains("not found"));
+    }
+
+    @Test
     void expiredCouponIsRejected() {
         Coupon coupon = flatCoupon("OLD10", new BigDecimal("10"));
         coupon.setExpiryDate(LocalDate.now().minusDays(1));

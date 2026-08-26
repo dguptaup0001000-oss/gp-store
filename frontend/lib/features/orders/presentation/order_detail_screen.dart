@@ -7,7 +7,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
+import '../../checkout/presentation/checkout_providers.dart';
+import '../domain/online_payment_recovery.dart';
 import '../domain/order_models.dart';
+import '../domain/payment_status.dart';
 import 'invoice_screen.dart';
 import 'orders_providers.dart';
 import '../../../core/images/gp_network_image.dart';
@@ -59,6 +62,9 @@ class _OrderDetailBody extends ConsumerStatefulWidget {
 class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
   bool _isCancelling = false;
   bool _isBuyingAgain = false;
+  bool _isPaying = false;
+  String? _payError;
+  String _payPhase = '';
 
   Future<void> _buyAgain() async {
     final items = widget.order.items;
@@ -134,6 +140,52 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
     }
   }
 
+  Future<void> _payNow() async {
+    if (_isPaying) return;
+    setState(() {
+      _isPaying = true;
+      _payError = null;
+      _payPhase = 'Preparing payment...';
+    });
+
+    try {
+      final status = await OnlinePaymentRecovery(
+        repository: ref.read(checkoutRepositoryProvider),
+      ).pay(
+        orderId: widget.order.orderId,
+        onPhase: (phase) {
+          if (!mounted) return;
+          setState(() {
+            _payPhase = switch (phase) {
+              'preparing' => 'Preparing payment...',
+              'gateway' => 'Opening payment...',
+              'verifying' => 'Verifying payment...',
+              _ => 'Working...',
+            };
+          });
+        },
+      );
+
+      ref.invalidate(orderDetailProvider(widget.order.orderId));
+      ref.invalidate(myOrdersProvider);
+      if (!mounted) return;
+      if (PaymentStatusInfo.isSettled(status)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Payment received')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Payment status: ${PaymentStatusInfo.label(status)}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _payError = extractErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _isPaying = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
@@ -206,11 +258,52 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
               const Divider(height: 20),
               _billRow('Total Paid', '₹${order.totalAmount.toStringAsFixed(0)}', bold: true),
               const SizedBox(height: 4),
-              Text('Payment: ${order.paymentStatus.replaceAll('_', ' ')}',
+              Text('Payment: ${PaymentStatusInfo.label(order.paymentStatus)}',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12)),
             ],
           ),
         ),
+        if (order.needsOnlinePayment) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'This order is waiting for payment (${PaymentStatusInfo.label(order.paymentStatus)}).',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                if (_payError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_payError!, style: const TextStyle(color: AppColors.error, fontSize: 12)),
+                ],
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: _isPaying ? null : hapticize(_payNow),
+                  child: _isPaying
+                      ? Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(_payPhase),
+                          ],
+                        )
+                      : const Text('Pay now'),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: hapticize(() => Navigator.of(context).push(

@@ -21,23 +21,18 @@ import jakarta.annotation.PostConstruct;
  * so schema changes are reviewed, ordered and replayable; ddl-auto=update
  * routes around all three.
  *
- * TWO DIFFERENT RESPONSES, on purpose:
+ * Production responses:
  *
- *   create / create-drop / drop  -> REFUSE TO START.
- *       These drop tables. There is no production scenario where they are
- *       correct, and the cost of booting with one is the entire database.
- *       Failing to start is strictly better than starting.
- *
- *   update                       -> LOG LOUDLY, still start.
- *       Deliberately not a hard failure. An existing deployment is running
- *       with this today, and turning it into a startup failure would take a
- *       live store offline on its next deploy to fix a risk that is real but
- *       latent. The operator sets DDL_AUTO=validate and confirms the app
- *       still boots - if it does not, the schema genuinely disagrees with the
- *       entity model and that is a finding, not a reason to keep guessing.
+ *   create / create-drop / drop / update  -> REFUSE TO START.
+ *       create/drop destroy tables. update silently mutates the live schema.
+ *       Neither is acceptable against customer data. The operator sets
+ *       DDL_AUTO=validate (or none) and, if startup then fails, writes an
+ *       explicit Flyway migration - that disagreement is a finding, not a
+ *       reason to keep guessing.
  *
  * validate / none are the two settings this is trying to arrive at and pass
- * silently.
+ * silently. Local development and CI are unaffected: the guard is a no-op
+ * when app.production is false.
  */
 @Component
 public class SchemaSafetyGuard {
@@ -60,23 +55,23 @@ public class SchemaSafetyGuard {
             return;
         }
 
-        if (isDataDestroying(ddlAuto)) {
+        if (isUnsafeInProduction(ddlAuto)) {
             throw new IllegalStateException(
                     "Refusing to start in production with spring.jpa.hibernate.ddl-auto=" + ddlAuto + ". "
-                            + "That setting DROPS TABLES on startup and would destroy live customer data. "
-                            + "Set DDL_AUTO=validate in the production environment.");
+                            + "That setting can mutate or destroy the live schema. "
+                            + "Set DDL_AUTO=validate in the production environment "
+                            + "(Flyway migrations are the only allowed schema changes).");
         }
 
-        if ("update".equals(ddlAuto)) {
-            log.error("PRODUCTION SAFETY: spring.jpa.hibernate.ddl-auto=update. Hibernate is allowed to alter the "
-                    + "live schema on every boot, so a schema change can happen with no migration and no record of "
-                    + "it in the Flyway history. Set DDL_AUTO=validate in the production environment and redeploy; "
-                    + "if startup then fails, the live schema genuinely disagrees with the entity model and needs a "
-                    + "migration. See backend/src/main/resources/db/migration/README.md.");
+        if ("validate".equals(ddlAuto) || "none".equals(ddlAuto) || ddlAuto.isBlank()) {
+            log.info("Production schema management is safe: ddl-auto={}", ddlAuto.isBlank() ? "(blank)" : ddlAuto);
         }
     }
 
-    private static boolean isDataDestroying(String mode) {
-        return "create".equals(mode) || "create-drop".equals(mode) || "drop".equals(mode);
+    private static boolean isUnsafeInProduction(String mode) {
+        return "create".equals(mode)
+                || "create-drop".equals(mode)
+                || "drop".equals(mode)
+                || "update".equals(mode);
     }
 }

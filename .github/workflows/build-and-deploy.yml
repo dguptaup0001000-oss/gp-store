@@ -179,9 +179,10 @@ jobs:
           path: frontend/build/app/outputs/flutter-apk/gpstore-worker-*.apk
 
       - name: Build Delivery Worker App Bundle
-        # Play serves one ABI from an AAB. Same applicationId as the customer
-        # app (com.gpstore.app) — this is a size/packaging artifact, not a
-        # second Play listing. Do not treat the universal APK as the Play size.
+        # Play serves one ABI from an AAB. Worker applicationId is
+        # com.gpstore.worker (see android/app/build.gradle when
+        # GPSTORE_WORKER_SLIM=1). It must not share com.gpstore.app with the
+        # customer APK or installing one replaces the other.
         run: |
           chmod +x tool/with_worker_pubspec.sh
           API_URL="${{ vars.API_BASE_URL }}"
