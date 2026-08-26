@@ -4,6 +4,24 @@ After one-time setup, a push to `main` deploys the backend. Do not put
 SSH keys, database passwords, MSG91 keys, Cashfree keys, or JWT secrets
 in git.
 
+## GitHub auto-merge (one-time, admin)
+
+This repository's token cannot change repo settings. An admin must enable:
+
+1. **Settings → General → Pull Requests → Allow auto-merge**
+2. **Settings → Actions → General → Workflow permissions → Read and write**
+3. **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**
+4. Recommended: **Settings → Rules → Rulesets** on `main`, require status checks
+   `build-and-test` and `schema-migrate` so GitHub will not merge before CI.
+
+Workflow `.github/workflows/enable-auto-merge.yml` then turns on native
+auto-merge for non-draft, same-repo PRs into `main`. GitHub performs the
+merge, which triggers **Deploy Production**.
+
+Do **not** merge with a GitHub App `GITHUB_TOKEN` (`gh pr merge` from Actions
+without auto-merge). That merge does not emit a `push` event, so production
+deploy would not start.
+
 ## What GitHub Actions does
 
 Workflow: `.github/workflows/deploy-production.yml`

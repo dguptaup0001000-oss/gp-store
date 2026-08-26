@@ -1,0 +1,56 @@
+# Enable GitHub-native auto-merge on eligible PRs targeting main.
+#
+# Native auto-merge is performed by GitHub (not GITHUB_TOKEN), so the
+# resulting push to main still triggers Deploy Production.
+#
+# This workflow CANNOT turn on the repository setting. An admin must once:
+#   Settings → General → Pull Requests → Allow auto-merge
+#   Settings → Actions → General → Workflow permissions → Read and write
+#   Settings → Actions → General → Allow GitHub Actions to create and approve pull requests
+# Optional but safer: a ruleset on `main` requiring checks
+#   `build-and-test` and `schema-migrate` (prevents merge-before-CI).
+#
+# Draft PRs, fork PRs, and PRs not targeting main are ignored.
+
+name: Enable auto-merge
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+    branches: [main]
+
+concurrency:
+  group: enable-automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  enable:
+    name: Enable GitHub auto-merge
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge (merge commit)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -Eeuo pipefail
+          echo "Enabling native auto-merge for PR #$PR"
+          if gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --merge --auto; then
+            echo "GitHub will merge PR #$PR when remaining required checks pass."
+            exit 0
+          fi
+          echo "::warning::Could not enable auto-merge. An admin must enable:"
+          echo "1. Settings → General → Pull Requests → Allow auto-merge"
+          echo "2. Settings → Actions → General → Workflow permissions → Read and write"
+          echo "3. Settings → Actions → General → Allow GitHub Actions to create and approve pull requests"
+          echo "Until those are on, the Merge pull request button stays manual."
+          exit 0
