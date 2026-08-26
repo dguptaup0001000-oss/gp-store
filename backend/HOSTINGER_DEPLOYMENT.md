@@ -264,6 +264,38 @@ docker compose exec -T postgres \
 Do **not** treat a manual `pg_dump` one-liner as the backup system. The sidecar
 must be running (`docker compose ps backup`).
 
+## 13b. Redis password file
+
+`REDIS_PASSWORD` stays in `backend/.env` (gitignored). `deploy.sh` copies it
+to `backend/.secrets/redis_password` (mode 600) so Compose can mount a Docker
+secret. Redis and the backend containers do **not** list `REDIS_PASSWORD` in
+`environment:`, so `docker inspect` does not show the password.
+
+Manual compose from `backend/`:
+
+```bash
+python3 docker/redis/materialize-password-file.py .
+docker compose up -d
+```
+
+## 13c. Catalog compatibility
+
+`GET /v1/api/products` is still a paged, capped JSON **array** (default 20,
+max 50, sellable products only). It sends `Deprecation: true` and
+`Link: </v1/api/products/feed>; rel="successor-version"`.
+
+The Flutter app uses `GET /v1/api/products/feed` (Spring Data page, stable
+id sort, totals). Do not delete the array endpoint while any old client
+still calls it.
+
+## 13d. Monitoring
+
+See **[deploy/production/MONITORING.md](../deploy/production/MONITORING.md)**.
+On the VPS: `./deploy/production/check-health.sh`.
+
+Admin: `GET /v1/api/admin/ops/status` (JWT, ADMIN) for backups, Redis PING,
+backup-volume disk, and TLS expiry. Not public.
+
 ## 14. Rollback
 
 Application: previous git commit, then `docker compose build backend && docker compose up -d backend`.
@@ -292,6 +324,7 @@ CI already defaults to `https://api.gpstore.co.in/v1` when `vars.API_BASE_URL` i
 | App refuses to start | `JWT_SECRET` still the repo default, or `DDL_AUTO` is not `validate` |
 | Search errors `similarity` | V5 should create `pg_trgm`. Confirm Flyway in logs |
 | Login rate-limit all from one IP | `RATE_LIMIT_TRUST_FORWARDED_FOR=true` is set in Compose |
+| Redis down, login still works but caps per JVM | AUTH/CHECKOUT/ADMIN fail closed to a local limiter; SEARCH/cart fail open (documented in `RateLimitFilter`) |
 | Port 80/443 already in use | leftover Nginx/systemd from `deploy/hostinger/`. Stop them. |
 
 GitHub Actions **does** SSH to Hostinger when secrets `PROD_HOST`,

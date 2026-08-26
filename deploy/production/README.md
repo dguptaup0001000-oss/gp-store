@@ -90,6 +90,7 @@ for CI starved GitHub-hosted runners in this repo (CI `startup_failure`).
 3. SSHs to the VPS using GitHub secrets.
 4. Runs `deploy/production/deploy.sh <GITHUB_SHA>`.
 5. That script:
+   - materializes `backend/.secrets/redis_password` from `.env` (never logs it)
    - `git fetch origin`
    - `git checkout main`
    - `git reset --hard origin/main`
@@ -107,8 +108,9 @@ A GitHub Actions deploy job is not success unless:
 
 GitHub main SHA = VPS checkout SHA = running backend `gitCommit`
 
-It never runs `docker compose down` / `docker compose down -v`. Postgres and
-Redis volumes stay. Traefik is not restarted.
+The deploy job uses GitHub Environment `production` (PRs use `pr-syntax` and
+do not SSH). Add protection rules on `production` in the GitHub UI if you
+want required reviewers; leave `pr-syntax` unprotected.
 
 ## One-time VPS commands
 

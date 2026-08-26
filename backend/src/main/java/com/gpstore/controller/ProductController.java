@@ -7,6 +7,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,18 +33,29 @@ public class ProductController {
         return productService.saveProduct(product);
     }
 
-    // Public catalog. Paged, capped, and only products that can actually
-    // be sold (active product + at least one available variant with a price).
-    // Default size 20. Never an unbounded findAll.
+    /**
+     * Legacy public catalog. Still a paged, capped JSON array so existing
+     * callers keep working. New clients should use {@code GET /api/products/feed}
+     * (Spring Data page with totals and a stable id sort).
+     *
+     * Default size 20, hard cap 50. Only products that can actually be sold
+     * (active product + at least one available variant with a price).
+     */
     @GetMapping
-    public List<ProductResponse> getAllProducts(
+    public ResponseEntity<List<ProductResponse>> getAllProducts(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         Pageable pageable = PageRequest.of(
                 Math.max(page, 0),
                 Math.min(Math.max(size, 1), 50),
                 Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id")));
-        return productService.getAllProducts(pageable);
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("Deprecation", "true");
+        headers.add("Link", "</v1/api/products/feed>; rel=\"successor-version\"");
+        headers.add("Sunset", "Sat, 01 Aug 2027 00:00:00 GMT");
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(productService.getAllProducts(pageable));
     }
 
     // Admin only (enforced in SecurityConfig, must come before the broad

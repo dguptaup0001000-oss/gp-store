@@ -38,3 +38,4 @@ build/
 !.env.example
 supabase-env.sh
 *.bak
+.secrets/

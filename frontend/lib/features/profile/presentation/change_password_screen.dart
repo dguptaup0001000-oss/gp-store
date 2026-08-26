@@ -72,7 +72,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
                   obscureText: true,
                   decoration: const InputDecoration(
                     labelText: 'New password',
-                    helperText: 'At least 10 characters, with a letter and a number',
+                    helperText: AppPasswordPolicy.helperText,
                     helperMaxLines: 2,
                   ),
                   validator: AppPasswordPolicy.validateNewPassword,

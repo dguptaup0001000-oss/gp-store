@@ -24,6 +24,7 @@ public class ProductVariantService {
     @org.springframework.cache.annotation.CacheEvict(value = "products", allEntries = true)
     public ProductVariant saveProductVariant(ProductVariant productVariant, boolean allowBelowCost) {
         validatePrices(productVariant, allowBelowCost);
+        applyImageUrl(productVariant, productVariant.getImageUrl());
         return productVariantRepository.save(productVariant);
     }
 
@@ -56,7 +57,7 @@ public class ProductVariantService {
         existing.setUnit(updated.getUnit());
         existing.setBarcode(updated.getBarcode());
         existing.setSku(updated.getSku());
-        existing.setImageUrl(updated.getImageUrl());
+        applyImageUrl(existing, updated.getImageUrl());
         existing.setAvailable(updated.getAvailable());
         existing.setMrp(updated.getMrp());
         existing.setCostPrice(updated.getCostPrice());
@@ -68,6 +69,11 @@ public class ProductVariantService {
         validatePrices(existing, allowBelowCost);
 
         return productVariantRepository.save(existing);
+    }
+
+    private static void applyImageUrl(ProductVariant variant, String imageUrl) {
+        com.gpstore.catalog.CatalogUrlValidator.requireAllowedImageUrlOrEmpty(imageUrl);
+        variant.setImageUrl(com.gpstore.catalog.CatalogUrlValidator.trimToNull(imageUrl));
     }
 
     private void validatePrices(ProductVariant variant, boolean allowBelowCost) {

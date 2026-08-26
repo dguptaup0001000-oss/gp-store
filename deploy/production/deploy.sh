@@ -251,6 +251,9 @@ command -v docker >/dev/null || die "docker is not installed"
 docker compose version >/dev/null || die "docker compose v2 is required"
 command -v python3 >/dev/null || die "python3 is required for JSON parsing"
 
+python3 "$COMPOSE_DIR/docker/redis/materialize-password-file.py" "$COMPOSE_DIR" \
+  || die "Could not materialize Redis password file from backend/.env"
+
 mkdir -p "$STATE_DIR"
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then

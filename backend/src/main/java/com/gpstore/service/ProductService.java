@@ -82,6 +82,7 @@ public class ProductService {
     @Transactional
     public ProductResponse saveProduct(Product product) {
         resolveCategory(product);
+        applyModel3dUrl(product, product.getModel3dUrl(), true);
         // forAdmin: only an ADMIN can reach POST /api/products, and the reply
         // has to show them the privacy settings they just set - a
         // customer-shaped response would silently drop them and make the
@@ -465,8 +466,19 @@ public class ProductService {
         // authorisation, not a new one invented for this feature.
         existing.setIsPrivateProduct(updated.getIsPrivateProduct());
         existing.setCustomerDisplayName(updated.getCustomerDisplayName());
+        // Null means omitted (Flutter updateProduct does not send model3dUrl).
+        // Empty string clears it. A javascript: or http:// URL is refused.
+        applyModel3dUrl(existing, updated.getModel3dUrl(), false);
 
         return ProductResponse.forAdmin(productRepository.save(existing));
+    }
+
+    private static void applyModel3dUrl(Product product, String url, boolean always) {
+        if (!always && url == null) {
+            return;
+        }
+        com.gpstore.catalog.CatalogUrlValidator.requireAllowedModel3dUrl(url);
+        product.setModel3dUrl(com.gpstore.catalog.CatalogUrlValidator.trimToNull(url));
     }
 
     /**

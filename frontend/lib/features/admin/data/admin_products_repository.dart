@@ -312,9 +312,8 @@ class AdminProductsRepository {
     });
   }
 
-  /// Backend's CategoryService.update() copies every field from the
-  /// request body - same reasoning as address/delivery-partner updates,
-  /// always send a complete picture, never a partial one.
+  /// imageUrl is omitted on purpose. The backend keeps the existing photo
+  /// when the field is null; sending null used to wipe it.
   Future<void> updateCategory({
     required int categoryId,
     required String name,

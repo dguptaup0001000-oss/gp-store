@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -148,6 +149,15 @@ class CatalogProductsEndpointTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(100)));
+    }
+
+    @Test
+    @DisplayName("GET /api/products is marked deprecated in favour of /feed")
+    void publicProductsEndpointSendsDeprecationHeaders() throws Exception {
+        mockMvc.perform(get("/api/products?page=0&size=5"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Deprecation", "true"))
+                .andExpect(header().string("Link", org.hamcrest.Matchers.containsString("/api/products/feed")));
     }
 
     @Test

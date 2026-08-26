@@ -98,7 +98,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   obscureText: true,
                   decoration: const InputDecoration(
                     labelText: 'Password',
-                    helperText: 'At least ${AppPasswordPolicy.minLength} characters',
+                    helperText: AppPasswordPolicy.helperText,
                   ),
                   // Mirrors backend PasswordPolicy.MIN_LENGTH so the user
                   // finds out instantly instead of after a round-trip.

@@ -50,6 +50,7 @@ jobs:
           bash -n deploy/production/prepare-vps.sh
           python3 -m py_compile .github/scripts/wait_for_ci.py
           python3 -m py_compile .github/scripts/automerge_eligible_pr.py
+          python3 -m py_compile backend/docker/redis/materialize-password-file.py
           test -x deploy/production/deploy.sh || chmod +x deploy/production/deploy.sh
           grep -F 'set -Eeuo pipefail' deploy/production/deploy.sh
           if grep -vE '^[[:space:]]*#' deploy/production/deploy.sh | grep -E 'compose[[:space:]]+down[[:space:]]+(-v|--volumes)'; then
@@ -91,6 +92,8 @@ jobs:
     needs: [syntax, wait-for-ci]
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # PRs only syntax-check; they must not sit in the production environment.
+    environment: ${{ github.event_name == 'pull_request' && 'pr-syntax' || 'production' }}
     steps:
       - name: Skip deploy on pull requests
         if: github.event_name == 'pull_request'

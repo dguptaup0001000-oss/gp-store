@@ -7,5 +7,11 @@ void main() {
         AppPasswordPolicy.tooShortMessage);
     expect(AppPasswordPolicy.validateNewPassword('grocery99x'), isNull);
     expect(AppPasswordPolicy.validateNewPassword(''), 'Password is required');
+    expect(AppPasswordPolicy.validateNewPassword('passwordaa'),
+        AppPasswordPolicy.message);
+    expect(AppPasswordPolicy.validateNewPassword('1234567890'),
+        AppPasswordPolicy.message);
+    expect(AppPasswordPolicy.validateNewPassword('password123'),
+        AppPasswordPolicy.message);
   });
 }

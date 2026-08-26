@@ -125,8 +125,9 @@ class PasswordResetController extends StateNotifier<PasswordResetState> {
   }
 
   Future<bool> complete({required String newPassword, required String confirmPassword}) async {
-    if (AppPasswordPolicy.validateNewPassword(newPassword) != null) {
-      state = state.copyWith(errorMessage: OtpUserMessages.passwordTooShort);
+    final policyError = AppPasswordPolicy.validateNewPassword(newPassword);
+    if (policyError != null) {
+      state = state.copyWith(errorMessage: policyError);
       return false;
     }
     if (newPassword != confirmPassword) {

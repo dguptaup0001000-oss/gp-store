@@ -30,6 +30,8 @@ public class OpsStatusController {
     public Map<String, Object> status() {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("backups", opsStatusService.backupStatus());
+        body.put("redis", opsStatusService.redisStatus());
+        body.put("disk", opsStatusService.diskStatus());
         body.put("tls", tlsCertificateProbe.probe());
         return body;
     }
