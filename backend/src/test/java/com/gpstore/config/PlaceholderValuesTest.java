@@ -31,5 +31,6 @@ class PlaceholderValuesTest {
         assertTrue(PlaceholderValues.isSecretPlaceholder("CHANGE_ME_TO_A_LONG_RANDOM_PASSWORD"));
         assertFalse(PlaceholderValues.isSecretPlaceholder("real-db-password-not-a-placeholder"));
         assertFalse(PlaceholderValues.isSecretPlaceholder("high-entropy-value-without-forbidden-markers"));
+        assertTrue(PlaceholderValues.isBlankOrPlaceholder("https://placehold.co/600"));
     }
 }

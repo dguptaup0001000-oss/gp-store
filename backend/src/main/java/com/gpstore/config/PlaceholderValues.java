@@ -25,10 +25,11 @@ public final class PlaceholderValues {
         if (v.contains("xxxxxx")) {
             return true;
         }
-        if (v.contains("placeholder")) {
+        if (v.contains("yourstorename") || v.contains("your-store")) {
             return true;
         }
-        if (v.contains("yourstorename") || v.contains("your-store")) {
+        // Whole-value only. "not-a-placeholder" in a real password must not trip this.
+        if (v.equals("placeholder")) {
             return true;
         }
         return false;
@@ -43,6 +44,9 @@ public final class PlaceholderValues {
             return true;
         }
         if (v.contains("todo")) {
+            return true;
+        }
+        if (v.contains("placeholder") || v.contains("placehold.co")) {
             return true;
         }
         return false;

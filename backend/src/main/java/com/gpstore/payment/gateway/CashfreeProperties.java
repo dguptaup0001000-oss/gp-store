@@ -76,8 +76,8 @@ public class CashfreeProperties {
      * about that to a customer at checkout.
      */
     public boolean enabled() {
-        return !PlaceholderValues.isBlankOrPlaceholder(appId)
-                && !PlaceholderValues.isBlankOrPlaceholder(secretKey);
+        return !PlaceholderValues.isSecretPlaceholder(appId)
+                && !PlaceholderValues.isSecretPlaceholder(secretKey);
     }
 
     /**

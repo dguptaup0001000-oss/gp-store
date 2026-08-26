@@ -50,8 +50,12 @@ public class JwtService {
         }
 
         if (production) {
-            if (DEV_FALLBACK_SECRET.equals(secret)
-                    || PlaceholderValues.isSecretPlaceholder(secret)) {
+            if (DEV_FALLBACK_SECRET.equals(secret)) {
+                throw new IllegalStateException(
+                        "Refusing to start in production with the built-in development JWT secret. "
+                                + "Set JWT_SECRET to a real random 64+ character value.");
+            }
+            if (PlaceholderValues.isSecretPlaceholder(secret)) {
                 throw new IllegalStateException(
                         "Refusing to start in production with a missing, published, or CHANGE_ME JWT secret. "
                                 + "Set JWT_SECRET to a real random 64+ character value.");

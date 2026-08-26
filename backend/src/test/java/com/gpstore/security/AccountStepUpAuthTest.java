@@ -98,7 +98,7 @@ class AccountStepUpAuthTest {
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Weak","email":"weak-%d@example.com","phone":"9%09d","password":"password"}
+                                {"name":"Weak","email":"weak-%d@example.com","phone":"9%09d","password":"passwordaa"}
                                 """.formatted(stamp, Math.abs(stamp % 1_000_000_000L))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message", containsString("letter and one number")));
