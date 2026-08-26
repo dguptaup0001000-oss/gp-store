@@ -22,6 +22,7 @@ secrets in git. Shop credentials stay in `backend/.env` on the VPS.
 | Branch protection API | **403** Resource not accessible by integration |
 | GitHub Actions secrets API | **403** — this token cannot create `PROD_*` secrets |
 | SSH to `187.127.173.192` | **Permission denied** from this environment (no deploy key) |
+| PR CI `startup_failure` | Yes, on this branch. `build-and-push-image` skipped immediately on non-main while `build-and-test` was still queued. Job `if` conditions now wait on `needs.*`. |
 
 YAML files alone do not complete production. The remaining items are GitHub
 settings and VPS secrets this token cannot write.
