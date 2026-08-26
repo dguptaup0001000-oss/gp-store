@@ -1,5 +1,7 @@
 package com.gpstore.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -12,10 +14,17 @@ import jakarta.annotation.PostConstruct;
  *
  * Optional integrations (Cashfree, Firebase, Cloudinary, MSG91) stay
  * fail-closed at use-time rather than blocking boot: a shop can take COD
- * orders without them. Database, Redis, and support contacts cannot.
+ * orders without them. Database and Redis cannot.
+ *
+ * Support contacts: a SET placeholder (example.com, CHANGE_ME) still refuses
+ * boot so a copied .env.example cannot leak fake numbers. All-empty contacts
+ * log an error and boot — Contact Us stays blank via store-info. Taking the
+ * whole API down for missing phone numbers is worse than an empty Contact Us.
  */
 @Component
 public class ProductionSecretsGuard {
+
+    private static final Logger log = LoggerFactory.getLogger(ProductionSecretsGuard.class);
 
     private final boolean production;
     private final String dbPassword;
@@ -57,10 +66,9 @@ public class ProductionSecretsGuard {
         if (PlaceholderValues.isBlankOrPlaceholder(supportPhone)
                 && PlaceholderValues.isBlankOrPlaceholder(supportWhatsapp)
                 && PlaceholderValues.isBlankOrPlaceholder(supportEmail)) {
-            throw new IllegalStateException(
-                    "Refusing to start in production: STORE_SUPPORT_PHONE, STORE_SUPPORT_WHATSAPP, "
-                            + "and STORE_SUPPORT_EMAIL are missing or placeholders. "
-                            + "Set at least one real contact so customers are not shown fake numbers.");
+            log.error("STORE_SUPPORT_PHONE, STORE_SUPPORT_WHATSAPP, and STORE_SUPPORT_EMAIL "
+                    + "are unset or placeholders. Contact Us will be empty until the operator "
+                    + "sets at least one real value on the VPS. The API will still serve orders.");
         }
         rejectIfPlaceholder("STORE_SUPPORT_PHONE", supportPhone);
         rejectIfPlaceholder("STORE_SUPPORT_WHATSAPP", supportWhatsapp);
@@ -68,9 +76,8 @@ public class ProductionSecretsGuard {
     }
 
     /**
-     * A field that is set must be real. Empty is allowed only when another
-     * contact channel is real (already required above). A mix of a real phone
-     * and support@example.com would still leak a fake email.
+     * A field that is set must be real. Empty is allowed. A mix of a real
+     * phone and support@example.com would still leak a fake email.
      */
     private static void rejectIfPlaceholder(String name, String value) {
         if (value == null || value.isBlank()) {
