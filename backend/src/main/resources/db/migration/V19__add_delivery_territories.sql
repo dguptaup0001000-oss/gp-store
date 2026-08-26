@@ -14,7 +14,7 @@
 -- about. Two houses 200 m apart with no bridge between them are an hour
 -- apart on a scooter.
 --
--- WHY NOT PostGIS. CI and production run the plain postgres image, which has no PostGIS,
+-- WHY NOT PostGIS. CI runs the plain postgres:16 image, which has no PostGIS,
 -- and enabling it on Supabase is a change to someone's production database.
 -- At this scale - 26 polygons of a few dozen vertices - a ray-casting test in
 -- Java costs microseconds and needs no extension, no new CI image, and no
