@@ -71,9 +71,10 @@ and production will not update.
 
 ### Auto-merge — `.github/workflows/enable-auto-merge.yml`
 
-Runs on non-draft same-repo PRs into `main`, and when workflow **CI**
-succeeds on a PR branch. It waits until `build-and-test` and
-`schema-migrate` are green, refuses any failing check, then:
+Runs on non-draft same-repo PRs into `main` as a **job inside workflow CI**
+(after `build-and-test` and `schema-migrate` succeed), and as a backup when
+workflow **CI** completes on a PR branch. Holding a separate runner to poll
+for CI starved GitHub-hosted runners in this repo (CI `startup_failure`).
 
 - `gh pr merge --auto --merge` when Allow auto-merge is on (GitHub performs
   the merge; that `push` starts Deploy Production), or

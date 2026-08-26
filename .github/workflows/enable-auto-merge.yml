@@ -45,12 +45,13 @@ jobs:
         github.event.workflow_run.head_branch != 'main'
       )
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Wait for required CI, then auto-merge
+      - name: Enable auto-merge if required CI is already green
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -60,8 +61,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           python3 -m py_compile .github/scripts/automerge_eligible_pr.py
+          # Do not hold a runner waiting for CI. That deadlocked this repo:
+          # auto-merge occupied the runner, CI never started, merge never happened.
+          # The CI workflow merges after build-and-test and schema-migrate succeed.
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            python3 .github/scripts/automerge_eligible_pr.py --pr "$PR_NUMBER" --wait-seconds 2700
+            python3 .github/scripts/automerge_eligible_pr.py --pr "$PR_NUMBER" --wait-seconds 30
           else
-            python3 .github/scripts/automerge_eligible_pr.py --sha "$HEAD_SHA" --ci-already-green --wait-seconds 180
+            python3 .github/scripts/automerge_eligible_pr.py --sha "$HEAD_SHA" --ci-already-green --wait-seconds 60
           fi

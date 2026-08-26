@@ -231,3 +231,36 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:latest
             ${{ steps.image.outputs.name }}:${{ github.sha }}
+
+  automerge:
+    name: Auto-merge eligible PR
+    needs: [build-and-test, schema-migrate]
+    # Runs only after required CI jobs succeed. Do not poll for CI on a
+    # separate runner — that starved this repo's runners and CI never started.
+    if: |
+      always() &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.build-and-test.result == 'success' &&
+      needs.schema-migrate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Enable native auto-merge or merge after CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile .github/scripts/automerge_eligible_pr.py
+          python3 .github/scripts/automerge_eligible_pr.py --pr "${{ github.event.pull_request.number }}" --ci-already-green --wait-seconds 60
