@@ -26,6 +26,8 @@ services:
       - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
       - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
       - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      # Internal /ping for Docker HEALTHCHECK. Do not publish 8080.
+      - --ping=true
       # Dashboard / API not enabled. Do not add --api.insecure.
     ports:
       - "80:80"
@@ -33,6 +35,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik_letsencrypt:/letsencrypt
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks:
       - gpstore_net
 
@@ -107,6 +115,10 @@ services:
       RATE_LIMIT_TRUST_FORWARDED_FOR: "true"
       STORE_LATITUDE: ${STORE_LATITUDE:-27.162310}
       STORE_LONGITUDE: ${STORE_LONGITUDE:-83.940468}
+      # Contact Us. `:-` keeps placeholders if the VPS .env keys are empty.
+      STORE_SUPPORT_PHONE: ${STORE_SUPPORT_PHONE:-+91XXXXXXXXXX}
+      STORE_SUPPORT_WHATSAPP: ${STORE_SUPPORT_WHATSAPP:-+91XXXXXXXXXX}
+      STORE_SUPPORT_EMAIL: ${STORE_SUPPORT_EMAIL:-support@example.com}
       CASHFREE_ENVIRONMENT: ${CASHFREE_ENVIRONMENT:-production}
       CASHFREE_APP_ID: ${CASHFREE_APP_ID:-}
       CASHFREE_SECRET_KEY: ${CASHFREE_SECRET_KEY:-}
