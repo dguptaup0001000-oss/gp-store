@@ -10,18 +10,19 @@
 # write, secrets, rulesets). If merge returns 403, the job fails with the
 # exact Settings path that an admin must enable.
 
+# Backup auto-merge when workflow CI completes on a PR branch.
+# The CI workflow's Auto-merge eligible PR job is the primary path so this
+# file does not occupy a runner on every pull_request synchronize.
+
 name: Auto-merge eligible PRs
 
 on:
-  pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
-    branches: [main]
   workflow_run:
     workflows: ["CI"]
     types: [completed]
 
 concurrency:
-  group: enable-automerge-${{ github.event.pull_request.number || github.event.workflow_run.head_sha }}
+  group: enable-automerge-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: true
 
 permissions:
@@ -33,17 +34,7 @@ permissions:
 jobs:
   automerge:
     name: Auto-merge eligible PR
-    if: |
-      (
-        github.event_name == 'pull_request' &&
-        github.event.pull_request.draft == false &&
-        github.event.pull_request.base.ref == 'main' &&
-        github.event.pull_request.head.repo.full_name == github.repository
-      ) || (
-        github.event_name == 'workflow_run' &&
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.head_branch != 'main'
-      )
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch != 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -55,17 +46,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -Eeuo pipefail
           python3 -m py_compile .github/scripts/automerge_eligible_pr.py
-          # Do not hold a runner waiting for CI. That deadlocked this repo:
-          # auto-merge occupied the runner, CI never started, merge never happened.
-          # The CI workflow merges after build-and-test and schema-migrate succeed.
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            python3 .github/scripts/automerge_eligible_pr.py --pr "$PR_NUMBER" --wait-seconds 30
-          else
-            python3 .github/scripts/automerge_eligible_pr.py --sha "$HEAD_SHA" --ci-already-green --wait-seconds 60
-          fi
+          python3 .github/scripts/automerge_eligible_pr.py --sha "$HEAD_SHA" --ci-already-green --wait-seconds 60

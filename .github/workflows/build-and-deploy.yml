@@ -1,6 +1,6 @@
-# Canonical production APK + worker APK + GitHub Pages workflow for the
-# monorepo. Jobs use `working-directory: frontend`. Do not build release
-# APKs from frontend/.github/workflows (that copy is a disabled stub).
+# Canonical production APK + worker APK workflow for the monorepo.
+# GitHub Pages lives in deploy-github-pages.yml (push to main only) so this
+# workflow has no job that skips on PRs while build-apk is still queued.
 #
 # What this gives you, with ZERO extra accounts beyond GitHub itself:
 # - An APK you can download directly from the Actions run's "Artifacts"
@@ -30,6 +30,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/build-and-deploy.yml'
   # Lets you manually re-trigger a build from the Actions tab without
   # needing a new commit - handy the first time, or after just flipping on
   # the Pages setting above.

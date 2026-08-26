@@ -60,10 +60,8 @@ jobs:
   wait-for-ci:
     name: Wait for backend CI
     needs: [syntax]
-    # Wait for syntax to finish before this job can skip. Skipping
-    # wait-for-ci/deploy while syntax is still queued aborted #94's
-    # production deploy as a 19s failure.
-    if: always() && needs.syntax.result == 'success'
+    # No job-level if. A false if while syntax is still queued aborts the
+    # workflow as startup_failure (seen on #94 and on this PR).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -91,15 +89,15 @@ jobs:
   deploy:
     name: Deploy backend to VPS
     needs: [syntax, wait-for-ci]
-    if: |
-      always() &&
-      needs.syntax.result == 'success' &&
-      needs.wait-for-ci.result == 'success' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Skip deploy on pull requests
+        if: github.event_name == 'pull_request'
+        run: echo "PR run is syntax-only; not deploying."
+
       - name: Resolve target SHA
+        if: github.event_name != 'pull_request'
         id: sha
         env:
           DISPATCH_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
@@ -112,6 +110,7 @@ jobs:
           fi
 
       - name: Require VPS SSH secrets
+        if: github.event_name != 'pull_request'
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
           PROD_USER: ${{ secrets.PROD_USER }}
@@ -128,6 +127,7 @@ jobs:
           exit "$missing"
 
       - name: SSH deploy
+        if: github.event_name != 'pull_request'
         uses: appleboy/ssh-action@v1.2.0
         env:
           TARGET_SHA: ${{ steps.sha.outputs.sha }}
