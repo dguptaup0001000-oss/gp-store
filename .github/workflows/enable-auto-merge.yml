@@ -1,56 +1,67 @@
-# Enable GitHub-native auto-merge on eligible PRs targeting main.
+# Auto-merge eligible PRs into main, then production deploy follows.
 #
-# Native auto-merge is performed by GitHub (not GITHUB_TOKEN), so the
-# resulting push to main still triggers Deploy Production.
+# After required CI is green this workflow:
+#   1. Enables GitHub-native auto-merge when the repo setting is on.
+#   2. Otherwise merges the PR itself (only after CI is green).
+# It never merges drafts, forks, conflicted PRs, failing checks, or PRs that
+# still require review. It does not approve reviews or bypass protection.
 #
-# This workflow CANNOT turn on the repository setting. An admin must once:
-#   Settings → General → Pull Requests → Allow auto-merge
-#   Settings → Actions → General → Workflow permissions → Read and write
-#   Settings → Actions → General → Allow GitHub Actions to create and approve pull requests
-# Optional but safer: a ruleset on `main` requiring checks
-#   `build-and-test` and `schema-migrate` (prevents merge-before-CI).
-#
-# Draft PRs, fork PRs, and PRs not targeting main are ignored.
+# This token cannot change repository settings (Allow auto-merge, Actions
+# write, secrets, rulesets). If merge returns 403, the job fails with the
+# exact Settings path that an admin must enable.
 
-name: Enable auto-merge
+name: Auto-merge eligible PRs
 
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
     branches: [main]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 concurrency:
-  group: enable-automerge-${{ github.event.pull_request.number }}
+  group: enable-automerge-${{ github.event.pull_request.number || github.event.workflow_run.head_sha }}
   cancel-in-progress: true
 
 permissions:
   contents: write
   pull-requests: write
   checks: read
+  actions: write
 
 jobs:
-  enable:
-    name: Enable GitHub auto-merge
-    if: >
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+  automerge:
+    name: Auto-merge eligible PR
+    if: |
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.base.ref == 'main' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      ) || (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch != 'main'
+      )
     runs-on: ubuntu-latest
     steps:
-      - name: Enable auto-merge (merge commit)
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Wait for required CI, then auto-merge
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -Eeuo pipefail
-          echo "Enabling native auto-merge for PR #$PR"
-          if gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --merge --auto; then
-            echo "GitHub will merge PR #$PR when remaining required checks pass."
-            exit 0
+          python3 -m py_compile .github/scripts/automerge_eligible_pr.py
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            python3 .github/scripts/automerge_eligible_pr.py --pr "$PR_NUMBER"
+          else
+            python3 .github/scripts/automerge_eligible_pr.py --sha "$HEAD_SHA" --ci-already-green
           fi
-          echo "::warning::Could not enable auto-merge. An admin must enable:"
-          echo "1. Settings → General → Pull Requests → Allow auto-merge"
-          echo "2. Settings → Actions → General → Workflow permissions → Read and write"
-          echo "3. Settings → Actions → General → Allow GitHub Actions to create and approve pull requests"
-          echo "Until those are on, the Merge pull request button stays manual."
-          exit 0
