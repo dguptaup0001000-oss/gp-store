@@ -12,6 +12,11 @@
 # Customer applicationId: com.gpstore.app
 # Worker applicationId:   com.gpstore.worker
 #
+# Play upload keystore secrets are optional for a green CI job. Without them,
+# analyze/tests still run and sideload APKs are Android Debug signed under
+# gpstore-*-sideload-apk. CI does not invent a keystore. Play-named artifacts
+# (gpstore-release-apk / AAB) are produced only when ANDROID_KEYSTORE_* is set.
+#
 # One-time setup after you push this to GitHub:
 # 1. Go to your repo's Settings -> Pages -> Source -> select "GitHub Actions".
 #    (Without this one click, the deploy step below has nothing to deploy to.)
@@ -98,29 +103,46 @@ jobs:
         # pure Dart unit tests (no device, no emulator), so they cost seconds.
         run: flutter test
 
-      - name: Require release keystore on main
-        if: github.ref == 'refs/heads/main'
+      - name: Detect Play upload keystore
+        # Analyze + flutter test above already ran. Missing Play secrets must
+        # not fail the job: there is no keystore in git and CI must not invent
+        # one. Sideload APKs can still build debug-signed. Play-named artifacts
+        # (gpstore-release-apk / AAB) are skipped until the operator stores a
+        # real upload keystore in GitHub secrets.
+        id: play_signing
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "::error::main branch APK/AAB artifacts require ANDROID_KEYSTORE_BASE64"
-            exit 1
-          fi
-
-      - name: Require full keystore secrets on main
-        if: github.ref == 'refs/heads/main'
-        env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is unset. Analyze/tests still run. Play-signed APK/AAB artifacts are skipped; sideload APKs will be Android Debug signed."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Android signing"
+              echo ""
+              echo "Play upload keystore is **not** configured. This job stays green on analyze, tests, and debug-signed sideload APKs."
+              echo "Set repo secrets \`ANDROID_KEYSTORE_BASE64\`, \`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_PASSWORD\`, and \`ANDROID_KEY_ALIAS\` to produce Play-ready artifacts."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          missing=0
           for v in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD ANDROID_KEY_ALIAS; do
             if [ -z "${!v}" ]; then
-              echo "::error::$v is required on main"
-              exit 1
+              echo "::error::$v is required when ANDROID_KEYSTORE_BASE64 is set"
+              missing=1
             fi
           done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Android signing"
+            echo ""
+            echo "Play upload keystore is configured. Release APK/AAB artifacts must not be Android Debug signed."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Decode google-services.json
         env:
@@ -129,18 +151,15 @@ jobs:
           if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
             echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > android/app/google-services.json
             python3 tool/verify_google_services.py android/app/google-services.json
-          elif [ "${GITHUB_REF}" = "refs/heads/main" ]; then
-            echo "::error::GOOGLE_SERVICES_JSON_BASE64 is required for production APKs on main"
-            exit 1
           else
-            echo "::warning::GOOGLE_SERVICES_JSON_BASE64 unset; using the committed placeholder (push/Crashlytics will not work)"
+            echo "::warning::GOOGLE_SERVICES_JSON_BASE64 unset; using the committed placeholder (push/Crashlytics will not work). Sideload APKs still compile."
             cp android/app/google-services.placeholder.json android/app/google-services.json
           fi
 
       - name: Install Play upload keystore if configured
-        # Required on main (see the two gate steps above). PRs may omit these
-        # secrets and produce a debug-signed APK that verify_apk_release.py
-        # will not treat as a Play artifact.
+        # When ANDROID_KEYSTORE_BASE64 is set, password + alias were already
+        # required above. When it is unset, APKs are Android Debug signed and
+        # must not be uploaded under Play-ready artifact names.
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -211,10 +230,13 @@ jobs:
       - name: Upload Delivery Worker APK
         uses: actions/upload-artifact@v4
         with:
-          name: gpstore-worker-apk
+          name: ${{ steps.play_signing.outputs.enabled == 'true' && 'gpstore-worker-apk' || 'gpstore-worker-sideload-apk' }}
           path: frontend/build/app/outputs/flutter-apk/gpstore-worker-*.apk
 
       - name: Build Delivery Worker App Bundle
+        # Play-only. Skipped when the upload keystore is missing so this job
+        # cannot publish a debug-signed AAB under a release name.
+        if: steps.play_signing.outputs.enabled == 'true'
         # Play serves one ABI from an AAB. Worker applicationId is
         # com.gpstore.worker (see android/app/build.gradle when
         # GPSTORE_WORKER_SLIM=1). It must not share com.gpstore.app with the
@@ -241,6 +263,7 @@ jobs:
           echo "| $(basename "$aab") | $(du -h "$aab" | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Delivery Worker App Bundle
+        if: steps.play_signing.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-worker-aab
@@ -292,10 +315,12 @@ jobs:
       - name: Verify APK signatures and zip alignment
         # assembleRelease already signs (debug key unless key.properties exists)
         # and zip-aligns. This step fails the job if an artifact is actually
-        # unsigned or unaligned. It does not re-sign. On main, a debug signer
-        # is a hard failure so Play-bound artifacts cannot ship unsigned-for-Play.
+        # unsigned or unaligned. It does not re-sign. When a Play keystore is
+        # configured, a debug signer is a hard failure so Play-bound artifacts
+        # cannot ship unsigned-for-Play. Without a keystore, debug signing is
+        # expected for sideload-only APKs.
         env:
-          REQUIRE_RELEASE_SIGNING: ${{ github.ref == 'refs/heads/main' && '1' || '0' }}
+          REQUIRE_RELEASE_SIGNING: ${{ steps.play_signing.outputs.enabled == 'true' && '1' || '0' }}
         run: |
           chmod +x tool/verify_apk_release.py
           python3 tool/verify_apk_release.py \
@@ -303,6 +328,7 @@ jobs:
             build/app/outputs/flutter-apk/app-*-release.apk
 
       - name: Build App Bundle
+        if: steps.play_signing.outputs.enabled == 'true'
         # What Google Play actually wants. Play splits an .aab per device, so
         # a phone downloads one ABI instead of all three - the APK above
         # carries arm64, armv7 and x86_64 together because a raw APK cannot
@@ -315,6 +341,8 @@ jobs:
         # This step is also what verifies the R8 configuration. minifyEnabled
         # only runs in release, so a missing ProGuard keep rule cannot fail
         # any debug build - it fails here, or it fails on a customer's phone.
+        # Skipped when the upload keystore is missing so CI cannot upload a
+        # debug-signed AAB as gpstore-release-aab.
         run: |
           API_URL="${{ vars.API_BASE_URL }}"
           if [ -z "$API_URL" ]; then
@@ -329,10 +357,11 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: gpstore-release-apk
+          name: ${{ steps.play_signing.outputs.enabled == 'true' && 'gpstore-release-apk' || 'gpstore-sideload-apk' }}
           path: frontend/build/app/outputs/flutter-apk/app-*-release.apk
 
       - name: Upload App Bundle
+        if: steps.play_signing.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-release-aab
