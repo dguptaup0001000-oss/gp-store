@@ -20,6 +20,9 @@ RUN ./mvnw clean package -DskipTests -B \
 # Stage 2: runtime - just a JRE (not a full JDK) and the built jar.
 FROM eclipse-temurin:21-jre-jammy
 
+ARG GIT_COMMIT=unknown
+ARG APP_VERSION=0.0.1-SNAPSHOT
+
 WORKDIR /app
 
 # curl is only for the Docker HEALTHCHECK against /v1/actuator/health.
@@ -58,6 +61,8 @@ ENV JVM_THREAD_STACK=512k
 ENV JVM_ACTIVE_PROCESSORS=1
 ENV JVM_GC=-XX:+UseSerialGC
 ENV JVM_OOM_BEHAVIOUR=-XX:+ExitOnOutOfMemoryError
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV APP_VERSION=${APP_VERSION}
 
 # Context-path is /v1 (see application.properties). Actuator health is
 # public; other actuator endpoints require ADMIN.

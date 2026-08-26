@@ -32,4 +32,6 @@ GET /v1/api/health
 GET /v1/actuator/health
 ```
 
-GitHub Actions builds APKs and runs tests. It does not SSH to Hostinger.
+GitHub Actions builds APKs and runs tests. Production backend deploys from
+`main` via `.github/workflows/deploy-production.yml` once VPS SSH secrets
+are configured (`deploy/production/README.md`).

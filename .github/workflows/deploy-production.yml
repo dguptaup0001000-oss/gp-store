@@ -1,0 +1,173 @@
+# Automatic production deploy: GitHub main → Hostinger VPS.
+#
+# Push to main starts this after backend CI is green. workflow_dispatch is
+# an emergency redeploy of a specific SHA (must be origin/main unless you
+# temporarily set REQUIRE_ORIGIN_MAIN=0 on the VPS, which is not recommended).
+#
+# Secrets (repo Settings → Secrets → Actions):
+#   PROD_HOST, PROD_USER, PROD_SSH_PRIVATE_KEY
+#   optional: PROD_PORT (default 22), PROD_APP_DIR (default /opt/gp-store)
+#
+# This workflow does not receive database, JWT, MSG91, or Cashfree secrets.
+# Those stay in backend/.env on the VPS.
+
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Full 40-character git SHA to deploy (empty = this commit / current main)'
+        required: false
+        default: ''
+      skip_ci_gate:
+        description: 'Skip waiting for the CI workflow (emergency only)'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('deploy-syntax-pr-{0}', github.event.number) || 'production-deployment' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  syntax:
+    name: Check deploy scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n
+        run: |
+          bash -n deploy/production/deploy.sh
+          bash -n deploy/production/prepare-vps.sh
+          test -x deploy/production/deploy.sh || chmod +x deploy/production/deploy.sh
+          grep -F 'set -Eeuo pipefail' deploy/production/deploy.sh
+          if grep -vE '^[[:space:]]*#' deploy/production/deploy.sh | grep -E 'compose[[:space:]]+down[[:space:]]+(-v|--volumes)'; then
+            echo "deploy.sh must never destroy Compose volumes" >&2
+            exit 1
+          fi
+
+  wait-for-ci:
+    name: Wait for backend CI
+    needs: [syntax]
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.skip_ci_gate == false)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait until workflow CI succeeds for this SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.sha }}
+        run: |
+          set -Eeuo pipefail
+          SHA="$TARGET_SHA"
+          if [ -z "$SHA" ]; then SHA="${GITHUB_SHA}"; fi
+          echo "Waiting for CI on $SHA"
+          for _ in $(seq 1 90); do
+            json="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow CI --json conclusion,status,event,headBranch --limit 20)"
+            echo "$json"
+            conclusion="$(printf '%s' "$json" | python3 -c 'import json,sys; raw=sys.stdin.read().strip(); runs=json.loads(raw) if raw else []; wanted=[r for r in runs if r.get("event")=="push" and r.get("headBranch")=="main"] or runs; print((wanted[0].get("conclusion") or wanted[0].get("status") or "unknown") if wanted else "missing")')"
+            case "$conclusion" in
+              success) echo "CI green"; exit 0 ;;
+              failure|cancelled|timed_out|startup_failure)
+                echo "CI $conclusion — refusing to deploy" >&2
+                exit 1
+                ;;
+              missing|in_progress|queued|waiting|requested|pending|"")
+                echo "CI not finished ($conclusion); sleeping"
+                sleep 20
+                ;;
+              *)
+                echo "CI status $conclusion; sleeping"
+                sleep 20
+                ;;
+            esac
+          done
+          echo "Timed out waiting for CI" >&2
+          exit 1
+
+  deploy:
+    name: Deploy backend to VPS
+    needs: [syntax, wait-for-ci]
+    if: |
+      always() &&
+      needs.syntax.result == 'success' &&
+      (needs.wait-for-ci.result == 'success' || needs.wait-for-ci.result == 'skipped') &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Resolve target SHA
+        id: sha
+        env:
+          DISPATCH_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+        run: |
+          set -Eeuo pipefail
+          if [ -n "${DISPATCH_SHA}" ]; then
+            echo "sha=${DISPATCH_SHA}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require VPS SSH secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for v in PROD_HOST PROD_USER PROD_SSH_PRIVATE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set. Add it in repo Settings → Secrets and variables → Actions. See deploy/production/README.md"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          TARGET_SHA: ${{ steps.sha.outputs.sha }}
+          DEPLOY_ROOT: ${{ secrets.PROD_APP_DIR }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_PORT != '' && secrets.PROD_PORT || 22 }}
+          script_stop: true
+          command_timeout: 40m
+          envs: TARGET_SHA,DEPLOY_ROOT
+          script: |
+            set -Eeuo pipefail
+            DEPLOY_ROOT="${DEPLOY_ROOT:-/opt/gp-store}"
+            if [ -z "${TARGET_SHA:-}" ]; then
+              echo "TARGET_SHA is empty"
+              exit 1
+            fi
+            if [ ! -d "$DEPLOY_ROOT/.git" ]; then
+              echo "No checkout at $DEPLOY_ROOT. Run deploy/production/prepare-vps.sh once."
+              exit 1
+            fi
+            cd "$DEPLOY_ROOT"
+            git fetch origin --prune
+            if git show-ref --verify --quiet refs/heads/main; then
+              git checkout main
+            else
+              git checkout -b main origin/main
+            fi
+            git reset --hard origin/main
+            HEAD_SHA="$(git rev-parse HEAD)"
+            if [ "$HEAD_SHA" != "$TARGET_SHA" ]; then
+              echo "VPS HEAD $HEAD_SHA != GITHUB_SHA $TARGET_SHA. Refusing to deploy."
+              exit 1
+            fi
+            chmod +x deploy/production/deploy.sh deploy/production/prepare-vps.sh
+            exec ./deploy/production/deploy.sh "$TARGET_SHA"

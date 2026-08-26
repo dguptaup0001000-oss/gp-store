@@ -174,6 +174,7 @@ public class SecurityConfig {
                 // (e.g. locked out and needing to contact support).
                 .requestMatchers("/api/store-info").permitAll()
                 .requestMatchers("/api/health", "/api/health/**").permitAll()
+                .requestMatchers("/api/version").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                 .requestMatchers("/actuator/**").hasRole("ADMIN")
                 // Springdoc auto-generates these from your existing @RestController
