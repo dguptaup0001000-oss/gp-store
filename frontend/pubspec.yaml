@@ -1,7 +1,7 @@
 name: gpstore
 description: GP-Store customer app
 publish_to: 'none'
-version: 0.1.0
+version: 1.0.0+2
 # Delivery-worker Android builds use pubspec.worker.yaml via
 # tool/with_worker_pubspec.sh so unused native plugins are not linked.
 
@@ -27,14 +27,8 @@ dependencies:
   # Stores the refresh token securely on-device (Keychain on iOS, Keystore on
   # Android) - NEVER store a refresh token in plain SharedPreferences.
   # QR scanning for the delivery worker APK (lib/worker_main.dart).
-  #
-  # THE COST, stated where it is incurred: this pulls in MLKit's barcode
-  # native library, and Flutter tree-shakes Dart but not native code - so it
-  # ships in the CUSTOMER apk too, which never scans anything. On an app that
-  # already carries Firebase, a webview and a 3D model viewer that is a small
-  # proportional addition, and the alternative was a second Flutter project
-  # with its own copy of the HTTP client, token storage and 401-refresh
-  # handling, which would have drifted apart from this one within a month.
+  # Customer AndroidManifest strips CAMERA so Play does not see a camera
+  # permission. Worker builds swap this file for pubspec.worker.yaml.
   mobile_scanner: ^5.2.3
 
   flutter_secure_storage: ^9.2.2

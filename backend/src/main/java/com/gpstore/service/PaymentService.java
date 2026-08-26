@@ -36,6 +36,7 @@ public class PaymentService {
     private final com.gpstore.repository.DeliveryRepository deliveryRepository;
     private final DeliveryPartnerService deliveryPartnerService;
     private final int upiTimeoutMinutes;
+    private final int onlineTimeoutMinutes;
     private final int expiryBatchSize;
     private final int maxExpiryBatchesPerRun;
 
@@ -64,6 +65,7 @@ public class PaymentService {
             DeliveryPartnerService deliveryPartnerService,
             @org.springframework.context.annotation.Lazy PaymentService self,
             @org.springframework.beans.factory.annotation.Value("${payment.upi-timeout-minutes}") int upiTimeoutMinutes,
+            @org.springframework.beans.factory.annotation.Value("${payment.online-timeout-minutes:60}") int onlineTimeoutMinutes,
             @org.springframework.beans.factory.annotation.Value("${payment.expiry-batch-size:100}") int expiryBatchSize,
             @org.springframework.beans.factory.annotation.Value("${payment.expiry-max-batches-per-run:50}") int maxExpiryBatchesPerRun) {
 
@@ -79,6 +81,7 @@ public class PaymentService {
         this.deliveryPartnerService = deliveryPartnerService;
         this.self = self;
         this.upiTimeoutMinutes = upiTimeoutMinutes;
+        this.onlineTimeoutMinutes = onlineTimeoutMinutes;
         this.expiryBatchSize = expiryBatchSize;
         this.maxExpiryBatchesPerRun = maxExpiryBatchesPerRun;
     }
@@ -105,7 +108,12 @@ public class PaymentService {
             lockAtMostFor = "10m",
             lockAtLeastFor = "1m")
     public void expireStalePendingUpiPayments() {
-        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(upiTimeoutMinutes);
+        expireStalePending(PaymentMethod.UPI, upiTimeoutMinutes);
+        expireStalePending(PaymentMethod.ONLINE, onlineTimeoutMinutes);
+    }
+
+    private void expireStalePending(PaymentMethod method, int timeoutMinutes) {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(timeoutMinutes);
 
         // Deliberately NOT @Transactional at this level, and deliberately
         // not one query returning every stale payment. This sweep covers
@@ -122,7 +130,7 @@ public class PaymentService {
         int processed = 0;
         for (int batch = 0; batch < maxExpiryBatchesPerRun; batch++) {
             List<Payment> stale = paymentRepository.findStaleForExpiry(
-                    PaymentStatus.PENDING, PaymentMethod.UPI, cutoff,
+                    PaymentStatus.PENDING, method, cutoff,
                     org.springframework.data.domain.PageRequest.of(0, expiryBatchSize));
 
             if (stale.isEmpty()) {
@@ -144,7 +152,8 @@ public class PaymentService {
         }
 
         if (processed > 0) {
-            log.info("Expired {} stale UPI payment(s) older than {} minutes", processed, upiTimeoutMinutes);
+            log.info("Expired {} stale {} payment(s) older than {} minutes",
+                    processed, method, timeoutMinutes);
         }
     }
 
@@ -180,7 +189,8 @@ public class PaymentService {
         Payment locked = paymentRepository.findByOrderIdForUpdate(orderId).orElse(null);
         if (locked == null
                 || locked.getPaymentStatus() != PaymentStatus.PENDING
-                || locked.getPaymentMethod() != PaymentMethod.UPI) {
+                || (locked.getPaymentMethod() != PaymentMethod.UPI
+                        && locked.getPaymentMethod() != PaymentMethod.ONLINE)) {
             // Someone confirmed or cancelled it while this run was in
             // flight - their transition wins, this one is abandoned.
             return;
@@ -194,8 +204,13 @@ public class PaymentService {
         // that exactly-once. Only audit the restore that actually happened.
         boolean restored = orderService.restoreInventoryForOrder(orderId);
 
-        auditLogService.log("UPI_PAYMENT_EXPIRED", "Payment", locked.getId(),
-                "no confirmation within " + upiTimeoutMinutes + " minutes; "
+        int timeoutMinutes = locked.getPaymentMethod() == PaymentMethod.ONLINE
+                ? onlineTimeoutMinutes
+                : upiTimeoutMinutes;
+        String methodLabel = locked.getPaymentMethod().name();
+
+        auditLogService.log(methodLabel + "_PAYMENT_EXPIRED", "Payment", locked.getId(),
+                "no confirmation within " + timeoutMinutes + " minutes; "
                         + (restored ? "inventory restored" : "inventory already restored by another path"));
 
         // THE ORDER ITSELF. Previously this method stopped at the line
@@ -228,7 +243,8 @@ public class PaymentService {
             cancelled = orderRepository.save(order);
 
             auditLogService.log("ORDER_CANCELLED", "Order", orderId,
-                    "auto-cancelled: UPI payment not confirmed within " + upiTimeoutMinutes + " minutes");
+                    "auto-cancelled: " + methodLabel + " payment not confirmed within "
+                            + timeoutMinutes + " minutes");
 
             // Same durability argument as cancelOrder's: the invoice has to
             // be cancelled or the books show a sale that never happened.
@@ -307,6 +323,11 @@ public class PaymentService {
         if (method == PaymentMethod.ONLINE) {
             if (cashfreeProperties == null || !cashfreeProperties.enabled()) {
                 throw new BadRequestException("Online payment is not available right now.");
+            }
+        }
+        if (method == PaymentMethod.UPI) {
+            if (upiPaymentService == null || !upiPaymentService.configured()) {
+                throw new BadRequestException("UPI payment is not available right now.");
             }
         }
         return method;

@@ -161,6 +161,9 @@ public class VariantImageService {
                         "One of those image links is too long (" + trimmed.length()
                                 + " characters, limit " + maxUrlLength + ").");
             }
+            if (!com.gpstore.catalog.CatalogUrlValidator.isAllowedImageUrl(trimmed)) {
+                throw new BadRequestException(com.gpstore.catalog.CatalogUrlValidator.IMAGE_MESSAGE);
+            }
             unique.add(trimmed);
         }
         return List.copyOf(unique);

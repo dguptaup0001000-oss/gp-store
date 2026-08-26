@@ -1,7 +1,6 @@
-# NOTE: this file assumes the repo root IS the backend/ folder (matching the
-# structure of the zip this came in). If your actual GitHub repo has backend/
-# as a subfolder instead, move this .github/ folder to the true repo root
-# and add `working-directory: backend` to the run steps below.
+# Canonical backend CI for this monorepo. Job run steps use
+# working-directory: backend. Artifact paths are repo-relative
+# (backend/target/...). Do not copy this file into backend/.github.
 
 name: CI
 
@@ -23,7 +22,7 @@ jobs:
     # can finally pass here even though it couldn't run locally on-device.
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_DB: gpstore_test
           POSTGRES_USER: gpstore
@@ -69,7 +68,7 @@ jobs:
       # clean database. This job still stubs the three objects tests need
       # when Flyway is off: pg_trgm (V5), order_number_seq (V6), shedlock (V3).
       #
-      # Runs psql via the postgres:16 image (already pulled locally for the
+        # Runs psql via the postgres:17 image (already pulled locally for the
       # "postgres" service container above) instead of
       # "apt-get install postgresql-client" - that step has repeatedly hung
       # indefinitely on ubuntu-latest runners (apt mirror reachability, not
@@ -78,7 +77,7 @@ jobs:
       - name: Create schema objects Flyway would normally own
         run: |
           run_psql() {
-            docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:16 \
+            docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17 \
               psql -h localhost -U gpstore -d gpstore_test -c "$1"
           }
           run_psql "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
@@ -102,7 +101,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: surefire-reports
-          path: target/surefire-reports/
+          path: backend/target/surefire-reports/
 
   # Flyway against a CLEAN database. The job above deliberately sets
   # FLYWAY_ENABLED=false and builds the schema with ddl-auto=update, so it
@@ -121,7 +120,7 @@ jobs:
         working-directory: backend
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_DB: gpstore_schema_bootstrap
           POSTGRES_USER: gpstore
@@ -155,7 +154,7 @@ jobs:
 
       - name: Wipe public schema so this job always starts empty
         run: |
-          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:16 \
+          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17 \
             psql -h localhost -U gpstore -d gpstore_schema_bootstrap -c \
             "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO gpstore;"
 
@@ -183,12 +182,38 @@ jobs:
           REDIS_PORT: 6379
         run: ./mvnw -B test -Pschema-bootstrap -Dtest=ProductionSchemaValidateTest -DexcludedGroups=
 
+      - name: Backup and restore drill
+        run: |
+          set -Eeuo pipefail
+          chmod +x docker/backup/backup.sh ../deploy/production/backup-restore-drill.sh
+          mkdir -p /tmp/gp-backups
+          docker run --rm --network=host \
+            -e PGHOST=localhost -e PGPORT=5432 \
+            -e PGUSER=gpstore -e PGDATABASE=gpstore_schema_bootstrap \
+            -e PGPASSWORD=gpstore_test_password \
+            -e BACKUP_DIR=/backups \
+            -v /tmp/gp-backups:/backups \
+            -v "$PWD/docker/backup/backup.sh:/backup.sh:ro" \
+            postgres:17 \
+            /bin/sh /backup.sh once
+          # Do not `ls gpstore-*.dump gpstore-*.sql.gz`: GNU ls exits 2 when
+          # the sql.gz glob matches nothing, and pipefail aborts before restore.
+          DUMP="$(find /tmp/gp-backups -maxdepth 1 \( -name 'gpstore-*.dump' -o -name 'gpstore-*.sql.gz' \) -type f -printf '%T@ %p\n' | sort -nr | awk '{print $2; exit}')"
+          test -n "$DUMP"
+          echo "Restore drill using $DUMP"
+          docker run --rm --network=host \
+            -e PGPASSWORD=gpstore_test_password \
+            -v /tmp/gp-backups:/backups \
+            -v "$PWD/../deploy/production/backup-restore-drill.sh:/drill.sh:ro" \
+            postgres:17 \
+            /bin/sh /drill.sh "/backups/$(basename "$DUMP")" localhost 5432 gpstore gpstore_restore_probe gpstore_test_password
+
       - name: Upload schema-migrate test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: schema-migrate-surefire-reports
-          path: target/surefire-reports/
+          path: backend/target/surefire-reports/
 
   build-and-push-image:
     needs: [build-and-test, schema-migrate]

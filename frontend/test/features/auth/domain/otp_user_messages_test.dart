@@ -44,4 +44,14 @@ void main() {
       OtpUserMessages.sendFailure,
     );
   });
+
+  test('backend 10-character floor is mapped to the same customer copy', () {
+    expect(
+      OtpUserMessages.fromError(
+        ApiException(statusCode: 400, message: 'Password must be 10–128 characters and contain at least one letter and one number.'),
+      ),
+      OtpUserMessages.passwordTooShort,
+    );
+    expect(OtpUserMessages.passwordTooShort, contains('10'));
+  });
 }

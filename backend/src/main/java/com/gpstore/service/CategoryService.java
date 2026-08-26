@@ -30,6 +30,7 @@ public class CategoryService {
         if (category.getActive() == null) {
             category.setActive(true);
         }
+        applyImageUrlIfPresent(category, category.getImageUrl(), true);
         return categoryRepository.save(category);
     }
 
@@ -66,7 +67,10 @@ public class CategoryService {
 
         existing.setName(updated.getName());
         existing.setDescription(updated.getDescription());
-        existing.setImageUrl(updated.getImageUrl());
+        // Null means the client omitted imageUrl (Flutter's updateCategory
+        // does). Copying that null used to wipe a category's photo on every
+        // rename. Empty string still means "clear it".
+        applyImageUrlIfPresent(existing, updated.getImageUrl(), false);
         existing.setGstRate(updated.getGstRate());
         existing.setActive(updated.getActive());
 
@@ -99,5 +103,13 @@ public class CategoryService {
                     "Cannot delete a category that still has products - deactivate it instead, or move the products first");
         }
         categoryRepository.deleteById(id);
+    }
+
+    private static void applyImageUrlIfPresent(Category category, String imageUrl, boolean always) {
+        if (!always && imageUrl == null) {
+            return;
+        }
+        com.gpstore.catalog.CatalogUrlValidator.requireAllowedImageUrlOrEmpty(imageUrl);
+        category.setImageUrl(com.gpstore.catalog.CatalogUrlValidator.trimToNull(imageUrl));
     }
 }

@@ -1,7 +1,7 @@
 name: gpstore
 description: GP-Store delivery worker app (slim Android plugin set)
 publish_to: 'none'
-version: 0.1.0
+version: 1.0.0+2
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

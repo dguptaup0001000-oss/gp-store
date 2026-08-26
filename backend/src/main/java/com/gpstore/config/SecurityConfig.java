@@ -242,6 +242,7 @@ public class SecurityConfig {
                 // future customer pays, and the per-order breakdown exposes
                 // cost prices and margins - neither is customer-readable.
                 .requestMatchers("/api/admin/delivery-pricing/**").hasRole("ADMIN")
+                .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 // THE WORKER APP. Every route here resolves the worker from the
                 // JWT and never from the request, so ADMIN is included only so
                 // an administrator can exercise the same flow while setting a

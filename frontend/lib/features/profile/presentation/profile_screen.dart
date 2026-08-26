@@ -298,26 +298,43 @@ class ProfileScreen extends ConsumerWidget {
     if (understood != true || !context.mounted) return;
 
     final typedController = TextEditingController();
+    final passwordController = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Type DELETE to confirm'),
-        content: TextField(
-          controller: typedController,
-          autofocus: true,
-          textCapitalization: TextCapitalization.characters,
-          decoration: const InputDecoration(hintText: 'DELETE'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'This cannot be undone. Enter DELETE and your current password.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: typedController,
+              autofocus: true,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(hintText: 'DELETE'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Current password',
+                helperText: 'Required. A stolen session is not enough to delete this account.',
+                helperMaxLines: 2,
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
             onPressed: () {
-              final typedCorrectly = typedController.text.trim() == 'DELETE';
-              // ONLY when the confirmation actually passes. Buzzing on a
-              // rejected tap tells the hand something happened when nothing
-              // did, which is precisely the "haptic on a disabled action"
-              // case that makes feedback untrustworthy.
+              final typedCorrectly = typedController.text.trim() == 'DELETE'
+                  && passwordController.text.isNotEmpty;
               if (typedCorrectly) AppHaptics.heavy();
               Navigator.of(context).pop(typedCorrectly);
             },
@@ -330,11 +347,13 @@ class ProfileScreen extends ConsumerWidget {
     // after the await. Released rather than left to the garbage collector's
     // discretion - a TextEditingController is a ChangeNotifier.
     typedController.dispose();
+    final password = passwordController.text;
+    passwordController.dispose();
 
     if (confirmed != true) return;
 
     try {
-      await ref.read(profileRepositoryProvider).deleteAccount();
+      await ref.read(profileRepositoryProvider).deleteAccount(currentPassword: password);
       // The backend has already revoked every refresh token by this point -
       // this just mirrors that locally (clear stored tokens, flip auth
       // state) so the router's listener (see app_router.dart) redirects to
@@ -356,6 +375,7 @@ class ProfileScreen extends ConsumerWidget {
     final nameController = TextEditingController(text: currentName);
     final mobileController = TextEditingController(text: currentMobile);
     final emailController = TextEditingController(text: currentEmail ?? '');
+    final passwordController = TextEditingController();
     final canSetEmail = currentEmail == null;
 
     final saved = await showDialog<bool>(
@@ -381,6 +401,16 @@ class ProfileScreen extends ConsumerWidget {
                 helperMaxLines: 2,
               ),
             ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Current password',
+                helperText: 'Required only if you change your mobile number',
+                helperMaxLines: 2,
+              ),
+            ),
           ],
         ),
         actions: [
@@ -395,10 +425,12 @@ class ProfileScreen extends ConsumerWidget {
     final fullName = nameController.text.trim();
     final mobileNumber = mobileController.text.trim();
     final email = emailController.text.trim();
+    final currentPassword = passwordController.text;
 
     nameController.dispose();
     mobileController.dispose();
     emailController.dispose();
+    passwordController.dispose();
 
     if (saved != true) return;
 
@@ -407,6 +439,7 @@ class ProfileScreen extends ConsumerWidget {
             fullName: fullName,
             mobileNumber: mobileNumber,
             email: canSetEmail && email.isNotEmpty ? email : null,
+            currentPassword: currentPassword.isEmpty ? null : currentPassword,
           );
       ref.invalidate(myProfileProvider);
     } catch (e) {

@@ -44,9 +44,20 @@ class ContactUsScreen extends ConsumerWidget {
             ],
           ),
         ),
-        data: (info) => ListView(
+        data: (info) {
+          if (!info.hasAnyContact) {
+            return const Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Support contact details are not configured for this shop yet. '
+                'Please try again later.',
+              ),
+            );
+          }
+          return ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (info.supportPhone.isNotEmpty) ...[
             _ContactTile(
               icon: Icons.call_outlined,
               label: 'Call us',
@@ -54,6 +65,8 @@ class ContactUsScreen extends ConsumerWidget {
               onTap: hapticize(() => _call(info.supportPhone)),
             ),
             const SizedBox(height: 12),
+            ],
+            if (info.supportWhatsapp.isNotEmpty) ...[
             _ContactTile(
               icon: Icons.chat_outlined,
               label: 'WhatsApp',
@@ -61,14 +74,29 @@ class ContactUsScreen extends ConsumerWidget {
               onTap: hapticize(() => _whatsapp(info.supportWhatsapp)),
             ),
             const SizedBox(height: 12),
+            ],
+            if (info.supportEmail.isNotEmpty) ...[
             _ContactTile(
               icon: Icons.email_outlined,
               label: 'Email',
               value: info.supportEmail,
               onTap: hapticize(() => _email(info.supportEmail)),
             ),
+            const SizedBox(height: 12),
+            ],
+            if (info.supportUrl.isNotEmpty)
+            _ContactTile(
+              icon: Icons.language_outlined,
+              label: 'Help',
+              value: info.supportUrl,
+              onTap: hapticize(() => launchUrl(
+                    Uri.parse(info.supportUrl),
+                    mode: LaunchMode.externalApplication,
+                  )),
+            ),
           ],
-        ),
+        );
+        },
       ),
     );
   }

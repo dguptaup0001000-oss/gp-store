@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/api/api_client.dart';
+import 'cloudinary_upload_guard.dart';
 import '../../products/domain/product_models.dart';
 import '../domain/admin_coupon_models.dart';
 import '../domain/admin_customer_model.dart';
@@ -23,7 +24,9 @@ class AdminProductsRepository {
   /// Includes deactivated products too, unlike the customer-facing list.
   Future<List<Product>> getAllForAdmin() async {
     final response = await apiClient.dio.get('/api/products/admin/all');
-    return (response.data as List).map((e) => Product.fromJson(e as Map<String, dynamic>)).toList();
+    return (response.data as List)
+        .map((e) => Product.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<Product> createProduct({
@@ -132,7 +135,8 @@ class AdminProductsRepository {
   /// backend's own message via extractErrorMessage) if Cloudinary hasn't
   /// been configured yet.
   Future<CloudinarySignature> getCloudinarySignature() async {
-    final response = await apiClient.dio.get('/api/uploads/cloudinary-signature');
+    final response =
+        await apiClient.dio.get('/api/uploads/cloudinary-signature');
     return CloudinarySignature.fromJson(response.data as Map<String, dynamic>);
   }
 
@@ -202,7 +206,8 @@ class AdminProductsRepository {
       return (urls: const <String>[], skipped: 0);
     }
 
-    final accepted = picked.length > remaining ? picked.sublist(0, remaining) : picked;
+    final accepted =
+        picked.length > remaining ? picked.sublist(0, remaining) : picked;
     final skipped = picked.length - accepted.length;
 
     final signature = await getCloudinarySignature();
@@ -221,11 +226,24 @@ class AdminProductsRepository {
 
   Future<String> _uploadOne(XFile file, CloudinarySignature signature) async {
     final bytes = await file.readAsBytes();
+    if (bytes.length > CloudinaryUploadGuard.maxBytes) {
+      throw ApiException(
+        statusCode: 400,
+        message: 'That photo is too large. Choose an image under 4 MB.',
+      );
+    }
+    if (!CloudinaryUploadGuard.isAllowedImageBytes(bytes)) {
+      throw ApiException(
+        statusCode: 400,
+        message: 'That file is not a JPEG, PNG, or WebP image.',
+      );
+    }
 
+    final filename = CloudinaryUploadGuard.safeFilename(file.name);
     final response = await Dio().post(
       'https://api.cloudinary.com/v1_1/${signature.cloudName}/image/upload',
       data: FormData.fromMap({
-        'file': MultipartFile.fromBytes(bytes, filename: file.name),
+        'file': MultipartFile.fromBytes(bytes, filename: filename),
         'api_key': signature.apiKey,
         'timestamp': signature.timestamp,
         'signature': signature.signature,
@@ -233,12 +251,29 @@ class AdminProductsRepository {
       }),
     );
 
-    return response.data['secure_url'] as String;
+    final data = response.data;
+    if (data is! Map) {
+      throw ApiException(
+        statusCode: response.statusCode,
+        message:
+            'Image upload did not return a usable link. The product was not changed.',
+      );
+    }
+    final url = data['secure_url'];
+    if (url is! String || !CloudinaryUploadGuard.isAllowedDeliveryUrl(url)) {
+      throw ApiException(
+        statusCode: response.statusCode,
+        message:
+            'Image upload did not return a usable link. The product was not changed.',
+      );
+    }
+    return url;
   }
 
   /// This variant's photos, in order.
   Future<List<String>> getVariantImages(int variantId) async {
-    final response = await apiClient.dio.get('/api/product-variants/$variantId/images');
+    final response =
+        await apiClient.dio.get('/api/product-variants/$variantId/images');
     return ((response.data as List?) ?? const [])
         .map((e) => e.toString())
         .toList(growable: false);
@@ -249,7 +284,8 @@ class AdminProductsRepository {
   /// The whole list, not one image - the first entry is the primary photo, so
   /// order carries meaning, and add/remove/reorder as three calls is three
   /// chances for the screen's order and the server's to drift apart.
-  Future<List<String>> setVariantImages(int variantId, List<String> urls) async {
+  Future<List<String>> setVariantImages(
+      int variantId, List<String> urls) async {
     final response = await apiClient.dio.put(
       '/api/product-variants/$variantId/images',
       data: {'imageUrls': urls},
@@ -261,10 +297,13 @@ class AdminProductsRepository {
 
   Future<List<Category>> getCategories() async {
     final response = await apiClient.dio.get('/api/categories');
-    return (response.data as List).map((e) => Category.fromJson(e as Map<String, dynamic>)).toList();
+    return (response.data as List)
+        .map((e) => Category.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
-  Future<void> createCategory({required String name, String? description, double? gstRate}) async {
+  Future<void> createCategory(
+      {required String name, String? description, double? gstRate}) async {
     await apiClient.dio.post('/api/categories', data: {
       'name': name,
       'description': description,
@@ -273,9 +312,8 @@ class AdminProductsRepository {
     });
   }
 
-  /// Backend's CategoryService.update() copies every field from the
-  /// request body - same reasoning as address/delivery-partner updates,
-  /// always send a complete picture, never a partial one.
+  /// imageUrl is omitted on purpose. The backend keeps the existing photo
+  /// when the field is null; sending null used to wipe it.
   Future<void> updateCategory({
     required int categoryId,
     required String name,
@@ -301,7 +339,8 @@ class AdminProductsRepository {
   // Real pagination now (used to be a bare unbounded array) - every
   // inventory row ever created was being loaded on every visit to this
   // screen otherwise.
-  Future<({List<InventoryItem> items, int totalPages})> getAllInventory({int page = 0, int size = 20}) async {
+  Future<({List<InventoryItem> items, int totalPages})> getAllInventory(
+      {int page = 0, int size = 20}) async {
     final response = await apiClient.dio.get(
       '/api/inventory',
       queryParameters: {'page': page, 'size': size},
@@ -309,19 +348,24 @@ class AdminProductsRepository {
     final data = response.data as Map<String, dynamic>;
     final content = data['content'] as List;
     return (
-      items: content.map((e) => InventoryItem.fromJson(e as Map<String, dynamic>)).toList(),
+      items: content
+          .map((e) => InventoryItem.fromJson(e as Map<String, dynamic>))
+          .toList(),
       totalPages: data['totalPages'] as int,
     );
   }
 
   Future<List<InventoryItem>> getLowStock() async {
     final response = await apiClient.dio.get('/api/inventory/low-stock');
-    return (response.data as List).map((e) => InventoryItem.fromJson(e as Map<String, dynamic>)).toList();
+    return (response.data as List)
+        .map((e) => InventoryItem.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// Additive - "we received N more units", not a replacement value. Matches
   /// the backend's restock endpoint exactly.
-  Future<void> restock({required int inventoryId, required int quantity}) async {
+  Future<void> restock(
+      {required int inventoryId, required int quantity}) async {
     await apiClient.dio.put(
       '/api/inventory/$inventoryId/restock',
       queryParameters: {'quantity': quantity},
@@ -355,7 +399,9 @@ class AdminProductsRepository {
 
   Future<List<AdminCoupon>> getAllCoupons() async {
     final response = await apiClient.dio.get('/api/coupons');
-    return (response.data as List).map((e) => AdminCoupon.fromJson(e as Map<String, dynamic>)).toList();
+    return (response.data as List)
+        .map((e) => AdminCoupon.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> createCoupon({
@@ -411,7 +457,9 @@ class AdminProductsRepository {
 
   Future<List<DeliveryPartnerModel>> getAllDeliveryPartners() async {
     final response = await apiClient.dio.get('/api/delivery-partners');
-    return (response.data as List).map((e) => DeliveryPartnerModel.fromJson(e as Map<String, dynamic>)).toList();
+    return (response.data as List)
+        .map((e) => DeliveryPartnerModel.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> createDeliveryPartner(DeliveryPartnerModel partner) async {
@@ -425,30 +473,37 @@ class AdminProductsRepository {
   /// method's doc comment). Always call this with a complete
   /// DeliveryPartnerModel, never a partial one.
   Future<void> updateDeliveryPartner(DeliveryPartnerModel partner) async {
-    assert(partner.id != null, 'Cannot update a delivery partner without an id');
+    assert(
+        partner.id != null, 'Cannot update a delivery partner without an id');
     await apiClient.dio.put('/api/delivery-partners', data: partner.toJson());
   }
 
   // --- Analytics ---
 
   Future<SalesSummary> getSalesSummary({int days = 30}) async {
-    final response = await apiClient.dio.get('/api/analytics/sales-summary', queryParameters: {'days': days});
+    final response = await apiClient.dio
+        .get('/api/analytics/sales-summary', queryParameters: {'days': days});
     return SalesSummary.fromJson(response.data as Map<String, dynamic>);
   }
 
   /// Map values come back as JSON numbers (Long serializes as a plain
   /// number, not a string) - cast explicitly rather than assume int.
   Future<Map<String, int>> getOrderStatusBreakdown() async {
-    final response = await apiClient.dio.get('/api/analytics/order-status-breakdown');
-    return (response.data as Map<String, dynamic>).map((key, value) => MapEntry(key, (value as num).toInt()));
+    final response =
+        await apiClient.dio.get('/api/analytics/order-status-breakdown');
+    return (response.data as Map<String, dynamic>)
+        .map((key, value) => MapEntry(key, (value as num).toInt()));
   }
 
-  Future<List<TopProduct>> getTopProducts({int days = 30, int limit = 10}) async {
+  Future<List<TopProduct>> getTopProducts(
+      {int days = 30, int limit = 10}) async {
     final response = await apiClient.dio.get(
       '/api/analytics/top-products',
       queryParameters: {'days': days, 'limit': limit},
     );
-    return (response.data as List).map((e) => TopProduct.fromJson(e as Map<String, dynamic>)).toList();
+    return (response.data as List)
+        .map((e) => TopProduct.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<int> getLowStockCount() async {
@@ -463,7 +518,9 @@ class AdminProductsRepository {
   /// endpoint) - purely a signal for the admin to act on.
   Future<List<DeliveryBreach>> getBreachedDeliveries() async {
     final response = await apiClient.dio.get('/api/deliveries/breached');
-    return (response.data as List).map((e) => DeliveryBreach.fromJson(e as Map<String, dynamic>)).toList();
+    return (response.data as List)
+        .map((e) => DeliveryBreach.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   // --- Audit log ---
@@ -474,7 +531,9 @@ class AdminProductsRepository {
       queryParameters: {'page': page, 'size': size},
     );
     final content = response.data['content'] as List;
-    return content.map((e) => AuditLogEntry.fromJson(e as Map<String, dynamic>)).toList();
+    return content
+        .map((e) => AuditLogEntry.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   // --- Orders ---
@@ -485,7 +544,8 @@ class AdminProductsRepository {
   /// directly - the backend now allows admin to bypass the ownership check
   /// on that same endpoint, so no separate admin detail call is needed.
   /// Paginated - every order ever placed, system-wide, has no natural upper bound.
-  Future<({List<OrderSummary> orders, int totalPages})> getAllOrders({int page = 0, int size = 20}) async {
+  Future<({List<OrderSummary> orders, int totalPages})> getAllOrders(
+      {int page = 0, int size = 20}) async {
     final response = await apiClient.dio.get(
       '/api/orders/admin/all',
       queryParameters: {'page': page, 'size': size},
@@ -493,7 +553,9 @@ class AdminProductsRepository {
     final data = response.data as Map<String, dynamic>;
     final content = data['content'] as List;
     return (
-      orders: content.map((e) => OrderSummary.fromJson(e as Map<String, dynamic>)).toList(),
+      orders: content
+          .map((e) => OrderSummary.fromJson(e as Map<String, dynamic>))
+          .toList(),
       totalPages: data['totalPages'] as int,
     );
   }
@@ -511,10 +573,13 @@ class AdminProductsRepository {
     );
     final data = response.data as Map<String, dynamic>;
     final content = data['content'] as List;
-    return content.map((e) => OrderSummary.fromJson(e as Map<String, dynamic>)).toList();
+    return content
+        .map((e) => OrderSummary.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
-  Future<void> updateOrderStatus({required int orderId, required String status}) async {
+  Future<void> updateOrderStatus(
+      {required int orderId, required String status}) async {
     await apiClient.dio.put(
       '/api/orders/$orderId/status',
       queryParameters: {'status': status},
@@ -524,7 +589,8 @@ class AdminProductsRepository {
   // --- Review moderation ---
 
   /// Paginated - system-wide review count has no natural upper bound.
-  Future<({List<AdminReview> reviews, int totalPages})> getAllReviews({int page = 0, int size = 20}) async {
+  Future<({List<AdminReview> reviews, int totalPages})> getAllReviews(
+      {int page = 0, int size = 20}) async {
     final response = await apiClient.dio.get(
       '/api/reviews',
       queryParameters: {'page': page, 'size': size},
@@ -532,7 +598,9 @@ class AdminProductsRepository {
     final data = response.data as Map<String, dynamic>;
     final content = data['content'] as List;
     return (
-      reviews: content.map((e) => AdminReview.fromJson(e as Map<String, dynamic>)).toList(),
+      reviews: content
+          .map((e) => AdminReview.fromJson(e as Map<String, dynamic>))
+          .toList(),
       totalPages: data['totalPages'] as int,
     );
   }
@@ -545,7 +613,8 @@ class AdminProductsRepository {
   // --- Customer management ---
 
   /// Paginated - the customer base has no natural upper bound.
-  Future<({List<AdminCustomer> customers, int totalPages})> getAllCustomers({int page = 0, int size = 20}) async {
+  Future<({List<AdminCustomer> customers, int totalPages})> getAllCustomers(
+      {int page = 0, int size = 20}) async {
     final response = await apiClient.dio.get(
       '/api/customers',
       queryParameters: {'page': page, 'size': size},
@@ -553,7 +622,9 @@ class AdminProductsRepository {
     final data = response.data as Map<String, dynamic>;
     final content = data['content'] as List;
     return (
-      customers: content.map((e) => AdminCustomer.fromJson(e as Map<String, dynamic>)).toList(),
+      customers: content
+          .map((e) => AdminCustomer.fromJson(e as Map<String, dynamic>))
+          .toList(),
       totalPages: data['totalPages'] as int,
     );
   }
@@ -577,7 +648,8 @@ class AdminProductsRepository {
 
   /// Deactivating also force-logs-out every device that customer is signed
   /// into - see the backend's CustomerService.setAccountActive doc comment.
-  Future<void> setCustomerActive({required int customerId, required bool active}) async {
+  Future<void> setCustomerActive(
+      {required int customerId, required bool active}) async {
     await apiClient.dio.put(
       '/api/customers/$customerId/active',
       queryParameters: {'active': active},
@@ -587,7 +659,8 @@ class AdminProductsRepository {
   // --- Payments ---
 
   /// Paginated - system-wide payment count has no natural upper bound.
-  Future<({List<AdminPayment> payments, int totalPages})> getAllPayments({int page = 0, int size = 20}) async {
+  Future<({List<AdminPayment> payments, int totalPages})> getAllPayments(
+      {int page = 0, int size = 20}) async {
     final response = await apiClient.dio.get(
       '/api/payments',
       queryParameters: {'page': page, 'size': size},
@@ -595,7 +668,9 @@ class AdminProductsRepository {
     final data = response.data as Map<String, dynamic>;
     final content = data['content'] as List;
     return (
-      payments: content.map((e) => AdminPayment.fromJson(e as Map<String, dynamic>)).toList(),
+      payments: content
+          .map((e) => AdminPayment.fromJson(e as Map<String, dynamic>))
+          .toList(),
       totalPages: data['totalPages'] as int,
     );
   }
@@ -615,7 +690,10 @@ class AdminProductsRepository {
   Future<void> confirmUpiPayment(int orderId, {String? transactionId}) async {
     await apiClient.dio.put(
       '/api/payments/order/$orderId/upi/confirm',
-      queryParameters: {if (transactionId != null && transactionId.isNotEmpty) 'transactionId': transactionId},
+      queryParameters: {
+        if (transactionId != null && transactionId.isNotEmpty)
+          'transactionId': transactionId
+      },
     );
   }
 
@@ -624,8 +702,10 @@ class AdminProductsRepository {
   /// Store-wide announcement - one real notification per active customer.
   /// Returns the backend's own confirmation message (e.g. "Sent to 5
   /// customers") rather than discarding it.
-  Future<String> broadcastNotification({required String title, required String message}) async {
-    final response = await apiClient.dio.post('/api/notifications/broadcast', data: {'title': title, 'message': message});
+  Future<String> broadcastNotification(
+      {required String title, required String message}) async {
+    final response = await apiClient.dio.post('/api/notifications/broadcast',
+        data: {'title': title, 'message': message});
     return response.data as String;
   }
 
@@ -635,14 +715,21 @@ class AdminProductsRepository {
   /// manual fallback for the rare case where no delivery partner happened
   /// to be available at that moment (see DeliveryService.autoAssignBestEffort).
   Future<List<DeliveryPartnerModel>> getAvailablePartners() async {
-    final response = await apiClient.dio.get('/api/delivery-partners/available');
-    return (response.data as List).map((e) => DeliveryPartnerModel.fromJson(e as Map<String, dynamic>)).toList();
+    final response =
+        await apiClient.dio.get('/api/delivery-partners/available');
+    return (response.data as List)
+        .map((e) => DeliveryPartnerModel.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
-  Future<void> assignDeliveryPartner({required int orderId, required int deliveryPartnerId}) async {
+  Future<void> assignDeliveryPartner(
+      {required int orderId, required int deliveryPartnerId}) async {
     await apiClient.dio.post(
       '/api/deliveries/assign',
-      queryParameters: {'orderId': orderId, 'deliveryPartnerId': deliveryPartnerId},
+      queryParameters: {
+        'orderId': orderId,
+        'deliveryPartnerId': deliveryPartnerId
+      },
     );
   }
 }

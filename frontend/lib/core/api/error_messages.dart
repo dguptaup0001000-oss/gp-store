@@ -97,8 +97,11 @@ String _describeDioFailure(DioException error) {
 String _describeStatus(int? status) {
   if (status == null) return _unknown;
 
-  if (status == 401 || status == 403) {
+  if (status == 401) {
     return 'Your session has expired. Please sign in again.';
+  }
+  if (status == 403) {
+    return 'You do not have permission to do that.';
   }
   if (status == 404) {
     return 'That is no longer available.';

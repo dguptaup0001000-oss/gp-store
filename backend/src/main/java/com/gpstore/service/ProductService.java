@@ -82,6 +82,7 @@ public class ProductService {
     @Transactional
     public ProductResponse saveProduct(Product product) {
         resolveCategory(product);
+        applyModel3dUrl(product, product.getModel3dUrl(), true);
         // forAdmin: only an ADMIN can reach POST /api/products, and the reply
         // has to show them the privacy settings they just set - a
         // customer-shaped response would silently drop them and make the
@@ -95,28 +96,22 @@ public class ProductService {
     // /api/products/search/instant endpoint; these three exist only for
     // backward compatibility with old callers that expect a bare JSON array,
     // capped at a safe size instead of the whole catalog.
-    private static final int LEGACY_UNPAGINATED_CAP = 100;
+    private static final int ADMIN_UNPAGINATED_CAP = 100;
 
-    // Get All Products - CUSTOMER-FACING, active only. This was returning
-    // deactivated products too before - deactivating a product did nothing
-    // to actually hide it from the public browsing endpoint. Was also
-    // previously a full unbounded findAll() - on a public endpoint, that's a
-    // full-catalog-dump-on-every-request risk that only gets worse as the
-    // catalog grows, regardless of concurrent user count.
+    // Customer-facing list. Paged by the controller (default 20, cap 50).
+    // Only products that can actually be sold: active + a priced available
+    // variant. A name with empty variants is not a product in the shop window.
     @Transactional(readOnly = true)
     @Cacheable(value = "products", sync = true)
-    public List<ProductResponse> getAllProducts() {
-        return productRepository
-                .findByActiveTrueOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
-                .map(ProductResponse::fromCard)
-                .toList();
+    public List<ProductResponse> getAllProducts(org.springframework.data.domain.Pageable pageable) {
+        return batchFetchWithVariants(productRepository.findSellable(pageable)).getContent();
     }
 
     /** Admin management view - includes inactive/deactivated products too, unlike the customer-facing list above. */
     @Transactional(readOnly = true)
     public List<ProductResponse> getAllForAdmin() {
         return productRepository
-                .findAllByOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
+                .findAllByOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, ADMIN_UNPAGINATED_CAP))
                 .map(ProductResponse::forAdmin)
                 .toList();
     }
@@ -126,7 +121,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     public List<ProductResponse> search(String keyword) {
         return productRepository
-                .findByNameContainingIgnoreCase(keyword, org.springframework.data.domain.PageRequest.of(0, LEGACY_UNPAGINATED_CAP))
+                .findByNameContainingIgnoreCase(keyword, org.springframework.data.domain.PageRequest.of(0, ADMIN_UNPAGINATED_CAP))
                 .stream()
                 .map(ProductResponse::fromCard)
                 .toList();
@@ -180,7 +175,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable(value = "productFeed", sync = true)
     public Page<ProductResponse> browseAll(Pageable pageable) {
-        return batchFetchWithVariants(productRepository.findByActiveTrue(pageable));
+        return batchFetchWithVariants(productRepository.findSellable(pageable));
     }
 
     /**
@@ -240,7 +235,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable(value = "categoryProducts", sync = true)
     public Page<ProductResponse> browseByCategory(Long categoryId, Pageable pageable) {
-        return batchFetchWithVariants(productRepository.findByCategoryIdAndActiveTrue(categoryId, pageable));
+        return batchFetchWithVariants(productRepository.findSellableByCategoryId(categoryId, pageable));
     }
 
     /**
@@ -260,7 +255,14 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable(value = "newArrivals", sync = true)
     public Page<ProductResponse> getNewArrivals(Pageable pageable) {
-        return batchFetchWithVariants(productRepository.findByActiveTrueOrderByCreatedAtDesc(pageable));
+        return batchFetchWithVariants(productRepository.findSellable(
+                org.springframework.data.domain.PageRequest.of(
+                        pageable.getPageNumber(),
+                        pageable.getPageSize(),
+                        org.springframework.data.domain.Sort.by(
+                                org.springframework.data.domain.Sort.Direction.DESC, "createdAt")
+                                .and(org.springframework.data.domain.Sort.by(
+                                        org.springframework.data.domain.Sort.Direction.DESC, "id")))));
     }
 
     /**
@@ -464,8 +466,19 @@ public class ProductService {
         // authorisation, not a new one invented for this feature.
         existing.setIsPrivateProduct(updated.getIsPrivateProduct());
         existing.setCustomerDisplayName(updated.getCustomerDisplayName());
+        // Null means omitted (Flutter updateProduct does not send model3dUrl).
+        // Empty string clears it. A javascript: or http:// URL is refused.
+        applyModel3dUrl(existing, updated.getModel3dUrl(), false);
 
         return ProductResponse.forAdmin(productRepository.save(existing));
+    }
+
+    private static void applyModel3dUrl(Product product, String url, boolean always) {
+        if (!always && url == null) {
+            return;
+        }
+        com.gpstore.catalog.CatalogUrlValidator.requireAllowedModel3dUrl(url);
+        product.setModel3dUrl(com.gpstore.catalog.CatalogUrlValidator.trimToNull(url));
     }
 
     /**

@@ -109,6 +109,12 @@ public class TerritoryResolver {
 
         for (Territory territory : currentMap()) {
             if (territory.polygon().contains(latitude, longitude)) {
+                List<String> overlaps = findOverlaps(latitude, longitude);
+                if (overlaps.size() > 1) {
+                    log.warn("Point ({}, {}) is inside overlapping territories {}; failing closed",
+                            latitude, longitude, overlaps);
+                    return Optional.empty();
+                }
                 return Optional.of(territory);
             }
         }

@@ -8,8 +8,7 @@ import '../domain/territory_models.dart';
 import 'admin_providers.dart';
 import 'admin_territory_forms.dart';
 
-/// Health, zone list, and territory list. Outlines are reported as present
-/// or missing — this screen does not draw a map.
+/// Health, zone list, territory list, and outline paste/save.
 class AdminTerritoriesScreen extends ConsumerWidget {
   const AdminTerritoriesScreen({super.key});
 
@@ -22,7 +21,8 @@ class AdminTerritoriesScreen extends ConsumerWidget {
         children: [
           Text(
             'Delivery is organised as named territories, not a circle around the shop. '
-            'The design target is 8 main zones and 26 territories.',
+            'The design target is 8 main zones and 26 territories. '
+            'Paste a JSON outline on each territory so dispatch can assign riders.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
           ),
           const SizedBox(height: 16),
@@ -327,7 +327,7 @@ class _SubzonesSection extends ConsumerWidget {
               ...subzones.map((subzone) {
                 final outline = switch (subzone.boundaryPresence) {
                   BoundaryPresence.stored =>
-                    'Outline stored (${boundaryVertexCount(subzone.boundary)} points) — not shown as a map',
+                    'Outline stored (${boundaryVertexCount(subzone.boundary)} points)',
                   BoundaryPresence.unreadable => 'Stored outline could not be read',
                   BoundaryPresence.missing => 'No outline stored yet',
                 };

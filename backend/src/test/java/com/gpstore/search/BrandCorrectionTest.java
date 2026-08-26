@@ -88,6 +88,8 @@ class BrandCorrectionTest {
     @AfterEach
     void removeFixtures() {
         for (String name : insertedProducts) {
+            jdbc.update("DELETE FROM product_variants WHERE product_id IN (SELECT id FROM products WHERE name = ?)",
+                    name);
             jdbc.update("DELETE FROM products WHERE name = ?", name);
         }
         insertedProducts.clear();
@@ -109,7 +111,28 @@ class BrandCorrectionTest {
                 VALUES (?, ?, true, false, false, false, false, now())
                 """, productName, brand);
         insertedProducts.add(productName);
+        insertSellableVariant(productName);
         brands.reload();
+    }
+
+    /**
+     * Public search only advertises products with a priced, available
+     * variant. A brand-correction fixture without one is invisible, which
+     * looks like the correction failed.
+     */
+    private void insertSellableVariant(String productName) {
+        jdbc.queryForObject(
+                "SELECT setval('product_variants_id_seq', GREATEST("
+                        + "  (SELECT COALESCE(max(id), 0) FROM product_variants), "
+                        + "  COALESCE(pg_sequence_last_value('product_variants_id_seq'), 0), "
+                        + "  1), true)",
+                Long.class);
+        jdbc.update("""
+                INSERT INTO product_variants (product_id, quantity, unit, available, active,
+                                              mrp, selling_price)
+                SELECT id, 1, 'pc', true, true, 20.00, 19.00
+                FROM products WHERE name = ?
+                """, productName);
     }
 
     @Test
@@ -192,6 +215,7 @@ class BrandCorrectionTest {
         // was verified by hand against a production-shaped catalogue:
         // "रांची हल्दी" -> interpreted as "Aachi turmeric", top result
         // "Aachi Turmeric Powder 50 g".
+        jdbc.update("DELETE FROM product_variants WHERE product_id IN (SELECT id FROM products WHERE brand = 'Zeppelina')");
         jdbc.update("DELETE FROM products WHERE brand = 'Zeppelina'");
         jdbc.update("""
                 INSERT INTO products (name, brand, active, bestseller, featured,
@@ -200,6 +224,7 @@ class BrandCorrectionTest {
                         true, false, false, false, false, now())
                 """);
         insertedProducts.add("Zeppelina Kumquat Marmalade 200 g");
+        insertSellableVariant("Zeppelina Kumquat Marmalade 200 g");
         brands.reload();
 
         // One letter wrong, exactly as a recogniser would leave it.
@@ -213,6 +238,7 @@ class BrandCorrectionTest {
         assertTrue(result.getResults().hasContent(), "the corrected query must find the product");
         assertEquals("Zeppelina", result.getResults().getContent().get(0).getBrand());
 
+        jdbc.update("DELETE FROM product_variants WHERE product_id IN (SELECT id FROM products WHERE brand = 'Zeppelina')");
         jdbc.update("DELETE FROM products WHERE brand = 'Zeppelina'");
     }
 }

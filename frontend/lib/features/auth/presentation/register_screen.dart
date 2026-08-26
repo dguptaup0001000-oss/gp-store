@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../domain/password_policy.dart';
 import 'auth_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
 
@@ -97,16 +98,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   obscureText: true,
                   decoration: const InputDecoration(
                     labelText: 'Password',
-                    helperText: 'At least 8 characters',
+                    helperText: AppPasswordPolicy.helperText,
                   ),
-                  // Mirrors the backend's @Size(min = 8) constraint exactly -
-                  // catching this here means the user finds out instantly
-                  // instead of after a round-trip to the server.
-                  validator: (value) {
-                    if (value == null || value.isEmpty) return 'Password is required';
-                    if (value.length < 8) return 'Password must be at least 8 characters';
-                    return null;
-                  },
+                  // Mirrors backend PasswordPolicy.MIN_LENGTH so the user
+                  // finds out instantly instead of after a round-trip.
+                  validator: AppPasswordPolicy.validateNewPassword,
                 ),
                 const SizedBox(height: 24),
                 FilledButton(

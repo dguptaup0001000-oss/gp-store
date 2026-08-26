@@ -65,7 +65,7 @@ class _DeliveryDashboardScreenState
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         throw Exception(
-            'Please turn on location services to share your live location');
+            'Please turn on location services to share your position while this screen is open');
       }
 
       LocationPermission permission = await Geolocator.checkPermission();
@@ -73,7 +73,7 @@ class _DeliveryDashboardScreenState
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
           throw Exception(
-              'Location permission denied - customers will not see your live position');
+              'Location permission denied - your position is not shared while this screen is open');
         }
       }
       if (permission == LocationPermission.deniedForever) {
@@ -153,7 +153,7 @@ class _DeliveryDashboardScreenState
             const Padding(
               padding: EdgeInsets.only(right: 4),
               child: Tooltip(
-                message: 'Sharing live location',
+                message: 'Sharing location while this screen is open',
                 child:
                     Icon(Icons.gps_fixed, size: 18, color: AppColors.primary),
               ),
@@ -195,7 +195,21 @@ class _DeliveryDashboardScreenState
           ),
         ],
       ),
-      body: assignmentsAsync.when(
+      body: Column(
+        children: [
+          if (_isTracking)
+            Material(
+              color: AppColors.primary.withValues(alpha: 0.08),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Text(
+                  'Location is shared only while this screen is open. '
+                  'It stops if you leave the app. We do not track in the background.',
+                ),
+              ),
+            ),
+          Expanded(
+            child: assignmentsAsync.when(
         loading: () =>
             const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         error: (error, stackTrace) => Center(
@@ -233,6 +247,9 @@ class _DeliveryDashboardScreenState
             ),
           );
         },
+            ),
+          ),
+        ],
       ),
     );
   }

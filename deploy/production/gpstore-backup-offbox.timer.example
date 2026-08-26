@@ -1,0 +1,9 @@
+[Unit]
+Description=Off-box GP-STORE backup copy (after the sidecar dump)
+
+[Timer]
+OnCalendar=*-*-* 01,07,13,19:15:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

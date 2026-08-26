@@ -20,13 +20,16 @@ public class UpiPaymentService {
         this.payeeName = payeeName;
     }
 
-    /**
-     * Standard UPI deep-link format - any UPI app (GPay, PhonePe, Paytm, etc.)
-     * can open this directly, or your Flutter app can render it as a QR code.
-     * "tr" (transaction reference) is the order number, so a payment can be
-     * matched back to the order manually when confirming it arrived.
-     */
+    /** False when STORE_UPI_ID is missing or a published placeholder. */
+    public boolean configured() {
+        return !com.gpstore.config.PlaceholderValues.isBlankOrPlaceholder(upiId);
+    }
+
     public String generatePaymentLink(String orderNumber, BigDecimal amount) {
+        if (!configured()) {
+            throw new com.gpstore.exception.ConflictException(
+                    "UPI is not configured. Set STORE_UPI_ID to the shop's real VPA.");
+        }
         String encodedName = URLEncoder.encode(payeeName, StandardCharsets.UTF_8);
         String encodedNote = URLEncoder.encode("Order " + orderNumber, StandardCharsets.UTF_8);
 

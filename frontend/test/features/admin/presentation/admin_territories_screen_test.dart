@@ -66,7 +66,7 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: AdminHomeScreen()));
     await tester.scrollUntilVisible(find.text('Territories'), 400);
     expect(find.text('Territories'), findsOneWidget);
-    expect(find.text('Zones, riders, and map status — not a drawn map'), findsOneWidget);
+    expect(find.text('Zones, riders, and pasteable map outlines'), findsOneWidget);
   });
 
   group('AdminTerritoriesScreen', () {

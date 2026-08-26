@@ -12,6 +12,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * The territory configuration API: mapped, and admin-only.
@@ -81,16 +83,33 @@ class TerritoryAdminApiTest {
     }
 
     @Test
-    @WithMockUser(roles = "CUSTOMER")
-    @DisplayName("a customer cannot redraw a boundary")
-    void customersCannotWriteTheMap() throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/admin/territory/zones")
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("validate-boundary accepts a triangle and rejects garbage")
+    void validateBoundaryParsesWithoutSaving() throws Exception {
+        mockMvc.perform(post("/api/admin/territory/validate-boundary")
                         .contentType("application/json")
-                        .content("{\"code\":\"Z9\",\"name\":\"Not yours\"}"))
-                .andReturn();
+                        .content("{\"boundary\":\"[[28.61,77.20],[28.62,77.20],[28.62,77.21]]\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(true))
+                .andExpect(jsonPath("$.vertexCount").value(3));
 
-        int status = result.getResponse().getStatus();
-        assertTrue(status == 401 || status == 403,
-                "one POST here creates a territory; expected an auth failure, got " + status);
+        mockMvc.perform(post("/api/admin/territory/validate-boundary")
+                        .contentType("application/json")
+                        .content("{\"boundary\":\"not-a-polygon\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(false));
+    }
+
+    @Test
+    @WithMockUser(roles = "CUSTOMER")
+    @DisplayName("a customer cannot validate a boundary")
+    void customersCannotValidateBoundary() throws Exception {
+        int status = mockMvc.perform(post("/api/admin/territory/validate-boundary")
+                        .contentType("application/json")
+                        .content("{\"boundary\":\"[]\"}"))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+        assertTrue(status == 401 || status == 403, "got " + status);
     }
 }

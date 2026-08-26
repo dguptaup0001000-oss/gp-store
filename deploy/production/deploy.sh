@@ -251,6 +251,9 @@ command -v docker >/dev/null || die "docker is not installed"
 docker compose version >/dev/null || die "docker compose v2 is required"
 command -v python3 >/dev/null || die "python3 is required for JSON parsing"
 
+python3 "$COMPOSE_DIR/docker/redis/materialize-password-file.py" "$COMPOSE_DIR" \
+  || die "Could not materialize Redis password file from backend/.env"
+
 mkdir -p "$STATE_DIR"
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
@@ -315,6 +318,13 @@ log "Image $TARGET_IMAGE built. Current production container is still the previo
 echo "[4/8] Database migration"
 log "Flyway runs on backend startup (FLYWAY_ENABLED=true, DDL_AUTO=validate)."
 log "Postgres and Redis volumes are untouched."
+
+echo "[4b/8] Infra sidecars"
+# Socket proxy, backup daemon, redis config file. Does not recreate Postgres.
+# Traefik is recreated only when its Compose definition changed.
+compose up -d dockerproxy
+compose up -d redis backup
+compose up -d traefik
 
 echo "[5/8] Starting backend"
 REPLACED=1

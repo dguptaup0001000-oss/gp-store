@@ -10,7 +10,7 @@ import java.util.List;
  * A subzone's outline, and the one question worth asking of it: is this
  * customer inside?
  *
- * WHY THIS IS NOT PostGIS. CI runs the plain postgres:16 image, which has no
+ * WHY THIS IS NOT PostGIS. CI and production run the plain postgres:17 image, which has no
  * PostGIS, and turning the extension on in Supabase is a change to a live
  * production database. What it would buy is a spatial index over twenty-six
  * polygons of a few dozen vertices each - a data set that fits in a few
@@ -201,5 +201,22 @@ public final class TerritoryPolygon {
             sumLng += lng[i];
         }
         return new double[]{sumLat / lat.length, sumLng / lng.length};
+    }
+
+    /**
+     * True when the two outlines share interior, not merely a boundary road.
+     * Adjacent territories that meet at an edge must still be allowed.
+     */
+    public boolean overlapsInterior(TerritoryPolygon other) {
+        if (other == null) {
+            return false;
+        }
+        if (maxLat < other.minLat || minLat > other.maxLat
+                || maxLng < other.minLng || minLng > other.maxLng) {
+            return false;
+        }
+        double[] here = approximateCentre();
+        double[] there = other.approximateCentre();
+        return other.contains(here[0], here[1]) || contains(there[0], there[1]);
     }
 }

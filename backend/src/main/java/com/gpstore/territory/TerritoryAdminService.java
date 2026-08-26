@@ -17,7 +17,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The only thing in this application allowed to move a boundary.
@@ -112,12 +114,53 @@ public class TerritoryAdminService {
                         "That boundary could not be read. It must be a JSON array of at least three "
                                 + "[latitude, longitude] pairs, e.g. [[28.61,77.20],[28.62,77.20],[28.62,77.21]].");
             }
+            for (DeliverySubzone existing : subzoneRepository.findAll()) {
+                if (incoming.getId() != null && incoming.getId().equals(existing.getId())) {
+                    continue;
+                }
+                if (existing.getBoundary() == null || existing.getBoundary().isBlank()) {
+                    continue;
+                }
+                TerritoryPolygon other = TerritoryPolygon.parse(existing.getBoundary(), objectMapper);
+                if (other != null && polygon.overlapsInterior(other)) {
+                    throw new BadRequestException(
+                            "That outline overlaps territory " + existing.getCode()
+                                    + ". Redraw so each house is in exactly one territory.");
+                }
+            }
         }
 
         incoming.setZone(zone);
         DeliverySubzone saved = subzoneRepository.save(incoming);
         resolver.invalidate();
         return saved;
+    }
+
+    /**
+     * Whether this JSON is a drawable outline. Does not persist anything.
+     */
+    public Map<String, Object> validateBoundary(String boundary) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        if (boundary == null || boundary.isBlank()) {
+            body.put("valid", false);
+            body.put("vertexCount", 0);
+            body.put("message",
+                    "Paste a JSON array of at least three [latitude, longitude] pairs.");
+            return body;
+        }
+        TerritoryPolygon polygon = TerritoryPolygon.parse(boundary, objectMapper);
+        if (polygon == null) {
+            body.put("valid", false);
+            body.put("vertexCount", 0);
+            body.put("message",
+                    "That boundary could not be read. It must be a JSON array of at least three "
+                            + "[latitude, longitude] pairs, e.g. [[28.61,77.20],[28.62,77.20],[28.62,77.21]].");
+            return body;
+        }
+        body.put("valid", true);
+        body.put("vertexCount", polygon.vertexCount());
+        body.put("message", "Outline is valid (" + polygon.vertexCount() + " points).");
+        return body;
     }
 
     @Transactional(readOnly = true)

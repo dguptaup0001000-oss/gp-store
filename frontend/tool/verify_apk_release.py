@@ -19,6 +19,55 @@ import sys
 CUSTOMER_PACKAGE = "com.gpstore.app"
 WORKER_PACKAGE = "com.gpstore.worker"
 
+CUSTOMER_FORBIDDEN_PERMISSIONS = {
+    "android.permission.CAMERA",
+    "android.permission.ACCESS_BACKGROUND_LOCATION",
+}
+WORKER_FORBIDDEN_PERMISSIONS = {
+    "android.permission.ACCESS_BACKGROUND_LOCATION",
+    "android.permission.RECORD_AUDIO",
+    "android.permission.BLUETOOTH_CONNECT",
+    "android.permission.BLUETOOTH_SCAN",
+}
+WORKER_REQUIRED_PERMISSIONS = {
+    "android.permission.CAMERA",
+}
+
+
+def permissions(aapt: str, apk: str) -> set[str]:
+    result = subprocess.run(
+        [aapt, "dump", "permissions", apk],
+        capture_output=True,
+        text=True,
+    )
+    blob = result.stdout or result.stderr
+    found: set[str] = set()
+    for line in blob.splitlines():
+        match = re.search(r"name='([^']+)'", line)
+        if match:
+            found.add(match.group(1))
+        else:
+            stripped = line.strip()
+            if stripped.startswith("android.permission."):
+                found.add(stripped)
+    return found
+
+
+def permission_violations(package: str, perms: set[str]) -> list[str]:
+    problems: list[str] = []
+    if package == CUSTOMER_PACKAGE:
+        extra = sorted(perms & CUSTOMER_FORBIDDEN_PERMISSIONS)
+        if extra:
+            problems.append(f"customer APK must not declare {extra}")
+    if package == WORKER_PACKAGE:
+        extra = sorted(perms & WORKER_FORBIDDEN_PERMISSIONS)
+        if extra:
+            problems.append(f"worker APK must not declare {extra}")
+        missing = sorted(WORKER_REQUIRED_PERMISSIONS - perms)
+        if missing:
+            problems.append(f"worker APK must declare {missing}")
+    return problems
+
 
 def sdk_tool(name: str) -> str:
     sdk = os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME")
@@ -111,6 +160,11 @@ def main() -> None:
             failed = True
         if pkg:
             seen[os.path.basename(apk)] = pkg
+            perms = permissions(aapt, apk)
+            print(f"PERMISSIONS {os.path.basename(apk)}={sorted(perms)}")
+            for problem in permission_violations(pkg, perms):
+                print(f"BAD_PERMISSION {apk}: {problem}")
+                failed = True
         z = subprocess.run(
             [zipalign, "-c", "-P", "16", "4", apk],
             capture_output=True,
@@ -138,4 +192,24 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
+        assert permission_violations(
+            CUSTOMER_PACKAGE, {"android.permission.CAMERA"}
+        ), "customer CAMERA must fail"
+        assert not permission_violations(
+            CUSTOMER_PACKAGE, {"android.permission.INTERNET"}
+        )
+        assert permission_violations(
+            WORKER_PACKAGE, {"android.permission.INTERNET"}
+        ), "worker missing CAMERA must fail"
+        assert not permission_violations(
+            WORKER_PACKAGE,
+            {"android.permission.CAMERA", "android.permission.ACCESS_FINE_LOCATION"},
+        )
+        assert permission_violations(
+            WORKER_PACKAGE,
+            {"android.permission.CAMERA", "android.permission.RECORD_AUDIO"},
+        )
+        print("self-test ok")
+        sys.exit(0)
     main()

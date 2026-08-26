@@ -8,7 +8,9 @@ DioException _dio(DioExceptionType type, {int? status}) {
   return DioException(
     requestOptions: options,
     type: type,
-    response: status == null ? null : Response(requestOptions: options, statusCode: status),
+    response: status == null
+        ? null
+        : Response(requestOptions: options, statusCode: status),
   );
 }
 
@@ -19,16 +21,21 @@ void main() {
       // layer does not.
       final wrapped = DioException(
         requestOptions: RequestOptions(path: '/api/orders'),
-        error: ApiException(statusCode: 400, message: 'Coupon SAVE20 has expired'),
+        error:
+            ApiException(statusCode: 400, message: 'Coupon SAVE20 has expired'),
       );
       expect(extractErrorMessage(wrapped), 'Coupon SAVE20 has expired');
-      expect(extractErrorMessage(ApiException(statusCode: 400, message: 'Out of stock')), 'Out of stock');
+      expect(
+          extractErrorMessage(
+              ApiException(statusCode: 400, message: 'Out of stock')),
+          'Out of stock');
     });
 
     test('being offline says so, rather than "something went wrong"', () {
       // The most common failure in this app, and the one with a completely
       // different remedy. "Try again" is useless advice on a train.
-      final message = extractErrorMessage(_dio(DioExceptionType.connectionError));
+      final message =
+          extractErrorMessage(_dio(DioExceptionType.connectionError));
       expect(message.toLowerCase(), contains('offline'));
     });
 
@@ -45,18 +52,26 @@ void main() {
     });
 
     test('an expired session says to sign in, not to try again', () {
-      for (final status in [401, 403]) {
-        expect(
-          extractErrorMessage(_dio(DioExceptionType.badResponse, status: status)).toLowerCase(),
-          contains('sign in'),
-        );
-      }
+      expect(
+        extractErrorMessage(_dio(DioExceptionType.badResponse, status: 401))
+            .toLowerCase(),
+        contains('sign in'),
+      );
     });
 
-    test('a busy store is distinguished from the customer\'s own connection', () {
+    test('a 403 is a permission problem, not a sign-in prompt', () {
+      final message =
+          extractErrorMessage(_dio(DioExceptionType.badResponse, status: 403));
+      expect(message.toLowerCase(), contains('permission'));
+      expect(message.toLowerCase(), isNot(contains('sign in')));
+    });
+
+    test('a busy store is distinguished from the customer\'s own connection',
+        () {
       // It is not their phone and it is not permanent - both worth saying.
       for (final status in [502, 503, 504]) {
-        final message = extractErrorMessage(_dio(DioExceptionType.badResponse, status: status));
+        final message = extractErrorMessage(
+            _dio(DioExceptionType.badResponse, status: status));
         expect(message.toLowerCase(), contains('busy'));
         expect(message.toLowerCase(), isNot(contains('offline')));
       }
@@ -64,7 +79,8 @@ void main() {
 
     test('rate limiting asks the customer to wait', () {
       expect(
-        extractErrorMessage(_dio(DioExceptionType.badResponse, status: 429)).toLowerCase(),
+        extractErrorMessage(_dio(DioExceptionType.badResponse, status: 429))
+            .toLowerCase(),
         contains('wait'),
       );
     });
@@ -72,7 +88,8 @@ void main() {
     test('a bad certificate is not framed as a retry', () {
       // This is the one failure a customer should not simply retry - it can
       // mean the connection is being intercepted.
-      final message = extractErrorMessage(_dio(DioExceptionType.badCertificate)).toLowerCase();
+      final message = extractErrorMessage(_dio(DioExceptionType.badCertificate))
+          .toLowerCase();
       expect(message, contains('secure'));
     });
 
@@ -91,8 +108,10 @@ void main() {
         extractErrorMessage(_dio(DioExceptionType.connectionError)),
         extractErrorMessage(_dio(DioExceptionType.unknown)),
         extractErrorMessage(_dio(DioExceptionType.badResponse, status: 500)),
-        extractErrorMessage(Exception('PostgresException: relation does not exist')),
-        extractErrorMessage(StateError('null check operator used on a null value')),
+        extractErrorMessage(
+            Exception('PostgresException: relation does not exist')),
+        extractErrorMessage(
+            StateError('null check operator used on a null value')),
       ];
       for (final message in leaky) {
         expect(message, isNot(contains('DioException')));
@@ -103,8 +122,10 @@ void main() {
     });
 
     test('an unrecognised error still gets a usable sentence', () {
-      expect(extractErrorMessage(StateError('boom')), 'Something went wrong. Please try again.');
-      expect(extractErrorMessage('a bare string'), 'Something went wrong. Please try again.');
+      expect(extractErrorMessage(StateError('boom')),
+          'Something went wrong. Please try again.');
+      expect(extractErrorMessage('a bare string'),
+          'Something went wrong. Please try again.');
     });
 
     test('every message reads as a sentence, not a code', () {

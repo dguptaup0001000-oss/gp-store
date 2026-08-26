@@ -3,6 +3,9 @@ package com.gpstore.controller;
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 
 import javax.sql.DataSource;
@@ -99,6 +102,44 @@ class HealthControllerTest {
         assertEquals(HttpStatus.OK, controller.ready().getStatusCode());
         assertEquals(HttpStatus.OK, controller.ready().getStatusCode());
         verify(dataSource, times(1)).getConnection();
+    }
+
+    @Test
+    void redisDownIsNotReadyEvenWhenPostgresIsUp() throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        when(connection.createStatement()).thenReturn(statement);
+        when(dataSource.getConnection()).thenReturn(connection);
+
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        RedisConnectionFactory factory = mock(RedisConnectionFactory.class);
+        when(redis.getConnectionFactory()).thenReturn(factory);
+        when(factory.getConnection()).thenThrow(new RuntimeException("Redis unavailable"));
+
+        HealthController controller = new HealthController(dataSource, redis);
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, controller.ready().getStatusCode());
+        verify(statement).execute("SELECT 1");
+    }
+
+    @Test
+    void redisPingSuccessIsReady() throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        when(connection.createStatement()).thenReturn(statement);
+        when(dataSource.getConnection()).thenReturn(connection);
+
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        RedisConnectionFactory factory = mock(RedisConnectionFactory.class);
+        RedisConnection redisConnection = mock(RedisConnection.class);
+        when(redis.getConnectionFactory()).thenReturn(factory);
+        when(factory.getConnection()).thenReturn(redisConnection);
+        when(redisConnection.ping()).thenReturn("PONG");
+
+        HealthController controller = new HealthController(dataSource, redis);
+        assertEquals(HttpStatus.OK, controller.ready().getStatusCode());
+        verify(redisConnection).close();
     }
 
     private static void setLastReadyOkFarInThePast(HealthController controller) {

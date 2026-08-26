@@ -200,6 +200,10 @@ class RateLimitFilterTest {
         filter.doFilter(request("DELETE", "/api/customers/me"), deleteMe, new MockFilterChain());
         assertEquals(429, deleteMe.getStatus());
 
+        MockHttpServletResponse putMe = new MockHttpServletResponse();
+        filter.doFilter(request("PUT", "/api/customers/me"), putMe, new MockFilterChain());
+        assertEquals(429, putMe.getStatus());
+
         MockHttpServletResponse pack = new MockHttpServletResponse();
         filter.doFilter(request("POST", "/api/worker/scans/pack"), pack, new MockFilterChain());
         assertEquals(429, pack.getStatus());

@@ -3,7 +3,12 @@
 
 services:
   postgres:
-    image: postgres:16
+    # PostgreSQL 17 matches CI and Hostinger production.
+    # An existing local volume created by postgres:16 cannot start 17.
+    # Recreate it once (local/dev ONLY, never on the VPS):
+    #   docker compose -f docker-compose.dev.yml down
+    #   docker volume rm backend_gpstore_pg_data
+    image: postgres:17
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USERNAME}

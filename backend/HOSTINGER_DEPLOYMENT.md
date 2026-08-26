@@ -123,6 +123,11 @@ If you already have a dump:
 
 ```bash
 # After `docker compose up -d` and postgres is healthy:
+# custom format (current backups):
+docker compose exec -T postgres \
+  pg_restore --clean --if-exists --no-owner --no-acl -U "$DB_USERNAME" -d "$DB_NAME" \
+  < gpstore-YYYYMMDDThhmmssZ.dump
+# legacy gzip SQL:
 gunzip -c gpstore-YYYY-MM-DD.sql.gz | docker compose exec -T postgres psql -U "$DB_USERNAME" -d "$DB_NAME"
 ```
 
@@ -221,9 +226,75 @@ Do **not** run `docker compose down -v`. That deletes shop data.
 
 ## 13. Backup
 
+See **[deploy/production/BACKUPS.md](../deploy/production/BACKUPS.md)** for the
+full restore procedure.
+
+The `backup` Compose service dumps Postgres every 6 hours as custom-format
+`gpstore-YYYYMMDDThhmmssZ.dump` files into the `gpstore_pg_backups` volume,
+keeps 14 days, and never deletes the latest successful file. Failed dumps
+are not promoted to `LATEST`. Each run inserts a row into `ops_backup_runs`.
+Admins can read status at `GET /v1/api/admin/ops/backups` (JWT, ADMIN role).
+
+That volume is still on this VPS until you copy it off-box:
+
 ```bash
-docker compose exec -T postgres pg_dump -U "$DB_USERNAME" "$DB_NAME" | gzip > gpstore-$(date +%F).sql.gz
+# systemd timer (recommended) — see deploy/production/gpstore-backup-offbox.*.example
+BACKUP_OFFBOX_TARGET=user@other-host:/safe/gpstore-backups \
+  ./deploy/production/backup-offbox-sync.sh
+# or copy by hand:
+docker compose exec -T backup ls -l /backups
+# scp the latest .dump (and .sha256) to another machine you control.
 ```
+
+Restore drill (isolated database named `gpstore_restore_probe`, never `gpstore`):
+
+```bash
+deploy/production/backup-restore-drill.sh /path/to/gpstore-....dump \
+  127.0.0.1 5432 gpstore gpstore_restore_probe 'the-password'
+```
+
+Emergency restore onto production is a last resort and replaces live data:
+
+```bash
+docker compose exec -T postgres \
+  pg_restore --clean --if-exists --no-owner --no-acl -U "$DB_USERNAME" -d "$DB_NAME" \
+  < gpstore-YYYYMMDDThhmmssZ.dump
+```
+
+Do **not** treat a manual `pg_dump` one-liner as the backup system. The sidecar
+must be running (`docker compose ps backup`).
+
+## 13b. Redis password file
+
+`REDIS_PASSWORD` stays in `backend/.env` (gitignored). `deploy.sh` copies it
+to `backend/.secrets/redis_password` (mode 600) so Compose can mount a Docker
+secret. Redis and the backend containers do **not** list `REDIS_PASSWORD` in
+`environment:`, so `docker inspect` does not show the password.
+
+Manual compose from `backend/`:
+
+```bash
+python3 docker/redis/materialize-password-file.py .
+docker compose up -d
+```
+
+## 13c. Catalog compatibility
+
+`GET /v1/api/products` is still a paged, capped JSON **array** (default 20,
+max 50, sellable products only). It sends `Deprecation: true` and
+`Link: </v1/api/products/feed>; rel="successor-version"`.
+
+The Flutter app uses `GET /v1/api/products/feed` (Spring Data page, stable
+id sort, totals). Do not delete the array endpoint while any old client
+still calls it.
+
+## 13d. Monitoring
+
+See **[deploy/production/MONITORING.md](../deploy/production/MONITORING.md)**.
+On the VPS: `./deploy/production/check-health.sh`.
+
+Admin: `GET /v1/api/admin/ops/status` (JWT, ADMIN) for backups, Redis PING,
+backup-volume disk, and TLS expiry. Not public.
 
 ## 14. Rollback
 
@@ -232,7 +303,9 @@ Application: previous git commit, then `docker compose build backend && docker c
 Database: restore a dump from section 13. Flyway is forward-only; do not edit applied SQL.
 
 ```bash
-gunzip -c gpstore-YYYY-MM-DD.sql.gz | docker compose exec -T postgres psql -U "$DB_USERNAME" -d "$DB_NAME"
+docker compose exec -T postgres \
+  pg_restore --clean --if-exists --no-owner --no-acl -U "$DB_USERNAME" -d "$DB_NAME" \
+  < gpstore-YYYYMMDDThhmmssZ.dump
 ```
 
 ## 15. Flutter APK
@@ -251,6 +324,7 @@ CI already defaults to `https://api.gpstore.co.in/v1` when `vars.API_BASE_URL` i
 | App refuses to start | `JWT_SECRET` still the repo default, or `DDL_AUTO` is not `validate` |
 | Search errors `similarity` | V5 should create `pg_trgm`. Confirm Flyway in logs |
 | Login rate-limit all from one IP | `RATE_LIMIT_TRUST_FORWARDED_FOR=true` is set in Compose |
+| Redis down, login still works but caps per JVM | AUTH/CHECKOUT/ADMIN fail closed to a local limiter; SEARCH/cart fail open (documented in `RateLimitFilter`) |
 | Port 80/443 already in use | leftover Nginx/systemd from `deploy/hostinger/`. Stop them. |
 
 GitHub Actions **does** SSH to Hostinger when secrets `PROD_HOST`,

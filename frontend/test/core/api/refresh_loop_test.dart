@@ -28,7 +28,8 @@ void main() {
       'access_token': 'stale-access-token',
       'refresh_token': 'valid-refresh-token',
     };
-    const channel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+    const channel =
+        MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (MethodCall call) async {
       final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? {};
@@ -67,7 +68,8 @@ void main() {
     useStorageHoldingTokens();
   });
 
-  test('a persistently-401 endpoint refreshes once and then gives up', () async {
+  test('a persistently-401 endpoint refreshes once and then gives up',
+      () async {
     final client = ApiClient(tokenStorage: TokenStorage());
     client.dio.httpClientAdapter = countingAdapter();
 
@@ -77,10 +79,12 @@ void main() {
     );
 
     expect(refreshCalls, 1,
-        reason: 'the token must be refreshed exactly once, not on every retry - '
+        reason:
+            'the token must be refreshed exactly once, not on every retry - '
             'each refresh rotates the refresh token on the backend');
     expect(protectedCalls, 2,
-        reason: 'the original request plus exactly one retry; more than that is the loop');
+        reason:
+            'the original request plus exactly one retry; more than that is the loop');
   });
 
   test('the session is not wiped when the refresh itself succeeded', () async {
@@ -91,7 +95,8 @@ void main() {
     );
     client.dio.httpClientAdapter = countingAdapter();
 
-    await expectLater(client.dio.get('/api/customers'), throwsA(isA<Exception>()));
+    await expectLater(
+        client.dio.get('/api/customers'), throwsA(isA<Exception>()));
 
     // A refusal that survives a successful refresh is a permission problem,
     // not a dead session - signing the customer out here would be wrong.
@@ -99,6 +104,49 @@ void main() {
         reason: 'onSessionExpired is for an unusable refresh token, not for a '
             'request the server keeps refusing');
   });
+
+  test('a malformed refresh body does not wipe the stored session', () async {
+    var sessionExpiredCalls = 0;
+    final client = ApiClient(
+      tokenStorage: TokenStorage(),
+      onSessionExpired: () => sessionExpiredCalls++,
+    );
+    client.dio.httpClientAdapter = _HtmlRefreshAdapter();
+
+    await expectLater(
+        client.dio.get('/api/customers'), throwsA(isA<Exception>()));
+    expect(sessionExpiredCalls, 0);
+    expect(await TokenStorage().getRefreshToken(), 'valid-refresh-token');
+  });
+}
+
+class _HtmlRefreshAdapter implements HttpClientAdapter {
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<List<int>>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    if (options.path == '/api/auth/refresh') {
+      return ResponseBody.fromString(
+        '<html>bad gateway</html>',
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['text/html'],
+        },
+      );
+    }
+    return ResponseBody.fromString(
+      jsonEncode({'message': 'Authentication required'}),
+      401,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
 }
 
 class _CountingAdapter implements HttpClientAdapter {
@@ -116,7 +164,10 @@ class _CountingAdapter implements HttpClientAdapter {
     if (options.path == '/api/auth/refresh') {
       onRefresh();
       return ResponseBody.fromString(
-        jsonEncode({'token': 'fresh-access-token', 'refreshToken': 'rotated-refresh-token'}),
+        jsonEncode({
+          'token': 'fresh-access-token',
+          'refreshToken': 'rotated-refresh-token'
+        }),
         200,
         headers: {
           Headers.contentTypeHeader: [Headers.jsonContentType],

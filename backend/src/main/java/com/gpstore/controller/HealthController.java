@@ -2,6 +2,10 @@ package com.gpstore.controller;
 
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,6 +35,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * queueing behind them. A JVM that has never successfully probed must not
  * skip the SELECT just because the pool looks full (hung connections to a
  * dead database would look "ready" forever). If the pool is not running, 503.
+ *
+ * Redis is required for cache and rate limits. A successful ready probe
+ * also PINGs Redis. Unit tests construct this controller with the
+ * one-argument constructor and skip that check.
  */
 @RestController
 public class HealthController {
@@ -38,10 +46,18 @@ public class HealthController {
     static final long READY_OK_CACHE_MS = 2_000;
 
     private final DataSource dataSource;
+    private final StringRedisTemplate redisTemplate;
     private final AtomicLong lastReadyOkAt = new AtomicLong(0);
 
     public HealthController(DataSource dataSource) {
+        this(dataSource, null);
+    }
+
+    @Autowired
+    public HealthController(DataSource dataSource,
+                            @Autowired(required = false) StringRedisTemplate redisTemplate) {
         this.dataSource = dataSource;
+        this.redisTemplate = redisTemplate;
     }
 
     @GetMapping("/api/health")
@@ -68,6 +84,9 @@ public class HealthController {
                 // at least once. Do not refresh lastReadyOkAt here: a skip is
                 // not a new proof, and bumping the timestamp would hide a
                 // later dead database behind a 2s "ready" cache forever.
+                if (!redisReady()) {
+                    return notReady();
+                }
                 return ResponseEntity.ok(Map.of("status", "ready"));
             }
         }
@@ -75,10 +94,41 @@ public class HealthController {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
             statement.execute("SELECT 1");
-            lastReadyOkAt.set(System.currentTimeMillis());
-            return ResponseEntity.ok(Map.of("status", "ready"));
         } catch (SQLException unavailable) {
             return notReady();
+        }
+
+        if (!redisReady()) {
+            return notReady();
+        }
+
+        lastReadyOkAt.set(System.currentTimeMillis());
+        return ResponseEntity.ok(Map.of("status", "ready"));
+    }
+
+    private boolean redisReady() {
+        if (redisTemplate == null) {
+            return true;
+        }
+        RedisConnectionFactory factory = redisTemplate.getConnectionFactory();
+        if (factory == null) {
+            return false;
+        }
+        RedisConnection connection = null;
+        try {
+            connection = factory.getConnection();
+            String pong = connection.ping();
+            return pong != null && !pong.isBlank();
+        } catch (RuntimeException unavailable) {
+            return false;
+        } finally {
+            if (connection != null) {
+                try {
+                    connection.close();
+                } catch (RuntimeException ignored) {
+                    // Closing a dead connection must not hide the PING result.
+                }
+            }
         }
     }
 

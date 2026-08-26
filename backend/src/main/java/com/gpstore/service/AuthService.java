@@ -2,6 +2,7 @@ package com.gpstore.service;
 
 import com.gpstore.auth.IndianPhoneNumbers;
 import com.gpstore.auth.OtpPurpose;
+import com.gpstore.auth.PasswordPolicy;
 import com.gpstore.dto.AuthRequest;
 import com.gpstore.dto.AuthResponse;
 import com.gpstore.dto.PasswordResetTokenResponse;
@@ -88,6 +89,8 @@ public class AuthService {
             throw new ConflictException(
                     "Unable to create this account. Try a different email or phone.");
         }
+
+        PasswordPolicy.requireAcceptable(request.getPassword());
 
         Customer customer = new Customer();
         customer.setFullName(request.getName());
@@ -204,9 +207,7 @@ public class AuthService {
 
     @Transactional
     public void completePasswordReset(String rawResetToken, String newPassword) {
-        if (newPassword == null || newPassword.length() < 8) {
-            throw new BadRequestException("Password must be at least 8 characters");
-        }
+        PasswordPolicy.requireAcceptable(newPassword);
         PasswordResetToken token = passwordResetTokenRepository.findByTokenHash(sha256(rawResetToken))
                 .orElseThrow(() -> new BadRequestException(INVALID_RESET_TOKEN));
 
@@ -256,6 +257,7 @@ public class AuthService {
             throw new BadRequestException("Add an email to your account before setting a password");
         }
 
+        PasswordPolicy.requireAcceptable(newPassword);
         customer.setPassword(passwordEncoder.encode(newPassword));
         customerRepository.save(customer);
 
@@ -280,10 +282,7 @@ public class AuthService {
                     || !com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer.get())) {
                 throw new BadRequestException(OtpService.INVALID_OTP_MESSAGE);
             }
-            if (newPassword == null || newPassword.length() < 8) {
-                throw new BadRequestException("Password must be at least 8 characters");
-            }
-
+            PasswordPolicy.requireAcceptable(newPassword);
             customer.get().setPassword(passwordEncoder.encode(newPassword));
             customerRepository.save(customer.get());
             refreshTokenService.revokeAllForCustomer(customer.get().getId());

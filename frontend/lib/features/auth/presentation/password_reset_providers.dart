@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/indian_phone.dart';
 import '../domain/otp_user_messages.dart';
+import '../domain/password_policy.dart';
 import 'auth_providers.dart';
 
 enum PasswordResetStep {
@@ -124,8 +125,9 @@ class PasswordResetController extends StateNotifier<PasswordResetState> {
   }
 
   Future<bool> complete({required String newPassword, required String confirmPassword}) async {
-    if (newPassword.length < 8) {
-      state = state.copyWith(errorMessage: OtpUserMessages.passwordTooShort);
+    final policyError = AppPasswordPolicy.validateNewPassword(newPassword);
+    if (policyError != null) {
+      state = state.copyWith(errorMessage: policyError);
       return false;
     }
     if (newPassword != confirmPassword) {

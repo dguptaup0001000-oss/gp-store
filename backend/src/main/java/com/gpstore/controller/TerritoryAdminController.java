@@ -1,5 +1,6 @@
 package com.gpstore.controller;
 
+import com.gpstore.dto.TerritoryBoundaryRequest;
 import com.gpstore.entity.Address;
 import com.gpstore.entity.DeliverySubzone;
 import com.gpstore.entity.DeliveryZone;
@@ -58,6 +59,15 @@ public class TerritoryAdminController {
     @PostMapping("/zones/{zoneId}/subzones")
     public DeliverySubzone saveSubzone(@PathVariable Long zoneId, @RequestBody DeliverySubzone subzone) {
         return adminService.saveSubzone(zoneId, subzone);
+    }
+
+    /**
+     * Parse-and-report without saving. The admin form uses this so a bad
+     * paste is refused before it becomes a territory that matches nothing.
+     */
+    @PostMapping("/validate-boundary")
+    public Map<String, Object> validateBoundary(@RequestBody TerritoryBoundaryRequest request) {
+        return adminService.validateBoundary(request == null ? null : request.getBoundary());
     }
 
     @PutMapping("/subzones/{subzoneId}/primary-partner")

@@ -25,18 +25,23 @@ class AuthRepository {
     );
 
     final auth = AuthResponse.fromJson(response.data as Map<String, dynamic>);
-    await tokenStorage.saveTokens(accessToken: auth.token, refreshToken: auth.refreshToken);
+    await tokenStorage.saveTokens(
+        accessToken: auth.token, refreshToken: auth.refreshToken);
     return auth;
   }
 
-  Future<AuthResponse> login({required String email, required String password, bool rememberMe = true}) async {
+  Future<AuthResponse> login(
+      {required String email,
+      required String password,
+      bool rememberMe = true}) async {
     final response = await apiClient.dio.post(
       '/api/auth/login',
       data: {'email': email, 'password': password},
     );
 
     final auth = AuthResponse.fromJson(response.data as Map<String, dynamic>);
-    await tokenStorage.saveTokens(accessToken: auth.token, refreshToken: auth.refreshToken);
+    await tokenStorage.saveTokens(
+        accessToken: auth.token, refreshToken: auth.refreshToken);
     await tokenStorage.setRememberMe(rememberMe);
     return auth;
   }
@@ -50,7 +55,8 @@ class AuthRepository {
     final refreshToken = await tokenStorage.getRefreshToken();
     if (refreshToken != null) {
       try {
-        await apiClient.dio.post('/api/auth/logout', data: {'refreshToken': refreshToken});
+        await apiClient.dio
+            .post('/api/auth/logout', data: {'refreshToken': refreshToken});
       } catch (_) {
         // Logout is best-effort server-side - the token gets cleared locally
         // regardless, so the user is logged out on THIS device either way,
@@ -105,34 +111,40 @@ class AuthRepository {
   /// Sends a login OTP. Uses the purpose-separated Part 1 endpoint so a
   /// LOGIN code cannot later be used to reset a password.
   Future<void> requestLoginOtp({required String phone}) async {
-    await apiClient.dio.post('/api/auth/otp/login/request', data: {'phone': phone});
+    await apiClient.dio
+        .post('/api/auth/otp/login/request', data: {'phone': phone});
   }
 
   /// Verifies a LOGIN OTP and stores the existing JWT pair.
-  Future<AuthResponse> verifyLoginOtp({required String phone, required String otp}) async {
+  Future<AuthResponse> verifyLoginOtp(
+      {required String phone, required String otp}) async {
     final response = await apiClient.dio.post(
       '/api/auth/otp/login/verify',
       data: {'phone': phone, 'otp': otp},
     );
 
     final auth = AuthResponse.fromJson(response.data as Map<String, dynamic>);
-    await tokenStorage.saveTokens(accessToken: auth.token, refreshToken: auth.refreshToken);
+    await tokenStorage.saveTokens(
+        accessToken: auth.token, refreshToken: auth.refreshToken);
     return auth;
   }
 
   Future<void> requestPasswordResetOtp({required String phone}) async {
-    await apiClient.dio.post('/api/auth/password-reset/request', data: {'phone': phone});
+    await apiClient.dio
+        .post('/api/auth/password-reset/request', data: {'phone': phone});
   }
 
   /// Returns a short-lived reset token. This is not a session JWT and must
   /// not be written to secure storage or logs.
-  Future<String> verifyPasswordResetOtp({required String phone, required String otp}) async {
+  Future<String> verifyPasswordResetOtp(
+      {required String phone, required String otp}) async {
     final response = await apiClient.dio.post(
       '/api/auth/password-reset/verify',
       data: {'phone': phone, 'otp': otp},
     );
     final body = response.data as Map<String, dynamic>;
-    final token = body['reset_token'] as String? ?? body['resetToken'] as String?;
+    final token =
+        body['reset_token'] as String? ?? body['resetToken'] as String?;
     if (token == null || token.isEmpty) {
       throw ApiException(statusCode: 400, message: 'Invalid or expired OTP');
     }
@@ -149,6 +161,13 @@ class AuthRepository {
     });
   }
 
+  /// Drops tokens on this device without calling the server.
+  ///
+  /// Used when the refresh token is already known to be dead: another
+  /// logout request would 401, and must not be a reason to leave credentials
+  /// on disk.
+  Future<void> clearLocalSession() => tokenStorage.clear();
+
   Future<bool> hasStoredSession() async {
     final refreshToken = await tokenStorage.getRefreshToken();
     return refreshToken != null;
@@ -161,7 +180,8 @@ class AuthRepository {
   /// currentPassword is genuinely optional - null/blank for an OTP-only
   /// account setting up password login for the first time, matching the
   /// backend's changePassword() behavior exactly.
-  Future<void> changePassword({String? currentPassword, required String newPassword}) async {
+  Future<void> changePassword(
+      {String? currentPassword, required String newPassword}) async {
     await apiClient.dio.put('/api/auth/change-password', data: {
       'currentPassword': currentPassword,
       'newPassword': newPassword,

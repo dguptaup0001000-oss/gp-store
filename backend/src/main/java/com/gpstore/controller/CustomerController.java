@@ -1,5 +1,7 @@
 package com.gpstore.controller;
 
+import com.gpstore.dto.DeleteAccountRequest;
+import com.gpstore.dto.UpdateProfileRequest;
 import com.gpstore.dto.request.FcmTokenRequest;
 import com.gpstore.entity.Customer;
 import com.gpstore.security.CurrentUser;
@@ -9,9 +11,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/customers")
@@ -70,12 +69,13 @@ public class CustomerController {
     // CustomerService.updateOwnProfile's doc comment for why this is
     // add-only, not change-anytime).
     @PutMapping("/me")
-    public Customer updateMyProfile(@RequestBody Map<String, String> request) {
+    public Customer updateMyProfile(@Valid @RequestBody UpdateProfileRequest request) {
         return customerService.updateOwnProfile(
                 currentUser.customerId(),
-                request.get("fullName"),
-                request.get("mobileNumber"),
-                request.get("email"));
+                request.getFullName(),
+                request.getMobileNumber(),
+                request.getEmail(),
+                request.getCurrentPassword());
     }
 
     // Registers/refreshes this account's push notification device token -
@@ -100,15 +100,11 @@ public class CustomerController {
     }
 
     // Google Play Account Deletion Requirement - see the doc comment on
-    // CustomerService.deleteOwnAccount for what this actually does
-    // (anonymize + end all sessions, not a literal row delete) and why.
-    // No confirmation/re-auth step here deliberately - the frontend is
-    // responsible for a confirmation dialog before ever calling this: once
-    // it's called, session tokens are already revoked, so a "type your
-    // password to confirm" step here would need to happen BEFORE the JWT
-    // this request is authenticated with could itself become invalid mid-flow.
+    // CustomerService.deleteOwnAccount. The frontend still asks the user to
+    // type DELETE; that is not authentication. The current password in this
+    // body is. A stolen access token alone must not destroy the account.
     @DeleteMapping("/me")
-    public void deleteMyAccount() {
-        customerService.deleteOwnAccount(currentUser.customerId());
+    public void deleteMyAccount(@Valid @RequestBody DeleteAccountRequest request) {
+        customerService.deleteOwnAccount(currentUser.customerId(), request.getCurrentPassword());
     }
 }

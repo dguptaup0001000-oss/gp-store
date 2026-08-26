@@ -53,8 +53,8 @@ public class DeliverySubzone {
      * The territory outline as a closed ring of {@code [latitude, longitude]}
      * pairs, JSON, e.g. {@code [[28.61,77.20],[28.62,77.20],[28.62,77.21]]}.
      *
-     * Stored as JSON text rather than a PostGIS geometry on purpose. CI runs
-     * the plain postgres:16 image, which has no PostGIS, and turning the
+     * Stored as JSON text rather than a PostGIS geometry on purpose. CI and
+     * production run the plain postgres image, which has no PostGIS, and turning the
      * extension on in Supabase is a change to a live production database made
      * for the sake of 26 polygons that a ray-casting test in TerritoryResolver
      * handles in microseconds. Keeping it as text means the move to PostGIS

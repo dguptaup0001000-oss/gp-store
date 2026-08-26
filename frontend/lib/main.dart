@@ -9,6 +9,7 @@ import 'core/lifecycle/session_refresh.dart';
 import 'core/logging/app_log.dart';
 import 'core/monitoring/crash_reporter.dart';
 import 'core/monitoring/firebase_crash_reporter.dart';
+import 'core/notifications/push_availability.dart';
 import 'core/notifications/push_notification_providers.dart';
 import 'core/notifications/push_notification_service.dart';
 import 'core/notifications/voice_announcement_providers.dart';
@@ -31,6 +32,7 @@ Future<void> main() async {
 
   try {
     await Firebase.initializeApp();
+    PushAvailability.firebaseReady = true;
 
     // FIRST, and before runApp: from here on a framework error or an
     // uncaught async error is recorded instead of painting a grey box on a
@@ -51,6 +53,7 @@ Future<void> main() async {
     // rethrown.
     appLog(
         'Firebase not configured yet - push and crash reporting disabled: $e');
+    PushAvailability.firebaseReady = false;
     await installCrashHandlers(const NoOpCrashReporter());
   }
 

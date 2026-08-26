@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Grocery bag (safe zone: adaptive icons crop the outer 18%) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,46 L74,46 L70,84 L38,84 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,46 L44,36 C44,30 48,26 54,26 C60,26 64,30 64,36 L64,46 L58,46 L58,36 C58,33 56,32 54,32 C52,32 50,33 50,36 L50,46 Z" />
+    <path
+        android:fillColor="#1DB954"
+        android:pathData="M42,58 L42,74 L48,74 C52,74 55,71 55,66 C55,61 52,58 48,58 Z M46,62 L48,62 C49.5,62 51,63.5 51,66 C51,68.5 49.5,70 48,70 L46,70 Z" />
+    <path
+        android:fillColor="#1DB954"
+        android:pathData="M58,58 L58,74 L62,74 L62,68 L66,68 L70,74 L75,74 L70,67 C72.5,66 74,64 74,61 C74,58.5 72,58 69,58 Z M62,62 L68,62 C69,62 70,62.5 70,63.5 C70,64.5 69,65 68,65 L62,65 Z" />
+</vector>

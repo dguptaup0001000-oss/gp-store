@@ -1,8 +1,7 @@
 import '../../../core/api/api_client.dart';
 import '../domain/territory_models.dart';
 
-/// Admin territory HTTP client. Display and persist configuration only —
-/// no map drawing and no dispatch-gate logic.
+/// Admin territory HTTP client. Display, persist, and paste JSON outlines.
 class TerritoryRepository {
   TerritoryRepository({required this.apiClient});
 
@@ -58,5 +57,18 @@ class TerritoryRepository {
       queryParameters: {'latitude': latitude, 'longitude': longitude},
     );
     return TerritoryResolveResult.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  Future<({bool valid, int vertexCount, String message})> validateBoundary(String boundary) async {
+    final response = await apiClient.dio.post(
+      '/api/admin/territory/validate-boundary',
+      data: {'boundary': boundary},
+    );
+    final data = response.data as Map<String, dynamic>;
+    return (
+      valid: data['valid'] == true,
+      vertexCount: (data['vertexCount'] as num?)?.toInt() ?? 0,
+      message: (data['message'] as String?) ?? '',
+    );
   }
 }

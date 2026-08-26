@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -83,8 +84,8 @@ class CatalogProductsEndpointTest {
      * products changes with the catalogue, the ceiling must not.
      */
     @Test
-    @DisplayName("the legacy bare-array endpoint is capped at 100, not the whole catalogue")
-    void legacyProductsEndpointIsCapped() throws Exception {
+    @DisplayName("GET /api/products honours page/size and caps size at 50")
+    void publicProductsEndpointIsPagedAndCapped() throws Exception {
         MvcResult result = mockMvc.perform(get("/api/products"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
@@ -93,10 +94,19 @@ class CatalogProductsEndpointTest {
         int count = com.jayway.jsonpath.JsonPath.read(
                 result.getResponse().getContentAsString(), "$.length()");
 
-        assertTrue(count <= 100,
-                "the legacy endpoint returned " + count + " products - the cap is gone and an "
-                + "unauthenticated caller can pull the whole catalogue");
+        assertTrue(count <= 20, "default size is 20, got " + count);
         assertTrue(count > 0, "the seeded catalogue should make this non-empty");
+
+        mockMvc.perform(get("/api/products?page=0&size=5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(5)));
+
+        MvcResult huge = mockMvc.perform(get("/api/products?page=0&size=100000"))
+                .andExpect(status().isOk())
+                .andReturn();
+        int hugeCount = com.jayway.jsonpath.JsonPath.read(
+                huge.getResponse().getContentAsString(), "$.length()");
+        assertTrue(hugeCount <= 50, "size=100000 must be capped at 50, got " + hugeCount);
     }
 
     @Test
@@ -139,6 +149,15 @@ class CatalogProductsEndpointTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$.length()").value(org.hamcrest.Matchers.lessThanOrEqualTo(100)));
+    }
+
+    @Test
+    @DisplayName("GET /api/products is marked deprecated in favour of /feed")
+    void publicProductsEndpointSendsDeprecationHeaders() throws Exception {
+        mockMvc.perform(get("/api/products?page=0&size=5"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Deprecation", "true"))
+                .andExpect(header().string("Link", org.hamcrest.Matchers.containsString("/api/products/feed")));
     }
 
     @Test
