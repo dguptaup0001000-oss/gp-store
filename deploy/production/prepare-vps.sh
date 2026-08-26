@@ -42,6 +42,19 @@ if [ ! -f "$DEPLOY_ROOT/backend/.env" ]; then
   log "OR set DEPLOY_ROOT to the existing checkout instead of moving data."
 fi
 
+if docker compose version >/dev/null; then
+  log "docker compose: $(docker compose version)"
+fi
+
+log "Existing named volumes (must keep Postgres/Redis data):"
+docker volume ls --format '{{.Name}}' | grep -E 'gpstore_pg_data|gpstore_redis_data|traefik' || log "No gpstore volumes visible yet"
+
+if curl -fsS --max-time 15 https://api.gpstore.co.in/v1/api/health >/dev/null; then
+  log "Current public API health: OK"
+else
+  log "WARNING: could not reach https://api.gpstore.co.in/v1/api/health from this host"
+fi
+
 chown -R "$DEPLOY_USER":"$DEPLOY_USER" "$DEPLOY_ROOT" "$STATE_DIR" || true
 
 AUTH_KEYS="/home/${DEPLOY_USER}/.ssh/authorized_keys"

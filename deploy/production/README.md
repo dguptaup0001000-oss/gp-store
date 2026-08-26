@@ -10,10 +10,16 @@ Workflow: `.github/workflows/deploy-production.yml`
 
 1. Waits until workflow **CI** succeeds for that commit (backend tests + schema-migrate).
 2. SSHs to the VPS using GitHub secrets.
-3. Runs `deploy/production/deploy.sh <full-sha>`.
-4. That script fetches `origin/main`, builds `gp-store-backend:<sha>`, replaces
-   **only** the backend container, waits for `/v1/actuator/health` = `UP`,
-   then requires `/v1/api/version` `gitCommit` to equal the SHA.
+3. Runs `deploy/production/deploy.sh <GITHUB_SHA>`.
+4. That script:
+   - `git fetch origin`
+   - `git checkout main`
+   - `git reset --hard origin/main`
+   - verifies `git rev-parse HEAD` == `GITHUB_SHA`
+   - builds `gp-store-backend:<sha>` while the old backend keeps running
+   - recreates **only** the backend container
+   - waits for `/v1/actuator/health` UP, `/v1/api/health`, `/v1/api/health/ready`
+   - requires in-container and public `https://api.gpstore.co.in/v1/api/version` `gitCommit` == SHA
 5. On failure after the new container is started, it rolls back to the
    previous SHA-tagged image.
 

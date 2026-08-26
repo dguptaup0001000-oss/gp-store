@@ -3,8 +3,7 @@
 #
 # Usage: deploy.sh <40-char-sha>
 #
-# Does NOT run `docker compose down` or `docker compose down -v`.
-# Postgres (`gpstore_pg_data`) and Redis (`gpstore_redis_data`) stay up.
+# Does NOT destroy Compose volumes. Postgres and Redis stay up.
 # Traefik is not restarted. Only the backend image is built, then replaced.
 
 set -Eeuo pipefail
@@ -18,7 +17,11 @@ COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.yml"
 STATE_FILE="${STATE_DIR}/deployment-state"
 LOCK_FILE="${STATE_DIR}/deploy.lock"
 HEALTH_URL="http://127.0.0.1:8081/v1/actuator/health"
+API_HEALTH_URL="http://127.0.0.1:8081/v1/api/health"
+READY_URL="http://127.0.0.1:8081/v1/api/health/ready"
 VERSION_URL="http://127.0.0.1:8081/v1/api/version"
+PUBLIC_VERSION_URL="${PUBLIC_VERSION_URL:-https://api.gpstore.co.in/v1/api/version}"
+PUBLIC_HEALTH_URL="${PUBLIC_HEALTH_URL:-https://api.gpstore.co.in/v1/actuator/health}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
 REQUIRE_ORIGIN_MAIN="${REQUIRE_ORIGIN_MAIN:-1}"
 IMAGE_NAME="gp-store-backend"
@@ -102,19 +105,38 @@ capture_previous() {
 
 wait_for_health() {
   local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
-  local body=""
+  local actuator="" api_health="" ready=""
   while (( SECONDS < deadline )); do
-    if body="$(backend_curl "$HEALTH_URL" 2>/dev/null)"; then
-      local status
-      status="$(printf '%s' "$body" | json_field status || true)"
-      if [ "$status" = "UP" ]; then
-        printf '%s' "$body"
-        return 0
-      fi
-      log "Health not UP yet: ${body}"
-    else
-      log "Health endpoint not reachable yet"
+    actuator="$(backend_curl "$HEALTH_URL" 2>/dev/null || true)"
+    api_health="$(backend_curl "$API_HEALTH_URL" 2>/dev/null || true)"
+    ready="$(backend_curl "$READY_URL" 2>/dev/null || true)"
+    local actuator_status ready_status
+    actuator_status="$(printf '%s' "$actuator" | json_field status 2>/dev/null || true)"
+    ready_status="$(printf '%s' "$ready" | json_field status 2>/dev/null || true)"
+    if [ "$actuator_status" = "UP" ] \
+      && printf '%s' "$api_health" | grep -q "GP-STORE Backend Running Successfully" \
+      && [ "$ready_status" = "ready" ]; then
+      printf '%s' "$actuator"
+      return 0
     fi
+    log "Waiting for health (actuator=${actuator_status:-none} ready=${ready_status:-none})"
+    sleep 5
+  done
+  return 1
+}
+
+verify_public_sha() {
+  local expected="$1"
+  local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
+  local body="" running=""
+  while (( SECONDS < deadline )); do
+    body="$(curl -fsS --max-time 15 "$PUBLIC_VERSION_URL" 2>/dev/null || true)"
+    running="$(printf '%s' "$body" | json_field gitCommit 2>/dev/null || true)"
+    if [ "$running" = "$expected" ]; then
+      printf '%s' "$body"
+      return 0
+    fi
+    log "Public /api/version gitCommit=${running:-none} expected=$expected"
     sleep 5
   done
   return 1
@@ -168,7 +190,8 @@ rollback() {
   log "Restoring image $PREV_IMAGE (sha=${rollback_tag:-unknown})"
   if [ -n "${PREV_SHA:-}" ] && is_full_sha "$PREV_SHA"; then
     git -C "$DEPLOY_ROOT" fetch origin --prune
-    git -C "$DEPLOY_ROOT" checkout -B main "$PREV_SHA"
+    git -C "$DEPLOY_ROOT" checkout main
+    git -C "$DEPLOY_ROOT" reset --hard "$PREV_SHA"
   fi
   export BACKEND_IMAGE_TAG="${rollback_tag}"
   export GIT_COMMIT="${PREV_SHA:-unknown}"
@@ -255,7 +278,6 @@ echo
 echo "[1/8] Fetching source"
 git -C "$DEPLOY_ROOT" remote get-url origin >/dev/null
 git -C "$DEPLOY_ROOT" fetch origin --prune
-git -C "$DEPLOY_ROOT" rev-parse --verify "${TARGET_SHA}^{commit}" >/dev/null
 
 echo "[2/8] Verifying SHA"
 REMOTE_MAIN="$(git -C "$DEPLOY_ROOT" rev-parse origin/main)"
@@ -264,9 +286,17 @@ if [ "$REQUIRE_ORIGIN_MAIN" = "1" ] && [ "$TARGET_SHA" != "$REMOTE_MAIN" ]; then
 fi
 # Untracked backend/.env is preserved: reset --hard does not delete it.
 # Never git clean.
-git -C "$DEPLOY_ROOT" checkout -B main "$TARGET_SHA"
+if git -C "$DEPLOY_ROOT" show-ref --verify --quiet refs/heads/main; then
+  git -C "$DEPLOY_ROOT" checkout main
+else
+  git -C "$DEPLOY_ROOT" checkout -b main origin/main
+fi
+git -C "$DEPLOY_ROOT" reset --hard origin/main
 WORKING_SHA="$(git -C "$DEPLOY_ROOT" rev-parse HEAD)"
-[ "$WORKING_SHA" = "$TARGET_SHA" ] || die "Working tree HEAD $WORKING_SHA != $TARGET_SHA"
+if [ "$WORKING_SHA" != "$TARGET_SHA" ]; then
+  die "HEAD $WORKING_SHA != GITHUB_SHA $TARGET_SHA. Stopping before build."
+fi
+log "HEAD is $WORKING_SHA on branch $(git -C "$DEPLOY_ROOT" branch --show-current)"
 
 echo "[3/8] Building image"
 if docker image inspect "$TARGET_IMAGE" >/dev/null 2>&1; then
@@ -284,7 +314,7 @@ log "Image $TARGET_IMAGE built. Current production container is still the previo
 
 echo "[4/8] Database migration"
 log "Flyway runs on backend startup (FLYWAY_ENABLED=true, DDL_AUTO=validate)."
-log "Not running docker compose down. Postgres and Redis volumes are untouched."
+log "Postgres and Redis volumes are untouched."
 
 echo "[5/8] Starting backend"
 REPLACED=1
@@ -303,13 +333,15 @@ log "Health: $HEALTH_BODY"
 echo "[7/8] Version verification"
 VERSION_BODY="$(backend_curl "$VERSION_URL")"
 RUNNING_SHA="$(printf '%s' "$VERSION_BODY" | json_field gitCommit)"
-log "Version: $VERSION_BODY"
+log "In-container version: $VERSION_BODY"
 if [ "$RUNNING_SHA" != "$TARGET_SHA" ]; then
   die "Expected SHA $TARGET_SHA != running gitCommit $RUNNING_SHA"
 fi
+PUBLIC_VERSION_BODY="$(verify_public_sha "$TARGET_SHA")" \
+  || die "Public $PUBLIC_VERSION_URL gitCommit did not equal $TARGET_SHA"
+log "Public version: $PUBLIC_VERSION_BODY"
 
 echo "[8/8] Deployment complete"
-docker tag "$TARGET_IMAGE" "${IMAGE_NAME}:latest" || true
 ENDED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 write_state "$TARGET_SHA" "$TARGET_IMAGE" "success" "$ENDED_AT" "$TARGET_SHA"
 report_optional_config
@@ -322,6 +354,7 @@ echo "Commit: $TARGET_SHA"
 echo "Image: $TARGET_IMAGE"
 echo "Health: $HEALTH_BODY"
 echo "Version: $VERSION_BODY"
+echo "Public version: ${PUBLIC_VERSION_BODY:-}"
 echo "Previous SHA: ${PREV_SHA:-none}"
 echo "Deployment start: $STARTED_AT"
 echo "Deployment end: $ENDED_AT"

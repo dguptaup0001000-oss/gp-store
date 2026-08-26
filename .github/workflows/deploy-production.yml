@@ -31,7 +31,7 @@ on:
         default: false
 
 concurrency:
-  group: deploy-production-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || 'main' }}
+  group: ${{ github.event_name == 'pull_request' && format('deploy-syntax-pr-{0}', github.event.number) || 'production-deployment' }}
   cancel-in-progress: false
 
 permissions:
@@ -50,8 +50,8 @@ jobs:
           bash -n deploy/production/prepare-vps.sh
           test -x deploy/production/deploy.sh || chmod +x deploy/production/deploy.sh
           grep -F 'set -Eeuo pipefail' deploy/production/deploy.sh
-          if grep -E 'compose[[:space:]]+down[[:space:]]+(-v|--volumes)' deploy/production/deploy.sh; then
-            echo "deploy.sh must never run docker compose down -v" >&2
+          if grep -vE '^[[:space:]]*#' deploy/production/deploy.sh | grep -E 'compose[[:space:]]+down[[:space:]]+(-v|--volumes)'; then
+            echo "deploy.sh must never destroy Compose volumes" >&2
             exit 1
           fi
 
@@ -158,7 +158,16 @@ jobs:
             fi
             cd "$DEPLOY_ROOT"
             git fetch origin --prune
-            git rev-parse --verify "${TARGET_SHA}^{commit}" >/dev/null
-            git checkout -B main "$TARGET_SHA"
+            if git show-ref --verify --quiet refs/heads/main; then
+              git checkout main
+            else
+              git checkout -b main origin/main
+            fi
+            git reset --hard origin/main
+            HEAD_SHA="$(git rev-parse HEAD)"
+            if [ "$HEAD_SHA" != "$TARGET_SHA" ]; then
+              echo "VPS HEAD $HEAD_SHA != GITHUB_SHA $TARGET_SHA. Refusing to deploy."
+              exit 1
+            fi
             chmod +x deploy/production/deploy.sh deploy/production/prepare-vps.sh
             exec ./deploy/production/deploy.sh "$TARGET_SHA"
