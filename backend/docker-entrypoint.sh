@@ -2,7 +2,9 @@
 # Runtime entrypoint. Secrets come from the container environment or a
 # Docker secret file, not this file.
 set -eu
-if [ -n "${REDIS_PASSWORD_FILE:-}" ] && [ -f "$REDIS_PASSWORD_FILE" ]; then
+# -r: a 0600 root-owned secret exists but appuser cannot read it; do not
+# crash the shell (set -e) before Java can report a clear error.
+if [ -n "${REDIS_PASSWORD_FILE:-}" ] && [ -r "$REDIS_PASSWORD_FILE" ]; then
   # Strip CR/LF so requirepass and Spring see the same value. Do not log it.
   REDIS_PASSWORD="$(tr -d '\r\n' < "$REDIS_PASSWORD_FILE")"
   export REDIS_PASSWORD

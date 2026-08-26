@@ -267,9 +267,11 @@ must be running (`docker compose ps backup`).
 ## 13b. Redis password file
 
 `REDIS_PASSWORD` stays in `backend/.env` (gitignored). `deploy.sh` copies it
-to `backend/.secrets/redis_password` (mode 600) so Compose can mount a Docker
-secret. Redis and the backend containers do **not** list `REDIS_PASSWORD` in
-`environment:`, so `docker inspect` does not show the password.
+to `backend/.secrets/redis_password` (file mode 0644, directory 0700) so
+Compose can mount a Docker secret readable by `appuser` and `redis`. Mode
+0600 on the host file is unreadable inside those containers. Redis and the
+backend containers do **not** list `REDIS_PASSWORD` in `environment:`, so
+`docker inspect` does not show the password.
 
 Manual compose from `backend/`:
 

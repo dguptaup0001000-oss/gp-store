@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.mockito.Mockito.mock;
 
 class RedisPasswordFileEnvironmentPostProcessorTest {
@@ -57,5 +58,25 @@ class RedisPasswordFileEnvironmentPostProcessorTest {
         assertThrows(IllegalStateException.class, () ->
                 new RedisPasswordFileEnvironmentPostProcessor()
                         .postProcessEnvironment(env, mock(SpringApplication.class)));
+    }
+
+    @Test
+    void unreadableFileFailsClosed() throws Exception {
+        Path file = tempDir.resolve("redis_password");
+        Files.writeString(file, "from-file-secret\n");
+        assertTrue(file.toFile().setReadable(false, false));
+        assumeFalse(Files.isReadable(file), "process can still read after chmod (likely root)");
+
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("REDIS_PASSWORD_FILE", file.toString());
+
+        try {
+            IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                    new RedisPasswordFileEnvironmentPostProcessor()
+                            .postProcessEnvironment(env, mock(SpringApplication.class)));
+            assertTrue(ex.getMessage().contains("Could not read REDIS_PASSWORD_FILE"));
+        } finally {
+            file.toFile().setReadable(true, false);
+        }
     }
 }

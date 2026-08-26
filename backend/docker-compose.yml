@@ -135,8 +135,12 @@ services:
       - gpstore_redis_data:/data
       - ./docker/redis/docker-entrypoint.sh:/redis-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/redis-entrypoint.sh"]
+    # Root only long enough to chown /data and gosu redis. cap_drop ALL
+    # removes CHOWN/SETUID/DAC_OVERRIDE, which made dump.rdb unreadable
+    # when the process stayed root (EACCES) after #96.
+    user: "0:0"
     healthcheck:
-      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping | grep -q PONG"]
+      test: ["CMD-SHELL", 'REDISCLI_AUTH="$$(tr -d ''\r\n'' < /run/secrets/redis_password)" redis-cli ping | grep -q PONG']
       interval: 10s
       timeout: 3s
       retries: 10
@@ -146,8 +150,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-    cap_drop:
-      - ALL
     security_opt:
       - no-new-privileges:true
     logging:
