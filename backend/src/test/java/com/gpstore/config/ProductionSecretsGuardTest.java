@@ -23,11 +23,17 @@ class ProductionSecretsGuardTest {
     }
 
     @Test
-    void productionRefusesFakeSupportContacts() {
+    void productionRefusesFakeSupportContactsThatAreSet() {
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> boot(true, "db-real-password-long", "redis-real-password-long",
                         "+91XXXXXXXXXX", "+91XXXXXXXXXX", "support@example.com"));
         assertTrue(ex.getMessage().toLowerCase().contains("support"));
+    }
+
+    @Test
+    void productionBootsWhenSupportContactsAreEmpty() {
+        assertDoesNotThrow(() -> boot(true, "db-real-password-long", "redis-real-password-long",
+                "", "", ""));
     }
 
     @Test

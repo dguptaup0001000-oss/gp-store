@@ -34,7 +34,14 @@ PREV_SHA=""
 PREV_IMAGE=""
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
-die() { log "ERROR: $*"; exit 1; }
+die() {
+  log "ERROR: $*"
+  dump_diagnostics || true
+  if [ "${REPLACED:-0}" -eq 1 ] && [ "${ROLLBACK_ATTEMPTED:-0}" -eq 0 ]; then
+    rollback || true
+  fi
+  exit 1
+}
 
 refuse_destructive_compose() {
   if printf '%s' "$*" | grep -Eq -- 'down[[:space:]]+(-v|--volumes)\b'; then
@@ -101,6 +108,15 @@ capture_previous() {
       PREV_SHA="$env_sha"
     fi
   fi
+}
+
+dump_diagnostics() {
+  log "--- compose ps ---"
+  compose ps || true
+  log "--- backend logs (last 80) ---"
+  compose logs --tail=80 backend || true
+  log "--- redis logs (last 20) ---"
+  compose logs --tail=20 redis || true
 }
 
 wait_for_health() {
@@ -300,6 +316,9 @@ if [ "$WORKING_SHA" != "$TARGET_SHA" ]; then
   die "HEAD $WORKING_SHA != GITHUB_SHA $TARGET_SHA. Stopping before build."
 fi
 log "HEAD is $WORKING_SHA on branch $(git -C "$DEPLOY_ROOT" branch --show-current)"
+
+python3 "$COMPOSE_DIR/docker/redis/materialize-password-file.py" "$COMPOSE_DIR" \
+  || die "Could not materialize Redis password file after checkout"
 
 echo "[3/8] Building image"
 if docker image inspect "$TARGET_IMAGE" >/dev/null 2>&1; then
