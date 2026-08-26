@@ -31,10 +31,18 @@ public class ProductController {
         return productService.saveProduct(product);
     }
 
-    // Get All Products
+    // Public catalog. Paged, capped, and only products that can actually
+    // be sold (active product + at least one available variant with a price).
+    // Default size 20. Never an unbounded findAll.
     @GetMapping
-    public List<ProductResponse> getAllProducts() {
-        return productService.getAllProducts();
+    public List<ProductResponse> getAllProducts(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(
+                Math.max(page, 0),
+                Math.min(Math.max(size, 1), 50),
+                Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id")));
+        return productService.getAllProducts(pageable);
     }
 
     // Admin only (enforced in SecurityConfig, must come before the broad
@@ -68,8 +76,8 @@ public class ProductController {
      * Endless home feed - every active product, one page at a time.
      *
      * Separate from the plain GET /api/products above rather than changing
-     * its shape, so nothing already calling that breaks. That endpoint stays
-     * a capped, unpaginated convenience list; this one is what the home
+     * its shape, so nothing already calling that breaks. That endpoint is a
+     * paged, capped list; this one is what the home
      * screen scrolls through.
      *
      * size is capped at 50 for the same reason as every other paginated

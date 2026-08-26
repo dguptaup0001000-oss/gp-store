@@ -126,7 +126,7 @@ class AdminHomeScreen extends StatelessWidget {
             context,
             icon: Icons.map_outlined,
             title: 'Territories',
-            subtitle: 'Zones, riders, and map status — not a drawn map',
+            subtitle: 'Zones, riders, and pasteable map outlines',
             onTap: hapticize(() => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AdminTerritoriesScreen()),
             )),

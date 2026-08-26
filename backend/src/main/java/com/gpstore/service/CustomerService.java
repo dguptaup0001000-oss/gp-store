@@ -2,6 +2,8 @@ package com.gpstore.service;
 
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.Role;
+import com.gpstore.exception.AuthException;
+import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.AddressRepository;
@@ -152,11 +154,19 @@ public class CustomerService {
      *
      * Password and role/active are still out of scope here - password has
      * its own dedicated change-password flow, role/active are staff-only.
+     *
+     * Changing the mobile number requires the current password. A stolen
+     * access token must not re-bind the account to an attacker's phone
+     * (OTP login would then belong to them). Name and first-time email
+     * add do not.
      */
-    public Customer updateOwnProfile(Long customerId, String fullName, String mobileNumber, String email) {
+    public Customer updateOwnProfile(Long customerId, String fullName, String mobileNumber,
+                                     String email, String currentPassword) {
         Customer customer = getOwnProfile(customerId);
 
         if (mobileNumber != null && !mobileNumber.equals(customer.getMobileNumber())) {
+            requireCurrentPassword(customer, currentPassword,
+                    "Set a password on this account before changing your mobile number.");
             customerRepository.findByMobileNumber(mobileNumber).ifPresent(existing -> {
                 throw new ConflictException("Another account already uses this mobile number");
             });
@@ -253,9 +263,12 @@ public class CustomerService {
      * permits multiple NULLs, so this is safe.
      */
     @Transactional
-    public void deleteOwnAccount(Long customerId) {
+    public void deleteOwnAccount(Long customerId, String currentPassword) {
         Customer customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+
+        requireCurrentPassword(customer, currentPassword,
+                "Set a password on this account before deleting it.");
 
         refreshTokenService.revokeAllForCustomer(customerId);
 
@@ -283,5 +296,22 @@ public class CustomerService {
 
         customerRepository.save(customer);
         accountStatusService.invalidate(customerId);
+    }
+
+    /**
+     * Step-up for irreversible or identity-binding changes. OTP-only
+     * accounts have no password to check; they must set one (which itself
+     * requires adding an email) before they can change phone or delete.
+     * MSG91 is fail-closed in production, so OTP cannot be the step-up
+     * until those credentials exist.
+     */
+    private void requireCurrentPassword(Customer customer, String currentPassword, String noPasswordMessage) {
+        if (customer.getPassword() == null || customer.getPassword().isBlank()) {
+            throw new BadRequestException(noPasswordMessage);
+        }
+        if (currentPassword == null || currentPassword.isBlank()
+                || !passwordEncoder.matches(currentPassword, customer.getPassword())) {
+            throw new AuthException("Current password is incorrect");
+        }
     }
 }

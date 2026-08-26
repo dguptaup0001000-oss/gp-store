@@ -10,7 +10,7 @@ import java.util.List;
  * A subzone's outline, and the one question worth asking of it: is this
  * customer inside?
  *
- * WHY THIS IS NOT PostGIS. CI runs the plain postgres:16 image, which has no
+ * WHY THIS IS NOT PostGIS. CI and production run the plain postgres:17 image, which has no
  * PostGIS, and turning the extension on in Supabase is a change to a live
  * production database. What it would buy is a spatial index over twenty-six
  * polygons of a few dozen vertices each - a data set that fits in a few

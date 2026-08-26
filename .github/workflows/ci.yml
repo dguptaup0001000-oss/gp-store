@@ -23,7 +23,7 @@ jobs:
     # can finally pass here even though it couldn't run locally on-device.
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_DB: gpstore_test
           POSTGRES_USER: gpstore
@@ -69,7 +69,7 @@ jobs:
       # clean database. This job still stubs the three objects tests need
       # when Flyway is off: pg_trgm (V5), order_number_seq (V6), shedlock (V3).
       #
-      # Runs psql via the postgres:16 image (already pulled locally for the
+        # Runs psql via the postgres:17 image (already pulled locally for the
       # "postgres" service container above) instead of
       # "apt-get install postgresql-client" - that step has repeatedly hung
       # indefinitely on ubuntu-latest runners (apt mirror reachability, not
@@ -78,7 +78,7 @@ jobs:
       - name: Create schema objects Flyway would normally own
         run: |
           run_psql() {
-            docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:16 \
+            docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17 \
               psql -h localhost -U gpstore -d gpstore_test -c "$1"
           }
           run_psql "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
@@ -121,7 +121,7 @@ jobs:
         working-directory: backend
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_DB: gpstore_schema_bootstrap
           POSTGRES_USER: gpstore
@@ -155,7 +155,7 @@ jobs:
 
       - name: Wipe public schema so this job always starts empty
         run: |
-          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:16 \
+          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17 \
             psql -h localhost -U gpstore -d gpstore_schema_bootstrap -c \
             "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO gpstore;"
 
@@ -182,6 +182,29 @@ jobs:
           REDIS_HOST: localhost
           REDIS_PORT: 6379
         run: ./mvnw -B test -Pschema-bootstrap -Dtest=ProductionSchemaValidateTest -DexcludedGroups=
+
+      - name: Backup and restore drill
+        run: |
+          set -Eeuo pipefail
+          chmod +x docker/backup/backup.sh ../../deploy/production/backup-restore-drill.sh
+          mkdir -p /tmp/gp-backups
+          docker run --rm --network=host \
+            -e PGHOST=localhost -e PGPORT=5432 \
+            -e PGUSER=gpstore -e PGDATABASE=gpstore_schema_bootstrap \
+            -e PGPASSWORD=gpstore_test_password \
+            -e BACKUP_DIR=/backups \
+            -v /tmp/gp-backups:/backups \
+            -v "$PWD/docker/backup/backup.sh:/backup.sh:ro" \
+            postgres:17 \
+            /bin/sh /backup.sh once
+          DUMP="$(ls -1t /tmp/gp-backups/gpstore-*.sql.gz | head -1)"
+          test -n "$DUMP"
+          docker run --rm --network=host \
+            -e PGPASSWORD=gpstore_test_password \
+            -v /tmp/gp-backups:/backups \
+            -v "$PWD/../../deploy/production/backup-restore-drill.sh:/drill.sh:ro" \
+            postgres:17 \
+            /bin/sh /drill.sh "/backups/$(basename "$DUMP")" localhost 5432 gpstore gpstore_restore_probe gpstore_test_password
 
       - name: Upload schema-migrate test results
         if: always()

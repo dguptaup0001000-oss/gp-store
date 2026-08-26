@@ -92,10 +92,9 @@ class GatewayPaymentLogicTest {
     @Test
     @DisplayName("A webhook for a superseded retry still finds its order")
     void internalOrderIdRecoverableFromProviderOrderId() {
-        // A customer who fails and retries gets a NEW gateway order, so the
-        // payment row only carries the LATEST attempt's id. Attempt 1's
-        // webhook arriving late must still find its way home rather than
-        // looking like an unknown order.
+        // A customer who retries gets a NEW gateway order id. The prefix
+        // still names which order row to lock. SUCCESS for the old attempt
+        // is not applied to the current row (GatewayPaymentStateTest).
         assertEquals(1234L, GatewayPaymentService.internalOrderIdFrom("GP-1234-7f3a9b"));
         assertEquals(7L, GatewayPaymentService.internalOrderIdFrom("GP-7-aaaa"));
     }

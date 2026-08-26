@@ -25,6 +25,15 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      */
     java.util.Optional<com.gpstore.entity.Order> findByQrToken(String qrToken);
 
+    /**
+     * Pack-scan lock. Two workers scanning the same label at the same
+     * instant must serialize here so the second one sees {@code qrTokenUsedAt}
+     * rather than both writing {@code packedByPartner}.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from Order o where o.qrToken = :qrToken")
+    Optional<Order> findByQrTokenForUpdate(@Param("qrToken") String qrToken);
+
 
     List<Order> findByCustomerId(Long customerId);
 

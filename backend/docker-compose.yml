@@ -9,6 +9,40 @@
 name: gpstore
 
 services:
+  # Traefik only needs to list containers/networks. Writes (start/stop) are
+  # denied. The raw Docker socket is never mounted on Traefik itself.
+  dockerproxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      NETWORKS: "1"
+      INFO: "1"
+      VERSION: "1"
+      EVENTS: "1"
+      PING: "1"
+      POST: "0"
+      DELETE: "0"
+      BUILD: "0"
+      EXEC: "0"
+      IMAGES: "0"
+      VOLUMES: "0"
+      AUTH: "0"
+      SECRETS: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 64m
+    cpus: "0.20"
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - gpstore_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   traefik:
     # v3.6.1+ negotiates Docker API with Engine 29 (min API 1.40).
     # v3.3 spoke API 1.24 and could not read container labels, so ACME never ran.
@@ -16,6 +50,7 @@ services:
     restart: unless-stopped
     command:
       - --providers.docker=true
+      - --providers.docker.endpoint=tcp://dockerproxy:2375
       - --providers.docker.exposedbydefault=false
       - --providers.docker.network=gpstore_net
       - --entrypoints.web.address=:80
@@ -33,7 +68,6 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik_letsencrypt:/letsencrypt
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
@@ -41,6 +75,19 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    # Traefik talks to a socket proxy, not the raw Docker socket.
+    depends_on:
+      dockerproxy:
+        condition: service_started
+    logging: &default_logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    mem_limit: 256m
+    cpus: "0.50"
+    security_opt:
+      - no-new-privileges:true
     networks:
       - gpstore_net
 
@@ -62,6 +109,15 @@ services:
       timeout: 5s
       retries: 10
     # Intentionally no `ports:` — Postgres is Docker-network only.
+    mem_limit: 1024m
+    cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
     networks:
       - gpstore_net
 
@@ -69,27 +125,32 @@ services:
     # Required by spring.cache.type=redis and RateLimitFilter. Not optional.
     image: redis:7-alpine
     restart: unless-stopped
-    command:
-      - redis-server
-      - --protected-mode
-      - "yes"
-      - --requirepass
-      - ${REDIS_PASSWORD}
-      - --maxmemory
-      - 512mb
-      - --maxmemory-policy
-      - allkeys-lru
-      - --save
-      - "60"
-      - "1000"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - gpstore_redis_data:/data
+      - ./docker/redis/docker-entrypoint.sh:/redis-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/redis-entrypoint.sh"]
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 10
     # Intentionally no `ports:` — Redis is Docker-network only.
+    mem_limit: 640m
+    cpus: "0.50"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     networks:
       - gpstore_net
 
@@ -166,13 +227,59 @@ services:
       - traefik.http.services.gpstore.loadbalancer.server.port=8081
       - traefik.http.services.gpstore.loadbalancer.server.scheme=http
     stop_grace_period: 40s
+    mem_limit: 1536m
+    cpus: "1.50"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     networks:
       - gpstore_net
     # Intentionally no host `ports:` — Traefik reaches 8081 on the Docker network.
 
+  backup:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${DB_USERNAME}
+      PGDATABASE: ${DB_NAME}
+      PGPASSWORD: ${DB_PASSWORD}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_NAME: ${DB_NAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-21600}
+    volumes:
+      - gpstore_pg_backups:/backups
+      - ./docker/backup/backup.sh:/backup.sh:ro
+    entrypoint: ["/bin/sh", "/backup.sh", "daemon"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: "0.25"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - gpstore_net
+
 volumes:
   gpstore_pg_data:
   gpstore_redis_data:
+  gpstore_pg_backups:
   traefik_letsencrypt:
 
 networks:

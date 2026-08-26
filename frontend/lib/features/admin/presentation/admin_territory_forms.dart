@@ -146,6 +146,7 @@ class _AdminSubzoneFormDialogState extends ConsumerState<AdminSubzoneFormDialog>
   late final TextEditingController _name;
   late final TextEditingController _notes;
   late final TextEditingController _capacity;
+  late final TextEditingController _boundary;
   late int? _zoneId;
   late int? _partnerId;
   late bool _active;
@@ -161,6 +162,7 @@ class _AdminSubzoneFormDialogState extends ConsumerState<AdminSubzoneFormDialog>
     _name = TextEditingController(text: s?.name ?? '');
     _notes = TextEditingController(text: s?.notes ?? '');
     _capacity = TextEditingController(text: (s?.maxConcurrentOrders ?? 12).toString());
+    _boundary = TextEditingController(text: s?.boundary ?? '');
     _zoneId = s?.zone?.id ?? (widget.zones.length == 1 ? widget.zones.first.id : null);
     _partnerId = s?.primaryPartner?.id;
     _active = s?.active ?? true;
@@ -172,6 +174,7 @@ class _AdminSubzoneFormDialogState extends ConsumerState<AdminSubzoneFormDialog>
     _name.dispose();
     _notes.dispose();
     _capacity.dispose();
+    _boundary.dispose();
     super.dispose();
   }
 
@@ -189,7 +192,9 @@ class _AdminSubzoneFormDialogState extends ConsumerState<AdminSubzoneFormDialog>
           id: widget.subzone?.id,
           code: _code.text.trim().toUpperCase(),
           name: _name.text.trim(),
-          boundary: widget.subzone?.boundary,
+          boundary: _boundary.text.trim().isEmpty
+              ? widget.subzone?.boundary
+              : _boundary.text.trim(),
           maxConcurrentOrders: int.parse(_capacity.text.trim()),
           notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
           displayOrder: widget.subzone?.displayOrder,
@@ -277,12 +282,23 @@ class _AdminSubzoneFormDialogState extends ConsumerState<AdminSubzoneFormDialog>
                 value: _active,
                 onChanged: hapticizeValue((value) => setState(() => _active = value)),
               ),
-              const SizedBox(height: 8),
-              Text(
-                widget.subzone?.boundaryPresence == BoundaryPresence.stored
-                    ? 'An outline is already stored for this territory. This screen does not draw or replace it.'
-                    : 'No outline is stored yet. Drawing the map is a later step — not done here.',
-                style: Theme.of(context).textTheme.bodySmall,
+              TextFormField(
+                controller: _boundary,
+                decoration: const InputDecoration(
+                  labelText: 'Outline (JSON)',
+                  helperText:
+                      'Paste [[latitude, longitude], ...] with at least three points. '
+                      'This is how dispatch learns the territory. Leave blank to keep the stored outline.',
+                  helperMaxLines: 4,
+                ),
+                maxLines: 6,
+                validator: (value) {
+                  final text = value?.trim() ?? '';
+                  if (text.isEmpty) return null;
+                  return describeBoundary(text) == BoundaryPresence.unreadable
+                      ? 'Not a JSON array of at least three [lat, lng] pairs'
+                      : null;
+                },
               ),
             ],
           ),

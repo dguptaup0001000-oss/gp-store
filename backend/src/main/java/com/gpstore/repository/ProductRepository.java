@@ -84,6 +84,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query(
         value = "SELECT p.* FROM products p " +
                 "WHERE p.active = true " +
+                "AND EXISTS (SELECT 1 FROM product_variants v " +
+                "            WHERE v.product_id = p.id AND v.available = true " +
+                "              AND (v.active IS NULL OR v.active = true) " +
+                "              AND v.selling_price IS NOT NULL AND v.selling_price > 0) " +
                 "AND (p.name % :keyword OR p.brand % :keyword " +
                 "     OR p.name ILIKE CONCAT('%', :keyword, '%') " +
                 "     OR p.brand ILIKE CONCAT('%', :keyword, '%') " +
@@ -93,6 +97,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                 + "                  similarity(CONCAT(COALESCE(p.brand, ''), ' ', p.name), :keyword)) DESC",
         countQuery = "SELECT count(*) FROM products p " +
                 "WHERE p.active = true " +
+                "AND EXISTS (SELECT 1 FROM product_variants v " +
+                "            WHERE v.product_id = p.id AND v.available = true " +
+                "              AND (v.active IS NULL OR v.active = true) " +
+                "              AND v.selling_price IS NOT NULL AND v.selling_price > 0) " +
                 "AND (p.name % :keyword OR p.brand % :keyword " +
                 "     OR p.name ILIKE CONCAT('%', :keyword, '%') " +
                 "     OR p.brand ILIKE CONCAT('%', :keyword, '%') " +
@@ -113,6 +121,37 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     // silently coming back wrong.
     @EntityGraph(attributePaths = {"category"})
     Page<Product> findByCategoryIdAndActiveTrue(Long categoryId, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"category"})
+    @Query("""
+            SELECT p FROM Product p
+            WHERE p.active = true
+              AND EXISTS (
+                  SELECT 1 FROM ProductVariant v
+                  WHERE v.product = p
+                    AND v.available = true
+                    AND (v.active = true OR v.active IS NULL)
+                    AND v.sellingPrice IS NOT NULL
+                    AND v.sellingPrice > 0
+              )
+            """)
+    Page<Product> findSellable(Pageable pageable);
+
+    @EntityGraph(attributePaths = {"category"})
+    @Query("""
+            SELECT p FROM Product p
+            WHERE p.category.id = :categoryId
+              AND p.active = true
+              AND EXISTS (
+                  SELECT 1 FROM ProductVariant v
+                  WHERE v.product = p
+                    AND v.available = true
+                    AND (v.active = true OR v.active IS NULL)
+                    AND v.sellingPrice IS NOT NULL
+                    AND v.sellingPrice > 0
+              )
+            """)
+    Page<Product> findSellableByCategoryId(@Param("categoryId") Long categoryId, Pageable pageable);
 
     @EntityGraph(attributePaths = {"category"})
     Page<Product> findByActiveTrueOrderByCreatedAtDesc(Pageable pageable);

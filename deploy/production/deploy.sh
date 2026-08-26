@@ -316,6 +316,13 @@ echo "[4/8] Database migration"
 log "Flyway runs on backend startup (FLYWAY_ENABLED=true, DDL_AUTO=validate)."
 log "Postgres and Redis volumes are untouched."
 
+echo "[4b/8] Infra sidecars"
+# Socket proxy, backup daemon, redis config file. Does not recreate Postgres.
+# Traefik is recreated only when its Compose definition changed.
+compose up -d dockerproxy
+compose up -d redis backup
+compose up -d traefik
+
 echo "[5/8] Starting backend"
 REPLACED=1
 (

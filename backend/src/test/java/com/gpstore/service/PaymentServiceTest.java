@@ -49,7 +49,7 @@ class PaymentServiceTest {
         // InventoryRestorationConcurrencyTest instead.
         paymentService = new PaymentService(
                 paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService,
-                null, null, new com.gpstore.payment.gateway.CashfreeProperties(), null, null, null, 30, 100, 50);
+                null, null, new com.gpstore.payment.gateway.CashfreeProperties(), null, null, null, 30, 60, 100, 50);
     }
 
     @Test
@@ -130,7 +130,7 @@ class PaymentServiceTest {
         props.setSecretKey("cf_test_secret");
         paymentService = new PaymentService(
                 paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService,
-                null, null, props, null, null, null, 30, 100, 50);
+                null, null, props, null, null, null, 30, 60, 100, 50);
 
         assertEquals(PaymentMethod.ONLINE, paymentService.parsePaymentMethod("ONLINE"));
         assertEquals(PaymentMethod.COD, paymentService.parsePaymentMethod("COD"));

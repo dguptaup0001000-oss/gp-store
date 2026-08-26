@@ -14,8 +14,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -337,6 +341,63 @@ class WorkerPackScanTest {
         Order reloaded = orderRepository.findById(order.getId()).orElseThrow();
         assertEquals(primary.getId(), reloaded.getPackedByPartner().getId(),
                 "the first worker keeps the order");
+    }
+
+    @Test
+    @DisplayName("two workers scanning the last carton at once: exactly one accepts")
+    void concurrentDoubleScanOnlyOneAccepts() throws Exception {
+        String token = issue(order);
+        DeliveryPartner other = newWorker("race");
+        jdbc.update("INSERT INTO subzone_backup_partners (subzone_id, partner_id, priority) "
+                + "VALUES (?, ?, 1)", territory.getId(), other.getId());
+
+        int threads = 2;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(threads);
+        AtomicInteger accepted = new AtomicInteger();
+        try {
+            pool.submit(() -> {
+                await(start);
+                try {
+                    if (scanService.packScan(accountOf(primary), token, null).accepted()) {
+                        accepted.incrementAndGet();
+                    }
+                } finally {
+                    done.countDown();
+                }
+            });
+            pool.submit(() -> {
+                await(start);
+                try {
+                    if (scanService.packScan(accountOf(other), token, null).accepted()) {
+                        accepted.incrementAndGet();
+                    }
+                } finally {
+                    done.countDown();
+                }
+            });
+            start.countDown();
+            assertTrue(done.await(30, TimeUnit.SECONDS), "pack-scan race timed out");
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertEquals(1, accepted.get(), "exactly one worker may take the carton");
+        Order reloaded = orderRepository.findById(order.getId()).orElseThrow();
+        assertNotNull(reloaded.getQrTokenUsedAt());
+        assertNotNull(reloaded.getPackedByPartner());
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("start latch timed out");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 
     // -------------------------------------------------------- authorisation

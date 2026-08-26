@@ -47,6 +47,7 @@ public class ProductBrowseRepository {
 
         List<String> conditions = new ArrayList<>();
         conditions.add("p.active = true");
+        conditions.add("COALESCE(v.sellable, false) = true");
         conditions.add(brand != null ? "LOWER(p.brand) = LOWER(:brand)" : "p.category_id = :categoryId");
 
         boolean hasKeyword = keyword != null && !keyword.isBlank();
@@ -69,10 +70,15 @@ public class ProductBrowseRepository {
                 FROM products p
                 LEFT JOIN (
                     SELECT product_id,
-                           MIN(selling_price) AS min_price,
+                           MIN(CASE WHEN available = true AND selling_price IS NOT NULL
+                                         AND selling_price > 0 THEN selling_price END) AS min_price,
                            MAX(CASE WHEN mrp IS NOT NULL AND mrp > 0 AND mrp > selling_price
                                     THEN (mrp - selling_price) / mrp ELSE 0 END) AS max_discount,
-                           BOOL_OR(available = true) AS in_stock
+                           BOOL_OR(available = true AND selling_price IS NOT NULL
+                                    AND selling_price > 0) AS in_stock,
+                           BOOL_OR(available = true AND selling_price IS NOT NULL
+                                    AND selling_price > 0
+                                    AND (active IS NULL OR active = true)) AS sellable
                     FROM product_variants
                     GROUP BY product_id
                 ) v ON v.product_id = p.id

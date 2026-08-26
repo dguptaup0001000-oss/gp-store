@@ -221,9 +221,39 @@ Do **not** run `docker compose down -v`. That deletes shop data.
 
 ## 13. Backup
 
+The `backup` Compose service dumps Postgres every 6 hours into the
+`gpstore_pg_backups` volume, keeps 14 days, and never deletes the latest
+successful file. Each run inserts a row into `ops_backup_runs`. Admins can
+read status at `GET /v1/api/admin/ops/backups` (JWT, ADMIN role).
+
+Off-box copy (required — the volume is still on this VPS until you copy it):
+
 ```bash
-docker compose exec -T postgres pg_dump -U "$DB_USERNAME" "$DB_NAME" | gzip > gpstore-$(date +%F).sql.gz
+# from the VPS, after a dump exists
+BACKUP_OFFBOX_TARGET=user@other-host:/safe/gpstore-backups \
+  ./deploy/production/backup-offbox-sync.sh
+# or copy by hand:
+docker compose exec -T backup ls -l /backups
+# scp the latest gzip to another machine you control.
+# Do not keep the only copy on the same disk.
 ```
+
+Restore drill (isolated database, never production):
+
+```bash
+# on a laptop / CI runner, not against the live volume
+deploy/production/backup-restore-drill.sh /path/to/gpstore-....sql.gz \
+  127.0.0.1 5432 gpstore gpstore_restore_probe 'the-password'
+```
+
+Emergency restore onto production is a last resort and replaces live data:
+
+```bash
+gunzip -c gpstore-YYYYMMDDThhmmssZ.sql.gz | docker compose exec -T postgres psql -U "$DB_USERNAME" -d "$DB_NAME"
+```
+
+Do **not** treat a manual `pg_dump` one-liner as the backup system. The sidecar
+must be running (`docker compose ps backup`).
 
 ## 14. Rollback
 

@@ -470,11 +470,27 @@ public class GatewayPaymentService {
         // ALREADY SETTLED. The duplicate-success case the brief calls out:
         // a second success event must do nothing at all. Not re-save, not
         // re-advance the order, not re-notify.
-        if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
+        if (payment.getPaymentStatus() == PaymentStatus.SUCCESS
+                || payment.getPaymentStatus() == PaymentStatus.REFUNDED
+                || payment.getPaymentStatus() == PaymentStatus.REFUND_PENDING) {
             return Outcome.ALREADY_SETTLED;
         }
 
         if (verdict.state() == GatewayOrderStatus.State.PAID) {
+            // A superseded Cashfree attempt (customer retried, we minted a
+            // new provider order id) must not bank SUCCESS onto the current
+            // row. Mutating that row would confirm the new session with the
+            // old attempt's money, or vice versa.
+            if (payment.getProviderOrderId() != null
+                    && verdict.providerOrderId() != null
+                    && !payment.getProviderOrderId().equals(verdict.providerOrderId())) {
+                auditLogService.log("GATEWAY_PAYMENT_SUPERSEDED", "Payment", payment.getId(),
+                        "source=" + source + ", current=" + payment.getProviderOrderId()
+                                + ", event=" + verdict.providerOrderId());
+                log.warn("Ignoring superseded gateway order id for payment {}", payment.getId());
+                return Outcome.MISMATCH;
+            }
+
             // AMOUNT AND CURRENCY ARE CHECKED BEFORE ANYTHING IS BANKED.
             // A payment that settled for less than the order, or in another
             // currency, is not this order being paid - and marking it paid
@@ -489,6 +505,26 @@ public class GatewayPaymentService {
                 return Outcome.MISMATCH;
             }
 
+            Order order = payment.getOrder();
+            boolean orderCancelled = order != null && order.getOrderStatus() == OrderStatus.CANCELLED;
+            if (orderCancelled || payment.getPaymentStatus() != PaymentStatus.PENDING) {
+                // Money arrived after the customer (or the expiry sweep)
+                // cancelled. Stock is already back on the shelf. Confirming
+                // the order would sell goods twice; ignoring the money would
+                // hide a real capture. Park it as REFUND_PENDING for a human.
+                payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
+                payment.setProviderPaymentId(verdict.providerPaymentId());
+                payment.setPaymentDate(LocalDateTime.now());
+                payment.setFailureReason(truncate("paid after cancel/terminal; refund required"));
+                payment.setUpdatedAt(LocalDateTime.now());
+                persist(payment);
+                auditLogService.log("GATEWAY_PAYMENT_AFTER_CANCEL", "Payment", payment.getId(),
+                        "source=" + source + ", providerOrderId=" + verdict.providerOrderId());
+                log.error("Gateway paid payment {} after the order was no longer pending confirmation",
+                        payment.getId());
+                return Outcome.MISMATCH;
+            }
+
             payment.setPaymentStatus(PaymentStatus.SUCCESS);
             payment.setProviderPaymentId(verdict.providerPaymentId());
             payment.setPaymentDate(LocalDateTime.now());
@@ -498,7 +534,7 @@ public class GatewayPaymentService {
 
             // Only NOW does the order become confirmed. This is the line the
             // whole design exists to protect.
-            advanceOrderIfStillPending(payment.getOrder());
+            advanceOrderIfStillPending(order);
 
             auditLogService.log("GATEWAY_PAYMENT_SUCCESS", "Payment", payment.getId(),
                     "source=" + source + ", providerOrderId=" + verdict.providerOrderId());
@@ -508,6 +544,14 @@ public class GatewayPaymentService {
         if (verdict.state() == GatewayOrderStatus.State.FAILED
                 || verdict.state() == GatewayOrderStatus.State.CANCELLED
                 || verdict.state() == GatewayOrderStatus.State.EXPIRED) {
+
+            Order order = payment.getOrder();
+            if (order != null && order.getOrderStatus() == OrderStatus.CANCELLED) {
+                return Outcome.IGNORED;
+            }
+            if (payment.getPaymentStatus() != PaymentStatus.PENDING) {
+                return Outcome.IGNORED;
+            }
 
             payment.setPaymentStatus(switch (verdict.state()) {
                 case EXPIRED -> PaymentStatus.EXPIRED;
@@ -521,7 +565,7 @@ public class GatewayPaymentService {
             // The ORDER is deliberately NOT cancelled here. A failed attempt
             // is not an abandoned order - the customer is usually still on
             // the screen about to try another card, and cancelling would
-            // restore stock underneath them. The existing expiry sweep is
+            // restore stock underneath them. The UPI/ONLINE expiry sweep is
             // what eventually releases a genuinely abandoned order.
             auditLogService.log("GATEWAY_PAYMENT_" + payment.getPaymentStatus(), "Payment", payment.getId(),
                     "source=" + source + ", providerOrderId=" + verdict.providerOrderId());
@@ -620,9 +664,23 @@ public class GatewayPaymentService {
 
         // Lock B, always after A.
         Optional<Payment> exact = paymentRepository.findByProviderOrderIdForUpdate(providerOrderId);
-        return exact.isPresent()
-                ? exact
-                : paymentRepository.findByOrderIdForUpdate(internalOrderId);
+        if (exact.isPresent()) {
+            return exact;
+        }
+
+        Optional<Payment> fallback = paymentRepository.findByOrderIdForUpdate(internalOrderId);
+        if (fallback.isEmpty()) {
+            return Optional.empty();
+        }
+        Payment current = fallback.get();
+        // A late webhook for attempt 1 must not settle attempt 2's row.
+        if (current.getProviderOrderId() != null
+                && !current.getProviderOrderId().equals(providerOrderId)) {
+            log.warn("Ignoring superseded provider order id {} (current is {})",
+                    providerOrderId, current.getProviderOrderId());
+            return Optional.empty();
+        }
+        return fallback;
     }
 
     static Long internalOrderIdFrom(String providerOrderId) {

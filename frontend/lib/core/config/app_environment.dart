@@ -28,6 +28,10 @@ enum AppEnvironment {
   /// Override only for a laptop/debug build via `--dart-define=API_BASE_URL`.
   static const String productionApiBaseUrl = 'https://api.gpstore.co.in/v1';
 
+  /// Hosted privacy policy (GitHub Pages). Play Console needs a public URL.
+  static const String publicPrivacyPolicyUrl =
+      'https://dguptaup0001000-oss.github.io/gp-store/privacy-policy.html';
+
   /// The environment this build was compiled for.
   ///
   /// An unrecognised APP_ENV falls back to development rather than throwing:

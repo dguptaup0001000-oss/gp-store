@@ -77,8 +77,8 @@ class VariantImageTest {
         product.setActive(true);
         product = productRepository.save(product);
 
-        oneKg = newVariant(1.0, "kg", "https://cdn.example.com/original-1kg.jpg");
-        fiveHundredG = newVariant(500.0, "g", "https://cdn.example.com/original-500g.jpg");
+        oneKg = newVariant(1.0, "kg", "https://res.cloudinary.com/demo/image/upload/v1/gp/original-1kg.jpg");
+        fiveHundredG = newVariant(500.0, "g", "https://res.cloudinary.com/demo/image/upload/v1/gp/original-500g.jpg");
     }
 
     @AfterEach
@@ -100,7 +100,7 @@ class VariantImageTest {
         assertEquals(List.of(), imageService.imagesFor(oneKg.getId()),
                 "A variant with no photo rows must report an empty gallery, not fail.");
 
-        assertEquals("https://cdn.example.com/original-1kg.jpg",
+        assertEquals("https://res.cloudinary.com/demo/image/upload/v1/gp/original-1kg.jpg",
                 variantRepository.findById(oneKg.getId()).orElseThrow().getImageUrl(),
                 "The existing imageUrl must not have been touched by anything.");
     }
@@ -112,7 +112,7 @@ class VariantImageTest {
         // what they meant: pictures of the product, not of any one pack size.
         ProductImage productLevel = new ProductImage();
         productLevel.setProduct(product);
-        productLevel.setImageUrl("https://cdn.example.com/product-wide.jpg");
+        productLevel.setImageUrl("https://res.cloudinary.com/demo/image/upload/v1/gp/product-wide.jpg");
         productLevel.setSortOrder(0);
         imageRepository.save(productLevel);
 
@@ -128,11 +128,11 @@ class VariantImageTest {
     @DisplayName("five photos are stored in the order they were sent")
     void orderIsPreservedBecauseTheFirstOneIsPrimary() {
         List<String> sent = List.of(
-                "https://cdn.example.com/front.jpg",
-                "https://cdn.example.com/back.jpg",
-                "https://cdn.example.com/side.jpg",
-                "https://cdn.example.com/ingredients.jpg",
-                "https://cdn.example.com/extra.jpg");
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/front.jpg",
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/back.jpg",
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/side.jpg",
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/ingredients.jpg",
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/extra.jpg");
 
         assertEquals(sent, imageService.replaceImages(oneKg.getId(), sent));
         assertEquals(sent, imageService.imagesFor(oneKg.getId()),
@@ -147,9 +147,9 @@ class VariantImageTest {
         // equal to the first photo is what makes this feature appear
         // everywhere the old field already did, with no client change.
         imageService.replaceImages(oneKg.getId(), List.of(
-                "https://cdn.example.com/front.jpg", "https://cdn.example.com/back.jpg"));
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/front.jpg", "https://res.cloudinary.com/demo/image/upload/v1/gp/back.jpg"));
 
-        assertEquals("https://cdn.example.com/front.jpg",
+        assertEquals("https://res.cloudinary.com/demo/image/upload/v1/gp/front.jpg",
                 variantRepository.findById(oneKg.getId()).orElseThrow().getImageUrl());
     }
 
@@ -157,7 +157,7 @@ class VariantImageTest {
     @DisplayName("a sixth photo is refused")
     void theLimitIsFive() {
         List<String> six = List.of("a", "b", "c", "d", "e", "f").stream()
-                .map(n -> "https://cdn.example.com/" + n + ".jpg")
+                .map(n -> "https://res.cloudinary.com/demo/image/upload/v1/gp/" + n + ".jpg")
                 .toList();
 
         BadRequestException refused = assertThrows(BadRequestException.class,
@@ -175,12 +175,12 @@ class VariantImageTest {
         // A real thing a person does at a picker. Two identical thumbnails in
         // a gallery reads as a broken shop rather than a slip.
         List<String> withDupes = List.of(
-                "https://cdn.example.com/front.jpg",
-                "https://cdn.example.com/back.jpg",
-                "https://cdn.example.com/front.jpg");
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/front.jpg",
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/back.jpg",
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/front.jpg");
 
         assertEquals(
-                List.of("https://cdn.example.com/front.jpg", "https://cdn.example.com/back.jpg"),
+                List.of("https://res.cloudinary.com/demo/image/upload/v1/gp/front.jpg", "https://res.cloudinary.com/demo/image/upload/v1/gp/back.jpg"),
                 imageService.replaceImages(oneKg.getId(), withDupes),
                 "The first occurrence wins, so the primary photo is still what the admin put first.");
     }
@@ -189,7 +189,7 @@ class VariantImageTest {
     @DisplayName("re-sending the same list is harmless")
     void replacingIsIdempotent() {
         List<String> five = List.of("1", "2", "3", "4", "5").stream()
-                .map(n -> "https://cdn.example.com/" + n + ".jpg")
+                .map(n -> "https://res.cloudinary.com/demo/image/upload/v1/gp/" + n + ".jpg")
                 .toList();
 
         imageService.replaceImages(oneKg.getId(), five);
@@ -208,15 +208,15 @@ class VariantImageTest {
     @DisplayName("removing a photo is just sending the shorter list")
     void removalIsAReplace() {
         imageService.replaceImages(oneKg.getId(), List.of(
-                "https://cdn.example.com/front.jpg",
-                "https://cdn.example.com/back.jpg",
-                "https://cdn.example.com/side.jpg"));
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/front.jpg",
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/back.jpg",
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/side.jpg"));
 
         assertEquals(
-                List.of("https://cdn.example.com/front.jpg", "https://cdn.example.com/side.jpg"),
+                List.of("https://res.cloudinary.com/demo/image/upload/v1/gp/front.jpg", "https://res.cloudinary.com/demo/image/upload/v1/gp/side.jpg"),
                 imageService.replaceImages(oneKg.getId(), List.of(
-                        "https://cdn.example.com/front.jpg",
-                        "https://cdn.example.com/side.jpg")));
+                        "https://res.cloudinary.com/demo/image/upload/v1/gp/front.jpg",
+                        "https://res.cloudinary.com/demo/image/upload/v1/gp/side.jpg")));
     }
 
     @Test
@@ -224,12 +224,12 @@ class VariantImageTest {
     void variantsDoNotShareGalleries() {
         // The whole reason these hang off the variant: the 1 kg packet and the
         // 500 g packet are different pictures.
-        imageService.replaceImages(oneKg.getId(), List.of("https://cdn.example.com/1kg-front.jpg"));
-        imageService.replaceImages(fiveHundredG.getId(), List.of("https://cdn.example.com/500g-front.jpg"));
+        imageService.replaceImages(oneKg.getId(), List.of("https://res.cloudinary.com/demo/image/upload/v1/gp/1kg-front.jpg"));
+        imageService.replaceImages(fiveHundredG.getId(), List.of("https://res.cloudinary.com/demo/image/upload/v1/gp/500g-front.jpg"));
 
-        assertEquals(List.of("https://cdn.example.com/1kg-front.jpg"),
+        assertEquals(List.of("https://res.cloudinary.com/demo/image/upload/v1/gp/1kg-front.jpg"),
                 imageService.imagesFor(oneKg.getId()));
-        assertEquals(List.of("https://cdn.example.com/500g-front.jpg"),
+        assertEquals(List.of("https://res.cloudinary.com/demo/image/upload/v1/gp/500g-front.jpg"),
                 imageService.imagesFor(fiveHundredG.getId()));
     }
 
@@ -239,7 +239,7 @@ class VariantImageTest {
     @DisplayName("product detail carries each variant's photos; listings do not")
     void galleriesReachTheDetailScreenOnly() {
         imageService.replaceImages(oneKg.getId(), List.of(
-                "https://cdn.example.com/1kg-front.jpg", "https://cdn.example.com/1kg-back.jpg"));
+                "https://res.cloudinary.com/demo/image/upload/v1/gp/1kg-front.jpg", "https://res.cloudinary.com/demo/image/upload/v1/gp/1kg-back.jpg"));
 
         // replaceImages evicts the catalogue caches, but this test asks the
         // service directly and a stale entry from an earlier assertion would
@@ -253,8 +253,8 @@ class VariantImageTest {
                 .filter(v -> v.getId().equals(oneKg.getId()))
                 .findFirst().orElseThrow();
 
-        assertEquals(List.of("https://cdn.example.com/1kg-front.jpg",
-                        "https://cdn.example.com/1kg-back.jpg"),
+        assertEquals(List.of("https://res.cloudinary.com/demo/image/upload/v1/gp/1kg-front.jpg",
+                        "https://res.cloudinary.com/demo/image/upload/v1/gp/1kg-back.jpg"),
                 detailVariant.getImages(),
                 "The detail screen is the one place a gallery belongs.");
 
@@ -263,6 +263,26 @@ class VariantImageTest {
                 .findFirst().orElseThrow();
         assertEquals(List.of(), otherVariant.getImages(),
                 "A variant with no photos gets an empty list, not the other variant's.");
+    }
+
+    @Test
+    @DisplayName("arbitrary hosts and non-HTTPS schemes are refused")
+    void imageUrlsMustBeCloudinaryHttps() {
+        BadRequestException arbitrary = assertThrows(BadRequestException.class,
+                () -> imageService.replaceImages(oneKg.getId(),
+                        List.of("https://evil.example/payload.jpg")));
+        assertTrue(arbitrary.getMessage().toLowerCase().contains("cloudinary"),
+                arbitrary.getMessage());
+
+        assertThrows(BadRequestException.class,
+                () -> imageService.replaceImages(oneKg.getId(),
+                        List.of("javascript:alert(1)")));
+        assertThrows(BadRequestException.class,
+                () -> imageService.replaceImages(oneKg.getId(),
+                        List.of("https://res.cloudinary.com.evil.example/x.jpg")));
+
+        assertEquals(List.of(), imageService.imagesFor(oneKg.getId()),
+                "A refused URL must write nothing.");
     }
 
     // ------------------------------------------------------------ fixtures

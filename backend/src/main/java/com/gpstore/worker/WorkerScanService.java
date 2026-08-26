@@ -212,7 +212,10 @@ public class WorkerScanService {
         }
 
         // ---- The token names the order. Nothing else does. --------------
-        Optional<Order> found = orderRepository.findByQrToken(qrToken);
+        // FOR UPDATE: two workers can scan the same carton in the same
+        // second. An unlocked read lets both see qrTokenUsedAt == null and
+        // both write packedByPartner. The second then wins silently.
+        Optional<Order> found = orderRepository.findByQrTokenForUpdate(qrToken);
         if (found.isEmpty()) {
             return reject(null, worker, clientRequestId, "UNKNOWN_TOKEN",
                     "This code is not a valid GP-STORE order label.");

@@ -178,6 +178,8 @@ jobs:
             > android/key.properties
 
       - name: Build Delivery Worker APK
+        env:
+          ALLOW_DEBUG_RELEASE_SIGNING: ${{ steps.play_signing.outputs.enabled == 'true' && '0' || '1' }}
         # A SECOND APK FROM THE SAME PROJECT, via a second entrypoint
         # (lib/worker_main.dart). Dart tree-shaking drops unused screens, but
         # Gradle still links every plugin in pubspec.yaml. CI therefore builds
@@ -271,6 +273,8 @@ jobs:
           path: frontend/build/app/outputs/bundle/worker/gpstore-worker-release.aab
 
       - name: Build APK
+        env:
+          ALLOW_DEBUG_RELEASE_SIGNING: ${{ steps.play_signing.outputs.enabled == 'true' && '0' || '1' }}
         # Same reasoning as the web build's API_BASE_URL handling below -
         # the app's coded default (10.0.2.2, the Android EMULATOR's
         # localhost alias) is just as unreachable from a real physical

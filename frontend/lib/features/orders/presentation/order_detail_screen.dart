@@ -518,7 +518,7 @@ class _DeliveryTrackingCardState extends ConsumerState<_DeliveryTrackingCard> {
                           child: Text(
                             live.locationUpdatedAt != null
                                 ? _timeAgo(live.locationUpdatedAt!)
-                                : 'Live location available',
+                                : 'Last known position (updates while the rider has the app open)',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyMedium

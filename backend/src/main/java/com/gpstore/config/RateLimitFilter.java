@@ -86,7 +86,8 @@ import java.util.concurrent.TimeUnit;
    *       and writes under /api/worker/**, /api/deliveries, /api/inventory,
    *       /api/products, /api/categories, /api/product-variants, and
    *       /api/orders (except place, which is CHECKOUT).
-   *       DELETE /api/customers/me is AUTH (account destruction).
+   *       DELETE /api/customers/me and PUT /api/customers/me are AUTH
+       (account destruction and phone-number rebind).
  *
  *   rate-limit.search-per-minute            default 60, per customer or IP
  *       GET /api/products/search*. Instant search is the expensive read.
@@ -250,7 +251,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return Bucket.CHECKOUT;
         }
 
-        if (path.equals("/api/customers/me") && method.equals("DELETE")) {
+        if (path.equals("/api/customers/me") && (method.equals("DELETE") || method.equals("PUT"))) {
             return Bucket.AUTH;
         }
 

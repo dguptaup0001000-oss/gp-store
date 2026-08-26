@@ -65,7 +65,7 @@ class _DeliveryDashboardScreenState
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         throw Exception(
-            'Please turn on location services to share your live location');
+            'Please turn on location services to share your position while this screen is open');
       }
 
       LocationPermission permission = await Geolocator.checkPermission();
@@ -73,7 +73,7 @@ class _DeliveryDashboardScreenState
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
           throw Exception(
-              'Location permission denied - customers will not see your live position');
+              'Location permission denied - your position is not shared while this screen is open');
         }
       }
       if (permission == LocationPermission.deniedForever) {
@@ -153,7 +153,7 @@ class _DeliveryDashboardScreenState
             const Padding(
               padding: EdgeInsets.only(right: 4),
               child: Tooltip(
-                message: 'Sharing live location',
+                message: 'Sharing location while this screen is open',
                 child:
                     Icon(Icons.gps_fixed, size: 18, color: AppColors.primary),
               ),

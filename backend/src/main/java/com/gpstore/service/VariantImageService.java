@@ -161,8 +161,28 @@ public class VariantImageService {
                         "One of those image links is too long (" + trimmed.length()
                                 + " characters, limit " + maxUrlLength + ").");
             }
+            if (!isAllowedImageUrl(trimmed)) {
+                throw new BadRequestException(
+                        "Image URLs must be HTTPS Cloudinary links (https://res.cloudinary.com/...).");
+            }
             unique.add(trimmed);
         }
         return List.copyOf(unique);
+    }
+
+    /**
+     * Bytes never pass through this backend; only Cloudinary HTTPS URLs do.
+     * Host equality, not a prefix check: {@code res.cloudinary.com.evil}
+     * must not count.
+     */
+    static boolean isAllowedImageUrl(String url) {
+        try {
+            java.net.URI uri = java.net.URI.create(url);
+            return "https".equalsIgnoreCase(uri.getScheme())
+                    && "res.cloudinary.com".equalsIgnoreCase(uri.getHost())
+                    && uri.getUserInfo() == null;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 }

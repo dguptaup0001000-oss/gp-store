@@ -17,6 +17,12 @@ void main() {
       expect(AppEnvironment.production.baseUrl, 'https://api.gpstore.co.in/v1');
     });
 
+    test('public privacy policy URL is https on GitHub Pages', () {
+      expect(AppEnvironment.publicPrivacyPolicyUrl, startsWith('https://'));
+      expect(AppEnvironment.publicPrivacyPolicyUrl, contains('privacy-policy.html'));
+      expect(AppEnvironment.publicPrivacyPolicyUrl, isNot(contains('localhost')));
+    });
+
     test(
         'staging without an API_BASE_URL override refuses to target production',
         () {

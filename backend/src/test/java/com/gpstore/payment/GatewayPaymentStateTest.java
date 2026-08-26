@@ -102,6 +102,42 @@ class GatewayPaymentStateTest {
                 orderRepository.findById(order.getId()).orElseThrow().getOrderStatus());
     }
 
+    @Test
+    @DisplayName("SUCCESS after the order is cancelled does not resurrect it")
+    void cancelledOrderRejectsLateSuccessWebhook() {
+        Order order = persistedOrder(OrderStatus.CANCELLED);
+        String providerOrderId = "GP-" + order.getId() + "-late";
+        persistedPayment(order, providerOrderId);
+        Payment before = paymentRepository.findByProviderOrderId(providerOrderId).orElseThrow();
+        before.setPaymentStatus(PaymentStatus.FAILED);
+        paymentRepository.save(before);
+
+        apply("PAYMENT_SUCCESS_WEBHOOK", providerOrderId, "SUCCESS", 10.00, "cf_late_" + order.getId());
+
+        Payment payment = paymentRepository.findByProviderOrderId(providerOrderId).orElseThrow();
+        assertEquals(PaymentStatus.REFUND_PENDING, payment.getPaymentStatus(),
+                "captured money after cancel must be parked for refund, not SUCCESS");
+        assertEquals(OrderStatus.CANCELLED,
+                orderRepository.findById(order.getId()).orElseThrow().getOrderStatus(),
+                "a late webhook must not un-cancel the order");
+    }
+
+    @Test
+    @DisplayName("SUCCESS for a superseded Cashfree attempt does not settle the current row")
+    void supersededAttemptDoesNotConfirmCurrentPayment() {
+        Order order = persistedOrder(OrderStatus.PENDING_CONFIRMATION);
+        String currentId = "GP-" + order.getId() + "-new";
+        persistedPayment(order, currentId);
+
+        apply("PAYMENT_SUCCESS_WEBHOOK", "GP-" + order.getId() + "-old", "SUCCESS", 10.00,
+                "cf_old_" + order.getId());
+
+        Payment payment = paymentRepository.findByProviderOrderId(currentId).orElseThrow();
+        assertEquals(PaymentStatus.PENDING, payment.getPaymentStatus());
+        assertEquals(OrderStatus.PENDING_CONFIRMATION,
+                orderRepository.findById(order.getId()).orElseThrow().getOrderStatus());
+    }
+
     private void apply(String type, String providerOrderId, String paymentStatus, double amount, String cfPaymentId) {
         String rawBody = "{\"type\":\"" + type + "\","
                 + "\"data\":{\"order\":{\"order_id\":\"" + providerOrderId + "\"},"
