@@ -61,6 +61,12 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
+      - name: Check Redis secret scripts
+        run: |
+          sh -n docker/redis/docker-entrypoint.sh
+          sh -n docker-entrypoint.sh
+          python3 docker/redis/test_materialize_password_file.py
+
       # FLYWAY_ENABLED is false below (schema comes from DDL_AUTO=update
       # instead, see that env var's own comment) - so none of the
       # hand-written SQL migrations (db/migration/V*.sql) ever run here.

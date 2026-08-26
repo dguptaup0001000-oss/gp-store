@@ -23,6 +23,7 @@ VERSION_URL="http://127.0.0.1:8081/v1/api/version"
 PUBLIC_VERSION_URL="${PUBLIC_VERSION_URL:-https://api.gpstore.co.in/v1/api/version}"
 PUBLIC_HEALTH_URL="${PUBLIC_HEALTH_URL:-https://api.gpstore.co.in/v1/actuator/health}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
+REDIS_HEALTH_TIMEOUT_SECONDS="${REDIS_HEALTH_TIMEOUT_SECONDS:-90}"
 REQUIRE_ORIGIN_MAIN="${REQUIRE_ORIGIN_MAIN:-1}"
 IMAGE_NAME="gp-store-backend"
 
@@ -115,8 +116,22 @@ dump_diagnostics() {
   compose ps || true
   log "--- backend logs (last 80) ---"
   compose logs --tail=80 backend || true
-  log "--- redis logs (last 20) ---"
-  compose logs --tail=20 redis || true
+  log "--- redis logs (last 40) ---"
+  compose logs --tail=40 redis || true
+}
+
+wait_for_redis() {
+  local deadline=$((SECONDS + REDIS_HEALTH_TIMEOUT_SECONDS))
+  while (( SECONDS < deadline )); do
+    if compose exec -T redis sh -c \
+      'REDISCLI_AUTH="$(tr -d "\r\n" < /run/secrets/redis_password)" redis-cli ping' \
+      2>/dev/null | grep -q PONG; then
+      return 0
+    fi
+    log "Waiting for Redis PONG"
+    sleep 2
+  done
+  return 1
 }
 
 wait_for_health() {
@@ -209,8 +224,13 @@ rollback() {
     git -C "$DEPLOY_ROOT" checkout main
     git -C "$DEPLOY_ROOT" reset --hard "$PREV_SHA"
   fi
+  python3 "$COMPOSE_DIR/docker/redis/materialize-password-file.py" "$COMPOSE_DIR" \
+    || log "Could not rematerialize Redis password file during rollback"
   export BACKEND_IMAGE_TAG="${rollback_tag}"
   export GIT_COMMIT="${PREV_SHA:-unknown}"
+  # Redis may be crash-looping independently of the backend image.
+  compose up -d redis || true
+  wait_for_redis || log "Redis still not healthy after rollback recreate"
   compose up -d --no-deps --no-build backend
   local health
   if ! health="$(wait_for_health)"; then
@@ -343,6 +363,7 @@ echo "[4b/8] Infra sidecars"
 # Traefik is recreated only when its Compose definition changed.
 compose up -d dockerproxy
 compose up -d redis backup
+wait_for_redis || die "Redis did not become healthy within ${REDIS_HEALTH_TIMEOUT_SECONDS}s"
 compose up -d traefik
 
 echo "[5/8] Starting backend"

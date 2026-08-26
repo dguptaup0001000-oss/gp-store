@@ -45,10 +45,20 @@ def main() -> int:
     os.chmod(secret_dir, 0o700)
     secret_file = secret_dir / "redis_password"
     secret_file.write_text(password + "\n", encoding="utf-8")
-    os.chmod(secret_file, stat.S_IRUSR | stat.S_IWUSR)
+    # Compose bind-mounts this file into /run/secrets with the host mode.
+    # 0600 root:root is unreadable by backend appuser and by redis after
+    # gosu. 0444 inside a 0700 directory: only the VPS owner can enter
+    # .secrets; the containers that receive the mount can read the file.
+    # 0644: owner can rematerialize; group/other read so appuser and redis
+    # can read the bind-mounted file. Directory stays 0700.
+    os.chmod(secret_file, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
     # Confirm we wrote a non-empty file without printing the value.
     if secret_file.stat().st_size < 2:
         print("Failed to write Redis password file", file=sys.stderr)
+        return 1
+    mode = secret_file.stat().st_mode & 0o777
+    if mode != 0o644:
+        print(f"Redis password file mode is {oct(mode)}, expected 0o644", file=sys.stderr)
         return 1
     print("Redis password file materialized (value not logged).")
     return 0

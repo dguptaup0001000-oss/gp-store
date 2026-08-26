@@ -36,7 +36,7 @@ curl -fsS --max-time 8 "https://${API_HOST}/v1/api/health"
 echo
 
 echo "== Redis (Compose network only) =="
-compose exec -T redis sh -c 'REDISCLI_AUTH="$(cat /run/secrets/redis_password)" redis-cli ping'
+compose exec -T redis sh -c 'REDISCLI_AUTH="$(tr -d "\r\n" < /run/secrets/redis_password)" redis-cli ping'
 echo
 
 echo "== Backup volume disk =="

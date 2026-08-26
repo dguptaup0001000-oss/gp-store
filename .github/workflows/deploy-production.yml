@@ -51,6 +51,9 @@ jobs:
           python3 -m py_compile .github/scripts/wait_for_ci.py
           python3 -m py_compile .github/scripts/automerge_eligible_pr.py
           python3 -m py_compile backend/docker/redis/materialize-password-file.py
+          sh -n backend/docker/redis/docker-entrypoint.sh
+          sh -n backend/docker-entrypoint.sh
+          python3 backend/docker/redis/test_materialize_password_file.py
           test -x deploy/production/deploy.sh || chmod +x deploy/production/deploy.sh
           grep -F 'set -Eeuo pipefail' deploy/production/deploy.sh
           if grep -vE '^[[:space:]]*#' deploy/production/deploy.sh | grep -E 'compose[[:space:]]+down[[:space:]]+(-v|--volumes)'; then
