@@ -32,8 +32,8 @@ This file is the Phase 2 inventory. It is not a runbook; operators use
 
 **Not changed (not Render hosting):** Flutter `RenderBox`/`RenderFlex`/`isRenderable`, Java “Rendered as a pin”, `pubspec.yaml` “Renders Google's model-viewer”.
 
-**Database:** Canonical production Postgres is the Docker `postgres` service in `backend/docker-compose.yml` (volume `gpstore_pg_data`). Existing shop data may still live in Railway Postgres, Supabase, or a dump — **do not** drop or `flyway clean` it. Dump/restore is a manual operator step; see `backend/HOSTINGER_DEPLOYMENT.md`.
+**Database:** Canonical production Postgres is the Docker `postgres` service in `backend/docker-compose.yml` (volume `gpstore_pg_data`, PostgreSQL 17). **Do not** drop or `flyway clean` it. Dump/restore is a manual operator step; see `backend/HOSTINGER_DEPLOYMENT.md`.
 
-**DNS (2026-08-25):** `api.gpstore.co.in` still CNAME'd to `s1z20khv.up.railway.app` (Railway 404, cert `*.up.railway.app`). Replace that with an A record to the Hostinger VPS before Traefik can issue a real certificate.
+**DNS (2026-08-26):** `api.gpstore.co.in` is **A `187.127.173.192`**. Traefik issues Let's Encrypt for that hostname. Do not change nameservers, apex, or MX.
 
 **Not invented:** production API is `https://api.gpstore.co.in/v1`. Do not ship a Hostinger SDK in the APK.

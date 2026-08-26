@@ -23,7 +23,7 @@ enum AppEnvironment {
 
   /// Canonical production API. Must stay HTTPS and end with `/v1`.
   ///
-  /// Hostinger + Traefik. Never Railway, Render, or localhost.
+  /// Hostinger VPS + Traefik. Never Render or localhost.
   /// Override only for a laptop/debug build via `--dart-define=API_BASE_URL`.
   static const String productionApiBaseUrl = 'https://api.gpstore.co.in/v1';
 

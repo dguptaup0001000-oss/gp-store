@@ -1,7 +1,7 @@
 # GP-STORE backend on Hostinger VPS (Docker Compose + Traefik)
 
-**This is the only production runbook.** Do not use Railway. Do not use Render.
-Do not run systemd + Nginx next to this stack.
+**This is the only production runbook.** Production is this Hostinger VPS
+stack. Do not use Render. Do not run systemd + Nginx next to this stack.
 
 ```
 Internet (HTTPS :443)
@@ -37,19 +37,20 @@ Flutter production builds must use `https://api.gpstore.co.in/v1`.
 
 ---
 
-## Live audit (2026-08-25, from this agent — not the VPS)
+## Live audit (2026-08-26)
 
-These checks were run from the cloud agent. They are **not** Hostinger verification.
+Public checks from this agent against `api.gpstore.co.in`:
 
 | Check | Result |
 |---|---|
-| DNS `api.gpstore.co.in` | **CNAME `s1z20khv.up.railway.app`** → `69.46.46.88` |
-| `https://api.gpstore.co.in/v1/api/health` | **404** `Application not found` (Railway) |
-| TLS certificate | **CN=`*.up.railway.app`**, does not match `api.gpstore.co.in` |
-| SSH to Hostinger | **not available** in this environment |
-| Production database location | **unknown** (Railway app is gone; data may still exist in Railway Postgres, Supabase, or a dump). Do not `DROP`/`flyway clean`. |
+| DNS `api.gpstore.co.in` | **A `187.127.173.192`** (Hostinger VPS) |
+| `http://api.gpstore.co.in/v1/api/health` | **301** → HTTPS |
+| `https://api.gpstore.co.in/v1/api/health` | **200** `GP-STORE Backend Running Successfully!` |
+| TLS certificate | **CN=`api.gpstore.co.in`**, issuer **Let's Encrypt YR2**, SAN `api.gpstore.co.in` |
+| `https://api.gpstore.co.in/v1/api/health/ready` | **200** `{"status":"ready"}` |
+| Production database | Docker Compose Postgres 17 on this VPS (`gpstore_pg_data`). Do not `DROP` / `flyway clean` / `docker compose down -v`. |
 
-Until DNS is an **A record to the Hostinger VPS IPv4**, Let's Encrypt on Traefik cannot issue a certificate for `api.gpstore.co.in`, and the Flutter APK will keep hitting a dead Railway hostname.
+Traefik must be **v3.6.1+** on Docker Engine 29 (this repo pins `traefik:v3.6.7`). Older Traefik spoke Docker API 1.24 and never discovered labels, so ACME never ran.
 
 ---
 
@@ -114,55 +115,43 @@ Optional vendor keys: Cashfree, MSG91, Firebase, Cloudinary. Production never us
 
 ## 5. Database — do not destroy shop data
 
-Compose Postgres is the **intended** production database (named volume `gpstore_pg_data`). Restarting containers does **not** wipe it.
-
-This agent **does not** know where today's customer/order/product rows live. The Railway HTTP app is already 404. Possible sources: Railway PostgreSQL, Supabase, a laptop dump.
+Compose Postgres 17 is the **production database** (named volume `gpstore_pg_data`). Restarting containers does **not** wipe it.
 
 **Do not** run `flyway clean`, `DROP DATABASE`, or `docker compose down -v` on a volume that has shop data.
 
 If you already have a dump:
 
 ```bash
-# After `docker compose up -d` and postgres is healthy, BEFORE pointing customers at DNS:
+# After `docker compose up -d` and postgres is healthy:
 gunzip -c gpstore-YYYY-MM-DD.sql.gz | docker compose exec -T postgres psql -U "$DB_USERNAME" -d "$DB_NAME"
 ```
 
-If you still have access to the old Postgres (Railway or Supabase), dump **before** deleting that project:
-
-```bash
-pg_dump -h <old-host> -U <old-user> -d <old-db> --no-owner --no-acl | gzip > gpstore-$(date +%F).sql.gz
-```
-
-Store that file **off** the VPS. Restoring overwrites the volume — do not run it twice by accident.
+Store dump files **off** the VPS. Restoring overwrites the volume — do not run it twice by accident.
 
 Flyway V2–current (including `pg_trgm` search indexes in `V5`) runs on first boot of an empty database. There is no manual `CREATE INDEX` step.
 
-This runbook does **not** execute a dump/restore. That needs your approval and access to the current database.
+Shop data already lives on `gpstore_pg_data`. Do not restore a dump over it unless you intend to overwrite.
 
-## 6. DNS (must happen before Traefik can get a cert)
+## 6. DNS
 
-At your DNS host, **delete** the Railway CNAME:
-
-```
-api.gpstore.co.in  CNAME  s1z20khv.up.railway.app   ← remove this
-```
-
-Create:
+Required record (already in place as of 2026-08-26):
 
 ```
-api.gpstore.co.in  A  <Hostinger VPS public IPv4>
+api.gpstore.co.in  A  187.127.173.192
 ```
 
-Wait until this is true from several resolvers:
+Do **not** change nameservers, the apex/root `gpstore.co.in` record, or MX records.
+
+Confirm from several resolvers:
 
 ```bash
 dig +short api.gpstore.co.in A
-# must print the VPS IPv4, not s1z20khv.up.railway.app / 69.46.46.88
+# must print 187.127.173.192
 ```
 
 If you use Cloudflare, grey-cloud (DNS only) until the certificate issues, then Full (strict).
 
-HTTP-01 ACME needs port 80 on that IP. Do not `docker compose up` for TLS until DNS points here, or Let's Encrypt will fail (or certify the wrong host).
+HTTP-01 ACME needs port 80 on that IP. Traefik cannot issue Let's Encrypt if `api` does not resolve to this VPS.
 
 ## 7. Start the stack
 
@@ -245,14 +234,14 @@ gunzip -c gpstore-YYYY-MM-DD.sql.gz | docker compose exec -T postgres psql -U "$
 
 Rebuild a **production** APK only after `https://api.gpstore.co.in/v1/api/health` succeeds with a certificate for `api.gpstore.co.in`.
 
-CI already defaults to `https://api.gpstore.co.in/v1` when `vars.API_BASE_URL` is empty. Do not point `API_BASE_URL` at Railway, Render, or localhost.
+CI already defaults to `https://api.gpstore.co.in/v1` when `vars.API_BASE_URL` is empty. Do not point `API_BASE_URL` at Render, localhost, or any host other than `https://api.gpstore.co.in/v1`.
 
 ## 16. Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| Certificate pending / CN is `*.up.railway.app` | DNS still the Railway CNAME. Fix the A record. |
-| 404 Application not found | You are still hitting Railway, not the VPS. |
+| Certificate is Traefik default / self-signed | `api.gpstore.co.in` A record must be `187.127.173.192`; Traefik image must be v3.6.1+; port 80 must reach Traefik for HTTP-01. |
+| 404 from the public hostname | Traefik labels / backend container not healthy. `docker compose ps` and `docker compose logs traefik`. |
 | 502 | `docker compose ps` — backend healthy? `docker compose logs backend` |
 | App refuses to start | `JWT_SECRET` still the repo default, or `DDL_AUTO` is not `validate` |
 | Search errors `similarity` | V5 should create `pg_trgm`. Confirm Flyway in logs |

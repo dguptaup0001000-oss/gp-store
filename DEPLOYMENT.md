@@ -1,7 +1,7 @@
 # Deploying GP-STORE
 
 **Production is a Hostinger VPS (Docker Compose + Traefik + Postgres + Redis).**
-Railway and Render are not used.
+Render is not used.
 
 - Hostinger Docker/Traefik commands:
   **[backend/HOSTINGER_DEPLOYMENT.md](backend/HOSTINGER_DEPLOYMENT.md)**

@@ -13,7 +13,6 @@ void main() {
         expect(env.baseUrl, isNot(contains('10.0.2.2')));
         expect(env.baseUrl, isNot(contains('onrender')));
         expect(env.baseUrl, isNot(contains('render.com')));
-        expect(env.baseUrl, isNot(contains('railway')));
         expect(env.baseUrl, AppEnvironment.productionApiBaseUrl);
         expect(env.baseUrl, 'https://api.gpstore.co.in/v1');
       }

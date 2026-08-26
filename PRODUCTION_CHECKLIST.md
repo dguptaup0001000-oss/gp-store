@@ -89,16 +89,16 @@ Android apps do not use CORS.
 - Run 1,000+ VU load tests against the live API URL. Use
   `load-tests/browse-cart-checkout.js` locally/staging, smallest stage first.
 - Merge or rewrite Flyway V2–V22.
-- Treat a leftover **Railway** GitHub status (`brilliant-spontaneity`) as a
-  required check. Disconnect that integration; production is the Hostinger VPS.
+- Require leftover third-party PaaS GitHub status checks. Production is the
+  Hostinger VPS.
 - Treat **Render** as a production dependency. It is removed.
 
 Release Android/web builds must pass `--dart-define=APP_ENV=production` (CI
 does this). The coded production API is `https://api.gpstore.co.in/v1`.
 GitHub `vars.API_BASE_URL` must stay that URL or empty (CI uses the same
-default). Do not set it to Railway, Render, or localhost.
+default). Do not set it to Render, localhost, or any other host.
 
-As of 2026-08-25 `api.gpstore.co.in` still CNAME'd to Railway
-(`s1z20khv.up.railway.app`) and HTTPS health returned 404. Point the A
-record at the Hostinger VPS **before** treating the APK as production-ready.
+As of 2026-08-26 `api.gpstore.co.in` is **A `187.127.173.192`** with a Let's
+Encrypt certificate. Confirm `https://api.gpstore.co.in/v1/api/health` returns
+200 before treating an APK as production-ready.
 See `backend/HOSTINGER_DEPLOYMENT.md`.

@@ -5,7 +5,7 @@ Operator checklist: repo-root `PRODUCTION_CHECKLIST.md`.
 **This backend is deployed on a Hostinger VPS with Docker Compose and
 Traefik.** Exact commands: [`HOSTINGER_DEPLOYMENT.md`](HOSTINGER_DEPLOYMENT.md).
 
-Railway and Render are not used.
+Render is not used.
 
 The app is already platform-agnostic: `server.port=${PORT:8081}`, secrets
 from the environment, Flyway for schema. Compose sets
