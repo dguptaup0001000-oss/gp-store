@@ -37,8 +37,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 jobs:
   build-apk:
@@ -367,82 +365,3 @@ jobs:
           name: gpstore-release-aab
           path: frontend/build/app/outputs/bundle/release/app-release.aab
 
-  build-and-deploy-web:
-    needs: [build-apk]
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    # Only deploy the LIVE site from main. Reference needs.* so this job
-    # cannot skip while build-apk is still queued (that aborted PR checks
-    # as startup_failure and blocked auto-merge).
-    if: |
-      always() &&
-      needs.build-apk.result == 'success' &&
-      github.ref == 'refs/heads/main'
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          # Pinned - see the build-apk job's Set up Flutter step above for
-          # why (analyzer/freezed 2.x version incompatibility with newer
-          # Dart SDKs). Keep these two jobs' Flutter versions in sync.
-          flutter-version: '3.35.7'
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Generate freezed/json_serializable code
-        run: dart run build_runner build --delete-conflicting-outputs
-
-      - name: Analyze
-        run: flutter analyze --no-fatal-infos
-
-      - name: Run Flutter tests
-        run: flutter test
-
-      - name: Build web
-        # --base-href must match the GitHub Pages subpath
-        # (https://<user>.github.io/<repo>/) or every asset/route request
-        # 404s - GitHub Pages serves this repo under its own name, not at
-        # the domain root, unless this repo IS named <user>.github.io.
-        #
-        # API_BASE_URL points the built app at your real, deployed backend.
-        # If you haven't set the repo variable yet (see below), this step
-        # deliberately falls back to the app's own coded default rather
-        # than passing an empty string, which would be worse - an empty
-        # --dart-define value still counts as "provided" and would override
-        # that sensible fallback with nothing at all. The app's own
-        # default (the Android emulator's localhost alias) is unreachable
-        # from a public website either way - the site will load and show
-        # its UI, but every API call (login, browsing, everything) will
-        # fail until you set this. One-time setup: this repo's Settings ->
-        # Secrets and variables -> Actions -> Variables tab, name:
-        # API_BASE_URL, value: the public HTTPS API + /v1 (for example
-        # https://api.gpstore.co.in/v1). Never an onrender.com URL.
-        run: |
-          API_URL="${{ vars.API_BASE_URL }}"
-          if [ -z "$API_URL" ]; then
-            API_URL="https://api.gpstore.co.in/v1"
-            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
-          fi
-          flutter build web --release \
-            --base-href "/${{ github.event.repository.name }}/" \
-            --dart-define=APP_ENV=production \
-            --dart-define=API_BASE_URL="$API_URL"
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: frontend/build/web
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
