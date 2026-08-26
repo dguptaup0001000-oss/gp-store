@@ -114,6 +114,10 @@ capture_previous() {
 dump_diagnostics() {
   log "--- compose ps ---"
   compose ps || true
+  log "--- boot / Flyway errors ---"
+  compose logs --tail=200 backend 2>/dev/null \
+    | grep -E 'Flyway|checksum mismatch|APPLICATION FAILED|Refusing to start|Permission denied|IllegalStateException|Caused by: org.flywaydb' \
+    || true
   log "--- backend logs (last 80) ---"
   compose logs --tail=80 backend || true
   log "--- redis logs (last 40) ---"
