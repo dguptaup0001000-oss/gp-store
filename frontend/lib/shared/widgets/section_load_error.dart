@@ -28,7 +28,8 @@ class SectionLoadError extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+              style:
+                  const TextStyle(color: AppColors.textSecondary, fontSize: 13),
             ),
           ),
           TextButton(

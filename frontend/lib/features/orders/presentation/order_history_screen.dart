@@ -19,7 +19,8 @@ class OrderHistoryScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('My Orders')),
       body: ordersAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        loading: () =>
+            const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         error: (error, stackTrace) => Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -30,7 +31,9 @@ class OrderHistoryScreen extends ConsumerWidget {
               // is a network problem, an auth issue, or something else.
               Text("Couldn't load your orders: ${extractErrorMessage(error)}"),
               const SizedBox(height: 8),
-              TextButton(onPressed: hapticize(() => ref.invalidate(myOrdersProvider)), child: const Text('Retry')),
+              TextButton(
+                  onPressed: hapticize(() => ref.invalidate(myOrdersProvider)),
+                  child: const Text('Retry')),
             ],
           ),
         ),
@@ -38,7 +41,8 @@ class OrderHistoryScreen extends ConsumerWidget {
           final orders = page.orders;
           if (orders.isEmpty) {
             return const Center(
-              child: Text('No orders yet', style: TextStyle(color: AppColors.textSecondary)),
+              child: Text('No orders yet',
+                  style: TextStyle(color: AppColors.textSecondary)),
             );
           }
 
@@ -55,15 +59,18 @@ class OrderHistoryScreen extends ConsumerWidget {
                   WidgetsBinding.instance.addPostFrameCallback(
                     (_) => ref.read(myOrdersProvider.notifier).loadMore(),
                   );
-                  return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                  return const Center(
+                      child: CircularProgressIndicator(strokeWidth: 2));
                 }
 
                 final order = orders[index];
                 return InkWell(
                   borderRadius: BorderRadius.circular(12),
                   onTap: hapticize(() => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.orderId)),
-                  )),
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                OrderDetailScreen(orderId: order.orderId)),
+                      )),
                   child: Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -76,33 +83,44 @@ class OrderHistoryScreen extends ConsumerWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('#${order.orderNumber}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                            Text('#${order.orderNumber}',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700)),
                             _StatusChip(status: order.orderStatus),
                           ],
                         ),
                         const SizedBox(height: 6),
                         Text(
                           _formatDate(order.orderDate),
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(fontSize: 12),
                         ),
                         const SizedBox(height: 8),
                         Text('₹${order.totalAmount.toStringAsFixed(0)}',
-                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w700)),
                         const SizedBox(height: 6),
                         Text(
                           'Payment: ${PaymentStatusInfo.label(order.paymentStatus)}',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(fontSize: 12),
                         ),
                         if (order.needsOnlinePayment) ...[
                           const SizedBox(height: 8),
                           Align(
                             alignment: Alignment.centerLeft,
                             child: FilledButton(
-                              onPressed: hapticize(() => Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => OrderDetailScreen(orderId: order.orderId),
-                                    ),
-                                  )),
+                              onPressed:
+                                  hapticize(() => Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => OrderDetailScreen(
+                                              orderId: order.orderId),
+                                        ),
+                                      )),
                               child: const Text('Pay now'),
                             ),
                           ),
@@ -141,7 +159,8 @@ class _StatusChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: (isPositive ? AppColors.success : AppColors.error).withValues(alpha: 0.12),
+        color: (isPositive ? AppColors.success : AppColors.error)
+            .withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(

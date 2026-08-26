@@ -10,30 +10,44 @@ void main() {
     });
 
     test('does not treat pending/failed/cancelled/unpaid as settled', () {
-      for (final status in ['PENDING', 'FAILED', 'CANCELLED', 'EXPIRED', 'UNPAID', 'ACTIVE']) {
+      for (final status in [
+        'PENDING',
+        'FAILED',
+        'CANCELLED',
+        'EXPIRED',
+        'UNPAID',
+        'ACTIVE'
+      ]) {
         expect(PaymentStatusInfo.isSettled(status), isFalse, reason: status);
       }
     });
 
-    test('needsOnlineRetry covers the recovery states without losing COD orders', () {
+    test(
+        'needsOnlineRetry covers the recovery states without losing COD orders',
+        () {
       expect(
-        PaymentStatusInfo.needsOnlineRetry(paymentStatus: 'PENDING', orderStatus: 'PENDING_CONFIRMATION'),
+        PaymentStatusInfo.needsOnlineRetry(
+            paymentStatus: 'PENDING', orderStatus: 'PENDING_CONFIRMATION'),
         isTrue,
       );
       expect(
-        PaymentStatusInfo.needsOnlineRetry(paymentStatus: 'FAILED', orderStatus: 'PENDING_CONFIRMATION'),
+        PaymentStatusInfo.needsOnlineRetry(
+            paymentStatus: 'FAILED', orderStatus: 'PENDING_CONFIRMATION'),
         isTrue,
       );
       expect(
-        PaymentStatusInfo.needsOnlineRetry(paymentStatus: 'UNPAID', orderStatus: 'PENDING_CONFIRMATION'),
+        PaymentStatusInfo.needsOnlineRetry(
+            paymentStatus: 'UNPAID', orderStatus: 'PENDING_CONFIRMATION'),
         isTrue,
       );
       expect(
-        PaymentStatusInfo.needsOnlineRetry(paymentStatus: 'COD_PENDING', orderStatus: 'CONFIRMED'),
+        PaymentStatusInfo.needsOnlineRetry(
+            paymentStatus: 'COD_PENDING', orderStatus: 'CONFIRMED'),
         isFalse,
       );
       expect(
-        PaymentStatusInfo.needsOnlineRetry(paymentStatus: 'SUCCESS', orderStatus: 'CONFIRMED'),
+        PaymentStatusInfo.needsOnlineRetry(
+            paymentStatus: 'SUCCESS', orderStatus: 'CONFIRMED'),
         isFalse,
       );
     });

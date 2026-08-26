@@ -12,11 +12,14 @@ void main() {
       expect(AppEnvironment.production.baseUrl, isNot(contains('10.0.2.2')));
       expect(AppEnvironment.production.baseUrl, isNot(contains('onrender')));
       expect(AppEnvironment.production.baseUrl, isNot(contains('render.com')));
-      expect(AppEnvironment.production.baseUrl, AppEnvironment.productionApiBaseUrl);
+      expect(AppEnvironment.production.baseUrl,
+          AppEnvironment.productionApiBaseUrl);
       expect(AppEnvironment.production.baseUrl, 'https://api.gpstore.co.in/v1');
     });
 
-    test('staging without an API_BASE_URL override refuses to target production', () {
+    test(
+        'staging without an API_BASE_URL override refuses to target production',
+        () {
       expect(
         () => AppEnvironment.staging.baseUrl,
         throwsA(isA<StateError>().having(
@@ -28,8 +31,13 @@ void main() {
     });
 
     test('staging must not be identified as the live production host', () {
-      expect(AppEnvironment.isProductionApiUrl(AppEnvironment.productionApiBaseUrl), isTrue);
-      expect(AppEnvironment.isProductionApiUrl('https://staging.example.com/v1'), isFalse);
+      expect(
+          AppEnvironment.isProductionApiUrl(
+              AppEnvironment.productionApiBaseUrl),
+          isTrue);
+      expect(
+          AppEnvironment.isProductionApiUrl('https://staging.example.com/v1'),
+          isFalse);
     });
 
     test('development and production target the versioned API path', () {
@@ -64,7 +72,8 @@ void main() {
       expect(AppEnvironment.current, AppEnvironment.development);
     });
 
-    test('the timeout is long enough for a slow mobile network and is bounded', () {
+    test('the timeout is long enough for a slow mobile network and is bounded',
+        () {
       // Always-on VPS: 15s is enough for a village 4G stall and short enough
       // that a spinner is not an eternity. Override via API_TIMEOUT_SECONDS.
       for (final env in AppEnvironment.values) {

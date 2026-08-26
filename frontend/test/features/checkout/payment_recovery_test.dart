@@ -12,7 +12,8 @@ void main() {
     expect(PaymentStatusInfo.isSettled('UNPAID'), isFalse);
   });
 
-  test('confirmation screen accepts an order id so Pay now can open the order', () {
+  test('confirmation screen accepts an order id so Pay now can open the order',
+      () {
     const screen = OrderConfirmationScreen(
       orderId: 42,
       orderNumber: 'ORD-42',

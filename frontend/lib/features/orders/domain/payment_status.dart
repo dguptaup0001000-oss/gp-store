@@ -55,7 +55,8 @@ class PaymentStatusInfo {
     }
   }
 
-  static String normalize(String? status) => (status ?? '').trim().toUpperCase();
+  static String normalize(String? status) =>
+      (status ?? '').trim().toUpperCase();
 
   static String label(String? status) {
     final value = normalize(status);

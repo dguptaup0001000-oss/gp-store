@@ -43,7 +43,9 @@ class OrderConfirmationScreen extends StatelessWidget {
 
     if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No UPI app found - install GPay, PhonePe, or Paytm to pay')),
+        const SnackBar(
+            content: Text(
+                'No UPI app found - install GPay, PhonePe, or Paytm to pay')),
       );
     }
   }
@@ -72,13 +74,15 @@ class OrderConfirmationScreen extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.check_circle, color: AppColors.success, size: 72),
+                const Icon(Icons.check_circle,
+                    color: AppColors.success, size: 72),
                 const SizedBox(height: 16),
-                Text('Order Placed!', style: Theme.of(context).textTheme.headlineSmall),
+                Text('Order Placed!',
+                    style: Theme.of(context).textTheme.headlineSmall),
                 const SizedBox(height: 8),
-                Text('Order #$orderNumber', style: Theme.of(context).textTheme.bodyMedium),
+                Text('Order #$orderNumber',
+                    style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 24),
-
                 if (isUpi) ...[
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -109,10 +113,13 @@ class OrderConfirmationScreen extends StatelessWidget {
                     style: TextStyle(color: AppColors.textSecondary),
                   ),
                 ],
-
                 const SizedBox(height: 24),
                 TextButton(
-                  onPressed: hapticize(() { final router = GoRouter.of(context); Navigator.of(context).popUntil((r) => r.isFirst); router.go('/'); }),
+                  onPressed: hapticize(() {
+                    final router = GoRouter.of(context);
+                    Navigator.of(context).popUntil((r) => r.isFirst);
+                    router.go('/');
+                  }),
                   child: const Text('Continue Shopping'),
                 ),
               ],
@@ -162,7 +169,8 @@ class _IncompletePaymentView extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.schedule_outlined, size: 64, color: AppColors.textSecondary),
+                const Icon(Icons.schedule_outlined,
+                    size: 64, color: AppColors.textSecondary),
                 const SizedBox(height: 16),
                 Text('Order $orderNumber is saved',
                     textAlign: TextAlign.center,
@@ -178,16 +186,19 @@ class _IncompletePaymentView extends StatelessWidget {
                 const SizedBox(height: 24),
                 if (orderId != null)
                   FilledButton(
-                    onPressed: hapticize(() => Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(
-                            builder: (_) => OrderDetailScreen(orderId: orderId!),
-                          ),
-                        )),
+                    onPressed:
+                        hapticize(() => Navigator.of(context).pushReplacement(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    OrderDetailScreen(orderId: orderId!),
+                              ),
+                            )),
                     child: const Text('Pay now'),
                   ),
                 if (orderId != null) const SizedBox(height: 12),
                 TextButton(
-                  onPressed: hapticize(() => Navigator.of(context).popUntil((route) => route.isFirst)),
+                  onPressed: hapticize(() =>
+                      Navigator.of(context).popUntil((route) => route.isFirst)),
                   child: const Text('Back to shopping'),
                 ),
               ],

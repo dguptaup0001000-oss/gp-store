@@ -15,10 +15,12 @@ class DeliveryDashboardScreen extends ConsumerStatefulWidget {
   const DeliveryDashboardScreen({super.key});
 
   @override
-  ConsumerState<DeliveryDashboardScreen> createState() => _DeliveryDashboardScreenState();
+  ConsumerState<DeliveryDashboardScreen> createState() =>
+      _DeliveryDashboardScreenState();
 }
 
-class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScreen> {
+class _DeliveryDashboardScreenState
+    extends ConsumerState<DeliveryDashboardScreen> {
   StreamSubscription<Position>? _positionSub;
   bool _isTracking = false;
 
@@ -34,7 +36,8 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
 
   Future<void> _resumeTrackingIfAlreadyOnDuty() async {
     try {
-      final profile = await ref.read(deliveryPartnerRepositoryProvider).getMyProfile();
+      final profile =
+          await ref.read(deliveryPartnerRepositoryProvider).getMyProfile();
       if (profile.available && mounted) {
         _startTracking();
       }
@@ -61,18 +64,21 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        throw Exception('Please turn on location services to share your live location');
+        throw Exception(
+            'Please turn on location services to share your live location');
       }
 
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          throw Exception('Location permission denied - customers will not see your live position');
+          throw Exception(
+              'Location permission denied - customers will not see your live position');
         }
       }
       if (permission == LocationPermission.deniedForever) {
-        throw Exception('Location permission permanently denied - enable it in app settings');
+        throw Exception(
+            'Location permission permanently denied - enable it in app settings');
       }
 
       _positionSub?.cancel();
@@ -85,7 +91,8 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
       // ACCESS_BACKGROUND_LOCATION + a foreground service on Android) -
       // deliberately out of scope for this first version.
       _positionSub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 20),
+        locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high, distanceFilter: 20),
       ).listen(
         (position) {
           ref.read(deliveryPartnerRepositoryProvider).updateMyLocation(
@@ -115,7 +122,9 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
 
   Future<void> _toggleAvailability(bool newValue) async {
     try {
-      await ref.read(deliveryPartnerRepositoryProvider).setMyAvailability(newValue);
+      await ref
+          .read(deliveryPartnerRepositoryProvider)
+          .setMyAvailability(newValue);
       ref.invalidate(myDeliveryProfileProvider);
 
       if (newValue) {
@@ -145,7 +154,8 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
               padding: EdgeInsets.only(right: 4),
               child: Tooltip(
                 message: 'Sharing live location',
-                child: Icon(Icons.gps_fixed, size: 18, color: AppColors.primary),
+                child:
+                    Icon(Icons.gps_fixed, size: 18, color: AppColors.primary),
               ),
             ),
           profileAsync.when(
@@ -160,13 +170,15 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
             error: (error, stackTrace) => IconButton(
               icon: const Icon(Icons.refresh),
               tooltip: "Couldn't load duty status — retry",
-              onPressed: hapticize(() => ref.invalidate(myDeliveryProfileProvider)),
+              onPressed:
+                  hapticize(() => ref.invalidate(myDeliveryProfileProvider)),
             ),
             data: (profile) => Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(
                 children: [
-                  Text(profile.available ? 'On duty' : 'Off duty', style: const TextStyle(fontSize: 12)),
+                  Text(profile.available ? 'On duty' : 'Off duty',
+                      style: const TextStyle(fontSize: 12)),
                   Switch(
                     value: profile.available,
                     onChanged: hapticizeValue(_toggleAvailability),
@@ -178,12 +190,14 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Log out',
-            onPressed: hapticize(() => ref.read(authControllerProvider.notifier).logout()),
+            onPressed: hapticize(
+                () => ref.read(authControllerProvider.notifier).logout()),
           ),
         ],
       ),
       body: assignmentsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        loading: () =>
+            const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         error: (error, stackTrace) => Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -191,15 +205,20 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
               // TEMPORARY, for active debugging - see RootScreen's identical
               // comment for why this shows the real failure reason instead
               // of one static string.
-              Text("Couldn't load your deliveries: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: hapticize(() => ref.invalidate(myAssignmentsProvider)), child: const Text('Retry')),
+              Text(
+                  "Couldn't load your deliveries: ${extractErrorMessage(error)}"),
+              TextButton(
+                  onPressed:
+                      hapticize(() => ref.invalidate(myAssignmentsProvider)),
+                  child: const Text('Retry')),
             ],
           ),
         ),
         data: (assignments) {
           if (assignments.isEmpty) {
             return const Center(
-              child: Text('No deliveries assigned right now', style: TextStyle(color: AppColors.textSecondary)),
+              child: Text('No deliveries assigned right now',
+                  style: TextStyle(color: AppColors.textSecondary)),
             );
           }
 
@@ -209,7 +228,8 @@ class _DeliveryDashboardScreenState extends ConsumerState<DeliveryDashboardScree
               padding: const EdgeInsets.all(16),
               itemCount: assignments.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) => _AssignmentCard(assignment: assignments[index]),
+              itemBuilder: (context, index) =>
+                  _AssignmentCard(assignment: assignments[index]),
             ),
           );
         },
@@ -275,29 +295,39 @@ class _AssignmentCardState extends ConsumerState<_AssignmentCard> {
 
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+          color: AppColors.cardBackground,
+          borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('#${assignment.orderNumber ?? assignment.deliveryId}', style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text('#${assignment.orderNumber ?? assignment.deliveryId}',
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
+                decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6)),
                 child: Text(
                   status.replaceAll('_', ' '),
-                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.primary),
+                  style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 8),
           if (assignment.customerName != null)
-            Text(assignment.customerName!, style: const TextStyle(fontWeight: FontWeight.w600)),
+            Text(assignment.customerName!,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
           if (assignment.deliveryAddress != null)
-            Text(assignment.deliveryAddress!, style: Theme.of(context).textTheme.bodyMedium),
+            Text(assignment.deliveryAddress!,
+                style: Theme.of(context).textTheme.bodyMedium),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -309,7 +339,9 @@ class _AssignmentCardState extends ConsumerState<_AssignmentCard> {
                     label: const Text('Navigate'),
                   ),
                 ),
-              if (assignment.latitude != null && assignment.longitude != null && assignment.customerPhone != null)
+              if (assignment.latitude != null &&
+                  assignment.longitude != null &&
+                  assignment.customerPhone != null)
                 const SizedBox(width: 8),
               if (assignment.customerPhone != null)
                 Expanded(
@@ -334,9 +366,14 @@ class _AssignmentCardState extends ConsumerState<_AssignmentCard> {
     // DeliveryService.updateDeliveryStatus.
     if (status == 'ASSIGNED') {
       return FilledButton(
-        onPressed: _isUpdating ? null : () => _advanceStatus('OUT_FOR_DELIVERY'),
+        onPressed:
+            _isUpdating ? null : () => _advanceStatus('OUT_FOR_DELIVERY'),
         child: _isUpdating
-            ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            ? const SizedBox(
+                height: 16,
+                width: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
             : const Text('Start Delivery'),
       );
     }
@@ -345,7 +382,11 @@ class _AssignmentCardState extends ConsumerState<_AssignmentCard> {
       return FilledButton(
         onPressed: _isUpdating ? null : () => _advanceStatus('DELIVERED'),
         child: _isUpdating
-            ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            ? const SizedBox(
+                height: 16,
+                width: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
             : const Text('Mark Delivered'),
       );
     }

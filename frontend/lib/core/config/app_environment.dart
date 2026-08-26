@@ -19,7 +19,8 @@ enum AppEnvironment {
   staging,
   production;
 
-  static const _envName = String.fromEnvironment('APP_ENV', defaultValue: 'development');
+  static const _envName =
+      String.fromEnvironment('APP_ENV', defaultValue: 'development');
 
   /// Canonical production API. Must stay HTTPS and end with `/v1`.
   ///

@@ -89,7 +89,8 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } catch (_) {
-      setState(() => _error = 'Could not sign in. Check the connection and try again.');
+      setState(() =>
+          _error = 'Could not sign in. Check the connection and try again.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -106,13 +107,12 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('GP-STORE', style: Theme.of(context).textTheme.headlineLarge),
+                Text('GP-STORE',
+                    style: Theme.of(context).textTheme.headlineLarge),
                 const SizedBox(height: 4),
                 Text('Delivery Worker',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(color: Theme.of(context).colorScheme.primary)),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Theme.of(context).colorScheme.primary)),
                 const SizedBox(height: 40),
                 TextField(
                   controller: _identifier,
@@ -140,7 +140,8 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
                   const SizedBox(height: 16),
                   Text(
                     _error!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error),
                   ),
                 ],
                 const SizedBox(height: 24),
@@ -154,7 +155,8 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
                             width: 22,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('SIGN IN', style: TextStyle(fontSize: 17, letterSpacing: 1)),
+                        : const Text('SIGN IN',
+                            style: TextStyle(fontSize: 17, letterSpacing: 1)),
                   ),
                 ),
               ],

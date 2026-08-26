@@ -97,7 +97,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
   Future<void> _selectAddress() async {
     final result = await Navigator.of(context).push<AddressModel>(
-      MaterialPageRoute(builder: (_) => const AddressListScreen(selectMode: true)),
+      MaterialPageRoute(
+          builder: (_) => const AddressListScreen(selectMode: true)),
     );
     if (result != null) {
       setState(() => _selectedAddress = result);
@@ -137,7 +138,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final preview = _preview;
     if (preview == null) return;
     HapticFeedback.mediumImpact();
-    final cartItems = ref.read(cartControllerProvider).valueOrNull?.items ?? const [];
+    final cartItems =
+        ref.read(cartControllerProvider).valueOrNull?.items ?? const [];
 
     final confirmed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -335,7 +337,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                       child: _selectedAddress == null
                           ? const Row(
                               children: [
-                                Icon(Icons.add_location_alt_outlined, color: AppColors.primary),
+                                Icon(Icons.add_location_alt_outlined,
+                                    color: AppColors.primary),
                                 SizedBox(width: 8),
                                 Text('Select delivery address'),
                               ],
@@ -343,19 +346,23 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                           : Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(_selectedAddress!.fullName, style: const TextStyle(fontWeight: FontWeight.w700)),
+                                Text(_selectedAddress!.fullName,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700)),
                                 const SizedBox(height: 4),
                                 Text(
                                   '${_selectedAddress!.houseNo}, ${_selectedAddress!.area}, ${_selectedAddress!.city}',
                                   style: Theme.of(context).textTheme.bodyMedium,
                                 ),
                                 const SizedBox(height: 4),
-                                const Text('Change address', style: TextStyle(color: AppColors.primary, fontSize: 12)),
+                                const Text('Change address',
+                                    style: TextStyle(
+                                        color: AppColors.primary,
+                                        fontSize: 12)),
                               ],
                             ),
                     ),
                   ),
-
                   const SizedBox(height: 20),
                   _sectionLabel('Coupon Code'),
                   Row(
@@ -364,55 +371,66 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         child: TextField(
                           controller: _couponController,
                           textCapitalization: TextCapitalization.characters,
-                          decoration: const InputDecoration(hintText: 'Enter coupon code (optional)'),
+                          decoration: const InputDecoration(
+                              hintText: 'Enter coupon code (optional)'),
                         ),
                       ),
                       const SizedBox(width: 8),
                       FilledButton(
-                        onPressed: _selectedAddress == null ? null : _fetchPreview,
+                        onPressed:
+                            _selectedAddress == null ? null : _fetchPreview,
                         child: const Text('Apply'),
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 20),
                   _sectionLabel('Payment Method'),
                   RadioListTile<String>(
                     value: 'COD',
                     groupValue: _paymentMethod,
-                    onChanged: hapticizeValue((value) => setState(() => _paymentMethod = value!)),
-                    secondary: const Icon(Icons.money_outlined, color: AppColors.success),
+                    onChanged: hapticizeValue(
+                        (value) => setState(() => _paymentMethod = value!)),
+                    secondary: const Icon(Icons.money_outlined,
+                        color: AppColors.success),
                     title: const Text('Cash on Delivery'),
                     contentPadding: EdgeInsets.zero,
                   ),
                   RadioListTile<String>(
                     value: 'UPI',
                     groupValue: _paymentMethod,
-                    onChanged: hapticizeValue((value) => setState(() => _paymentMethod = value!)),
-                    secondary: const Icon(Icons.qr_code_scanner_outlined, color: AppColors.primary),
+                    onChanged: hapticizeValue(
+                        (value) => setState(() => _paymentMethod = value!)),
+                    secondary: const Icon(Icons.qr_code_scanner_outlined,
+                        color: AppColors.primary),
                     title: const Text('UPI (GPay / PhonePe / Paytm)'),
-                    subtitle: const Text('Pay the shop directly, confirmed by the shop'),
+                    subtitle: const Text(
+                        'Pay the shop directly, confirmed by the shop'),
                     contentPadding: EdgeInsets.zero,
                   ),
                   RadioListTile<String>(
                     value: 'ONLINE',
                     groupValue: _paymentMethod,
-                    onChanged: hapticizeValue((value) => setState(() => _paymentMethod = value!)),
-                    secondary: const Icon(Icons.credit_card_outlined, color: AppColors.primary),
+                    onChanged: hapticizeValue(
+                        (value) => setState(() => _paymentMethod = value!)),
+                    secondary: const Icon(Icons.credit_card_outlined,
+                        color: AppColors.primary),
                     title: const Text('Pay online'),
-                    subtitle: const Text('Card, UPI or netbanking, confirmed instantly'),
+                    subtitle: const Text(
+                        'Card, UPI or netbanking, confirmed instantly'),
                     contentPadding: EdgeInsets.zero,
                   ),
-
                   const SizedBox(height: 20),
                   if (_isLoadingPreview)
-                    const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                    const Center(
+                        child: CircularProgressIndicator(strokeWidth: 2))
                   else if (_previewError != null)
                     Center(
                       child: Column(
                         children: [
                           Text(_previewError!),
-                          TextButton(onPressed: hapticize(_fetchPreview), child: const Text('Retry')),
+                          TextButton(
+                              onPressed: hapticize(_fetchPreview),
+                              child: const Text('Retry')),
                         ],
                       ),
                     )
@@ -426,7 +444,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: FilledButton(
-                  onPressed: (_preview != null && _preview!.deliverable && !_isPlacingOrder) ? _confirmAndPlaceOrder : null,
+                  onPressed: (_preview != null &&
+                          _preview!.deliverable &&
+                          !_isPlacingOrder)
+                      ? _confirmAndPlaceOrder
+                      : null,
                   // The label follows the PHASE, so a customer who has just
                   // come back from Cashfree sees "Verifying payment" rather
                   // than a spinner that looks identical to the one before
@@ -439,12 +461,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                             const SizedBox(
                                 height: 18,
                                 width: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white)),
                             const SizedBox(width: 10),
                             Text(_phase.label),
                           ],
                         )
-                      : Text(_preview != null ? 'Place Order - ₹${_preview!.estimatedTotal.toStringAsFixed(0)}' : 'Place Order'),
+                      : Text(_preview != null
+                          ? 'Place Order - ₹${_preview!.estimatedTotal.toStringAsFixed(0)}'
+                          : 'Place Order'),
                 ),
               ),
             ),
@@ -470,7 +495,9 @@ class _PreviewSummary extends StatelessWidget {
     if (!preview.deliverable) {
       return Container(
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: AppColors.error.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(
+            color: AppColors.error.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12)),
         child: const Text(
           "Sorry, we don't deliver to this address yet.",
           style: TextStyle(color: AppColors.error, fontWeight: FontWeight.w600),
@@ -480,30 +507,40 @@ class _PreviewSummary extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+          color: AppColors.cardBackground,
+          borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (preview.couponError != null) ...[
-            Text(preview.couponError!, style: const TextStyle(color: AppColors.error, fontSize: 12)),
+            Text(preview.couponError!,
+                style: const TextStyle(color: AppColors.error, fontSize: 12)),
             const SizedBox(height: 8),
           ],
           _row('Subtotal', '₹${preview.subtotal.toStringAsFixed(0)}'),
-          if (preview.discountAmount > 0) _row('Discount', '-₹${preview.discountAmount.toStringAsFixed(0)}'),
+          if (preview.discountAmount > 0)
+            _row('Discount', '-₹${preview.discountAmount.toStringAsFixed(0)}'),
           _row(
             'Delivery Fee',
-            preview.freeDeliveryApplied ? 'FREE' : '₹${preview.deliveryFee.toStringAsFixed(0)}',
+            preview.freeDeliveryApplied
+                ? 'FREE'
+                : '₹${preview.deliveryFee.toStringAsFixed(0)}',
           ),
           if (preview.estimatedDeliveryMinutes != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 'Estimated delivery: ${preview.estimatedDeliveryMinutes} minutes',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(fontSize: 12),
               ),
             ),
           const Divider(height: 20),
-          _row('Total', '₹${preview.estimatedTotal.toStringAsFixed(0)}', bold: true),
+          _row('Total', '₹${preview.estimatedTotal.toStringAsFixed(0)}',
+              bold: true),
         ],
       ),
     );
@@ -515,8 +552,12 @@ class _PreviewSummary extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
-          Text(value, style: TextStyle(fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
+          Text(label,
+              style: TextStyle(
+                  fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
+          Text(value,
+              style: TextStyle(
+                  fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
         ],
       ),
     );

@@ -20,7 +20,8 @@ class OrderSummary with _$OrderSummary {
     String? customerName,
   }) = _OrderSummary;
 
-  factory OrderSummary.fromJson(Map<String, dynamic> json) => _$OrderSummaryFromJson(json);
+  factory OrderSummary.fromJson(Map<String, dynamic> json) =>
+      _$OrderSummaryFromJson(json);
 }
 
 @freezed
@@ -41,7 +42,8 @@ class OrderItemDetail with _$OrderItemDetail {
     bool? currentlyAvailable,
   }) = _OrderItemDetail;
 
-  factory OrderItemDetail.fromJson(Map<String, dynamic> json) => _$OrderItemDetailFromJson(json);
+  factory OrderItemDetail.fromJson(Map<String, dynamic> json) =>
+      _$OrderItemDetailFromJson(json);
 }
 
 @freezed
@@ -52,7 +54,8 @@ class OrderAddressSummary with _$OrderAddressSummary {
     required String mobileNumber,
   }) = _OrderAddressSummary;
 
-  factory OrderAddressSummary.fromJson(Map<String, dynamic> json) => _$OrderAddressSummaryFromJson(json);
+  factory OrderAddressSummary.fromJson(Map<String, dynamic> json) =>
+      _$OrderAddressSummaryFromJson(json);
 }
 
 @freezed
@@ -66,7 +69,8 @@ class DeliveryTrackingInfo with _$DeliveryTrackingInfo {
     bool? guaranteeBreached,
   }) = _DeliveryTrackingInfo;
 
-  factory DeliveryTrackingInfo.fromJson(Map<String, dynamic> json) => _$DeliveryTrackingInfoFromJson(json);
+  factory DeliveryTrackingInfo.fromJson(Map<String, dynamic> json) =>
+      _$DeliveryTrackingInfoFromJson(json);
 }
 
 /// Mirrors backend's OrderDetailResponse exactly.
@@ -89,13 +93,15 @@ class OrderDetail with _$OrderDetail {
 
   const OrderDetail._();
 
-  factory OrderDetail.fromJson(Map<String, dynamic> json) => _$OrderDetailFromJson(json);
+  factory OrderDetail.fromJson(Map<String, dynamic> json) =>
+      _$OrderDetailFromJson(json);
 
   /// Only these statuses can still be cancelled by the customer - mirrors
   /// the backend's own valid-transition rules (delivered/cancelled orders
   /// reject cancellation server-side regardless, this is just so the UI
   /// doesn't show a button that would obviously fail).
-  bool get isCancellable => orderStatus != 'DELIVERED' && orderStatus != 'CANCELLED';
+  bool get isCancellable =>
+      orderStatus != 'DELIVERED' && orderStatus != 'CANCELLED';
 }
 
 extension OrderSummaryPayment on OrderSummary {

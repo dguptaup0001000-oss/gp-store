@@ -10,11 +10,14 @@ void main() {
 
   setUp(() {
     disk = {};
-    const channel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+    const channel =
+        MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
       channel,
       (call) async {
-        final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? const {};
+        final args =
+            (call.arguments as Map?)?.cast<String, dynamic>() ?? const {};
         switch (call.method) {
           case 'read':
             return disk[args['key'] as String];
@@ -34,8 +37,10 @@ void main() {
   });
 
   tearDown(() {
-    const channel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    const channel =
+        MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
   });
 
   test('holdTokensInMemory does not write to disk', () async {
@@ -47,7 +52,8 @@ void main() {
     expect(disk, isEmpty);
   });
 
-  test('verification failure clears memory so a later request has no token', () async {
+  test('verification failure clears memory so a later request has no token',
+      () async {
     final storage = TokenStorage(keyPrefix: 'worker_');
     storage.holdTokensInMemory(accessToken: 'access', refreshToken: 'refresh');
     await storage.clear();
@@ -57,7 +63,9 @@ void main() {
     expect(disk, isEmpty);
   });
 
-  test('saveTokens after a successful me() persists worker keys, not customer keys', () async {
+  test(
+      'saveTokens after a successful me() persists worker keys, not customer keys',
+      () async {
     final storage = TokenStorage(keyPrefix: 'worker_');
     storage.holdTokensInMemory(accessToken: 'access', refreshToken: 'refresh');
     await storage.saveTokens(accessToken: 'access', refreshToken: 'refresh');

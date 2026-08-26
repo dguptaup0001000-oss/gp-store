@@ -18,7 +18,8 @@ class TokenStorage {
   // storage path entirely on Android versions that support it.
   TokenStorage({this.keyPrefix = ''})
       : _storage = const FlutterSecureStorage(
-          aOptions: AndroidOptions(resetOnError: true, encryptedSharedPreferences: true),
+          aOptions: AndroidOptions(
+              resetOnError: true, encryptedSharedPreferences: true),
         );
 
   /// Isolates worker tokens from the customer app when both are installed.
@@ -109,9 +110,11 @@ class TokenStorage {
   /// session from before this flag existed, or the OTP/register flows which
   /// don't expose the toggle) defaults to true, matching the app's prior
   /// always-remember behavior.
-  Future<void> setRememberMe(bool remember) => _storage.write(key: _rememberMeKey, value: remember.toString());
+  Future<void> setRememberMe(bool remember) =>
+      _storage.write(key: _rememberMeKey, value: remember.toString());
 
-  Future<bool> getRememberMe() async => (await _storage.read(key: _rememberMeKey)) != 'false';
+  Future<bool> getRememberMe() async =>
+      (await _storage.read(key: _rememberMeKey)) != 'false';
 
   Future<void> clear() async {
     // Cache first here, deliberately the opposite order to saveTokens: if a
