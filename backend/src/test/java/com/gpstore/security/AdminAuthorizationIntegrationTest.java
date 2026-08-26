@@ -4,10 +4,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -109,9 +111,23 @@ class AdminAuthorizationIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "CUSTOMER")
     void unreadNotificationCountAllowsCustomerRole() throws Exception {
-        mockMvc.perform(get("/api/notifications/unread-count"))
+        long stamp = System.nanoTime();
+        String email = "unread-" + stamp + "@example.com";
+        String phone = "9" + String.format("%09d", Math.abs(stamp % 1_000_000_000L));
+        var registered = mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Unread Probe","email":"%s","phone":"%s","password":"Passw0rd!23"}
+                                """.formatted(email, phone)))
+                .andExpect(status().isOk())
+                .andReturn();
+        String token = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(registered.getResponse().getContentAsString())
+                .get("token").asText();
+
+        mockMvc.perform(get("/api/notifications/unread-count")
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
     }
 }
