@@ -135,8 +135,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   /// Nothing is sent to the backend until this resolves true - cancelling
   /// here is just closing a screen, no order ever existed to clean up.
   Future<void> _confirmAndPlaceOrder() async {
+    if (_isPlacingOrder) return;
     final preview = _preview;
     if (preview == null) return;
+    setState(() => _isPlacingOrder = true);
     HapticFeedback.mediumImpact();
     final cartItems =
         ref.read(cartControllerProvider).valueOrNull?.items ?? const [];
@@ -150,16 +152,22 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       ),
     );
 
-    if (!mounted || confirmed != true) return;
-    _placeOrder();
+    if (!mounted || confirmed != true) {
+      if (mounted) setState(() => _isPlacingOrder = false);
+      return;
+    }
+    await _placeOrder();
   }
 
   Future<void> _placeOrder() async {
     final address = _selectedAddress;
     final preview = _preview;
-    if (address?.id == null || preview == null || !preview.deliverable) return;
+    if (address?.id == null || preview == null || !preview.deliverable) {
+      if (mounted) setState(() => _isPlacingOrder = false);
+      return;
+    }
 
-    setState(() => _isPlacingOrder = true);
+    if (mounted) setState(() => _isPlacingOrder = true);
 
     // Generated once per logical checkout and deliberately NOT regenerated
     // on retry: reusing the key is the entire point. If a previous attempt

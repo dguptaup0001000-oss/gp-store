@@ -7,6 +7,7 @@ import com.gpstore.entity.Payment;
 import com.gpstore.entity.PaymentProviderEvent;
 import com.gpstore.entity.PaymentProviderEvent.Outcome;
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.enums.PaymentMethod;
 import com.gpstore.enums.PaymentProvider;
 import com.gpstore.enums.PaymentStatus;
 import com.gpstore.exception.BadRequestException;
@@ -201,6 +202,10 @@ public class GatewayPaymentService {
 
         Payment payment = paymentRepository.findByOrderIdForUpdate(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found for this order"));
+
+        if (payment.getPaymentMethod() != PaymentMethod.ONLINE) {
+            throw new ConflictException("This order is not an online payment.");
+        }
 
         // ALREADY PAID: the double-tap and the retry-after-success case.
         // Returning the existing state rather than minting a second session
@@ -710,7 +715,8 @@ public class GatewayPaymentService {
         return switch (paymentStatus.toUpperCase()) {
             case "SUCCESS" -> GatewayOrderStatus.State.PAID;
             case "FAILED", "USER_DROPPED" -> GatewayOrderStatus.State.FAILED;
-            case "CANCELLED", "VOID" -> GatewayOrderStatus.State.CANCELLED;
+            case "CANCELLED", "VOID", "TERMINATED" -> GatewayOrderStatus.State.CANCELLED;
+            case "EXPIRED" -> GatewayOrderStatus.State.EXPIRED;
             case "PENDING", "NOT_ATTEMPTED" -> GatewayOrderStatus.State.ACTIVE;
             default -> GatewayOrderStatus.State.UNKNOWN;
         };
@@ -724,7 +730,7 @@ public class GatewayPaymentService {
     }
 
     public record WebhookResult(boolean accepted, String reason, Outcome outcome) {
-        static WebhookResult accepted(Outcome outcome) { return new WebhookResult(true, null, outcome); }
-        static WebhookResult rejected(String reason) { return new WebhookResult(false, reason, null); }
+        public static WebhookResult accepted(Outcome outcome) { return new WebhookResult(true, null, outcome); }
+        public static WebhookResult rejected(String reason) { return new WebhookResult(false, reason, null); }
     }
 }

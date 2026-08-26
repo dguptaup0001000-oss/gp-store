@@ -299,6 +299,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/deliveries/**").hasAnyRole("ADMIN", "DELIVERY_BOY")
                 .requestMatchers("/api/coupons/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/notifications/mine").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/notifications/unread-count").authenticated()
                 // Same ordering reason as /mine above - these must come
                 // before the broader /api/notifications/** admin-only rule.
                 .requestMatchers(HttpMethod.PUT, "/api/notifications/*/read").authenticated()

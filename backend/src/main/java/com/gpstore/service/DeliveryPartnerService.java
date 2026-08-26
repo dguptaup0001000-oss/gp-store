@@ -9,6 +9,7 @@ import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliveryRepository;
+import com.gpstore.security.CustomerAccountStatusService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ public class DeliveryPartnerService {
     private final DeliveryPartnerRepository repository;
     private final DeliveryRepository deliveryRepository;
     private final CustomerRepository customerRepository;
+    private final CustomerAccountStatusService accountStatusService;
 
     /**
      * How vague a GPS fix may be and still be worth recording, in metres.
@@ -41,10 +43,12 @@ public class DeliveryPartnerService {
             DeliveryPartnerRepository repository,
             DeliveryRepository deliveryRepository,
             CustomerRepository customerRepository,
+            CustomerAccountStatusService accountStatusService,
             @Value("${delivery.max-location-accuracy-meters:500}") double maxLocationAccuracyMeters) {
         this.repository = repository;
         this.deliveryRepository = deliveryRepository;
         this.customerRepository = customerRepository;
+        this.accountStatusService = accountStatusService;
         this.maxLocationAccuracyMeters = maxLocationAccuracyMeters;
     }
 
@@ -89,6 +93,7 @@ public class DeliveryPartnerService {
                 account.setRole(Role.DELIVERY_BOY);
             }
             account = customerRepository.save(account);
+            accountStatusService.invalidate(account.getId());
 
             saved.setAccount(account);
             saved = repository.save(saved);

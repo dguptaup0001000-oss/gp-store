@@ -107,4 +107,11 @@ class AdminAuthorizationIntegrationTest {
                         .content("{\"title\":\"x\",\"message\":\"y\"}"))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    @WithMockUser(roles = "CUSTOMER")
+    void unreadNotificationCountAllowsCustomerRole() throws Exception {
+        mockMvc.perform(get("/api/notifications/unread-count"))
+                .andExpect(status().isOk());
+    }
 }

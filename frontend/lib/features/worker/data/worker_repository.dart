@@ -22,7 +22,7 @@ class WorkerRepository {
   final ApiClient apiClient;
   final FlutterSecureStorage _storage;
 
-  static const _queueKey = 'gpstore_worker_pending_scans';
+  static const _queueKey = 'worker_pending_scans';
 
   Future<WorkerProfile> me() async {
     final response = await apiClient.dio.get('/api/worker/me');

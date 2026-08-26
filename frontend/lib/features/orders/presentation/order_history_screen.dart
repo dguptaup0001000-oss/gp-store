@@ -47,15 +47,25 @@ class OrderHistoryScreen extends ConsumerWidget {
           }
 
           final hasMore = ref.read(myOrdersProvider.notifier).hasMore;
+          final loadMoreFailed = page.loadMoreFailed;
 
           return RefreshIndicator(
             onRefresh: () async => ref.invalidate(myOrdersProvider),
             child: ListView.separated(
               padding: const EdgeInsets.all(16),
-              itemCount: orders.length + (hasMore ? 1 : 0),
+              itemCount: orders.length + ((hasMore || loadMoreFailed) ? 1 : 0),
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 if (index == orders.length) {
+                  if (loadMoreFailed) {
+                    return Center(
+                      child: TextButton(
+                        onPressed: hapticize(
+                            () => ref.read(myOrdersProvider.notifier).loadMore()),
+                        child: const Text('Couldn\'t load more. Retry'),
+                      ),
+                    );
+                  }
                   WidgetsBinding.instance.addPostFrameCallback(
                     (_) => ref.read(myOrdersProvider.notifier).loadMore(),
                   );

@@ -6,9 +6,12 @@ import com.gpstore.entity.Delivery;
 import com.gpstore.entity.DeliveryBatch;
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.entity.Order;
+import com.gpstore.entity.Payment;
 import com.gpstore.entity.Role;
 import com.gpstore.enums.DeliveryStatus;
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.enums.PaymentMethod;
+import com.gpstore.enums.PaymentStatus;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
@@ -18,8 +21,10 @@ import com.gpstore.repository.DeliveryBatchRepository;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliveryRepository;
 import com.gpstore.repository.OrderRepository;
+import com.gpstore.repository.PaymentRepository;
 import com.gpstore.service.DeliveryPartnerService;
 import com.gpstore.service.DeliveryService;
+import com.gpstore.service.PaymentService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -63,12 +68,14 @@ class WorkerDeliveryStatusTest {
 
     @Autowired private DeliveryService deliveryService;
     @Autowired private DeliveryPartnerService partnerService;
+    @Autowired private PaymentService paymentService;
     @Autowired private OrderRepository orderRepository;
     @Autowired private CustomerRepository customerRepository;
     @Autowired private AddressRepository addressRepository;
     @Autowired private DeliveryPartnerRepository partnerRepository;
     @Autowired private DeliveryRepository deliveryRepository;
     @Autowired private DeliveryBatchRepository batchRepository;
+    @Autowired private PaymentRepository paymentRepository;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ExecutorService orderSideEffectsExecutor;
 
@@ -237,6 +244,30 @@ class WorkerDeliveryStatusTest {
                 "a stranger's delivery must read as missing, not as someone else's row");
         assertTrue(deliveryService.getDeliveryById(delivery.getId(), accountOf(otherWorker), true).isPresent(),
                 "an admin can still open any delivery");
+    }
+
+    @Test
+    @DisplayName("a worker cannot mark COD collected on someone else's order")
+    void anotherWorkerCannotCompleteCod() {
+        Payment payment = new Payment();
+        payment.setOrder(delivery.getOrder());
+        payment.setPaymentMethod(PaymentMethod.COD);
+        payment.setPaymentStatus(PaymentStatus.COD_PENDING);
+        payment.setAmount(delivery.getOrder().getTotalAmount());
+        payment.setActive(true);
+        paymentRepository.save(payment);
+
+        assertThrows(ResourceNotFoundException.class,
+                () -> paymentService.completeCodPayment(
+                        delivery.getOrder().getId(), accountOf(otherWorker), false),
+                "COD collection must use the same assigned-partner check as delivery status");
+
+        assertEquals(PaymentStatus.COD_PENDING,
+                paymentRepository.findByOrderId(delivery.getOrder().getId()).orElseThrow().getPaymentStatus());
+
+        paymentService.completeCodPayment(delivery.getOrder().getId(), accountOf(worker), false);
+        assertEquals(PaymentStatus.COD_RECEIVED,
+                paymentRepository.findByOrderId(delivery.getOrder().getId()).orElseThrow().getPaymentStatus());
     }
 
     @Test

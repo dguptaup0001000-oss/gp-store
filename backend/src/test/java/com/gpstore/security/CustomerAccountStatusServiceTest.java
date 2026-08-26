@@ -82,6 +82,13 @@ class CustomerAccountStatusServiceTest {
         verify(customerRepository, times(1)).findById(7L);
     }
 
+    @Test
+    void roleMismatchIsDetectedAgainstTheLiveAccount() {
+        assertFalse(CustomerAccountStatusService.roleMatches("DELIVERY_BOY", "CUSTOMER"));
+        assertTrue(CustomerAccountStatusService.roleMatches("CUSTOMER", "CUSTOMER"));
+        assertTrue(CustomerAccountStatusService.roleMatches(null, "CUSTOMER"));
+    }
+
     private static Customer customer(boolean active, boolean enabled) {
         Customer customer = new Customer();
         customer.setId(7L);

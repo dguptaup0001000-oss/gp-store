@@ -108,6 +108,20 @@ jobs:
             exit 1
           fi
 
+      - name: Require full keystore secrets on main
+        if: github.ref == 'refs/heads/main'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          for v in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD ANDROID_KEY_ALIAS; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is required on main"
+              exit 1
+            fi
+          done
+
       - name: Decode google-services.json
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
@@ -124,11 +138,9 @@ jobs:
           fi
 
       - name: Install Play upload keystore if configured
-        # Optional. Without these secrets, assembleRelease uses the Android
-        # Debug key (valid signature, not uploadable to Play). Add repo
-        # secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
-        # ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS. Do not generate a keystore
-        # in CI. Do not unzip/sign APKs by hand.
+        # Required on main (see the two gate steps above). PRs may omit these
+        # secrets and produce a debug-signed APK that verify_apk_release.py
+        # will not treat as a Play artifact.
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -356,6 +368,12 @@ jobs:
 
       - name: Generate freezed/json_serializable code
         run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run Flutter tests
+        run: flutter test
 
       - name: Build web
         # --base-href must match the GitHub Pages subpath

@@ -101,4 +101,16 @@ enum AppEnvironment {
   /// Whether to print diagnostics. Off in production, so nothing about a
   /// request can reach a device log there.
   bool get verboseLogging => this != AppEnvironment.production;
+
+  /// Release APKs default APP_ENV to development, which talks to 10.0.2.2.
+  /// A store build without --dart-define=APP_ENV=production must not ship.
+  /// Staging release builds are allowed; debug/profile development is too.
+  static void assertReleaseBuildIsConfigured({required bool isReleaseMode}) {
+    if (isReleaseMode && current == AppEnvironment.development) {
+      throw StateError(
+        'Release builds must set --dart-define=APP_ENV=production (or staging). '
+        'This build would talk to ${current.baseUrl}.',
+      );
+    }
+  }
 }

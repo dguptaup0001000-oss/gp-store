@@ -132,4 +132,15 @@ class OrderOwnershipTest {
                 () -> orderService.cancelOrder(ORDER_ID, OTHER_CUSTOMER_ID, false),
                 "A non-owner must not be able to cancel - or even get a different error for - someone else's order");
     }
+
+    @Test
+    void customerCannotCancelOncePackingHasStarted() {
+        Order order = orderOwnedBy(OWNER_ID);
+        order.setOrderStatus(com.gpstore.enums.OrderStatus.PACKING);
+        when(repository.findByIdForUpdate(ORDER_ID)).thenReturn(Optional.of(order));
+
+        assertThrows(com.gpstore.exception.ConflictException.class,
+                () -> orderService.cancelOrder(ORDER_ID, OWNER_ID, false),
+                "A customer must not be able to cancel after the shop has started packing");
+    }
 }

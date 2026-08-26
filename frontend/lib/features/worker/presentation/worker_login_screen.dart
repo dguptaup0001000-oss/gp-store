@@ -48,6 +48,13 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
 
   Future<void> _signIn() async {
     if (_busy) return;
+    final email = _identifier.text.trim();
+    if (!email.contains('@') || email.contains(' ')) {
+      setState(() {
+        _error = 'Enter the email address for this worker account.';
+      });
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -57,7 +64,7 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
       final response = await widget.apiClient.dio.post(
         '/api/auth/login',
         data: {
-          'email': _identifier.text.trim(),
+          'email': email,
           'password': _password.text,
         },
       );
@@ -121,7 +128,7 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
                   decoration: const InputDecoration(
-                    labelText: 'Email or mobile number',
+                    labelText: 'Email',
                     border: OutlineInputBorder(),
                   ),
                 ),

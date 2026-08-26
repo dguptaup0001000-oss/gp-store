@@ -62,8 +62,9 @@ public class JwtFilter extends OncePerRequestFilter {
                 // A valid signature is not enough. Deactivating an account
                 // revokes refresh tokens but an already-issued access JWT
                 // would otherwise keep working until expiry. Re-check live
-                // status here for every role (customer, worker, admin) -
-                // they are all Customer rows with the same active flag.
+                // status AND role here for every role (customer, worker,
+                // admin) - they are all Customer rows. A demoted rider must
+                // not keep worker authorities minted at login.
                 //
                 // Refresh/logout still run: those endpoints authenticate
                 // with the refresh token in the body. Blocking them would
@@ -71,10 +72,14 @@ public class JwtFilter extends OncePerRequestFilter {
                 // /api/auth/** calls (change-password) must still reject
                 // an inactive account.
                 String path = request.getServletPath();
-                if (!isSessionLifecycleAuthPath(path) && !accountIsUsable(customerId)) {
-                    SecurityContextHolder.clearContext();
-                    rejectInactive(response);
-                    return;
+                if (!isSessionLifecycleAuthPath(path)) {
+                    CustomerAccountStatusService.Snapshot snapshot = accountIsLive(customerId);
+                    if (!snapshot.usable()
+                            || !CustomerAccountStatusService.roleMatches(role, snapshot.role())) {
+                        SecurityContextHolder.clearContext();
+                        rejectInactive(response);
+                        return;
+                    }
                 }
 
                 AuthenticatedUser principal =
@@ -104,15 +109,15 @@ public class JwtFilter extends OncePerRequestFilter {
                 || "/api/auth/logout-all".equals(path);
     }
 
-    private boolean accountIsUsable(Long customerId) {
+    private CustomerAccountStatusService.Snapshot accountIsLive(Long customerId) {
         try {
-            return accountStatusService.isUsable(customerId);
+            return accountStatusService.resolve(customerId);
         } catch (RuntimeException ex) {
             // Fail closed: if we cannot confirm the account is live, do not
             // authenticate. A database blip already breaks checkout; it must
             // not be a window in which a banned JWT is accepted.
             log.warn("Account status check failed for customerId={}: {}", customerId, ex.getMessage());
-            return false;
+            return CustomerAccountStatusService.Snapshot.unusable();
         }
     }
 

@@ -134,6 +134,31 @@ class DeactivatedCustomerJwtTest {
                 .andExpect(jsonPath("$.message").value("Invalid email or password"));
     }
 
+    @Test
+    @DisplayName("a deactivated JWT cannot place an order or open a payment session")
+    void deactivatedAccountCannotUsePaymentEndpoints() throws Exception {
+        long stamp = System.nanoTime();
+        JsonNode body = register("pay-deact-" + stamp + "@example.com", phone(stamp));
+        String accessToken = body.get("token").asText();
+        long customerId = body.get("customerId").asLong();
+
+        customerService.setAccountActive(customerId, false);
+
+        mockMvc.perform(post("/api/orders/place")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"addressId\":1,\"paymentMethod\":\"COD\"}"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/payments/order/1/checkout-session")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/payments/order/1/verify")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isUnauthorized());
+    }
+
     private JsonNode register(String email, String phone) throws Exception {
         MvcResult registered = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)

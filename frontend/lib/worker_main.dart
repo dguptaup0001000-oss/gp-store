@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/api/api_client.dart';
+import 'core/config/app_environment.dart';
 import 'core/monitoring/crash_reporter.dart';
 import 'core/storage/token_storage.dart';
 import 'features/worker/data/worker_repository.dart';
@@ -29,6 +31,7 @@ import 'features/worker/presentation/worker_gate.dart';
 /// until then.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  AppEnvironment.assertReleaseBuildIsConfigured(isReleaseMode: kReleaseMode);
   await installCrashHandlers(const NoOpCrashReporter());
 
   // Portrait only. One hand, one thumb, a phone held while the other hand

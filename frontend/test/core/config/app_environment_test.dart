@@ -72,6 +72,21 @@ void main() {
       expect(AppEnvironment.current, AppEnvironment.development);
     });
 
+    test('a release build with the default APP_ENV is refused', () {
+      expect(
+        () => AppEnvironment.assertReleaseBuildIsConfigured(isReleaseMode: true),
+        throwsA(isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          contains('APP_ENV=production'),
+        )),
+      );
+      expect(
+        () => AppEnvironment.assertReleaseBuildIsConfigured(isReleaseMode: false),
+        returnsNormally,
+      );
+    });
+
     test('the timeout is long enough for a slow mobile network and is bounded',
         () {
       // Always-on VPS: 15s is enough for a village 4G stall and short enough

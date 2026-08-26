@@ -270,6 +270,7 @@ class _AssignmentCardState extends ConsumerState<_AssignmentCard> {
   }
 
   Future<void> _advanceStatus(String newStatus) async {
+    if (_isUpdating) return;
     setState(() => _isUpdating = true);
 
     try {

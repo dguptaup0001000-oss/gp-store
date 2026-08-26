@@ -1,8 +1,10 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/config/app_environment.dart';
 import 'core/lifecycle/session_refresh.dart';
 import 'core/logging/app_log.dart';
 import 'core/monitoring/crash_reporter.dart';
@@ -25,6 +27,7 @@ final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  AppEnvironment.assertReleaseBuildIsConfigured(isReleaseMode: kReleaseMode);
 
   try {
     await Firebase.initializeApp();
