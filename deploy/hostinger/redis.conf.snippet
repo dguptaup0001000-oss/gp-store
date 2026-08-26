@@ -1,0 +1,25 @@
+# Snippet for /etc/redis/redis.conf on the Hostinger VPS.
+# Apply these values; do not replace the whole distro redis.conf blindly.
+# Redis must not be reachable from the public internet.
+
+bind 127.0.0.1 -::1
+protected-mode yes
+port 6379
+# Leave the Unix socket as the package default if present.
+
+# Set a password and put the SAME value in /opt/gpstore/env.production
+# as REDIS_PASSWORD. Generate with: openssl rand -base64 32
+# requirepass <the-password>
+
+# KVM 2 shares 8 GB with the OS, Nginx, and a ~2.8 GB JVM heap.
+# 512 MB is enough for this app's cache + rate-limit keys.
+maxmemory 512mb
+maxmemory-policy allkeys-lru
+
+# Persistence for cache/rate-limit data. Losing Redis on reboot means a
+# cold cache, not lost orders (orders live in Supabase).
+save 60 1000
+appendonly no
+
+# Do not expose a Redis replica port. Do not set a public bind address.
+# After editing: sudo systemctl restart redis-server

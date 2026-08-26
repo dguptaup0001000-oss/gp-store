@@ -2,11 +2,11 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../api/api_client.dart';
 import 'voice_announcement_service.dart';
+import '../logging/app_log.dart';
 
 /// Runs when a push arrives while the app is fully backgrounded/terminated.
 /// Must be a top-level (or static) function - Firebase spins this up in its
@@ -36,7 +36,7 @@ import 'voice_announcement_service.dart';
 /// notification itself is unaffected either way.
 @pragma('vm:entry-point')
 Future<void> firebaseBackgroundMessageHandler(RemoteMessage message) async {
-  debugPrint('Background push received: ${message.messageId}');
+  appLog('Background push received: ${message.messageId}');
 
   if (message.data['type'] != 'NEW_ORDER') return;
 
@@ -67,7 +67,8 @@ Future<void> firebaseBackgroundMessageHandler(RemoteMessage message) async {
   } catch (e) {
     // The notification is already on screen and the order is already placed.
     // Nothing here is allowed to matter beyond a log line.
-    debugPrint('Background voice announcement failed (notification unaffected): $e');
+    appLog(
+        'Background voice announcement failed (notification unaffected): $e');
   }
 }
 
@@ -133,7 +134,8 @@ class PushNotificationService {
       if (onNotificationTap != null) {
         // App was backgrounded (not terminated) and the user tapped the
         // system notification to bring it back to the foreground.
-        _openedAppSub = FirebaseMessaging.onMessageOpenedApp.listen(onNotificationTap);
+        _openedAppSub =
+            FirebaseMessaging.onMessageOpenedApp.listen(onNotificationTap);
 
         // App was fully terminated and got launched BY tapping the
         // notification - onMessageOpenedApp above never fires for this
@@ -147,7 +149,7 @@ class PushNotificationService {
       // Never let a push-setup failure (permission denied, Firebase not
       // configured on this build yet, etc.) block the app from being
       // usable - push is an enhancement, not a requirement to shop/deliver.
-      debugPrint('Push notification setup failed (app continues normally): $e');
+      appLog('Push notification setup failed (app continues normally): $e');
     }
   }
 
@@ -203,15 +205,16 @@ class PushNotificationService {
         details,
       );
     } catch (e) {
-      debugPrint('Failed to show local notification: $e');
+      appLog('Failed to show local notification: $e');
     }
   }
 
   Future<void> _registerToken(String token) async {
     try {
-      await apiClient.dio.put('/api/customers/me/fcm-token', data: {'fcmToken': token});
+      await apiClient.dio
+          .put('/api/customers/me/fcm-token', data: {'fcmToken': token});
     } catch (e) {
-      debugPrint('Failed to register FCM token with backend: $e');
+      appLog('Failed to register FCM token with backend: $e');
     }
   }
 

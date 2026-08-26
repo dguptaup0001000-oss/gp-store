@@ -18,7 +18,7 @@
 // must stay false on the test instance.
 //
 // Usage:
-//   BASE_URL=http://localhost:8081/v1 COUNT=160 node seed-accounts.js
+//   BASE_URL=http://127.0.0.1:8081/v1 COUNT=160 node seed-accounts.js
 //
 // COUNT is the number of dedicated VU accounts (cart + checkout). Existing
 // timestamp-suffixed accounts are kept but not counted toward COUNT.

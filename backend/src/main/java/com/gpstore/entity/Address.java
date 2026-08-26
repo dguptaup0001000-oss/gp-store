@@ -110,6 +110,10 @@ public class Address {
     // that works on a populated table. The @PrePersist below is what actually
     // keeps the value non-null, since Hibernate binds an explicit NULL for an
     // unset field rather than letting the column DEFAULT apply.
+    //
+    // @JsonIgnore so a customer POST cannot lock themselves out of auto-stamp
+    // (or pick a rider). Admin pinning goes through TerritoryAdminService.
+    @JsonIgnore
     private Boolean subzoneLocked = Boolean.FALSE;
 
     public Address() {

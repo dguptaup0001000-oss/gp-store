@@ -26,12 +26,12 @@ Phase 2 of the scale roadmap: measure the real breaking point instead of guessin
 
 # 2. Seed dedicated VU accounts (takes ~9 min for 160 — deliberately slow)
 cd load-tests
-BASE_URL=http://localhost:8081/v1 COUNT=160 CART_COUNT=150 node seed-accounts.js
+BASE_URL=http://127.0.0.1:8081/v1 COUNT=160 CART_COUNT=150 node seed-accounts.js
 node snapshot-fixtures.js
 
 # 3. Correctness probes, then the mix (localhost only — not the live shop)
 node integrity-cart-order.js
-BASE_URL=http://localhost:8081/v1 BROWSE_VUS=50 CART_VUS=15 k6 run browse-cart-checkout.js
+BASE_URL=http://127.0.0.1:8081/v1 BROWSE_VUS=50 CART_VUS=15 k6 run browse-cart-checkout.js
 ```
 
 Read the actual numbers from k6's summary at the end: `http_req_duration` (p50/p95/p99
@@ -43,7 +43,7 @@ The custom `orders_placed`/`orders_rate_limited`/`orders_rejected_client_error`
 counters report actual checkout outcomes - `orders_placed` is what a follow-up
 duplicate-order/duplicate-payment check against the database should use as its
 baseline (this script can't query Postgres directly to verify that itself). Cross-
-reference the whole run against Render's own metrics and Supabase's connection-count
+reference the whole run against the VPS CPU/memory graph and Supabase's connection-count
 graph for the same time window - that combination tells you what actually saturated
 first (app CPU, DB connections, Redis, etc.), not just that something did.
 
@@ -93,7 +93,7 @@ Do **not** proceed to 1,000 VUs until the 750 gate is `PASS`. An `INFRASTRUCTURE
 
 ### Staged execution (required order)
 
-Do **not** start at 1,000 or 5,000 VUs against one Render instance.
+Do **not** start at 1,000 or 5,000 VUs against one small VPS.
 A previous production run at ~5,005 VUs produced **95% HTTP failures and
 ~325k 502s**. That is overload of a 40-thread / 10-connection container,
 not a code rating, and it is **not** a reason to raise `DB_POOL_MAX_SIZE`.
@@ -121,7 +121,7 @@ Record Hikari (`total/active/idle/waiting`), `pg_stat_activity`, CPU and
 RSS in the same window. k6 cannot see the pool.
 
 There is **no** 5k/10k/25k/50k command in `browse-cart-checkout.js`. Do not
-add one. A 5,000-VU run against one small Render instance is overload
+add one. A 5,000-VU run against one small VPS is overload
 theatre, not a customer scenario.
 
 Realistic customer mix (browse + cart + paced checkout):
@@ -137,7 +137,7 @@ BASE_URL=http://localhost:8081/v1 BROWSE_VUS=50 CART_VUS=15 CHECKOUT_RATE=4 \
 # In Termux (install from F-Droid, not the abandoned Play Store version):
 pkg update -y && pkg install -y nodejs
 curl -o phone-loadtest.js https://raw.githubusercontent.com/dguptaup0001000-oss/gp-store/main/load-tests/phone-loadtest.js
-BASE_URL=https://your-backend.onrender.com/v1 node phone-loadtest.js
+BASE_URL=http://127.0.0.1:8081/v1 node phone-loadtest.js
 ```
 
 One command: it seeds its own small account pool, runs browse/cart/checkout load for 2
@@ -167,13 +167,13 @@ orders/minute by default (`CHECKOUT_RATE`), which is what a small shop
 actually sees - not a VU-shaped checkout flood.
 
 **3. Testing at 50k scale against today's infrastructure would mostly measure
-today's infrastructure, not the app's actual ceiling.** Backend is a single Render
+today's infrastructure, not the app's actual ceiling.** Backend is a single VPS
 instance; the database pool (even after the Phase 1 pooler switch) is sized for
 today's traffic, not 50k concurrent. Running a 50k-VU test against this setup
 right now would just confirm it falls over well before 50k - which is useful
 information, but it's the Phase 1 gap restated, not new information. A test that's
 meant to validate a 50k target needs to run against infrastructure that was already
-sized with 50k in mind (Phase 3 of the roadmap): more Render instances, a Supabase
+sized with 50k in mind (Phase 3 of the roadmap): more app instances, a Supabase
 plan with a connection budget to match, autoscaling turned on.
 
 **The practical path:** run this script now, at the scale in the Quickstart above,

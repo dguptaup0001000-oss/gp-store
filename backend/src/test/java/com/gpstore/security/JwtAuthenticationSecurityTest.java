@@ -203,6 +203,14 @@ class JwtAuthenticationSecurityTest {
         expectUnauthorized(expired);
     }
 
+    /**
+     * Must not collide with rows earlier tests insert. CI's empty database
+     * assigns identity 1, 2, 3, … so a hardcoded customerId of 2 was a live
+     * account by the time this class ran, and JwtFilter correctly treated it
+     * as authenticated (403 on admin) instead of missing (401).
+     */
+    private static final long MISSING_CUSTOMER_ID = 8_888_888_888L;
+
     @Test
     @DisplayName("an admin endpoint refuses a genuinely signed token carrying no role")
     void signedTokenWithoutRoleCannotReachAdminEndpoints() throws Exception {
@@ -212,13 +220,16 @@ class JwtAuthenticationSecurityTest {
         // NO authority rather than a blank one that accidentally matches.
         String roleless = Jwts.builder()
                 .setSubject("customer@example.com")
-                .claim("customerId", 2L)
+                .claim("customerId", MISSING_CUSTOMER_ID)
                 .setExpiration(new Date(System.currentTimeMillis() + 600_000))
                 .signWith(realKey(), SignatureAlgorithm.HS256)
                 .compact();
 
+        // The customer id is not a row, so JwtFilter rejects the token before
+        // authorization. 401 (not authenticated) is correct; 403 would mean
+        // the missing account was treated as a live principal.
         mockMvc.perform(get("/api/admin/catalog/audit").header("Authorization", "Bearer " + roleless))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -226,13 +237,13 @@ class JwtAuthenticationSecurityTest {
     void unknownRoleCannotReachAdminEndpoints() throws Exception {
         String bogusRole = Jwts.builder()
                 .setSubject("customer@example.com")
-                .claim("customerId", 2L)
+                .claim("customerId", MISSING_CUSTOMER_ID)
                 .claim("role", "SUPERUSER")
                 .setExpiration(new Date(System.currentTimeMillis() + 600_000))
                 .signWith(realKey(), SignatureAlgorithm.HS256)
                 .compact();
 
         mockMvc.perform(get("/api/admin/catalog/audit").header("Authorization", "Bearer " + bogusRole))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 }

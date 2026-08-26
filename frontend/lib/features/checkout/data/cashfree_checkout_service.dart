@@ -1,12 +1,12 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_cashfree_pg_sdk/api/cferrorresponse/cferrorresponse.dart';
 import 'package:flutter_cashfree_pg_sdk/api/cfpayment/cfwebcheckoutpayment.dart';
 import 'package:flutter_cashfree_pg_sdk/api/cfpaymentgateway/cfpaymentgatewayservice.dart';
 import 'package:flutter_cashfree_pg_sdk/api/cfsession/cfsession.dart';
 import 'package:flutter_cashfree_pg_sdk/utils/cfenums.dart';
 import 'package:flutter_cashfree_pg_sdk/utils/cfexceptions.dart';
+import '../../../core/logging/app_log.dart';
 
 /// What the SDK told us locally. Deliberately NOT a payment result.
 ///
@@ -65,26 +65,29 @@ class CashfreeCheckoutService {
     try {
       _gateway.setCallback(
         (String _) => finish(CheckoutOutcome.reportedComplete),
-        (CFErrorResponse _, String __) => finish(CheckoutOutcome.reportedIncomplete),
+        (CFErrorResponse _, String __) =>
+            finish(CheckoutOutcome.reportedIncomplete),
       );
 
       final session = CFSessionBuilder()
-          .setEnvironment(production ? CFEnvironment.PRODUCTION : CFEnvironment.SANDBOX)
+          .setEnvironment(
+              production ? CFEnvironment.PRODUCTION : CFEnvironment.SANDBOX)
           .setOrderId(orderId)
           .setPaymentSessionId(paymentSessionId)
           .build();
 
-      final checkout = CFWebCheckoutPaymentBuilder().setSession(session).build();
+      final checkout =
+          CFWebCheckoutPaymentBuilder().setSession(session).build();
       await _gateway.doPayment(checkout);
     } on CFException catch (e) {
       // The SDK refused to open - a malformed session, an expired one, a
       // device without a browser component. NOT a failed payment: nothing
       // was attempted, so the caller should say so rather than telling the
       // customer their payment failed.
-      debugPrint('Cashfree checkout could not open: ${e.message}');
+      appLog('Cashfree checkout could not open: ${e.message}');
       finish(CheckoutOutcome.couldNotOpen);
     } catch (e) {
-      debugPrint('Cashfree checkout error: ${e.runtimeType}');
+      appLog('Cashfree checkout error: ${e.runtimeType}');
       finish(CheckoutOutcome.couldNotOpen);
     }
 

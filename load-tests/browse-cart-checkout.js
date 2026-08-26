@@ -21,7 +21,9 @@
 // 502 aborts the test (kill switch). 503 catalog shed is expected protective
 // behaviour. 429 is documented, not disabled.
 //
-// Do NOT raise BROWSE_VUS to 5,000 to "prove scale".
+// Do NOT raise BROWSE_VUS to 5,000 to "prove scale". A previous 5,005-VU
+// production run measured overload of one small instance
+// (~40 Tomcat threads, 10 DB connections), not shopper capacity.
 
 import http from 'k6/http';
 import { check, sleep, group } from 'k6';

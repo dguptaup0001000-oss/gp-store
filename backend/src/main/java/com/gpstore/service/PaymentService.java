@@ -32,6 +32,9 @@ public class PaymentService {
     private final OrderService orderService;
     private final com.gpstore.repository.OutboxEventRepository outboxEventRepository;
     private final NotificationService notificationService;
+    private final com.gpstore.payment.gateway.CashfreeProperties cashfreeProperties;
+    private final com.gpstore.repository.DeliveryRepository deliveryRepository;
+    private final DeliveryPartnerService deliveryPartnerService;
     private final int upiTimeoutMinutes;
     private final int expiryBatchSize;
     private final int maxExpiryBatchesPerRun;
@@ -56,6 +59,9 @@ public class PaymentService {
             OrderService orderService,
             com.gpstore.repository.OutboxEventRepository outboxEventRepository,
             NotificationService notificationService,
+            com.gpstore.payment.gateway.CashfreeProperties cashfreeProperties,
+            com.gpstore.repository.DeliveryRepository deliveryRepository,
+            DeliveryPartnerService deliveryPartnerService,
             @org.springframework.context.annotation.Lazy PaymentService self,
             @org.springframework.beans.factory.annotation.Value("${payment.upi-timeout-minutes}") int upiTimeoutMinutes,
             @org.springframework.beans.factory.annotation.Value("${payment.expiry-batch-size:100}") int expiryBatchSize,
@@ -68,6 +74,9 @@ public class PaymentService {
         this.orderService = orderService;
         this.outboxEventRepository = outboxEventRepository;
         this.notificationService = notificationService;
+        this.cashfreeProperties = cashfreeProperties;
+        this.deliveryRepository = deliveryRepository;
+        this.deliveryPartnerService = deliveryPartnerService;
         this.self = self;
         this.upiTimeoutMinutes = upiTimeoutMinutes;
         this.expiryBatchSize = expiryBatchSize;
@@ -296,7 +305,9 @@ public class PaymentService {
             throw new BadRequestException("Unknown payment method: " + raw);
         }
         if (method == PaymentMethod.ONLINE) {
-            throw new BadRequestException("Card/online gateway payment is not available yet - use UPI or COD");
+            if (cashfreeProperties == null || !cashfreeProperties.enabled()) {
+                throw new BadRequestException("Online payment is not available right now.");
+            }
         }
         return method;
     }
@@ -381,6 +392,35 @@ public class PaymentService {
     }
 
     /**
+     * Admins may close any COD. A delivery partner may close only an order
+     * assigned to them. Missing assignment, a stranger's delivery, or no
+     * partner profile all read as the same not-found so order ids cannot be
+     * probed.
+     */
+    private void assertCallerMayCompleteCod(Long orderId, Long callerCustomerId, boolean isAdmin) {
+        if (isAdmin) {
+            return;
+        }
+        if (callerCustomerId == null || deliveryRepository == null || deliveryPartnerService == null) {
+            throw new ResourceNotFoundException("Order not found");
+        }
+        com.gpstore.entity.Delivery delivery = deliveryRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+        com.gpstore.entity.DeliveryPartner caller;
+        try {
+            caller = deliveryPartnerService.getByAccountIdOrThrow(callerCustomerId);
+        } catch (ResourceNotFoundException hidden) {
+            throw new ResourceNotFoundException("Order not found");
+        }
+        Long assignedPartnerId = delivery.getBatch() != null && delivery.getBatch().getDeliveryPartner() != null
+                ? delivery.getBatch().getDeliveryPartner().getId()
+                : null;
+        if (assignedPartnerId == null || !assignedPartnerId.equals(caller.getId())) {
+            throw new ResourceNotFoundException("Order not found");
+        }
+    }
+
+    /**
      * Advances the order to CONFIRMED once payment is actually in hand - only
      * if it's still sitting in PENDING_CONFIRMATION. Prevents Payment and
      * Order from silently drifting out of sync (e.g. payment says SUCCESS
@@ -396,8 +436,8 @@ public class PaymentService {
      * Creates a payment record for an order the caller owns. Amount is always
      * taken from the order total and status is always computed here - a client
      * can never set either directly (that was the self-reported-payment bug).
-     * Only COD and UPI are accepted right now - no card/wallet gateway is
-     * wired up, so ONLINE is rejected rather than silently doing nothing.
+     * ONLINE is accepted only when Cashfree is configured; otherwise it is
+     * rejected rather than creating a payment nobody can settle.
      */
     @Transactional
     @io.micrometer.core.annotation.Timed(value = "payment.initiate", description = "Payment record creation (and UPI link generation)", percentiles = {0.5, 0.95, 0.99})
@@ -516,10 +556,22 @@ public class PaymentService {
         return com.gpstore.dto.response.PaymentResponse.from(saved);
     }
 
+    /**
+     * Internal/admin path: delivery marked DELIVERED, or an administrator
+     * recording cash at the counter. HTTP callers must use the three-argument
+     * overload so a rider can only close COD on a delivery assigned to them.
+     */
     @Transactional
     public com.gpstore.dto.response.PaymentResponse completeCodPayment(Long orderId) {
+        return completeCodPayment(orderId, null, true);
+    }
+
+    @Transactional
+    public com.gpstore.dto.response.PaymentResponse completeCodPayment(
+            Long orderId, Long callerCustomerId, boolean isAdmin) {
 
         Payment payment = lockOrderThenPayment(orderId);
+        assertCallerMayCompleteCod(orderId, callerCustomerId, isAdmin);
 
         if (payment.getPaymentMethod() != PaymentMethod.COD) {
             throw new ConflictException("This payment is not a COD payment");

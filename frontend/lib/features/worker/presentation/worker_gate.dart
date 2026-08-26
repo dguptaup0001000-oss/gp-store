@@ -54,6 +54,7 @@ class _WorkerGateState extends State<WorkerGate> {
       // An expired or revoked session, or a login that is not linked to a
       // worker record. Either way the answer is the same and it is not an
       // error worth showing: sign in again.
+      await widget.tokenStorage.clear();
       return null;
     }
   }
@@ -63,7 +64,19 @@ class _WorkerGateState extends State<WorkerGate> {
   }
 
   Future<void> _signOut() async {
+    final refreshToken = await widget.tokenStorage.getRefreshToken();
+    try {
+      if (refreshToken != null && refreshToken.isNotEmpty) {
+        await widget.apiClient.dio.post(
+          '/api/auth/logout',
+          data: {'refreshToken': refreshToken},
+        );
+      }
+    } catch (_) {
+      // Local cleanup still has to happen if the network is gone.
+    }
     await widget.tokenStorage.clear();
+    if (!mounted) return;
     setState(() => _session = Future.value(null));
   }
 

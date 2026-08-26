@@ -32,8 +32,12 @@ public class AddressController {
     // Creates an address for the logged-in customer (ownership is never taken from the client).
     @PostMapping
     public Address createAddress(@RequestBody Address address) {
-        address.setCustomer(customerService.getById(currentUser.customerId()));
-        return addressService.save(address);
+        // setId(null) is load-bearing. Binding the body onto Address would
+        // otherwise let a client POST someone else's id and Hibernate-merge
+        // that row (including rewriting customer_id). createOwned also
+        // drops a client-supplied territory lock.
+        return addressService.createOwned(
+                customerService.getById(currentUser.customerId()), address);
     }
 
     /**

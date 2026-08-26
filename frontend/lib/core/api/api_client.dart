@@ -32,8 +32,7 @@ class ApiClient {
 
     _dio = Dio(
       BaseOptions(
-        // One named environment decides the host - see AppEnvironment for why
-        // production still points at Render rather than at Oracle.
+        // One named environment decides the host - see AppEnvironment.
         baseUrl: env.baseUrl,
         connectTimeout: env.timeout,
         receiveTimeout: env.timeout,

@@ -141,7 +141,8 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
     if (order != null && mounted) {
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => WorkerOrderScreen(repository: widget.repository, order: order),
+          builder: (_) =>
+              WorkerOrderScreen(repository: widget.repository, order: order),
         ),
       );
     }
@@ -155,7 +156,8 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => WorkerOrderScreen(repository: widget.repository, order: order),
+          builder: (_) =>
+              WorkerOrderScreen(repository: widget.repository, order: order),
         ),
       );
       await _refresh();
@@ -190,7 +192,8 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
               const SizedBox(height: 2),
               Text(
                 _profile.workerCode,
-                style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.primary),
+                style: theme.textTheme.titleLarge
+                    ?.copyWith(color: theme.colorScheme.primary),
               ),
               const SizedBox(height: 20),
 
@@ -201,12 +204,14 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
                 _Facts(rows: {
                   'Zone': _profile.zoneCode ?? '-',
                   'Subzone': territory,
-                  if (_profile.subzoneName != null) 'Area': _profile.subzoneName!,
+                  if (_profile.subzoneName != null)
+                    'Area': _profile.subzoneName!,
                 })
               else
                 _Notice(
                   icon: Icons.map_outlined,
-                  text: 'No territory assigned yet. You can still scan orders an '
+                  text:
+                      'No territory assigned yet. You can still scan orders an '
                       'administrator assigns to you.',
                 ),
 
@@ -214,10 +219,15 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: _Stat(label: "Today's orders", value: '${_profile.todaysOrders}'),
+                    child: _Stat(
+                        label: "Today's orders",
+                        value: '${_profile.todaysOrders}'),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(child: _Stat(label: 'Status', value: _statusLabel(_profile.status))),
+                  Expanded(
+                      child: _Stat(
+                          label: 'Status',
+                          value: _statusLabel(_profile.status))),
                 ],
               ),
 
@@ -225,7 +235,8 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
                 const SizedBox(height: 16),
                 _Notice(
                   icon: Icons.cloud_off,
-                  text: '$_pending scan${_pending == 1 ? '' : 's'} waiting to be sent. '
+                  text:
+                      '$_pending scan${_pending == 1 ? '' : 's'} waiting to be sent. '
                       'Pull down to retry when you have signal.',
                   emphasis: true,
                 ),
@@ -242,17 +253,24 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
                   icon: const Icon(Icons.qr_code_scanner, size: 42),
                   label: const Text(
                     'SCAN ORDER QR',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 1),
+                    style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1),
                   ),
                   style: FilledButton.styleFrom(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
                   ),
                 ),
               ),
 
               if (_locationProblem != null) ...[
                 const SizedBox(height: 16),
-                _Notice(icon: Icons.location_off, text: _locationProblem!, emphasis: true),
+                _Notice(
+                    icon: Icons.location_off,
+                    text: _locationProblem!,
+                    emphasis: true),
               ],
 
               if (_profile.activeTasks.isNotEmpty) ...[
@@ -303,9 +321,11 @@ class _Facts extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(entry.key, style: const TextStyle(color: Colors.white70)),
+                  Text(entry.key,
+                      style: const TextStyle(color: Colors.white70)),
                   Text(entry.value,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 17)),
                 ],
               ),
             ),
@@ -332,9 +352,11 @@ class _Stat extends StatelessWidget {
       child: Column(
         children: [
           Text(value,
-              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+              style:
+                  const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
           const SizedBox(height: 2),
-          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          Text(label,
+              style: const TextStyle(color: Colors.white70, fontSize: 13)),
         ],
       ),
     );
@@ -342,7 +364,8 @@ class _Stat extends StatelessWidget {
 }
 
 class _Notice extends StatelessWidget {
-  const _Notice({required this.icon, required this.text, this.emphasis = false});
+  const _Notice(
+      {required this.icon, required this.text, this.emphasis = false});
 
   final IconData icon;
   final String text;
@@ -350,7 +373,8 @@ class _Notice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colour = emphasis ? Theme.of(context).colorScheme.tertiary : Colors.white70;
+    final colour =
+        emphasis ? Theme.of(context).colorScheme.tertiary : Colors.white70;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(

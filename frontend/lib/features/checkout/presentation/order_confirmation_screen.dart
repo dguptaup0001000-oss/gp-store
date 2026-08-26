@@ -4,16 +4,20 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../orders/domain/payment_status.dart';
+import '../../orders/presentation/order_detail_screen.dart';
 
 class OrderConfirmationScreen extends StatelessWidget {
   const OrderConfirmationScreen({
     super.key,
     required this.orderNumber,
     required this.paymentMethod,
+    this.orderId,
     this.upiPaymentLink,
     this.verifiedPaymentStatus,
   });
 
+  final int? orderId;
   final String orderNumber;
   final String paymentMethod;
   final String? upiPaymentLink;
@@ -27,7 +31,9 @@ class OrderConfirmationScreen extends StatelessWidget {
   final String? verifiedPaymentStatus;
 
   bool get _onlinePaymentIncomplete =>
-      paymentMethod == 'ONLINE' && verifiedPaymentStatus != null && verifiedPaymentStatus != 'SUCCESS';
+      paymentMethod == 'ONLINE' &&
+      verifiedPaymentStatus != null &&
+      !PaymentStatusInfo.isSettled(verifiedPaymentStatus);
 
   Future<void> _openUpiApp(BuildContext context) async {
     if (upiPaymentLink == null) return;
@@ -37,7 +43,9 @@ class OrderConfirmationScreen extends StatelessWidget {
 
     if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No UPI app found - install GPay, PhonePe, or Paytm to pay')),
+        const SnackBar(
+            content: Text(
+                'No UPI app found - install GPay, PhonePe, or Paytm to pay')),
       );
     }
   }
@@ -52,6 +60,7 @@ class OrderConfirmationScreen extends StatelessWidget {
     // an error screen either.
     if (_onlinePaymentIncomplete) {
       return _IncompletePaymentView(
+        orderId: orderId,
         orderNumber: orderNumber,
         status: verifiedPaymentStatus!,
       );
@@ -65,13 +74,15 @@ class OrderConfirmationScreen extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.check_circle, color: AppColors.success, size: 72),
+                const Icon(Icons.check_circle,
+                    color: AppColors.success, size: 72),
                 const SizedBox(height: 16),
-                Text('Order Placed!', style: Theme.of(context).textTheme.headlineSmall),
+                Text('Order Placed!',
+                    style: Theme.of(context).textTheme.headlineSmall),
                 const SizedBox(height: 8),
-                Text('Order #$orderNumber', style: Theme.of(context).textTheme.bodyMedium),
+                Text('Order #$orderNumber',
+                    style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 24),
-
                 if (isUpi) ...[
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -102,10 +113,13 @@ class OrderConfirmationScreen extends StatelessWidget {
                     style: TextStyle(color: AppColors.textSecondary),
                   ),
                 ],
-
                 const SizedBox(height: 24),
                 TextButton(
-                  onPressed: hapticize(() { final router = GoRouter.of(context); Navigator.of(context).popUntil((r) => r.isFirst); router.go('/'); }),
+                  onPressed: hapticize(() {
+                    final router = GoRouter.of(context);
+                    Navigator.of(context).popUntil((r) => r.isFirst);
+                    router.go('/');
+                  }),
                   child: const Text('Continue Shopping'),
                 ),
               ],
@@ -124,17 +138,24 @@ class OrderConfirmationScreen extends StatelessWidget {
 /// history. Treating this as a failure screen would suggest the basket was
 /// lost, which is both untrue and the thing people fear at this moment.
 class _IncompletePaymentView extends StatelessWidget {
-  const _IncompletePaymentView({required this.orderNumber, required this.status});
+  const _IncompletePaymentView({
+    required this.orderNumber,
+    required this.status,
+    this.orderId,
+  });
 
+  final int? orderId;
   final String orderNumber;
   final String status;
 
-  String get _explanation => switch (status) {
+  String get _explanation => switch (PaymentStatusInfo.normalize(status)) {
         'CANCELLED' => 'The payment was cancelled before it completed.',
         'EXPIRED' => 'The payment window closed before it completed.',
         'FAILED' => 'The payment did not go through.',
-        // PENDING: the customer may genuinely still be paying in their bank
-        // app, so this must not claim it failed.
+        'UNPAID' => 'This order is waiting for payment.',
+        'SUCCESS' || 'PAID' => 'Payment received.',
+        // PENDING / ACTIVE: the customer may genuinely still be paying in
+        // their bank app, so this must not claim it failed.
         _ => 'We have not received confirmation of this payment yet.',
       };
 
@@ -148,7 +169,8 @@ class _IncompletePaymentView extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.schedule_outlined, size: 64, color: AppColors.textSecondary),
+                const Icon(Icons.schedule_outlined,
+                    size: 64, color: AppColors.textSecondary),
                 const SizedBox(height: 16),
                 Text('Order $orderNumber is saved',
                     textAlign: TextAlign.center,
@@ -157,13 +179,26 @@ class _IncompletePaymentView extends StatelessWidget {
                 Text(_explanation, textAlign: TextAlign.center),
                 const SizedBox(height: 6),
                 const Text(
-                  'Your items are held. You can pay for this order from My Orders.',
+                  'Your items are held. You can pay for this order now or from My Orders.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppColors.textSecondary),
                 ),
                 const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: hapticize(() => Navigator.of(context).popUntil((route) => route.isFirst)),
+                if (orderId != null)
+                  FilledButton(
+                    onPressed:
+                        hapticize(() => Navigator.of(context).pushReplacement(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    OrderDetailScreen(orderId: orderId!),
+                              ),
+                            )),
+                    child: const Text('Pay now'),
+                  ),
+                if (orderId != null) const SizedBox(height: 12),
+                TextButton(
+                  onPressed: hapticize(() =>
+                      Navigator.of(context).popUntil((route) => route.isFirst)),
                   child: const Text('Back to shopping'),
                 ),
               ],

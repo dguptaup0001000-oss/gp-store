@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'worker_repository.dart';
+import '../../../core/logging/app_log.dart';
 
 /// Reports where the worker is, while they are actually working.
 ///
@@ -89,7 +89,7 @@ class WorkerLocationService {
         distanceFilter: distanceFilterMetres,
       ),
     ).listen(_onPosition, onError: (Object error) {
-      debugPrint('Location stream error: $error');
+      appLog('Location stream error: $error');
     });
 
     return null;

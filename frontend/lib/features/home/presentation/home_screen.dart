@@ -28,6 +28,7 @@ import '../../../shared/widgets/see_all_products_screen.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../../shared/widgets/section_load_error.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -48,23 +49,27 @@ class HomeScreen extends ConsumerWidget {
     final feedAsync = belowFoldReady
         ? ref.watch(productFeedProvider)
         : const AsyncValue<ProductFeedState>.loading();
-    final isLoggedIn = ref.watch(authControllerProvider).status == AuthStatus.authenticated;
-    final cartItemCount = ref.watch(cartControllerProvider).valueOrNull?.totalItems ?? 0;
+    final isLoggedIn =
+        ref.watch(authControllerProvider).status == AuthStatus.authenticated;
+    final cartItemCount =
+        ref.watch(cartControllerProvider).valueOrNull?.totalItems ?? 0;
 
     void openProduct(Product product) => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
+          MaterialPageRoute(
+              builder: (_) => ProductDetailScreen(product: product)),
         );
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('GP-Store', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Text('GP-Store',
+            style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(
             icon: const Icon(Icons.receipt_long_outlined),
             tooltip: 'My Orders',
             onPressed: hapticize(() => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const OrderHistoryScreen()),
-            )),
+                  MaterialPageRoute(builder: (_) => const OrderHistoryScreen()),
+                )),
           ),
           Stack(
             alignment: Alignment.center,
@@ -73,8 +78,8 @@ class HomeScreen extends ConsumerWidget {
                 icon: const Icon(Icons.shopping_cart_outlined),
                 tooltip: 'Cart',
                 onPressed: hapticize(() => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const CartScreen()),
-                )),
+                      MaterialPageRoute(builder: (_) => const CartScreen()),
+                    )),
               ),
               if (cartItemCount > 0)
                 Positioned(
@@ -82,12 +87,17 @@ class HomeScreen extends ConsumerWidget {
                   right: 6,
                   child: Container(
                     padding: const EdgeInsets.all(3),
-                    decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
-                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    decoration: const BoxDecoration(
+                        color: AppColors.primary, shape: BoxShape.circle),
+                    constraints:
+                        const BoxConstraints(minWidth: 16, minHeight: 16),
                     child: Text(
                       '$cartItemCount',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700),
                     ),
                   ),
                 ),
@@ -97,8 +107,8 @@ class HomeScreen extends ConsumerWidget {
             icon: const Icon(Icons.person_outline),
             tooltip: 'Profile',
             onPressed: hapticize(() => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ProfileScreen()),
-            )),
+                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                )),
           ),
         ],
       ),
@@ -144,232 +154,272 @@ class HomeScreen extends ConsumerWidget {
         // still drives itself from scroll notifications, so the two do not
         // interfere and neither had to be rewritten for the other.
         child: ScrollToTop(
-          builder: (context, scrollController) => NotificationListener<ScrollNotification>(
-          onNotification: (notification) {
-            // Trigger a page BEFORE the customer hits the bottom, so the
-            // next products are usually already there by the time they
-            // arrive - waiting until extentAfter == 0 guarantees they see
-            // the spinner every single time.
-            //
-            // Only depth 0: a horizontal carousel inside the page also emits
-            // ScrollNotifications, and without this check flicking "Trending
-            // now" sideways would request another page of the vertical feed.
-            // belowFoldReady as well: reading .notifier would BUILD the
-            // feed provider and fire its first page, which is the one thing
-            // the gate exists to hold back.
-            if (belowFoldReady &&
-                notification.depth == 0 &&
-                notification.metrics.axis == Axis.vertical &&
-                notification.metrics.extentAfter < 600) {
-              // loadMore is safe to call repeatedly - it no-ops while a page
-              // is in flight and once the server says there is no next page.
-              ref.read(productFeedProvider.notifier).loadMore();
-            }
-            // false: this listener observes, it does not consume. Returning
-            // true would swallow the notification and break anything else
-            // listening, including the refresh indicator.
-            return false;
-          },
-          child: CustomScrollView(
-            controller: scrollController,
-            slivers: [
-            SliverList(
-              delegate: SliverChildListDelegate([
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: GestureDetector(
-                onTap: hapticize(() => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SearchScreen()),
-                )),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: AppColors.cardBackground,
-                    // Fully rounded and lifted: the search box is the first
-                    // thing a customer looks for, and on a lavender ground a
-                    // flat cream rectangle recedes rather than inviting a tap.
-                    borderRadius: BorderRadius.circular(28),
-                    boxShadow: AppElevation.card,
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.search, color: AppColors.textSecondary),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          'Search for atta, dal, coke and more',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: AppColors.textSecondary),
+          builder: (context, scrollController) =>
+              NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              // Trigger a page BEFORE the customer hits the bottom, so the
+              // next products are usually already there by the time they
+              // arrive - waiting until extentAfter == 0 guarantees they see
+              // the spinner every single time.
+              //
+              // Only depth 0: a horizontal carousel inside the page also emits
+              // ScrollNotifications, and without this check flicking "Trending
+              // now" sideways would request another page of the vertical feed.
+              // belowFoldReady as well: reading .notifier would BUILD the
+              // feed provider and fire its first page, which is the one thing
+              // the gate exists to hold back.
+              if (belowFoldReady &&
+                  notification.depth == 0 &&
+                  notification.metrics.axis == Axis.vertical &&
+                  notification.metrics.extentAfter < 600) {
+                // loadMore is safe to call repeatedly - it no-ops while a page
+                // is in flight and once the server says there is no next page.
+                ref.read(productFeedProvider.notifier).loadMore();
+              }
+              // false: this listener observes, it does not consume. Returning
+              // true would swallow the notification and break anything else
+              // listening, including the refresh indicator.
+              return false;
+            },
+            child: CustomScrollView(
+              controller: scrollController,
+              slivers: [
+                SliverList(
+                  delegate: SliverChildListDelegate([
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                      child: GestureDetector(
+                        onTap: hapticize(() => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) => const SearchScreen()),
+                            )),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: AppColors.cardBackground,
+                            // Fully rounded and lifted: the search box is the first
+                            // thing a customer looks for, and on a lavender ground a
+                            // flat cream rectangle recedes rather than inviting a tap.
+                            borderRadius: BorderRadius.circular(28),
+                            boxShadow: AppElevation.card,
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.search,
+                                  color: AppColors.textSecondary),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text(
+                                  'Search for atta, dal, coke and more',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style:
+                                      TextStyle(color: AppColors.textSecondary),
+                                ),
+                              ),
+                              // Opens the search screen ALREADY LISTENING, so the
+                              // microphone here is one gesture rather than two. The
+                              // pill's own tap still opens search with a keyboard,
+                              // which is what somebody who wants to type expects.
+                              GestureDetector(
+                                onTap: () {
+                                  AppHaptics.selection();
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                        builder: (_) => const SearchScreen(
+                                            openVoice: true)),
+                                  );
+                                },
+                                // Opaque, so the taps land here rather than falling
+                                // through to the pill behind and opening a keyboard.
+                                behavior: HitTestBehavior.opaque,
+                                child: const Padding(
+                                  // Padding rather than a bigger icon: the target is
+                                  // a comfortable 48dp for a thumb while the icon
+                                  // stays the same visual weight as the search glass.
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 6),
+                                  child: Icon(Icons.mic_none_rounded,
+                                      color: AppColors.primary),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                      // Opens the search screen ALREADY LISTENING, so the
-                      // microphone here is one gesture rather than two. The
-                      // pill's own tap still opens search with a keyboard,
-                      // which is what somebody who wants to type expects.
-                      GestureDetector(
-                        onTap: () {
-                          AppHaptics.selection();
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const SearchScreen(openVoice: true)),
-                          );
-                        },
-                        // Opaque, so the taps land here rather than falling
-                        // through to the pill behind and opening a keyboard.
-                        behavior: HitTestBehavior.opaque,
-                        child: const Padding(
-                          // Padding rather than a bigger icon: the target is
-                          // a comfortable 48dp for a thumb while the icon
-                          // stays the same visual weight as the search glass.
-                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                          child: Icon(Icons.mic_none_rounded, color: AppColors.primary),
+                    ),
+
+                    categoriesAsync.when(
+                      loading: () => const SizedBox.shrink(),
+                      error: (e, s) => SectionLoadError(
+                        message: "Couldn't load categories",
+                        onRetry: () => ref.invalidate(categoriesProvider),
+                      ),
+                      data: (categories) => Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: CategoryTabsBar(categories: categories),
+                      ),
+                    ),
+
+                    categoriesAsync.when(
+                      // Reserves the shelf's real height, so the sections below do
+                      // not jump down the page when the categories land.
+                      loading: () => const SizedBox(
+                        height: CategoriesRow.shelfHeight,
+                        child: Center(
+                            child: CircularProgressIndicator(strokeWidth: 2)),
+                      ),
+                      error: (e, s) => SectionLoadError(
+                        message: "Couldn't load the category shelf",
+                        onRetry: () => ref.invalidate(categoriesProvider),
+                      ),
+                      data: (categories) => Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: CategoriesRow(
+                          categories: categories,
+                          onCategoryTap: (category) =>
+                              Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    CategoryProductsScreen(category: category)),
+                          ),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+                    ),
 
-            categoriesAsync.when(
-              loading: () => const SizedBox.shrink(),
-              error: (e, s) => const SizedBox.shrink(),
-              data: (categories) => Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: CategoryTabsBar(categories: categories),
-              ),
-            ),
-
-            categoriesAsync.when(
-              // Reserves the shelf's real height, so the sections below do
-              // not jump down the page when the categories land.
-              loading: () => const SizedBox(
-                height: CategoriesRow.shelfHeight,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
-              error: (e, s) => const SizedBox.shrink(),
-              data: (categories) => Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: CategoriesRow(
-                  categories: categories,
-                  onCategoryTap: (category) => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => CategoryProductsScreen(category: category)),
-                  ),
-                ),
-              ),
-            ),
-
-            brandsAsync.when(
-              loading: () => const SizedBox.shrink(),
-              error: (e, s) => const SizedBox.shrink(),
-              data: (brands) => BrandsRow(
-                brands: brands,
-                onBrandTap: (brand) => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => BrandProductsScreen(brand: brand)),
-                ),
-              ),
-            ),
-
-            offersAsync.when(
-              loading: () => const SizedBox.shrink(),
-              error: (e, s) => const SizedBox.shrink(),
-              data: (offers) => Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: OffersBanner(offers: offers),
-              ),
-            ),
-
-            categoriesAsync.when(
-              loading: () => const SizedBox.shrink(),
-              error: (e, s) => const SizedBox.shrink(),
-              data: (categories) => BestsellersSection(categories: categories),
-            ),
-
-            brandsAsync.when(
-              loading: () => const SizedBox.shrink(),
-              error: (e, s) => const SizedBox.shrink(),
-              data: (brands) => BuyByBrandBanner(brands: brands),
-            ),
-
-            // SECOND WAVE, from here down.
-            //
-            // Each carousel is a Consumer that watches its provider only
-            // once the gate is open - and a Riverpod watch inside a builder
-            // is genuinely conditional, so an unwatched provider is never
-            // built and never issues its request. Until then the section
-            // renders its own loading state, which is what it would be
-            // showing anyway while the request was in flight, so the page
-            // looks no different and nothing moves when the data lands.
-            //
-            // Watching these three at the top of HomeScreen.build instead -
-            // as this file did - put all three on the wire at open,
-            // competing with the categories, brands and offers calls for
-            // content the customer can actually see.
-            //
-            // The providers are not autoDispose, so once a section has
-            // loaded, scrolling past it and back does not refetch.
-            if (isLoggedIn)
-              Consumer(
-                builder: (context, ref, _) => HorizontalProductSection(
-                  title: 'Recommended for you',
-                  provider: belowFoldReady ? ref.watch(recommendedForMeProvider) : const AsyncValue.loading(),
-                  onRetry: () => ref.invalidate(recommendedForMeProvider),
-                  onProductTap: openProduct,
-                  onSeeAllTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => SeeAllProductsScreen(
-                        title: 'Recommended for you',
-                        fetchProducts: () => ref.read(productsRepositoryProvider).getRecommendedForMe(limit: 50),
+                    brandsAsync.when(
+                      loading: () => const SizedBox.shrink(),
+                      error: (e, s) => SectionLoadError(
+                        message: "Couldn't load brands",
+                        onRetry: () => ref.invalidate(brandsProvider),
+                      ),
+                      data: (brands) => BrandsRow(
+                        brands: brands,
+                        onBrandTap: (brand) => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  BrandProductsScreen(brand: brand)),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-              ),
 
-            Consumer(
-              builder: (context, ref, _) => HorizontalProductSection(
-                title: 'Trending now',
-                provider: belowFoldReady ? ref.watch(trendingProvider) : const AsyncValue.loading(),
-                onRetry: () => ref.invalidate(trendingProvider),
-                onProductTap: openProduct,
-                onSeeAllTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => SeeAllProductsScreen(
-                      title: 'Trending now',
-                      fetchProducts: () => ref.read(productsRepositoryProvider).getTrending(limit: 50),
+                    offersAsync.when(
+                      loading: () => const SizedBox.shrink(),
+                      error: (e, s) => SectionLoadError(
+                        message: "Couldn't load offers",
+                        onRetry: () => ref.invalidate(activeOffersProvider),
+                      ),
+                      data: (offers) => Padding(
+                        padding: const EdgeInsets.only(top: 16),
+                        child: OffersBanner(offers: offers),
+                      ),
                     ),
-                  ),
-                ),
-              ),
-            ),
 
-            Consumer(
-              builder: (context, ref, _) => HorizontalProductSection(
-                title: 'New Arrivals',
-                provider: belowFoldReady ? ref.watch(newArrivalsProvider) : const AsyncValue.loading(),
-                onRetry: () => ref.invalidate(newArrivalsProvider),
-                onProductTap: openProduct,
-                onSeeAllTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => SeeAllProductsScreen(
-                      title: 'New Arrivals',
-                      fetchProducts: () => ref.read(productsRepositoryProvider).getNewArrivals(size: 50),
+                    categoriesAsync.maybeWhen(
+                      data: (categories) =>
+                          BestsellersSection(categories: categories),
+                      orElse: () => const SizedBox.shrink(),
                     ),
-                  ),
-                ),
-              ),
-            ),
 
-              const SizedBox(height: 8),
-            ]),
+                    brandsAsync.maybeWhen(
+                      data: (brands) => BuyByBrandBanner(brands: brands),
+                      orElse: () => const SizedBox.shrink(),
+                    ),
+
+                    // SECOND WAVE, from here down.
+                    //
+                    // Each carousel is a Consumer that watches its provider only
+                    // once the gate is open - and a Riverpod watch inside a builder
+                    // is genuinely conditional, so an unwatched provider is never
+                    // built and never issues its request. Until then the section
+                    // renders its own loading state, which is what it would be
+                    // showing anyway while the request was in flight, so the page
+                    // looks no different and nothing moves when the data lands.
+                    //
+                    // Watching these three at the top of HomeScreen.build instead -
+                    // as this file did - put all three on the wire at open,
+                    // competing with the categories, brands and offers calls for
+                    // content the customer can actually see.
+                    //
+                    // The providers are not autoDispose, so once a section has
+                    // loaded, scrolling past it and back does not refetch.
+                    if (isLoggedIn)
+                      Consumer(
+                        builder: (context, ref, _) => HorizontalProductSection(
+                          title: 'Recommended for you',
+                          provider: belowFoldReady
+                              ? ref.watch(recommendedForMeProvider)
+                              : const AsyncValue.loading(),
+                          onRetry: () =>
+                              ref.invalidate(recommendedForMeProvider),
+                          onProductTap: openProduct,
+                          onSeeAllTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => SeeAllProductsScreen(
+                                title: 'Recommended for you',
+                                fetchProducts: () => ref
+                                    .read(productsRepositoryProvider)
+                                    .getRecommendedForMe(limit: 50),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    Consumer(
+                      builder: (context, ref, _) => HorizontalProductSection(
+                        title: 'Trending now',
+                        provider: belowFoldReady
+                            ? ref.watch(trendingProvider)
+                            : const AsyncValue.loading(),
+                        onRetry: () => ref.invalidate(trendingProvider),
+                        onProductTap: openProduct,
+                        onSeeAllTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => SeeAllProductsScreen(
+                              title: 'Trending now',
+                              fetchProducts: () => ref
+                                  .read(productsRepositoryProvider)
+                                  .getTrending(limit: 50),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    Consumer(
+                      builder: (context, ref, _) => HorizontalProductSection(
+                        title: 'New Arrivals',
+                        provider: belowFoldReady
+                            ? ref.watch(newArrivalsProvider)
+                            : const AsyncValue.loading(),
+                        onRetry: () => ref.invalidate(newArrivalsProvider),
+                        onProductTap: openProduct,
+                        onSeeAllTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => SeeAllProductsScreen(
+                              title: 'New Arrivals',
+                              fetchProducts: () => ref
+                                  .read(productsRepositoryProvider)
+                                  .getNewArrivals(size: 50),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 8),
+                  ]),
+                ),
+                // Everything above is the curated part of the home screen. This
+                // is where it stops ending after New Arrivals and keeps going
+                // through the whole catalogue, one page at a time.
+                ...HomeFeedSlivers.build(context, ref,
+                    feed: feedAsync, onProductTap: openProduct),
+              ],
             ),
-            // Everything above is the curated part of the home screen. This
-            // is where it stops ending after New Arrivals and keeps going
-            // through the whole catalogue, one page at a time.
-            ...HomeFeedSlivers.build(context, ref, feed: feedAsync, onProductTap: openProduct),
-            ],
           ),
-        ),
         ),
       ),
     );

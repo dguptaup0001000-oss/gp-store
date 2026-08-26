@@ -18,7 +18,8 @@ class FakeCrashReporter implements CrashReporter {
   }
 
   @override
-  void recordFlutterError(FlutterErrorDetails details) => flutterErrors.add(details);
+  void recordFlutterError(FlutterErrorDetails details) =>
+      flutterErrors.add(details);
 
   @override
   void recordFatal(Object error, StackTrace? stack) => fatals.add(error);
@@ -65,7 +66,21 @@ void main() {
       );
 
       expect(reporter.fatals, hasLength(1));
-      expect(handled, isTrue, reason: 'reported, so the platform should not also print it');
+      expect(handled, isTrue,
+          reason: 'reported, so the platform should not also print it');
+    });
+
+    test('a no-op reporter does not swallow the engine dump', () async {
+      await installCrashHandlers(const NoOpCrashReporter(), inDebugMode: false);
+
+      final handled = PlatformDispatcher.instance.onError!(
+        StateError('nothing awaited this'),
+        StackTrace.current,
+      );
+
+      expect(handled, isFalse,
+          reason:
+              'worker/no-op reporting must not hide the crash from the engine');
     });
 
     test('a framework error is NOT recorded as fatal', () async {
@@ -75,7 +90,8 @@ void main() {
       // sink the crash-free rate and bury the failures that stop checkout.
       await installCrashHandlers(reporter, inDebugMode: false);
 
-      FlutterError.onError!(detailsFor(FlutterError('A RenderFlex overflowed by 12 pixels')));
+      FlutterError.onError!(
+          detailsFor(FlutterError('A RenderFlex overflowed by 12 pixels')));
 
       expect(reporter.flutterErrors, hasLength(1));
       expect(reporter.fatals, isEmpty);
@@ -98,7 +114,8 @@ void main() {
       expect(reporter.flutterErrors, hasLength(1));
     });
 
-    test('a reporter that cannot start leaves the handlers untouched', () async {
+    test('a reporter that cannot start leaves the handlers untouched',
+        () async {
       // Crash reporting failing is never a reason for the app not to run,
       // and half-installed handlers pointing at a dead reporter would be
       // worse than none.

@@ -2,9 +2,9 @@
 
 **Status as of 2026-08-19:** production's live schema has been confirmed
 (via a real schema dump, see below) to already match what the JPA entities
-expect - `DDL_AUTO=validate` is safe to set in Render's environment
-variables. That env var change itself is a manual step in Render's
-dashboard, done outside this repo. This file documents the reasoning, in
+expect - `DDL_AUTO=validate` is safe to set in `/opt/gpstore/env.production`.
+That env var change itself is a manual step on the VPS, done outside this
+repo. This file documents the reasoning, in
 case the question ever comes up again (a new environment, a new developer,
 "why isn't this ddl-auto=update?").
 
@@ -60,8 +60,8 @@ safely.
    It is deliberately **not** a Flyway migration file (wrong filename
    pattern, wrong directory) - see that file's own header for why it must
    never be treated as one.
-2. **Manual step, outside this repo:** set `DDL_AUTO=validate` in Render's
-   environment variables (Render → your service → Environment) and confirm
+2. **Manual step, outside this repo:** set `DDL_AUTO=validate` in
+   `/opt/gpstore/env.production` and confirm
    the app starts cleanly on the redeploy that triggers. If it fails to
    start, revert `DDL_AUTO` (unset it, or set it back to `update`) and
    redeploy - `validate` mode never writes anything, so there's no data risk
@@ -146,7 +146,7 @@ bootstrap script. That file is a point-in-time dump from 2026-08-19 and does
 not include later columns (V17–V22). It remains a human-readable snapshot,
 not an executable migration.
 
-**Production `DDL_AUTO=validate`:** still a **manual** Render environment
+**Production `DDL_AUTO=validate`:** still a **manual** VPS environment
 change, outside this repository. Set it only after `schema-migrate` is green
 on `main`. Flipping that variable does not rewrite data; if validate fails,
 the new deploy does not start and you can unset it. This repo does not set

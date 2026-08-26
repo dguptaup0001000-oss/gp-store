@@ -59,7 +59,8 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
     });
 
     try {
-      await widget.repository.setDeliveryStatus(deliveryId: deliveryId, status: status);
+      await widget.repository
+          .setDeliveryStatus(deliveryId: deliveryId, status: status);
 
       // RE-READ RATHER THAN ASSUME. The screen could set the new status
       // locally and be right nearly always - but "nearly" is the problem: the
@@ -107,7 +108,6 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
             orderStatus: _order.orderStatus,
             deliveryStatus: _order.deliveryStatus,
           ),
-
           if (showCash) ...[
             const SizedBox(height: 16),
             // THE ONE PIECE OF MONEY ON THIS SCREEN, and it is not the order
@@ -125,20 +125,20 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('COLLECT CASH',
-                      style: theme.textTheme.labelLarge?.copyWith(letterSpacing: 1.2)),
+                      style: theme.textTheme.labelLarge
+                          ?.copyWith(letterSpacing: 1.2)),
                   const SizedBox(height: 4),
                   Text('₹$collect', style: theme.textTheme.headlineLarge),
                 ],
               ),
             ),
           ],
-
           const SizedBox(height: 24),
-          Text('${_order.totalItems} item${_order.totalItems == 1 ? '' : 's'} to pack',
+          Text(
+              '${_order.totalItems} item${_order.totalItems == 1 ? '' : 's'} to pack',
               style: theme.textTheme.titleLarge),
           const SizedBox(height: 8),
           for (final line in _order.items) _PackingLine(line: line),
-
           if (_order.deliveryAddress != null) ...[
             const SizedBox(height: 24),
             Text('Deliver to', style: theme.textTheme.titleLarge),
@@ -152,14 +152,12 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
                     style: theme.textTheme.bodyLarge),
               ),
           ],
-
           if (_error != null) ...[
             const SizedBox(height: 20),
             Text(_error!,
                 style: theme.textTheme.bodyLarge
                     ?.copyWith(color: theme.colorScheme.error)),
           ],
-
           const SizedBox(height: 28),
           if (_order.deliveryId == null)
             Text(
@@ -179,7 +177,9 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
                   onPressed: _sending == null ? () => _move(next) : null,
                   child: _sending == next
                       ? const SizedBox(
-                          height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2))
                       : Text(_label(next)),
                 ),
               ),
@@ -234,8 +234,7 @@ class _PackingLine extends StatelessWidget {
           // counting things into a carton; the name is what they check second.
           SizedBox(
             width: 46,
-            child: Text('${line.quantity}x',
-                style: theme.textTheme.titleLarge),
+            child: Text('${line.quantity}x', style: theme.textTheme.titleLarge),
           ),
           Expanded(
             child: Column(

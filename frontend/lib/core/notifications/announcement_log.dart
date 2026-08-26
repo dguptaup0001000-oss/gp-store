@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'key_value_store.dart';
+import '../logging/app_log.dart';
 
 /// Remembers which orders have already been announced, so the same order is
 /// never spoken twice.
@@ -62,7 +63,7 @@ class AnnouncementLog {
       try {
         completer.complete(await _claimUnsynchronised(orderId));
       } catch (e) {
-        debugPrint('Announcement dedup failed, allowing the announcement: $e');
+        appLog('Announcement dedup failed, allowing the announcement: $e');
         completer.complete(true);
       }
     });

@@ -12,14 +12,16 @@ import 'voice_settings.dart';
 /// so turning the voice off applies whether the app is open or not.
 final voiceSettingsProvider = Provider<VoiceSettings>((ref) => VoiceSettings());
 
-final announcementLogProvider = Provider<AnnouncementLog>((ref) => AnnouncementLog());
+final announcementLogProvider =
+    Provider<AnnouncementLog>((ref) => AnnouncementLog());
 
 /// One TTS engine for the app's lifetime.
 ///
 /// Not created per announcement: instantiating an engine costs a platform
 /// channel round trip and re-running the language/rate setup, which on a busy
 /// counter would be paid on every order.
-final voiceAnnouncementServiceProvider = Provider<VoiceAnnouncementService>((ref) {
+final voiceAnnouncementServiceProvider =
+    Provider<VoiceAnnouncementService>((ref) {
   final service = VoiceAnnouncementService(
     log: ref.watch(announcementLogProvider),
     settings: ref.watch(voiceSettingsProvider),
@@ -34,6 +36,7 @@ final voiceAnnouncementServiceProvider = Provider<VoiceAnnouncementService>((ref
 /// cached bool: the value also changes from outside this container (a fresh
 /// read in the background isolate), so re-reading storage when the screen
 /// opens is the honest thing to show.
-final voiceAnnouncementsEnabledProvider = FutureProvider.autoDispose<bool>((ref) {
+final voiceAnnouncementsEnabledProvider =
+    FutureProvider.autoDispose<bool>((ref) {
   return ref.watch(voiceSettingsProvider).isEnabled();
 });

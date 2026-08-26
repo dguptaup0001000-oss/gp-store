@@ -7,6 +7,7 @@ import com.gpstore.dto.response.PaymentResponse;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.enums.PaymentMethod;
 import com.gpstore.enums.PaymentStatus;
+import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.repository.OrderRepository;
 import com.gpstore.repository.PaymentRepository;
@@ -48,7 +49,7 @@ class PaymentServiceTest {
         // InventoryRestorationConcurrencyTest instead.
         paymentService = new PaymentService(
                 paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService,
-                null, null, null, 30, 100, 50);
+                null, null, new com.gpstore.payment.gateway.CashfreeProperties(), null, null, null, 30, 100, 50);
     }
 
     @Test
@@ -114,6 +115,25 @@ class PaymentServiceTest {
         PaymentResponse result = paymentService.completeCodPayment(2L);
 
         assertEquals(PaymentStatus.COD_RECEIVED.name(), result.getPaymentStatus());
+    }
+
+    @Test
+    void onlineIsRejectedWhenCashfreeIsNotConfigured() {
+        assertThrows(BadRequestException.class,
+                () -> paymentService.parsePaymentMethod("ONLINE"));
+    }
+
+    @Test
+    void onlineIsAllowedWhenCashfreeIsConfigured() {
+        var props = new com.gpstore.payment.gateway.CashfreeProperties();
+        props.setAppId("cf_test_app");
+        props.setSecretKey("cf_test_secret");
+        paymentService = new PaymentService(
+                paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService,
+                null, null, props, null, null, null, 30, 100, 50);
+
+        assertEquals(PaymentMethod.ONLINE, paymentService.parsePaymentMethod("ONLINE"));
+        assertEquals(PaymentMethod.COD, paymentService.parsePaymentMethod("COD"));
     }
 
     @Test

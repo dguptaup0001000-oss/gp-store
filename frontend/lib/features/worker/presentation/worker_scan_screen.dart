@@ -55,16 +55,18 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
   /// twice", which is the difference between one record and two.
   String _newRequestId() {
     const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    final suffix = List.generate(16, (_) => alphabet[_random.nextInt(alphabet.length)]).join();
+    final suffix =
+        List.generate(16, (_) => alphabet[_random.nextInt(alphabet.length)])
+            .join();
     return '${DateTime.now().millisecondsSinceEpoch}-$suffix';
   }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
     if (_submitting || _result != null) return;
 
-    final raw = capture.barcodes
-        .map((b) => b.rawValue)
-        .firstWhere((v) => v != null && v.trim().isNotEmpty, orElse: () => null);
+    final raw = capture.barcodes.map((b) => b.rawValue).firstWhere(
+        (v) => v != null && v.trim().isNotEmpty,
+        orElse: () => null);
     if (raw == null) return;
 
     setState(() => _submitting = true);
@@ -80,7 +82,8 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
         clientRequestId: _newRequestId(),
       );
     } on ApiException catch (e) {
-      outcome = ScanOutcome(accepted: false, outcome: 'ERROR', message: e.message);
+      outcome =
+          ScanOutcome(accepted: false, outcome: 'ERROR', message: e.message);
     } catch (_) {
       outcome = const ScanOutcome(
         accepted: false,
@@ -220,7 +223,8 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
               height: 56,
               child: OutlinedButton(
                 onPressed: _scanAnother,
-                child: const Text('SCAN ANOTHER', style: TextStyle(fontSize: 17)),
+                child:
+                    const Text('SCAN ANOTHER', style: TextStyle(fontSize: 17)),
               ),
             ),
           ] else ...[
@@ -228,7 +232,8 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
               height: 64,
               child: FilledButton(
                 onPressed: _scanAnother,
-                child: const Text('SCAN ANOTHER', style: TextStyle(fontSize: 18)),
+                child:
+                    const Text('SCAN ANOTHER', style: TextStyle(fontSize: 18)),
               ),
             ),
             const SizedBox(height: 12),

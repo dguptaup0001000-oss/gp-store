@@ -1,0 +1,25 @@
+[Unit]
+Description=GP-STORE Spring Boot API
+After=network-online.target redis-server.service
+Wants=network-online.target
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=gpstore
+Group=gpstore
+WorkingDirectory=/opt/gpstore
+EnvironmentFile=/opt/gpstore/env.production
+Environment=MALLOC_ARENA_MAX=2
+ExecStart=/opt/gpstore/run-backend.sh
+SuccessExitStatus=143
+Restart=always
+RestartSec=5
+TimeoutStopSec=40
+LimitNOFILE=65535
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gpstore-backend
+
+[Install]
+WantedBy=multi-user.target

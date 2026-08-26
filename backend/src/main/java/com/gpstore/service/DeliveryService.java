@@ -274,17 +274,35 @@ public class DeliveryService {
     }
 
     @Transactional(readOnly = true)
-
-
-    public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryById(Long id) {
-        return deliveryRepository.findById(id).map(com.gpstore.dto.response.DeliveryResponse::from);
+    public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryById(
+            Long id, Long callerCustomerId, boolean isAdmin) {
+        return deliveryRepository.findById(id)
+                .filter(delivery -> staffMaySee(delivery, callerCustomerId, isAdmin))
+                .map(com.gpstore.dto.response.DeliveryResponse::from);
     }
 
     @Transactional(readOnly = true)
+    public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryByOrderId(
+            Long orderId, Long callerCustomerId, boolean isAdmin) {
+        return deliveryRepository.findByOrderId(orderId)
+                .filter(delivery -> staffMaySee(delivery, callerCustomerId, isAdmin))
+                .map(com.gpstore.dto.response.DeliveryResponse::from);
+    }
 
-
-    public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryByOrderId(Long orderId) {
-        return deliveryRepository.findByOrderId(orderId).map(com.gpstore.dto.response.DeliveryResponse::from);
+    /**
+     * Admins see every delivery. A partner only sees rows on their own batch.
+     * Missing assignment reads as empty so a guessed id is not distinguishable
+     * from a delivery that belongs to someone else.
+     */
+    private boolean staffMaySee(Delivery delivery, Long callerCustomerId, boolean isAdmin) {
+        if (isAdmin) {
+            return true;
+        }
+        DeliveryPartner caller = deliveryPartnerService.getByAccountIdOrThrow(callerCustomerId);
+        Long assignedPartnerId = delivery.getBatch() != null && delivery.getBatch().getDeliveryPartner() != null
+                ? delivery.getBatch().getDeliveryPartner().getId()
+                : null;
+        return assignedPartnerId != null && assignedPartnerId.equals(caller.getId());
     }
 
     /** Returns the delivery only if the order belongs to this customer - closes the IDOR. */

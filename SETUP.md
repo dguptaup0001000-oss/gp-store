@@ -79,11 +79,11 @@ optional cleanup:
    - Testing on a **physical phone**: use your computer's real LAN IP
      instead (e.g. `http://192.168.1.x:8081/v1`), and make sure your phone
      and backend are on the same network.
-   - Testing against your **deployed Render backend**: use that real HTTPS
-     URL instead.
+   - Testing against your **deployed production API**: use that real HTTPS
+     URL instead (for example `https://api.gpstore.co.in/v1`).
 
 4. **Backend must actually be running and reachable** at whatever URL you
-   pass in step 3 - via `docker compose up`, a deployed Render instance, or
+   pass in step 3 - via `docker compose up`, the Hostinger VPS, or
    similar. This app has nothing to talk to otherwise.
 
 ## Platform folders (android/, web/) - what's real and what needs one more step
@@ -176,7 +176,7 @@ call (login, browsing products, everything) will fail until they know
 where your real backend actually lives. The app's own coded default
 (`10.0.2.2`, the Android *emulator's* localhost alias) is unreachable from
 both a real phone and a public website. Once your backend is deployed
-somewhere reachable (e.g. Render, per [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md)
+somewhere reachable (e.g. the Hostinger VPS, per [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md)
 and `backend/DEPLOYMENT.md`),
 set it once: this repo's Settings -> Secrets and variables -> Actions ->
 Variables tab -> New repository variable -> name `API_BASE_URL`, value

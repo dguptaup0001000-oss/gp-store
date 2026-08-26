@@ -2,10 +2,13 @@ import 'package:flutter/foundation.dart';
 
 import '../domain/brand_models.dart';
 import '../domain/product_models.dart';
+import '../../../core/logging/app_log.dart';
 
 /// Fetches one page of one brand. Injected so this controller can be tested
 /// without a network, a Dio client, or a running app.
-typedef BrandPageFetcher = Future<({List<Product> products, int totalElements, int totalPages})> Function({
+typedef BrandPageFetcher
+    = Future<({List<Product> products, int totalElements, int totalPages})>
+        Function({
   required String brand,
   BrandSortOption? sort,
   bool inStockOnly,
@@ -165,7 +168,8 @@ class BrandFeedController extends ChangeNotifier {
       // A failed brand list is not a failed page: the anchor brand is still
       // browsable on its own, which is exactly what this screen did before
       // the feed existed. Degrade to that rather than showing an error.
-      debugPrint('Could not load the brand order, staying within ${anchorBrand.brand}: $e');
+      appLog(
+          'Could not load the brand order, staying within ${anchorBrand.brand}: $e');
       _order = [anchorBrand];
     }
 
@@ -255,7 +259,8 @@ class BrandFeedController extends ChangeNotifier {
     // another page into the brand already on screen leaves the section count
     // unchanged, and treating that as "no progress" made this continue
     // immediately, pulling an entire brand in one scroll instead of a page.
-    final madeProgress = _sections.length != sectionsBefore || _loadedProductCount != productsBefore;
+    final madeProgress = _sections.length != sectionsBefore ||
+        _loadedProductCount != productsBefore;
 
     if (!failed && !_reachedEnd && !madeProgress && _sections.isNotEmpty) {
       await Future<void>.delayed(Duration.zero);
@@ -286,7 +291,8 @@ class BrandFeedController extends ChangeNotifier {
 
   Future<void> _appendNextBrand(int generation) async {
     // Skip brands already in the feed rather than trusting the index alone.
-    while (_nextBrandIndex < _order.length && _loadedBrands.contains(_order[_nextBrandIndex].brand)) {
+    while (_nextBrandIndex < _order.length &&
+        _loadedBrands.contains(_order[_nextBrandIndex].brand)) {
       _nextBrandIndex++;
     }
 
@@ -333,7 +339,8 @@ class BrandFeedController extends ChangeNotifier {
 
       if (fresh.isEmpty && result.totalElements == 0) {
         // Skip past brands already in the feed before the next attempt.
-        while (_nextBrandIndex < _order.length && _loadedBrands.contains(_order[_nextBrandIndex].brand)) {
+        while (_nextBrandIndex < _order.length &&
+            _loadedBrands.contains(_order[_nextBrandIndex].brand)) {
           _nextBrandIndex++;
         }
         continue;
@@ -349,8 +356,8 @@ class BrandFeedController extends ChangeNotifier {
     }
   }
 
-  int get _loadedProductCount =>
-      _sections.fold<int>(0, (total, section) => total + section.products.length);
+  int get _loadedProductCount => _sections.fold<int>(
+      0, (total, section) => total + section.products.length);
 
   List<Product> _dedupe(List<Product> incoming) {
     final fresh = <Product>[];

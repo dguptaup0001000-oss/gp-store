@@ -35,7 +35,9 @@ cp pubspec.worker.yaml pubspec.yaml
 # Barcode scanning still goes through mobile_scanner; the model is not packed
 # into the APK. Required on devices with Google Play Services (Play installs).
 printf '\ndev.steenbakker.mobile_scanner.useUnbundled=true\n' >> "$GRADLE_PROPS"
+printf 'gpstore.applicationId=com.gpstore.worker\n' >> "$GRADLE_PROPS"
 
 export GPSTORE_WORKER_SLIM=1
+echo "GPSTORE_WORKER_SLIM=1 (applicationId=com.gpstore.worker)"
 flutter pub get
 "$@"

@@ -1,13 +1,11 @@
 # Deploying GP-STORE
 
-**Production is Render (app) + Supabase (Postgres), not Railway.**
+**Production is a Hostinger VPS (Docker Compose + Traefik + Postgres + Redis).**
+Render is not used.
 
-- Operator checklist, including the manual `DDL_AUTO=validate` Render step
-  and its rollback: **[PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md)**
-- Render service setup (placeholders only, no live credentials):
-  **[backend/DEPLOYMENT.md](backend/DEPLOYMENT.md)**
-- Flyway / empty-database CI (`schema-migrate`):
+- Hostinger Docker/Traefik commands:
+  **[backend/HOSTINGER_DEPLOYMENT.md](backend/HOSTINGER_DEPLOYMENT.md)**
+- Operator checklist:
+  **[PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md)**
+- Flyway / empty-database CI:
   **[backend/src/main/resources/db/migration/README.md](backend/src/main/resources/db/migration/README.md)**
-
-This page used to describe Railway. That host is not used. Old links to
-`DEPLOYMENT.md` should land here and follow the files above.

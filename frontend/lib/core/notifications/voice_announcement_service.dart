@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'announcement_log.dart';
 import 'speech_engine.dart';
 import 'voice_settings.dart';
+import '../logging/app_log.dart';
 
 /// Speaks a newly-received order aloud on the shop counter phone, the way a
 /// payment soundbox announces a transfer.
@@ -60,9 +61,10 @@ class VoiceAnnouncementService {
       // Build FIRST, before claiming the id. A malformed payload should not
       // consume the one chance this order has to be announced - if a valid
       // duplicate of it arrives later, that one should still be spoken.
-      final line = buildAnnouncement(customerName: customerName, rupees: rupees);
+      final line =
+          buildAnnouncement(customerName: customerName, rupees: rupees);
       if (line == null) {
-        debugPrint('Skipping announcement for order $orderId: '
+        appLog('Skipping announcement for order $orderId: '
             'name or amount missing or unparseable in the push payload');
         return;
       }
@@ -77,7 +79,8 @@ class VoiceAnnouncementService {
 
       _enqueue(line);
     } catch (e) {
-      debugPrint('Voice announcement failed (order and notification unaffected): $e');
+      appLog(
+          'Voice announcement failed (order and notification unaffected): $e');
     }
   }
 
@@ -93,7 +96,7 @@ class VoiceAnnouncementService {
       } catch (e) {
         // Swallowed inside the chain on purpose: one failed line must not
         // break the chain and mute every order after it.
-        debugPrint('Speaking an announcement failed: $e');
+        appLog('Speaking an announcement failed: $e');
       }
     });
   }
@@ -104,7 +107,7 @@ class VoiceAnnouncementService {
       await _engine.configure();
       _configured = true;
     } catch (e) {
-      debugPrint('TTS configuration failed, falling back to device defaults: $e');
+      appLog('TTS configuration failed, falling back to device defaults: $e');
       // Deliberately not rethrown, and _configured stays false: speaking with
       // default settings is far better than not speaking at all.
     }
@@ -123,7 +126,7 @@ class VoiceAnnouncementService {
     try {
       await _engine.stop();
     } catch (e) {
-      debugPrint('Stopping TTS failed: $e');
+      appLog('Stopping TTS failed: $e');
     }
   }
 
@@ -160,10 +163,12 @@ class VoiceAnnouncementService {
     if (name.isEmpty) return null;
 
     final lowered = name.toLowerCase();
-    if (lowered == 'null' || lowered == 'undefined' || lowered == 'nan') return null;
+    if (lowered == 'null' || lowered == 'undefined' || lowered == 'nan')
+      return null;
 
     // Anything that looks like structured data rather than a person.
-    if (name.contains('{') || name.contains('}') || name.contains('"')) return null;
+    if (name.contains('{') || name.contains('}') || name.contains('"'))
+      return null;
 
     return name;
   }
@@ -183,7 +188,8 @@ class VoiceAnnouncementService {
   /// silence rather than the app reading a raw string aloud.
   static String? _spokenAmount(String raw) {
     final value = double.tryParse(raw.trim());
-    if (value == null || value.isNaN || value.isInfinite || value < 0) return null;
+    if (value == null || value.isNaN || value.isInfinite || value < 0)
+      return null;
 
     final whole = value.floor();
     // Rounded, not truncated: floating point turns 780.50 into 780.49999...,

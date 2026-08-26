@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+*.env
+!.env.example
+target
+**/target
+.idea
+*.iml
+*.md
+docker-compose*.yml
+.hostinger
