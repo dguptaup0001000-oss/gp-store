@@ -217,8 +217,11 @@ class JwtAuthenticationSecurityTest {
                 .signWith(realKey(), SignatureAlgorithm.HS256)
                 .compact();
 
+        // Customer 2 does not exist, so JwtFilter rejects the token before
+        // authorization. 401 (not authenticated) is correct; 403 would mean
+        // the missing account was treated as a live principal.
         mockMvc.perform(get("/api/admin/catalog/audit").header("Authorization", "Bearer " + roleless))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -233,6 +236,6 @@ class JwtAuthenticationSecurityTest {
                 .compact();
 
         mockMvc.perform(get("/api/admin/catalog/audit").header("Authorization", "Bearer " + bogusRole))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 }

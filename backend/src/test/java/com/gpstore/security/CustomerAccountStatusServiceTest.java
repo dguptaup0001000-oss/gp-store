@@ -51,7 +51,7 @@ class CustomerAccountStatusServiceTest {
 
     @Test
     void nullCustomerIdIsNotUsable() {
-        assertFalse(service.isUsable(null));
+        assertFalse(service.isUsable((Long) null));
     }
 
     @Test

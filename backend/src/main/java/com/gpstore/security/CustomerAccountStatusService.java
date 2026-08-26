@@ -54,7 +54,7 @@ public class CustomerAccountStatusService {
             return cached.usable;
         }
         boolean usable = customerRepository.findById(customerId)
-                .map(CustomerAccountStatusService::isUsable)
+                .map(CustomerAccountStatusService::isCustomerUsable)
                 .orElse(false);
         cache.put(customerId, new Cached(usable, now + TTL_MS));
         return usable;
@@ -66,7 +66,7 @@ public class CustomerAccountStatusService {
         }
     }
 
-    static boolean isUsable(Customer customer) {
+    static boolean isCustomerUsable(Customer customer) {
         if (customer == null) {
             return false;
         }
