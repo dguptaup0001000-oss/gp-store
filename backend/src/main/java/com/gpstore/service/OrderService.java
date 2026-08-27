@@ -29,6 +29,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
+
+import com.gpstore.dto.response.AdminNewOrdersSinceResponse;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -763,6 +766,62 @@ public class OrderService {
             org.springframework.data.domain.Pageable pageable) {
         return repository.findAllByOrderByOrderDateDesc(pageable)
                 .map(order -> toOrderResponse(order, true));
+    }
+
+    /**
+     * Shop-counter soundbox poll. A missing afterId is the arming call: return
+     * the current max id and an empty list so the app does not speak every
+     * historical order when the admin opens the app. Later calls return at
+     * most 20 newer orders, oldest first, so a burst is spoken in order and
+     * the next poll continues from the last returned id.
+     */
+    @Transactional(readOnly = true)
+    public AdminNewOrdersSinceResponse getNewOrdersSince(Long afterId) {
+        if (afterId == null) {
+            return new AdminNewOrdersSinceResponse(repository.findMaxId(), List.of());
+        }
+        long floor = Math.max(afterId, 0L);
+        List<Order> found = repository.findNewSince(floor, PageRequest.of(0, 20));
+        return composeNewOrdersSince(floor, found);
+    }
+
+    static AdminNewOrdersSinceResponse composeNewOrdersSince(
+            long requestedAfterId, List<Order> found) {
+        if (found == null || found.isEmpty()) {
+            // Stay on the caller's cursor. Jumping to maxId when the query
+            // returned nothing would skip orders that are committed but not
+            // yet visible to this read.
+            return new AdminNewOrdersSinceResponse(requestedAfterId, List.of());
+        }
+        List<AdminNewOrdersSinceResponse.AdminNewOrderAlert> alerts = new ArrayList<>();
+        for (Order order : found) {
+            alerts.add(new AdminNewOrdersSinceResponse.AdminNewOrderAlert(
+                    order.getId(),
+                    displayNameOf(order),
+                    plainAmountOf(order)));
+        }
+        long lastReturned = found.get(found.size() - 1).getId();
+        return new AdminNewOrdersSinceResponse(lastReturned, alerts);
+    }
+
+    private static String displayNameOf(Order order) {
+        Customer customer = order.getCustomer();
+        if (customer == null) {
+            return "a customer";
+        }
+        String name = customer.getFullName();
+        return (name == null || name.isBlank()) ? "a customer" : name.trim();
+    }
+
+    private static String plainAmountOf(Order order) {
+        BigDecimal total = order.getTotalAmount();
+        if (total == null) {
+            return "0";
+        }
+        if (total.stripTrailingZeros().scale() <= 0) {
+            return total.toBigInteger().toString();
+        }
+        return total.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
     }
 
     /**

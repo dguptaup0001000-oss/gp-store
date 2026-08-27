@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/notifications/push_notification_providers.dart';
 import '../../../core/notifications/voice_announcement_providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -93,6 +94,13 @@ class _AdminVoiceSettingsScreenState extends ConsumerState<AdminVoiceSettingsScr
                 ),
                 SizedBox(height: 10),
                 Text(
+                  'Keep this app open and logged in as admin on the counter phone. '
+                  'New orders ding and are spoken from the app itself, even when '
+                  'Firebase push is not configured on this install.',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                ),
+                SizedBox(height: 10),
+                Text(
                   'Announcements use the phone\'s own volume, and follow silent mode. '
                   'Each order is announced once, even if the notification arrives twice.',
                   style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
@@ -117,6 +125,28 @@ class _AdminVoiceSettingsScreenState extends ConsumerState<AdminVoiceSettingsScr
             const SizedBox(height: 12),
             Text(_statusMessage!, style: const TextStyle(color: AppColors.textSecondary)),
           ],
+          const SizedBox(height: 16),
+          FilledButton.tonalIcon(
+            onPressed: hapticize(() async {
+              final id = DateTime.now().millisecondsSinceEpoch.toString();
+              await ref.read(pushNotificationServiceProvider).alertNewOrder(
+                    title: 'New order received from Test Customer',
+                    body: 'Order amount ₹1',
+                  );
+              await ref.read(voiceAnnouncementServiceProvider).announceNewOrder(
+                    orderId: 'test-$id',
+                    customerName: 'Test Customer',
+                    rupees: '1',
+                  );
+              if (!mounted) return;
+              setState(() {
+                _statusMessage =
+                    'Played a test ding and spoken line. If you heard nothing, turn the media volume up and check notification permission.';
+              });
+            }),
+            icon: const Icon(Icons.volume_up_outlined),
+            label: const Text('Play a test announcement'),
+          ),
         ],
       ),
     );

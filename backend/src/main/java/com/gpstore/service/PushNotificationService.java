@@ -3,6 +3,8 @@ package com.gpstore.service;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
+import com.google.firebase.messaging.AndroidConfig;
+import com.google.firebase.messaging.AndroidNotification;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.FirebaseMessagingException;
 import com.google.firebase.messaging.Message;
@@ -111,7 +113,8 @@ public class PushNotificationService {
         try {
             Message.Builder messageBuilder = Message.builder()
                     .setToken(fcmToken)
-                    .setNotification(Notification.builder().setTitle(title).setBody(body).build());
+                    .setNotification(Notification.builder().setTitle(title).setBody(body).build())
+                    .setAndroidConfig(androidOrderAlertConfig());
 
             if (data != null) {
                 messageBuilder.putAllData(data);
@@ -171,7 +174,8 @@ public class PushNotificationService {
         try {
             Message.Builder messageBuilder = Message.builder()
                     .setTopic(topic)
-                    .setNotification(Notification.builder().setTitle(title).setBody(body).build());
+                    .setNotification(Notification.builder().setTitle(title).setBody(body).build())
+                    .setAndroidConfig(androidOrderAlertConfig());
 
             if (data != null) {
                 messageBuilder.putAllData(data);
@@ -181,5 +185,21 @@ public class PushNotificationService {
         } catch (Exception ex) {
             log.error("Unexpected error sending topic push", ex);
         }
+    }
+
+    /**
+     * Android 8+ ignores FCM sound unless the payload names the same channel
+     * the app created ({@code gp_store_orders}). Without this, a background
+     * NEW_ORDER push is silent even when the shop phone is not on mute.
+     */
+    static AndroidConfig androidOrderAlertConfig() {
+        return AndroidConfig.builder()
+                .setPriority(AndroidConfig.Priority.HIGH)
+                .setNotification(AndroidNotification.builder()
+                        .setChannelId("gp_store_orders")
+                        .setSound("default")
+                        .setDefaultSound(true)
+                        .build())
+                .build();
     }
 }

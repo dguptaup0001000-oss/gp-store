@@ -11,6 +11,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -38,10 +39,26 @@ class AdminAuthorizationIntegrationTest {
 
     @Test
     @WithMockUser(roles = "CUSTOMER")
-    void adminOnlyInventoryEndpointRejectsCustomerRole() throws Exception {
-        mockMvc.perform(get("/api/inventory"))
+    void adminNewOrdersSinceRejectsCustomerRole() throws Exception {
+        mockMvc.perform(get("/api/orders/admin/since"))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void adminNewOrdersSinceRejectsUnauthenticatedRequest() throws Exception {
+        mockMvc.perform(get("/api/orders/admin/since"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void adminNewOrdersSinceAllowsAdminRole() throws Exception {
+        mockMvc.perform(get("/api/orders/admin/since"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.afterId").isNumber())
+                .andExpect(jsonPath("$.orders").isArray());
+    }
+
 
     @Test
     void adminOnlyInventoryEndpointRejectsUnauthenticatedRequest() throws Exception {

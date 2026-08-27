@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../api/api_client.dart';
+import 'push_availability.dart';
 import 'voice_announcement_service.dart';
 import '../logging/app_log.dart';
 
@@ -103,6 +104,20 @@ class PushNotificationService {
     void Function(RemoteMessage message)? onNotificationTap,
   }) async {
     try {
+      await _initLocalNotifications();
+    } catch (e) {
+      appLog('Local notification channel setup failed: $e');
+    }
+
+    if (!PushAvailability.firebaseReady) {
+      appLog(
+          'Firebase is not configured on this build - FCM will not deliver '
+          'order pushes. The admin in-app poll still announces new orders '
+          'while the shop app is open.');
+      return;
+    }
+
+    try {
       final messaging = FirebaseMessaging.instance;
 
       // iOS/web require this explicit prompt; Android 13+ (API 33) also
@@ -168,15 +183,51 @@ class PushNotificationService {
       'gp_store_orders',
       'Order updates',
       description: 'Order status changes and delivery assignments',
-      importance: Importance.high,
+      importance: Importance.max,
       playSound: true,
+      enableVibration: true,
     );
-    await _localNotifications
+    final android = _localNotifications
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
+            AndroidFlutterLocalNotificationsPlugin>();
+    await android?.createNotificationChannel(channel);
+    try {
+      await android?.requestNotificationsPermission();
+    } catch (e) {
+      appLog('POST_NOTIFICATIONS prompt failed: $e');
+    }
 
     _localNotificationsReady = true;
+  }
+
+  /// Ding + banner for a new order, independent of FCM. Used by the admin
+  /// poller so a sideload APK without google-services.json still makes a
+  /// sound on the counter phone.
+  Future<void> alertNewOrder({
+    required String title,
+    required String body,
+  }) async {
+    try {
+      await _initLocalNotifications();
+      const androidDetails = AndroidNotificationDetails(
+        'gp_store_orders',
+        'Order updates',
+        channelDescription: 'Order status changes and delivery assignments',
+        importance: Importance.max,
+        priority: Priority.max,
+        playSound: true,
+        enableVibration: true,
+      );
+      const details = NotificationDetails(android: androidDetails);
+      await _localNotifications.show(
+        DateTime.now().millisecondsSinceEpoch.remainder(1 << 31),
+        title,
+        body,
+        details,
+      );
+    } catch (e) {
+      appLog('Failed to play order alert: $e');
+    }
   }
 
   /// FCM stays silent in the foreground on Android by design - this is what
@@ -192,9 +243,10 @@ class PushNotificationService {
         'gp_store_orders',
         'Order updates',
         channelDescription: 'Order status changes and delivery assignments',
-        importance: Importance.high,
-        priority: Priority.high,
+        importance: Importance.max,
+        priority: Priority.max,
         playSound: true,
+        enableVibration: true,
       );
       const details = NotificationDetails(android: androidDetails);
 

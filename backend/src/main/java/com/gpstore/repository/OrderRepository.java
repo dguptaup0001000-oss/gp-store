@@ -134,4 +134,16 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query(value = "SELECT nextval('order_number_seq')", nativeQuery = true)
     long nextOrderNumberSequenceValue();
 
+    @Query("select coalesce(max(o.id), 0) from Order o")
+    long findMaxId();
+
+    /**
+     * Shop-counter soundbox poll: orders newer than {@code afterId}, oldest
+     * first, customer fetched in the same query so the spoken name does not
+     * N+1. Pageable supplies the LIMIT. Fetch-joining a to-ONE is safe with
+     * Pageable.
+     */
+    @Query("select o from Order o left join fetch o.customer where o.id > :afterId order by o.id asc")
+    List<Order> findNewSince(@Param("afterId") Long afterId, Pageable pageable);
+
 }
