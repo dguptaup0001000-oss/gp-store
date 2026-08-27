@@ -3,12 +3,24 @@
 # workflow has no job that skips on PRs while build-apk is still queued.
 #
 # Download: Actions run → Artifacts → gpstore-production-latest.apk
-# (arm64-v8a customer app, APP_ENV=production, API https://api.gpstore.co.in/v1).
+# (and gp-store-release-apk). arm64-v8a customer app, APP_ENV=production,
+# API https://api.gpstore.co.in/v1.
 #
 # GITHUB_TOKEN merges do not start `on: push` workflows. After a merge,
 # automerge_eligible_pr.py dispatches this workflow on main, and
-# workflow_run also starts it when Deploy Production completes on main.
+# workflow_run also starts it when Deploy Production completes successfully.
 #
+# WHY RUN #420 WAS SKIPPED. build-apk had:
+#   github.event_name != 'workflow_run'
+#   || (head_branch == 'main' && event != 'pull_request')
+# Deploy Production #55 was a pull_request syntax check (28s, success).
+# That fired this workflow_run. The job if saw event == pull_request and
+# skipped in 0s. The Actions UI still showed main@addea27 because a
+# workflow_run listener always runs from the default branch — that is not
+# github.ref of the source deploy and must not be used as a filter.
+# The job now runs for every successful Deploy Production and packages
+# github.event.workflow_run.head_sha. Failed deploys still skip.
+
 # What this gives you, with ZERO extra accounts beyond GitHub itself:
 # - An APK you can download directly from the Actions run's "Artifacts"
 #   section after every push - install it on an Android phone to test.
@@ -48,9 +60,9 @@ on:
         required: false
         default: ''
   # GITHUB_TOKEN merges do not start push workflows. Deploy Production is
-  # dispatched after merge; this watches that (not pull_request syntax runs)
-  # so every production release still gets a downloadable APK even if the
-  # VPS SSH step fails.
+  # dispatched after merge; this watches that so every successful deploy
+  # still gets a downloadable APK. Do not filter on github.ref here:
+  # workflow_run always executes this file from the default branch.
   workflow_run:
     workflows: ["Deploy Production"]
     types: [completed]
@@ -65,20 +77,34 @@ permissions:
 
 jobs:
   build-apk:
-    if: >
-      github.event_name != 'workflow_run'
-      || (github.event.workflow_run.head_branch == 'main'
-          && github.event.workflow_run.event != 'pull_request')
+    # Push, pull_request, and workflow_dispatch always run.
+    # workflow_run runs when the source Deploy Production succeeded.
+    # Do not use github.ref. Do not skip solely because the event is
+    # workflow_run — that is what skipped #420.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
+      - name: Record workflow_run source
+        if: github.event_name == 'workflow_run'
+        working-directory: .
+        run: |
+          set -Eeuo pipefail
+          echo "source_event=${{ github.event.workflow_run.event }}"
+          echo "source_branch=${{ github.event.workflow_run.head_branch }}"
+          echo "source_sha=${{ github.event.workflow_run.head_sha }}"
+          echo "source_conclusion=${{ github.event.workflow_run.conclusion }}"
+
       - name: Resolve commit to package
         id: src
         working-directory: .
         run: |
           set -Eeuo pipefail
+          echo "event_name=${GITHUB_EVENT_NAME}"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
             SHA="${{ github.event.workflow_run.head_sha }}"
           elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.sha }}" ]; then
@@ -453,6 +479,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-production-latest.apk
+          path: frontend/build/app/outputs/flutter-apk/gpstore-production-latest.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload gp-store-release-apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: gp-store-release-apk
           path: frontend/build/app/outputs/flutter-apk/gpstore-production-latest.apk
           if-no-files-found: error
           retention-days: 90
