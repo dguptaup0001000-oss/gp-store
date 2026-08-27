@@ -1,13 +1,16 @@
 # Live backup/restore verification over SSH. Does not deploy or restart
 # production Compose services. Restore target is throwaway container
 # gpstore-restore-drill only.
+# Dispatch-only after the successful drill: a push trigger would dump
+# production again on every commit to this branch.
 name: Backup restore verify
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - cursor/ssh-access-check-8230
+
+concurrency:
+  group: gpstore-prod-ssh
+  cancel-in-progress: false
 
 permissions:
   contents: read

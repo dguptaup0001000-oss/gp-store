@@ -1,11 +1,15 @@
 # Harmless SSH proof only. Does not deploy, restore, or change the VPS.
+# Dispatch-only: a push trigger raced the backup drill and timed out on
+# a concurrent TCP dial. Re-running on every commit would SSH production
+# again without an explicit operator request.
 name: SSH access check
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - cursor/ssh-access-check-8230
+
+concurrency:
+  group: gpstore-prod-ssh
+  cancel-in-progress: false
 
 permissions:
   contents: read
