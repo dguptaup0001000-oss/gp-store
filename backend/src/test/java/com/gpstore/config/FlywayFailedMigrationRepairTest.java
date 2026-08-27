@@ -99,6 +99,65 @@ class FlywayFailedMigrationRepairTest {
     }
 
     @Test
+    @DisplayName("when V27 was never recorded (Postgres rolled back the failed row), insert a skip row")
+    void insertsSkipRowWhenV27NeverRecorded() throws Exception {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("DROP TABLE IF EXISTS " + TABLE);
+            statement.execute("""
+                    CREATE TABLE %s (
+                        installed_rank INTEGER NOT NULL PRIMARY KEY,
+                        version VARCHAR(50),
+                        description VARCHAR(200) NOT NULL,
+                        type VARCHAR(20) NOT NULL,
+                        script VARCHAR(1000) NOT NULL,
+                        checksum INTEGER,
+                        installed_by VARCHAR(100) NOT NULL,
+                        installed_on TIMESTAMP NOT NULL DEFAULT now(),
+                        execution_time INTEGER NOT NULL,
+                        success BOOLEAN NOT NULL
+                    )
+                    """.formatted(TABLE));
+            statement.execute("""
+                    INSERT INTO %s
+                        (installed_rank, version, description, type, script, checksum,
+                         installed_by, execution_time, success)
+                    VALUES
+                        (26, '26', 'catalog hotpath indexes', 'SQL',
+                         'V26__catalog_hotpath_indexes.sql', 1, 'test', 5, true)
+                    """.formatted(TABLE));
+        }
+
+        Flyway flyway = Flyway.configure()
+                .dataSource(dataSource)
+                .table(TABLE)
+                .load();
+        FlywayFailedMigrationRepair.repair(flyway, dataSource);
+
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement ps = connection.prepareStatement(
+                     "SELECT version, success, checksum, script FROM " + TABLE
+                             + " WHERE version = '27'")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "pending V27 must be recorded as success so Flyway will not execute it");
+                assertTrue(rs.getBoolean("success"));
+                assertEquals(-1932722443, rs.getInt("checksum"));
+                assertEquals("V27__search_keyword_trigram_indexes.sql", rs.getString("script"));
+            }
+        }
+
+        FlywayFailedMigrationRepair.repair(flyway, dataSource);
+
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT COUNT(*) FROM " + TABLE + " WHERE version = '27'")) {
+                assertTrue(rs.next());
+                assertEquals(1, rs.getInt(1), "repair must be idempotent");
+            }
+            statement.execute("DROP TABLE IF EXISTS " + TABLE);
+        }
+    }
+
+    @Test
     @DisplayName("repair is a no-op when the history table does not exist yet")
     void missingHistoryTableIsIgnored() {
         Flyway flyway = Flyway.configure()
@@ -116,5 +175,6 @@ class FlywayFailedMigrationRepairTest {
                 FlywayFailedMigrationRepair.quoteIdent("flyway_schema_history"));
         assertEquals("public.flyway_schema_history",
                 FlywayFailedMigrationRepair.qualify("public", "flyway_schema_history"));
+        assertEquals(-1932722443, FlywayFailedMigrationRepair.v27Checksum());
     }
 }
