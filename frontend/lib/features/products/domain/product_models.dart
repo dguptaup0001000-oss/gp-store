@@ -150,6 +150,25 @@ enum DiscountType {
   flat,
   @JsonValue('PERCENTAGE')
   percentage,
+  @JsonValue('DELIVERY_FLAT')
+  deliveryFlat,
+}
+
+extension DiscountTypeLabel on DiscountType {
+  String get apiName => switch (this) {
+        DiscountType.flat => 'FLAT',
+        DiscountType.percentage => 'PERCENTAGE',
+        DiscountType.deliveryFlat => 'DELIVERY_FLAT',
+      };
+
+  String offerLabel(double value) {
+    final amount = value.toStringAsFixed(0);
+    return switch (this) {
+      DiscountType.percentage => '$amount% OFF',
+      DiscountType.flat => '₹$amount OFF',
+      DiscountType.deliveryFlat => 'Up to ₹$amount off delivery',
+    };
+  }
 }
 
 @freezed

@@ -281,6 +281,9 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
                 _billRow(
                     'Discount${order.appliedCouponCode != null ? ' (${order.appliedCouponCode})' : ''}',
                     '-₹${order.discountAmount!.toStringAsFixed(0)}'),
+              if ((order.discountAmount == null || order.discountAmount! <= 0) &&
+                  order.appliedCouponCode != null)
+                _billRow('Coupon', order.appliedCouponCode!),
               if (order.deliveryFee != null)
                 _billRow(
                     'Delivery Fee',

@@ -205,13 +205,6 @@ public class OrderService {
 
         BigDecimal discountAmount = BigDecimal.ZERO;
         String couponError = null;
-        if (couponCode != null && !couponCode.isBlank()) {
-            try {
-                discountAmount = couponService.previewDiscount(couponCode, subtotal);
-            } catch (Exception ex) {
-                couponError = ex.getMessage();
-            }
-        }
 
         boolean deliverable = deliveryEstimateService.isWithinServiceableRadius(
                 address.getLatitude(), address.getLongitude());
@@ -233,9 +226,22 @@ public class OrderService {
             estimatedMinutes = deliveryEstimateService.estimateMinutes(address.getLatitude(), address.getLongitude());
         }
 
+        if (couponCode != null && !couponCode.isBlank()) {
+            try {
+                AppliedCoupon applied = couponService.preview(couponCode, subtotal, deliveryFee);
+                discountAmount = applied.merchandiseDiscount();
+                deliveryFee = applied.deliveryFeeDue(deliveryFee);
+                if (deliverable && deliveryFee.signum() == 0) {
+                    freeDeliveryApplied = true;
+                }
+            } catch (Exception ex) {
+                couponError = ex.getMessage();
+            }
+        }
+
         // finalCharge is already zero when delivery is free - the quote applies
         // the rule, rather than the caller re-deciding it and risking the two
-        // disagreeing.
+        // disagreeing. A DELIVERY_FLAT coupon may still reduce a non-zero quote.
         BigDecimal effectiveDeliveryFee = deliveryFee;
         BigDecimal estimatedTotal = subtotal.subtract(discountAmount).add(effectiveDeliveryFee);
 
@@ -520,22 +526,26 @@ public class OrderService {
         // Coupon is validated and redeemed (usage count incremented, under a row
         // lock) here, inside the same transaction as the rest of checkout - so a
         // failure anywhere else in placeOrder rolls the redemption back too.
-        BigDecimal discountAmount = BigDecimal.ZERO;
-        if (request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
-            discountAmount = couponService.redeem(request.getCouponCode(), totalAmount);
-            order.setAppliedCouponCode(request.getCouponCode().toUpperCase());
-            order.setDiscountAmount(discountAmount);
-        }
-
-        order.setTotalAmount(totalAmount.subtract(discountAmount));
-
-        // Delivery fee: distance-based, with a profit-gated free-delivery rule.
-        // We already know the address has valid coordinates - the radius check
-        // above would have thrown otherwise.
+        // Delivery is quoted first so a DELIVERY_FLAT coupon can reduce the
+        // fee the customer actually pays without touching merchandise.
         com.gpstore.pricing.DeliveryQuote quote =
                 deliveryPricingService.quoteForCart(cartItems, address);
-        BigDecimal deliveryFee = quote.finalCharge();
+        BigDecimal quotedDeliveryFee = quote.finalCharge();
         boolean freeDeliveryApplied = quote.freeDelivery();
+
+        AppliedCoupon applied = AppliedCoupon.none();
+        if (request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
+            applied = couponService.redeem(request.getCouponCode(), totalAmount, quotedDeliveryFee);
+            order.setAppliedCouponCode(request.getCouponCode().toUpperCase());
+            order.setDiscountAmount(applied.merchandiseDiscount());
+        }
+
+        BigDecimal deliveryFee = applied.deliveryFeeDue(quotedDeliveryFee);
+        if (deliveryFee.signum() == 0) {
+            freeDeliveryApplied = true;
+        }
+
+        order.setTotalAmount(totalAmount.subtract(applied.merchandiseDiscount()));
 
         order.setDeliveryFee(deliveryFee);
         order.setFreeDeliveryApplied(freeDeliveryApplied);

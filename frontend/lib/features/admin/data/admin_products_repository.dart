@@ -415,7 +415,7 @@ class AdminProductsRepository {
   }) async {
     await apiClient.dio.post('/api/coupons', data: {
       'couponCode': couponCode.toUpperCase(),
-      'discountType': discountType == DiscountType.flat ? 'FLAT' : 'PERCENTAGE',
+      'discountType': discountType.apiName,
       'discountValue': discountValue,
       'maxDiscountAmount': maxDiscountAmount,
       'minimumOrderAmount': minimumOrderAmount,
@@ -439,7 +439,7 @@ class AdminProductsRepository {
     required bool active,
   }) async {
     await apiClient.dio.put('/api/coupons/$couponId', data: {
-      'discountType': discountType == DiscountType.flat ? 'FLAT' : 'PERCENTAGE',
+      'discountType': discountType.apiName,
       'discountValue': discountValue,
       'maxDiscountAmount': maxDiscountAmount,
       'minimumOrderAmount': minimumOrderAmount,

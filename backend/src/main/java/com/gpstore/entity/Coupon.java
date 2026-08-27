@@ -26,7 +26,8 @@ public class Coupon implements Serializable {
     @Enumerated(EnumType.STRING)
     private DiscountType discountType;
 
-    // For FLAT: rupees off. For PERCENTAGE: whole-number percent (e.g. 10 = 10%).
+    // For FLAT: rupees off merchandise. For PERCENTAGE: whole-number percent
+    // (e.g. 10 = 10%). For DELIVERY_FLAT: maximum rupees taken off delivery.
     private BigDecimal discountValue;
 
     // Only used for PERCENTAGE - caps the discount so "50% off" can't blow out on a big cart.

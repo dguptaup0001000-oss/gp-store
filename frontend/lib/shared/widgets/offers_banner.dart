@@ -90,9 +90,7 @@ class _OffersBannerState extends State<OffersBanner> {
             onPageChanged: (index) => setState(() => _currentPage = index),
             itemBuilder: (context, index) {
               final offer = widget.offers[index];
-              final label = offer.discountType == DiscountType.percentage
-                  ? '${offer.discountValue.toStringAsFixed(0)}% OFF'
-                  : '₹${offer.discountValue.toStringAsFixed(0)} OFF';
+              final label = offer.discountType.offerLabel(offer.discountValue);
 
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),

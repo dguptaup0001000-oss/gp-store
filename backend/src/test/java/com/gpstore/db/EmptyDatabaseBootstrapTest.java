@@ -64,6 +64,10 @@ class EmptyDatabaseBootstrapTest {
                 "SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'idx_products_search_keywords_trgm'",
                 Integer.class);
         assertEquals(1, searchKwIdx, "V27/V28 create idx_products_search_keywords_trgm");
+        Integer freeDel = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM coupons WHERE coupon_code = 'FREEDEL10' AND discount_type = 'DELIVERY_FLAT'",
+                Integer.class);
+        assertEquals(1, freeDel, "V29 seeds FREEDEL10 as a delivery coupon");
         assertTrue(sequenceExists("order_number_seq"), "V6 creates order_number_seq");
 
         Integer trigram = jdbc.queryForObject(

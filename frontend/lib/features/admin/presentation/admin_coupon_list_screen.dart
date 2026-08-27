@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../products/domain/product_models.dart';
 import '../domain/admin_coupon_models.dart';
 import 'admin_coupon_form_dialog.dart';
 import 'admin_providers.dart';
@@ -110,9 +111,7 @@ class _CouponTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final label = coupon.discountType.name == 'percentage'
-        ? '${coupon.discountValue.toStringAsFixed(0)}% OFF'
-        : '₹${coupon.discountValue.toStringAsFixed(0)} OFF';
+    final label = coupon.discountType.offerLabel(coupon.discountValue);
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
