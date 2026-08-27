@@ -38,6 +38,10 @@ const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8081/v1').replace(/\/$/, '
 const VUS = Number(__ENV.VUS || 10);
 const HOLD_TIME = __ENV.HOLD_TIME || '20s';
 
+if (/gpstore\.co\.in/i.test(BASE_URL) || BASE_URL.indexOf('187.127.173.192') !== -1) {
+  throw new Error('Refusing to send staged capacity load at production');
+}
+
 const status502 = new Counter('status_502');
 const status503Shed = new Counter('status_503_shed');
 const status503Unexpected = new Counter('status_503_unexpected');

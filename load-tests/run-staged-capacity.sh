@@ -8,6 +8,13 @@ BASE_URL="${BASE_URL:-http://localhost:8081/v1}"
 HOLD_TIME="${HOLD_TIME:-20s}"
 STAGES="${STAGES:-10 25 50 100}"
 
+case "$BASE_URL" in
+  *api.gpstore.co.in*|*gpstore.co.in*|*187.127.173.192*)
+    echo "Refusing to send staged capacity load at production." >&2
+    exit 1
+    ;;
+esac
+
 if ! command -v k6 >/dev/null 2>&1; then
   echo "k6 is not installed. Install from https://k6.io/docs/get-started/installation/" >&2
   exit 1
