@@ -74,6 +74,9 @@ class CorsIdempotencyPreflightTest {
         mockMvc.perform(get("/api/health"))
                 .andExpect(status().isOk())
                 .andExpect(content().string("GP-STORE Backend Running Successfully!"));
+        mockMvc.perform(get("/api/health/live"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("live"));
     }
 
     @Test

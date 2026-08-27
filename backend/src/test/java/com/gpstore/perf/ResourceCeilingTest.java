@@ -225,5 +225,15 @@ class ResourceCeilingTest {
         assertTrue(hikari >= 10 && hikari <= 32,
                 "Hikari default " + hikari + " is outside 10–32. Do not size the pool to 500 "
                         + "because a load test asked for 10k VUs; Postgres on this VPS cannot.");
+        assertTrue(yaml.contains("TOMCAT_LIVE_PORT: \"8082\""),
+                "Production must bind the dedicated live-health connector. Without it, "
+                        + "/api/health/live shares the 80 catalog workers and times out under load.");
+        assertTrue(yaml.contains("cpus: \"1.00\""),
+                "Traefik CPU limit must be 1.00 so TLS handshakes are not capped at 0.60 "
+                        + "while the backend heap stays idle.");
+        assertTrue(properties().contains("server.http2.enabled=true"),
+                "Tomcat HTTP/2 upgrade should stay on; Traefik already speaks HTTP/2 to clients.");
+        assertEquals("0", defaultOf(properties(), "server.tomcat.live-port").trim(),
+                "live-port default must be 0 so tests do not bind 8082");
     }
 }

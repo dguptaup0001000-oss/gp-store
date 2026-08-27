@@ -1,6 +1,7 @@
 package com.gpstore.controller;
 
 import com.gpstore.entity.Product;
+import com.gpstore.exception.BadRequestException;
 import com.gpstore.service.ProductService;
 import com.gpstore.dto.response.ProductResponse;
 import org.springframework.data.domain.Page;
@@ -81,7 +82,11 @@ public class ProductController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 50));
+        if (keyword == null || keyword.isBlank()) {
+            throw new BadRequestException("Search keyword is required");
+        }
+        Pageable pageable = PageRequest.of(
+                Math.max(page, 0), Math.min(Math.max(size, 1), 50));
         return productService.searchInstant(keyword, pageable);
     }
 

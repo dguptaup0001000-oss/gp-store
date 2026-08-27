@@ -59,7 +59,13 @@ services:
       - --entrypoints.websecure.address=:443
       # HTTP/2 is the Traefik TLS default. Raise the stream cap so one
       # browser/app connection is not artificially limited to 128.
-      - --entrypoints.websecure.http2.maxConcurrentStreams=256
+      - --entrypoints.websecure.http2.maxConcurrentStreams=512
+      # Bound how long a client can occupy a TLS slot after Traefik has
+      # accepted the handshake. Unbounded idle was fine at tens of users
+      # and expensive at thousands of keep-alive VUs.
+      - --entrypoints.websecure.transport.respondingTimeouts.readTimeout=60s
+      - --entrypoints.websecure.transport.respondingTimeouts.writeTimeout=60s
+      - --entrypoints.websecure.transport.respondingTimeouts.idleTimeout=90s
       - --certificatesresolvers.le.acme.httpchallenge=true
       - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
       - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
@@ -67,7 +73,7 @@ services:
       # Pool HTTP/1.1 connections to Tomcat. Default Go http.Transport is
       # 2 idle conns per host, which forces extra handshakes under browse
       # load. 256 matches a busy keep-alive set without opening 10k.
-      - --serversTransport.maxIdleConnsPerHost=256
+      - --serversTransport.maxIdleConnsPerHost=512
       - --serversTransport.forwardingTimeouts.dialTimeout=5s
       - --serversTransport.forwardingTimeouts.responseHeaderTimeout=60s
       - --serversTransport.forwardingTimeouts.idleConnTimeout=90s
@@ -94,8 +100,12 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+    # TLS termination was the 2,000-VU bottleneck (http_req_blocked p95
+    # 1s, max 8s) while the backend heap and Hikari stayed idle. 1.00 lets
+    # Traefik use a full core for handshakes; these are limits, not
+    # reservations, so Postgres can still burst when catalog misses.
     mem_limit: 384m
-    cpus: "0.60"
+    cpus: "1.00"
     ulimits:
       nofile:
         soft: 65535
@@ -255,10 +265,11 @@ services:
       CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
       OPS_BACKUP_VOLUME_PATH: /backups
       JVM_ACTIVE_PROCESSORS: "2"
-      JVM_GC: "-XX:+UseG1GC"
+      JVM_GC: "-XX:+UseG1GC -XX:MaxGCPauseMillis=50"
       # 35% of 2560m ≈ 896 MB heap. Direct buffers raised with maxConnections.
       JVM_MAX_RAM_PERCENT: "35"
       JVM_MAX_DIRECT: "64m"
+      TOMCAT_LIVE_PORT: "8082"
     depends_on:
       postgres:
         condition: service_healthy
@@ -270,9 +281,11 @@ services:
       # Read-only so /api/admin/ops/status can report backup-volume disk.
       - gpstore_pg_backups:/backups:ro
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/v1/actuator/health"]
-      interval: 30s
-      timeout: 5s
+      # Live connector, not the 80-thread catalog pool. Actuator/health on
+      # 8081 still exists; Docker must not queue behind catalog GETs.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8082/v1/api/health/live"]
+      interval: 10s
+      timeout: 2s
       retries: 5
       start_period: 90s
     labels:
@@ -280,10 +293,20 @@ services:
       - traefik.http.routers.gpstore.rule=Host(`${API_DOMAIN:-api.gpstore.co.in}`)
       - traefik.http.routers.gpstore.entrypoints=websecure
       - traefik.http.routers.gpstore.tls.certresolver=le
+      - traefik.http.routers.gpstore.priority=10
       - traefik.http.routers.gpstore.middlewares=gpstore-compress
       - traefik.http.middlewares.gpstore-compress.compress=true
       - traefik.http.services.gpstore.loadbalancer.server.port=8081
       - traefik.http.services.gpstore.loadbalancer.server.scheme=http
+      # Liveness on the dedicated connector. Higher priority than the
+      # catch-all Host rule. No compress middleware: the body is tiny.
+      - traefik.http.routers.gpstore-live.rule=Host(`${API_DOMAIN:-api.gpstore.co.in}`) && PathPrefix(`/v1/api/health/live`)
+      - traefik.http.routers.gpstore-live.entrypoints=websecure
+      - traefik.http.routers.gpstore-live.tls.certresolver=le
+      - traefik.http.routers.gpstore-live.service=gpstore-live
+      - traefik.http.routers.gpstore-live.priority=100
+      - traefik.http.services.gpstore-live.loadbalancer.server.port=8082
+      - traefik.http.services.gpstore-live.loadbalancer.server.scheme=http
     stop_grace_period: 40s
     # Host is 2 vCPU / 8 GB. Limits (not reservations) so idle sidecars do
     # not steal quota. 1.70 lets the JVM use the cores Postgres is not

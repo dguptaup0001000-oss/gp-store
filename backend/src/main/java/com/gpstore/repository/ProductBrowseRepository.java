@@ -278,7 +278,9 @@ public class ProductBrowseRepository {
             return result;
         } catch (RuntimeException ex) {
             log.warn("Trigram search failed; falling back to ILIKE ranking: {}", ex.toString());
-            trigramUsable = false;
+            if (looksLikeMissingTrigram(ex)) {
+                trigramUsable = false;
+            }
             return searchInstantIlike(keyword, likePattern, page, size);
         }
     }

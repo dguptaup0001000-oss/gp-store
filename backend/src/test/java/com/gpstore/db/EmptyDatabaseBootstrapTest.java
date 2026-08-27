@@ -60,6 +60,10 @@ class EmptyDatabaseBootstrapTest {
                 "SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'idx_product_variants_sellable'",
                 Integer.class);
         assertEquals(1, sellableIdx, "V26 creates idx_product_variants_sellable");
+        Integer searchKwIdx = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'idx_products_search_keywords_trgm'",
+                Integer.class);
+        assertEquals(1, searchKwIdx, "V27 creates idx_products_search_keywords_trgm");
         assertTrue(sequenceExists("order_number_seq"), "V6 creates order_number_seq");
 
         Integer trigram = jdbc.queryForObject(

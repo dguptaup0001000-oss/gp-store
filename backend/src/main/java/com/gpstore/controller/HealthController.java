@@ -21,8 +21,12 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Liveness vs readiness.
  *
- * {@code /api/health} answers "is the JVM serving HTTP". Load balancers can
- * use it after a crash. It does not prove the database is reachable.
+ * {@code /api/health/live} answers "is this JVM accepting HTTP" and does
+ * no I/O. Production routes it to a dedicated Tomcat connector so catalog
+ * saturation cannot make liveness time out.
+ *
+ * {@code /api/health} is the original string probe, kept so existing
+ * monitors do not 404. Prefer {@code /live} for new checks.
  *
  * {@code /api/health/ready} must not take a pooled connection on every
  * probe. A 5,000-VU script that hits ready once per iteration used to
@@ -45,24 +49,45 @@ public class HealthController {
 
     static final long READY_OK_CACHE_MS = 2_000;
 
+    private static final Map<String, String> LIVE = Map.of("status", "live");
+
     private final DataSource dataSource;
     private final StringRedisTemplate redisTemplate;
+    private final com.gpstore.config.TomcatRequestCapacity tomcatCapacity;
+    private final com.gpstore.config.CacheHitStats cacheHitStats;
     private final AtomicLong lastReadyOkAt = new AtomicLong(0);
 
     public HealthController(DataSource dataSource) {
-        this(dataSource, null);
+        this(dataSource, null, null, null);
+    }
+
+    public HealthController(DataSource dataSource, StringRedisTemplate redisTemplate) {
+        this(dataSource, redisTemplate, null, null);
     }
 
     @Autowired
     public HealthController(DataSource dataSource,
-                            @Autowired(required = false) StringRedisTemplate redisTemplate) {
+                            @Autowired(required = false) StringRedisTemplate redisTemplate,
+                            @Autowired(required = false) com.gpstore.config.TomcatRequestCapacity tomcatCapacity,
+                            @Autowired(required = false) com.gpstore.config.CacheHitStats cacheHitStats) {
         this.dataSource = dataSource;
         this.redisTemplate = redisTemplate;
+        this.tomcatCapacity = tomcatCapacity;
+        this.cacheHitStats = cacheHitStats;
     }
 
     @GetMapping("/api/health")
     public String health() {
         return "GP-STORE Backend Running Successfully!";
+    }
+
+    /**
+     * Liveness. No database, no Redis, no cache, no allocation beyond the
+     * constant map. Docker HEALTHCHECK and Traefik should call this.
+     */
+    @GetMapping("/api/health/live")
+    public Map<String, String> live() {
+        return LIVE;
     }
 
     /**
@@ -89,6 +114,12 @@ public class HealthController {
                 body.put("hikariWaiting", mx.getThreadsAwaitingConnection());
                 body.put("hikariTotal", mx.getTotalConnections());
             }
+        }
+        if (tomcatCapacity != null) {
+            body.putAll(tomcatCapacity.snapshot());
+        }
+        if (cacheHitStats != null) {
+            body.putAll(cacheHitStats.snapshot());
         }
         return body;
     }
