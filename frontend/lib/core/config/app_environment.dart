@@ -57,14 +57,44 @@ enum AppEnvironment {
     return normalized.contains('api.gpstore.co.in');
   }
 
+  /// Production APKs must not ship a retired host.
+  ///
+  /// GitHub `vars.API_BASE_URL` was still `https://gp-store.onrender.com/v1`
+  /// after the Hostinger cutover. CI baked that into `--dart-define`, Render
+  /// answers 404, and login showed "Request failed (HTTP 404)".
+  static String canonicalizeProductionApiUrl(String? override) {
+    var raw = (override ?? '').trim();
+    if (raw.endsWith('/')) {
+      raw = raw.substring(0, raw.length - 1);
+    }
+    if (raw.isEmpty) return productionApiBaseUrl;
+    final lowered = raw.toLowerCase();
+    const retired = [
+      'onrender.com',
+      'localhost',
+      '127.0.0.1',
+      '10.0.2.2',
+      'railway.app',
+    ];
+    if (retired.any(lowered.contains)) return productionApiBaseUrl;
+    if (!lowered.startsWith('https://')) return productionApiBaseUrl;
+    if (!lowered.endsWith('/v1')) return productionApiBaseUrl;
+    if (!isProductionApiUrl(lowered)) return productionApiBaseUrl;
+    return raw;
+  }
+
   /// Where this build's API lives.
   ///
   /// Override with `--dart-define=API_BASE_URL=https://your-host/v1`.
+  /// Production ignores retired hosts (Render) and URLs that drop `/v1`.
   ///
   /// Staging has no default on purpose: a missing override used to silently
   /// target the live shop. A staging build must pass a non-production URL.
   String get baseUrl {
     const override = String.fromEnvironment('API_BASE_URL');
+    if (this == AppEnvironment.production) {
+      return canonicalizeProductionApiUrl(override);
+    }
     if (override.isNotEmpty) {
       if (this == AppEnvironment.staging && isProductionApiUrl(override)) {
         throw StateError(

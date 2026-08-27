@@ -51,17 +51,22 @@ jobs:
       - name: Run Flutter tests
         run: flutter test
 
+      - name: Resolve production API URL
+        working-directory: .
+        env:
+          CANDIDATE_API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: python3 .github/scripts/resolve_api_base_url.py --github-env
+
       - name: Build web
         run: |
-          API_URL="${{ vars.API_BASE_URL }}"
-          if [ -z "$API_URL" ]; then
-            API_URL="https://api.gpstore.co.in/v1"
-            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
+          if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
+            echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
+            exit 1
           fi
           flutter build web --release \
             --base-href "/${{ github.event.repository.name }}/" \
             --dart-define=APP_ENV=production \
-            --dart-define=API_BASE_URL="$API_URL"
+            --dart-define=API_BASE_URL="$API_BASE_URL"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

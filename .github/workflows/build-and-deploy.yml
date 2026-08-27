@@ -186,6 +186,16 @@ jobs:
         run: |
           python3 tool/verify_apk_release.py --self-test
           python3 tool/report_apk_artifacts.py --self-test
+          python3 ../.github/scripts/resolve_api_base_url.py --self-test
+
+      - name: Resolve production API URL
+        # vars.API_BASE_URL is still the retired Render host. Using it as
+        # --dart-define makes every login HTTP 404. Always write the Hostinger
+        # URL to GITHUB_ENV unless the var is already the canonical /v1 host.
+        working-directory: .
+        env:
+          CANDIDATE_API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: python3 .github/scripts/resolve_api_base_url.py --github-env
 
       - name: Detect Play upload keystore
         # Analyze + flutter test above already ran. Missing Play secrets must
@@ -282,16 +292,15 @@ jobs:
         # worker artifact; build it locally with android-x64 if needed.
         run: |
           chmod +x tool/with_worker_pubspec.sh
-          API_URL="${{ vars.API_BASE_URL }}"
-          if [ -z "$API_URL" ]; then
-            API_URL="https://api.gpstore.co.in/v1"
-            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
+          if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
+            echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
+            exit 1
           fi
           ./tool/with_worker_pubspec.sh flutter build apk --release --split-per-abi \
             --target-platform android-arm,android-arm64 \
             -t lib/worker_main.dart \
             --dart-define=APP_ENV=production \
-            --dart-define=API_BASE_URL="$API_URL" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
           cd build/app/outputs/flutter-apk
           if [ ! -f app-arm64-v8a-release.apk ] || [ ! -f app-armeabi-v7a-release.apk ]; then
@@ -312,16 +321,15 @@ jobs:
         # customer APK or installing one replaces the other.
         run: |
           chmod +x tool/with_worker_pubspec.sh
-          API_URL="${{ vars.API_BASE_URL }}"
-          if [ -z "$API_URL" ]; then
-            API_URL="https://api.gpstore.co.in/v1"
-            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
+          if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
+            echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
+            exit 1
           fi
           ./tool/with_worker_pubspec.sh flutter build appbundle --release \
             --target-platform android-arm,android-arm64 \
             -t lib/worker_main.dart \
             --dart-define=APP_ENV=production \
-            --dart-define=API_BASE_URL="$API_URL" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
           mkdir -p build/app/outputs/bundle/worker
           mv build/app/outputs/bundle/release/app-release.aab \
@@ -361,14 +369,13 @@ jobs:
         # is emulators; Play's AAB (next step) still contains every ABI and
         # serves one per device. Sideload artifacts are arm only.
         run: |
-          API_URL="${{ vars.API_BASE_URL }}"
-          if [ -z "$API_URL" ]; then
-            API_URL="https://api.gpstore.co.in/v1"
-            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
+          if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
+            echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
+            exit 1
           fi
           flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
             --dart-define=APP_ENV=production \
-            --dart-define=API_BASE_URL="$API_URL" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
 
       - name: Name customer APKs and report actual sizes
@@ -425,14 +432,13 @@ jobs:
         # Skipped when the upload keystore is missing so CI cannot upload a
         # debug-signed AAB as gpstore-release-aab.
         run: |
-          API_URL="${{ vars.API_BASE_URL }}"
-          if [ -z "$API_URL" ]; then
-            API_URL="https://api.gpstore.co.in/v1"
-            echo "::warning::vars.API_BASE_URL is unset; using $API_URL"
+          if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
+            echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
+            exit 1
           fi
           flutter build appbundle --release \
             --dart-define=APP_ENV=production \
-            --dart-define=API_BASE_URL="$API_URL" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
 
       - name: Upload customer+admin ARM64 APK
