@@ -173,7 +173,11 @@ class _AdminCouponFormDialogState extends ConsumerState<AdminCouponFormDialog> {
                 decoration: const InputDecoration(labelText: 'Discount type'),
                 items: const [
                   DropdownMenuItem(value: DiscountType.percentage, child: Text('Percentage off')),
-                  DropdownMenuItem(value: DiscountType.flat, child: Text('Flat amount off')),
+                  DropdownMenuItem(value: DiscountType.flat, child: Text('Flat amount off cart')),
+                  DropdownMenuItem(
+                    value: DiscountType.deliveryFlat,
+                    child: Text('Up to ₹ off delivery'),
+                  ),
                 ],
                 onChanged: hapticizeValue((value) => setState(() => _discountType = value!)),
               ),
@@ -182,7 +186,14 @@ class _AdminCouponFormDialogState extends ConsumerState<AdminCouponFormDialog> {
                 controller: _valueController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
-                  labelText: _discountType == DiscountType.percentage ? 'Discount (%)' : 'Discount (₹)',
+                  labelText: _discountType == DiscountType.percentage
+                      ? 'Discount (%)'
+                      : _discountType == DiscountType.deliveryFlat
+                          ? 'Max delivery discount (₹)'
+                          : 'Discount (₹)',
+                  helperText: _discountType == DiscountType.deliveryFlat
+                      ? 'Example: 10 makes a ₹10 fee free, and a ₹20 fee become ₹10'
+                      : null,
                 ),
                 validator: (v) => (v == null || double.tryParse(v) == null) ? 'Required' : null,
               ),

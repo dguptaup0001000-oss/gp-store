@@ -78,7 +78,17 @@ class ProductsRepository {
 
   Future<List<Coupon>> getActiveOffers() async {
     final response = await apiClient.dio.get('/api/coupons/active');
-    return (response.data as List).map((e) => Coupon.fromJson(e as Map<String, dynamic>)).toList();
+    return (response.data as List)
+        .whereType<Map>()
+        .map((e) {
+          try {
+            return Coupon.fromJson(Map<String, dynamic>.from(e));
+          } catch (_) {
+            return null;
+          }
+        })
+        .whereType<Coupon>()
+        .toList();
   }
 
   Future<List<Product>> searchInstant(String keyword, {int page = 0, int size = 20}) async {

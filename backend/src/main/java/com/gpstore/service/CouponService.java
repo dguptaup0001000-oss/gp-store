@@ -104,10 +104,20 @@ public class CouponService {
 
     /** Read-only check used to preview a discount before checkout - does not consume a usage slot. */
     public BigDecimal previewDiscount(String couponCode, BigDecimal orderAmount) {
+        return preview(couponCode, orderAmount, BigDecimal.ZERO).merchandiseDiscount();
+    }
+
+    /**
+     * Preview merchandise and/or delivery reduction. {@code deliveryFee} is
+     * the quoted charge before this coupon; DELIVERY_FLAT knocks up to
+     * {@code discountValue} off that number and leaves the cart subtotal
+     * alone.
+     */
+    public AppliedCoupon preview(String couponCode, BigDecimal merchandiseSubtotal, BigDecimal deliveryFee) {
         Coupon coupon = couponRepository.findByCouponCodeIgnoreCase(couponCode)
                 .orElseThrow(() -> new BadRequestException(GENERIC_INVALID_COUPON));
-        validate(coupon, orderAmount);
-        return calculateDiscount(coupon, orderAmount);
+        validate(coupon, merchandiseSubtotal);
+        return calculate(coupon, merchandiseSubtotal, deliveryFee);
     }
 
     /**
@@ -118,17 +128,23 @@ public class CouponService {
     @CacheEvict(value = "activeCoupons", allEntries = true)
     @Transactional
     public BigDecimal redeem(String couponCode, BigDecimal orderAmount) {
+        return redeem(couponCode, orderAmount, BigDecimal.ZERO).merchandiseDiscount();
+    }
+
+    @CacheEvict(value = "activeCoupons", allEntries = true)
+    @Transactional
+    public AppliedCoupon redeem(String couponCode, BigDecimal merchandiseSubtotal, BigDecimal deliveryFee) {
         Coupon coupon = couponRepository.findByCouponCodeForUpdate(couponCode)
                 .orElseThrow(() -> new BadRequestException(GENERIC_INVALID_COUPON));
 
-        validate(coupon, orderAmount);
+        validate(coupon, merchandiseSubtotal);
 
-        BigDecimal discount = calculateDiscount(coupon, orderAmount);
+        AppliedCoupon applied = calculate(coupon, merchandiseSubtotal, deliveryFee);
 
         coupon.setUsedCount(coupon.getUsedCount() == null ? 1 : coupon.getUsedCount() + 1);
         couponRepository.save(coupon);
 
-        return discount;
+        return applied;
     }
 
     private void validate(Coupon coupon, BigDecimal orderAmount) {
@@ -155,13 +171,26 @@ public class CouponService {
         }
     }
 
-    private BigDecimal calculateDiscount(Coupon coupon, BigDecimal orderAmount) {
-        BigDecimal discount;
+    private AppliedCoupon calculate(Coupon coupon, BigDecimal merchandiseSubtotal, BigDecimal deliveryFee) {
+        BigDecimal subtotal = merchandiseSubtotal == null ? BigDecimal.ZERO : merchandiseSubtotal;
+        BigDecimal quotedDelivery = deliveryFee == null ? BigDecimal.ZERO : deliveryFee;
+        if (quotedDelivery.signum() < 0) {
+            quotedDelivery = BigDecimal.ZERO;
+        }
 
+        if (coupon.getDiscountType() == DiscountType.DELIVERY_FLAT) {
+            BigDecimal cap = coupon.getDiscountValue() == null ? BigDecimal.ZERO : coupon.getDiscountValue();
+            if (cap.signum() < 0) {
+                cap = BigDecimal.ZERO;
+            }
+            return new AppliedCoupon(BigDecimal.ZERO, cap.min(quotedDelivery));
+        }
+
+        BigDecimal discount;
         if (coupon.getDiscountType() == DiscountType.FLAT) {
             discount = coupon.getDiscountValue();
         } else {
-            discount = orderAmount
+            discount = subtotal
                     .multiply(coupon.getDiscountValue())
                     .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
 
@@ -171,11 +200,11 @@ public class CouponService {
             }
         }
 
-        // Never discount more than the order is worth.
-        if (discount.compareTo(orderAmount) > 0) {
-            discount = orderAmount;
+        // Never discount more than the merchandise is worth.
+        if (discount.compareTo(subtotal) > 0) {
+            discount = subtotal;
         }
 
-        return discount;
+        return new AppliedCoupon(discount, BigDecimal.ZERO);
     }
 }

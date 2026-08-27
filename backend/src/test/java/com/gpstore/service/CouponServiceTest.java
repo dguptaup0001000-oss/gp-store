@@ -47,6 +47,18 @@ class CouponServiceTest {
     }
 
     @Test
+    void flatCouponDoesNotChangeTheQuotedDeliveryFee() {
+        Coupon coupon = flatCoupon("SAVE50", new BigDecimal("50"));
+        when(couponRepository.findByCouponCodeIgnoreCase("SAVE50")).thenReturn(Optional.of(coupon));
+
+        AppliedCoupon applied = couponService.preview("SAVE50", new BigDecimal("500"), new BigDecimal("20"));
+
+        assertEquals(new BigDecimal("50"), applied.merchandiseDiscount());
+        assertEquals(0, applied.deliveryDiscount().compareTo(BigDecimal.ZERO));
+        assertEquals(0, applied.deliveryFeeDue(new BigDecimal("20")).compareTo(new BigDecimal("20")));
+    }
+
+    @Test
     void percentageDiscountIsCappedByMaxDiscountAmount() {
         Coupon coupon = new Coupon();
         coupon.setCouponCode("BIG50");
@@ -126,6 +138,53 @@ class CouponServiceTest {
     }
 
     @Test
+    void deliveryFlatTakesUpToTenRupeesOffDelivery() {
+        Coupon coupon = deliveryCoupon("FREEDEL10", new BigDecimal("10"));
+        when(couponRepository.findByCouponCodeIgnoreCase("FREEDEL10")).thenReturn(Optional.of(coupon));
+
+        AppliedCoupon ten = couponService.preview("FREEDEL10", new BigDecimal("500"), new BigDecimal("10"));
+        assertEquals(0, ten.merchandiseDiscount().compareTo(BigDecimal.ZERO));
+        assertEquals(0, ten.deliveryDiscount().compareTo(new BigDecimal("10")));
+        assertEquals(0, ten.deliveryFeeDue(new BigDecimal("10")).compareTo(BigDecimal.ZERO));
+
+        AppliedCoupon twenty = couponService.preview("FREEDEL10", new BigDecimal("500"), new BigDecimal("20"));
+        assertEquals(0, twenty.deliveryDiscount().compareTo(new BigDecimal("10")));
+        assertEquals(0, twenty.deliveryFeeDue(new BigDecimal("20")).compareTo(new BigDecimal("10")));
+    }
+
+    @Test
+    void deliveryFlatDoesNotReduceMerchandise() {
+        Coupon coupon = deliveryCoupon("FREEDEL10", new BigDecimal("10"));
+        when(couponRepository.findByCouponCodeIgnoreCase("FREEDEL10")).thenReturn(Optional.of(coupon));
+
+        AppliedCoupon applied = couponService.preview("FREEDEL10", new BigDecimal("500"), new BigDecimal("20"));
+
+        assertEquals(0, applied.merchandiseDiscount().compareTo(BigDecimal.ZERO));
+        assertEquals(0, applied.deliveryFeeDue(new BigDecimal("20")).compareTo(new BigDecimal("10")));
+    }
+
+    @Test
+    void deliveryFlatOnAlreadyFreeDeliveryIsANoOp() {
+        Coupon coupon = deliveryCoupon("FREEDEL10", new BigDecimal("10"));
+        when(couponRepository.findByCouponCodeIgnoreCase("FREEDEL10")).thenReturn(Optional.of(coupon));
+
+        AppliedCoupon applied = couponService.preview("FREEDEL10", new BigDecimal("500"), BigDecimal.ZERO);
+
+        assertEquals(0, applied.deliveryDiscount().compareTo(BigDecimal.ZERO));
+        assertEquals(0, applied.deliveryFeeDue(BigDecimal.ZERO).compareTo(BigDecimal.ZERO));
+    }
+
+    @Test
+    void deliveryFlatStillRequiresTheMinimumCartTotal() {
+        Coupon coupon = deliveryCoupon("FREEDEL10", new BigDecimal("10"));
+        coupon.setMinimumOrderAmount(new BigDecimal("200"));
+        when(couponRepository.findByCouponCodeIgnoreCase("FREEDEL10")).thenReturn(Optional.of(coupon));
+
+        assertThrows(BadRequestException.class,
+                () -> couponService.preview("FREEDEL10", new BigDecimal("100"), new BigDecimal("20")));
+    }
+
+    @Test
     void activeListUsesTheOfferQueryNotFindAll() {
         when(couponRepository.findCurrentlyOfferable(LocalDate.now())).thenReturn(List.of());
 
@@ -139,6 +198,16 @@ class CouponServiceTest {
         Coupon coupon = new Coupon();
         coupon.setCouponCode(code);
         coupon.setDiscountType(DiscountType.FLAT);
+        coupon.setDiscountValue(value);
+        coupon.setActive(true);
+        coupon.setUsedCount(0);
+        return coupon;
+    }
+
+    private Coupon deliveryCoupon(String code, BigDecimal value) {
+        Coupon coupon = new Coupon();
+        coupon.setCouponCode(code);
+        coupon.setDiscountType(DiscountType.DELIVERY_FLAT);
         coupon.setDiscountValue(value);
         coupon.setActive(true);
         coupon.setUsedCount(0);

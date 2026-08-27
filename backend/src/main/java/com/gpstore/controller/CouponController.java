@@ -2,6 +2,7 @@ package com.gpstore.controller;
 
 import com.gpstore.config.PageRequests;
 import com.gpstore.entity.Coupon;
+import com.gpstore.service.AppliedCoupon;
 import com.gpstore.service.CouponService;
 
 import org.springframework.web.bind.annotation.*;
@@ -64,15 +65,20 @@ public class CouponController {
     @GetMapping("/validate")
     public Map<String, Object> validateCoupon(
             @RequestParam String code,
-            @RequestParam BigDecimal orderAmount) {
+            @RequestParam BigDecimal orderAmount,
+            @RequestParam(required = false) BigDecimal deliveryFee) {
 
-        BigDecimal discount = couponService.previewDiscount(code, orderAmount);
+        AppliedCoupon applied = couponService.preview(
+                code, orderAmount, deliveryFee == null ? BigDecimal.ZERO : deliveryFee);
+        BigDecimal merchandiseDue = orderAmount.subtract(applied.merchandiseDiscount());
 
         return Map.of(
                 "valid", true,
                 "couponCode", code.toUpperCase(),
-                "discountAmount", discount,
-                "finalAmount", orderAmount.subtract(discount)
+                "discountAmount", applied.merchandiseDiscount(),
+                "deliveryDiscountAmount", applied.deliveryDiscount(),
+                "finalAmount", merchandiseDue.add(applied.deliveryFeeDue(
+                        deliveryFee == null ? BigDecimal.ZERO : deliveryFee))
         );
     }
 }

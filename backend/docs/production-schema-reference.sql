@@ -217,7 +217,7 @@ CREATE TABLE public.coupons (
     minimum_order_amount numeric(38,2),
     usage_limit integer,
     used_count integer,
-    CONSTRAINT coupons_discount_type_check CHECK (((discount_type)::text = ANY ((ARRAY['FLAT'::character varying, 'PERCENTAGE'::character varying])::text[])))
+    CONSTRAINT coupons_discount_type_check CHECK (((discount_type)::text = ANY ((ARRAY['FLAT'::character varying, 'PERCENTAGE'::character varying, 'DELIVERY_FLAT'::character varying])::text[])))
 );
 
 
