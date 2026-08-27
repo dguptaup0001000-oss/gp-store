@@ -141,7 +141,9 @@ jobs:
           exit "$missing"
 
       - name: SSH deploy
+        id: ssh_deploy
         if: github.event_name != 'pull_request'
+        continue-on-error: true
         uses: appleboy/ssh-action@v1.2.0
         env:
           TARGET_SHA: ${{ steps.sha.outputs.sha }}
@@ -151,6 +153,55 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PROD_PORT != '' && secrets.PROD_PORT || 22 }}
+          # Default 30s missed this VPS twice (PR #107 and #108). Dial timeout
+          # is not the 40m command window; it is only the TCP connect.
+          timeout: 2m
+          script_stop: true
+          command_timeout: 40m
+          envs: TARGET_SHA,DEPLOY_ROOT
+          script: |
+            set -Eeuo pipefail
+            DEPLOY_ROOT="${DEPLOY_ROOT:-/opt/gp-store}"
+            if [ -z "${TARGET_SHA:-}" ]; then
+              echo "TARGET_SHA is empty"
+              exit 1
+            fi
+            if [ ! -d "$DEPLOY_ROOT/.git" ]; then
+              echo "No checkout at $DEPLOY_ROOT. Run deploy/production/prepare-vps.sh once."
+              exit 1
+            fi
+            cd "$DEPLOY_ROOT"
+            git fetch origin --prune
+            if git show-ref --verify --quiet refs/heads/main; then
+              git checkout main
+            else
+              git checkout -b main origin/main
+            fi
+            git reset --hard origin/main
+            HEAD_SHA="$(git rev-parse HEAD)"
+            if [ "$HEAD_SHA" != "$TARGET_SHA" ]; then
+              echo "VPS HEAD $HEAD_SHA != GITHUB_SHA $TARGET_SHA. Refusing to deploy."
+              exit 1
+            fi
+            chmod +x deploy/production/deploy.sh deploy/production/prepare-vps.sh
+            exec ./deploy/production/deploy.sh "$TARGET_SHA"
+
+      - name: Pause before SSH retry
+        if: github.event_name != 'pull_request' && steps.ssh_deploy.outcome == 'failure'
+        run: sleep 20
+
+      - name: SSH deploy retry
+        if: github.event_name != 'pull_request' && steps.ssh_deploy.outcome == 'failure'
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          TARGET_SHA: ${{ steps.sha.outputs.sha }}
+          DEPLOY_ROOT: ${{ secrets.PROD_APP_DIR }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_PORT != '' && secrets.PROD_PORT || 22 }}
+          timeout: 2m
           script_stop: true
           command_timeout: 40m
           envs: TARGET_SHA,DEPLOY_ROOT
