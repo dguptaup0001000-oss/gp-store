@@ -155,8 +155,8 @@ public class FlywayAfterSchemaConfig {
      * context has been created - entityManagerFactory among them, so Hibernate's
      * schema export has already run by the time migrate() is called.
      *
-     * Goes through {@link FlywayMigrationStrategy} when present so failed V27
-     * is repaired before migrate on this path too (see FlywayRepairAndMigrateConfig).
+     * Goes through {@link FlywayMigrationStrategy} when present so V27 is
+     * skipped before migrate on this path too (see FlywayRepairAndMigrateConfig).
      */
     @Bean
     public SmartInitializingSingleton deferredFlywayMigration(
