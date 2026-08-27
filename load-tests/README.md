@@ -75,9 +75,26 @@ the measured ceiling for that target.
 | COD orders | 10, 25, 50, 100 concurrent checkouts | `./run-concurrent-orders.sh` against localhost/staging only |
 
 `run-concurrent-orders.sh` **refuses** `api.gpstore.co.in`. It places COD
-orders (no card charges). Seed `accounts.json` first. Duplicate/lost-order
-and negative-stock proofs are `ConcurrentOrderLoadTest` in backend CI, not
-k6.
+orders (no card charges). Seed `accounts.json` first.
+
+**HTTP 10/25/50/100 concurrent proof in CI** is
+`ConcurrentHttpOrderLoadTest` (real Tomcat, `RANDOM_PORT`, production-like
+pool 20 / threads 80). It measures catalog GET, product GET, cart add,
+checkout preview, and COD `placeOrder`, including p50/p95/p99, Hikari, CPU,
+heap, and `pg_stat_activity`. Service-level `ConcurrentOrderLoadTest` remains
+as the in-process integrity suite. Neither is a production flood.
+
+Measured on 2026-08-27 in this isolated environment (not the Hostinger VPS):
+
+| Concurrency | place p95 | place p99 | HTTP rps | orders | dup / lost / neg stock / mismatch |
+|---|---|---|---|---|---|
+| 10 | 72 ms | 72 ms | 305 | 10/10 | 0 |
+| 25 | 468 ms | 470 ms | 112 | 25/25 | 0 |
+| 50 | 318 ms | 325 ms | 358 | 50/50 | 0 |
+| 100 | 764 ms | 784 ms | 260 | 100/100 | 0 |
+
+Peak at 100 concurrent: Hikari 6/20, `pg_stat_activity` 13, heap ~247 MB,
+catalog 503 shed 0. Concurrent same `Idempotency-Key` created one order.
 | E–G | 250, 500, 1,000 | `STAGES="250" HOLD_TIME=1m ./run-staged-capacity.sh` on staging only |
 
 Browse-only probe (no checkout, no seeded accounts):

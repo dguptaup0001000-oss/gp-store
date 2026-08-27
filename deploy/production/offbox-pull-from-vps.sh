@@ -90,7 +90,7 @@ if [[ -n "${BACKUP_GPG_PASSPHRASE:-}" ]]; then
   passfile="$(mktemp)"
   printf '%s' "$BACKUP_GPG_PASSPHRASE" > "$passfile"
   chmod 600 "$passfile"
-  gpg --batch --yes --symmetric --cipher-algo AES256 \
+  gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 \
     --passphrase-file "$passfile" \
     -o "$OUT_DIR/${LATEST}.gpg" "$OUT_DIR/$LATEST"
   rm -f "$passfile"

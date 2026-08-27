@@ -104,3 +104,5 @@ As of 2026-08-26 `api.gpstore.co.in` is **A `187.127.173.192`** with a Let's
 Encrypt certificate. Confirm `https://api.gpstore.co.in/v1/api/health` returns
 200 before treating an APK as production-ready.
 See `backend/HOSTINGER_DEPLOYMENT.md`.
+Backups / off-box / VPS-loss: [`deploy/production/BACKUPS.md`](deploy/production/BACKUPS.md),
+[`deploy/production/DISASTER_RECOVERY.md`](deploy/production/DISASTER_RECOVERY.md).

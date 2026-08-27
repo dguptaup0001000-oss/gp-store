@@ -17,7 +17,7 @@ export PGPASSWORD="${6:?password required}"
 [ -f "$DUMP" ] || { echo "dump not found: $DUMP" >&2; exit 1; }
 
 case "$HOST" in
-  *gpstore.co.in*)
+  *gpstore.co.in*|187.127.173.192)
     echo "Refusing to restore against production host $HOST" >&2
     exit 1
     ;;

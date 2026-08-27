@@ -61,6 +61,20 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
+      - name: Refuse tracked secret files
+        working-directory: .
+        run: |
+          set -Eeuo pipefail
+          if git ls-files | grep -E '(^|/)\.env$'; then
+            echo "::error::A .env file is tracked. Secrets must stay out of git."
+            exit 1
+          fi
+          if git ls-files | grep -Ei '(^|/)google-services\.json$|(^|/).+\.p12$|(^|/).+\.jks$|serviceAccountKey.*\.json$'; then
+            echo "::error::A credential file is tracked."
+            exit 1
+          fi
+          echo "No tracked .env or credential files."
+
       - name: Check Redis secret scripts
         run: |
           sh -n docker/redis/docker-entrypoint.sh
@@ -69,7 +83,11 @@ jobs:
           sh -n docker/backup/backup.sh
           bash -n ../deploy/production/backup-offbox-sync.sh
           bash -n ../deploy/production/offbox-pull-from-vps.sh
+          bash -n ../deploy/production/offbox-decrypt-restore.sh
+          bash -n ../deploy/production/offbox-gpg-roundtrip.sh
           bash -n ../deploy/production/evaluate-backup-status.sh
+          bash -n ../deploy/production/evaluate-offbox-result.sh
+          bash -n ../deploy/production/backup-restore-drill.sh
           chmod +x docker/backup/test_backup_health.sh
           ./docker/backup/test_backup_health.sh
 
@@ -114,6 +132,14 @@ jobs:
         with:
           name: surefire-reports
           path: backend/target/surefire-reports/
+
+      - name: Upload HTTP concurrent load report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-concurrent-load-report
+          path: backend/target/http-concurrent-load-report.json
+          if-no-files-found: ignore
 
   # Flyway against a CLEAN database. The job above deliberately sets
   # FLYWAY_ENABLED=false and builds the schema with ddl-auto=update, so it
@@ -219,6 +245,37 @@ jobs:
             -v "$PWD/../deploy/production/backup-restore-drill.sh:/drill.sh:ro" \
             postgres:17 \
             /bin/sh /drill.sh "/backups/$(basename "$DUMP")" localhost 5432 gpstore gpstore_restore_probe gpstore_test_password
+
+      - name: Encrypted off-box roundtrip restore
+        run: |
+          set -Eeuo pipefail
+          chmod +x ../deploy/production/offbox-gpg-roundtrip.sh \
+            ../deploy/production/offbox-decrypt-restore.sh \
+            ../deploy/production/evaluate-offbox-result.sh \
+            ../deploy/production/backup-restore-drill.sh
+          DUMP="$(find /tmp/gp-backups -maxdepth 1 \( -name 'gpstore-*.dump' -o -name 'gpstore-*.sql.gz' \) -type f -printf '%T@ %p\n' | sort -nr | awk '{print $2; exit}')"
+          test -n "$DUMP"
+          ROUND="/tmp/gp-backups/roundtrip"
+          mkdir -p "$ROUND"
+          ../deploy/production/offbox-gpg-roundtrip.sh "$DUMP" "$ROUND/decrypted.dump" "$ROUND/encrypted.dump.gpg"
+          test -s "$ROUND/encrypted.dump.gpg"
+          test -s "$ROUND/decrypted.dump"
+          # Prove decrypt-restore.sh with a job-ephemeral passphrase (not the
+          # production secret, which this job must not possess).
+          PASSFILE="$(mktemp)"
+          openssl rand -base64 32 > "$PASSFILE"
+          chmod 600 "$PASSFILE"
+          gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 \
+            --passphrase-file "$PASSFILE" \
+            -o "$ROUND/ci.dump.gpg" "$DUMP"
+          cp "${DUMP}.sha256" "$ROUND/ci.dump.sha256"
+          RESULT_FILE=/tmp/gp-backups/offbox-result.txt
+          BACKUP_GPG_PASSPHRASE="$(cat "$PASSFILE")" RESULT_FILE="$RESULT_FILE" \
+            ../deploy/production/offbox-decrypt-restore.sh \
+            "$ROUND/ci.dump.gpg" localhost 5432 gpstore gpstore_offbox_probe gpstore_test_password
+          rm -f "$PASSFILE"
+          bash ../deploy/production/evaluate-offbox-result.sh "$RESULT_FILE"
+          echo "CI encrypted off-box isolate-restore passed."
 
       - name: Upload schema-migrate test results
         if: always()

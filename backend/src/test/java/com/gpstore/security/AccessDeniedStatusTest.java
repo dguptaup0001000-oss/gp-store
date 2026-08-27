@@ -166,4 +166,92 @@ class AccessDeniedStatusTest {
         assertEquals(HttpStatus.UNAUTHORIZED, res.getStatusCode(),
                 "an unparseable token leaves the SecurityContext empty, which is 401. Body: " + res.getBody());
     }
+
+    @Test
+    @DisplayName("admin ops status is 401 without credentials")
+    void adminOpsStatusRequiresAuthentication() {
+        ResponseEntity<String> res = rest.exchange(
+                url("/api/admin/ops/status"), HttpMethod.GET, HttpEntity.EMPTY, String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, res.getStatusCode(), res.getBody());
+    }
+
+    @Test
+    @DisplayName("admin ops backups is 401 without credentials")
+    void adminOpsBackupsRequiresAuthentication() {
+        ResponseEntity<String> res = rest.exchange(
+                url("/api/admin/ops/backups"), HttpMethod.GET, HttpEntity.EMPTY, String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, res.getStatusCode(), res.getBody());
+    }
+
+    @Test
+    @DisplayName("a logged-in CUSTOMER is 403 on admin ops")
+    void customerIsForbiddenOnAdminOps() {
+        ensureIdentities();
+        ResponseEntity<String> res = rest.exchange(
+                url("/api/admin/ops/status"), HttpMethod.GET, bearer(customerToken), String.class);
+        assertEquals(HttpStatus.FORBIDDEN, res.getStatusCode(), res.getBody());
+    }
+
+    @Test
+    @DisplayName("an ADMIN can read ops status")
+    void adminCanReadOpsStatus() {
+        ensureIdentities();
+        ResponseEntity<String> res = rest.exchange(
+                url("/api/admin/ops/status"), HttpMethod.GET, bearer(adminToken), String.class);
+        assertEquals(HttpStatus.OK, res.getStatusCode(), res.getBody());
+        assertNotNull(res.getBody());
+        assertTrue(res.getBody().contains("backups"), res.getBody());
+        assertFalse(res.getBody().toLowerCase().contains("password"));
+        assertFalse(res.getBody().toLowerCase().contains("passphrase"));
+    }
+
+    @Test
+    @DisplayName("prometheus and metrics are not public")
+    void actuatorMetricsRequireAdmin() {
+        ResponseEntity<String> anonMetrics = rest.getForEntity(
+                "http://localhost:" + port + "/v1/actuator/metrics", String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, anonMetrics.getStatusCode(), anonMetrics.getBody());
+
+        ResponseEntity<String> anonProm = rest.getForEntity(
+                "http://localhost:" + port + "/v1/actuator/prometheus", String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, anonProm.getStatusCode(), anonProm.getBody());
+
+        ensureIdentities();
+        ResponseEntity<String> customerMetrics = rest.exchange(
+                "http://localhost:" + port + "/v1/actuator/metrics",
+                HttpMethod.GET, bearer(customerToken), String.class);
+        assertEquals(HttpStatus.FORBIDDEN, customerMetrics.getStatusCode(), customerMetrics.getBody());
+
+        ResponseEntity<String> adminMetrics = rest.exchange(
+                "http://localhost:" + port + "/v1/actuator/metrics",
+                HttpMethod.GET, bearer(adminToken), String.class);
+        assertEquals(HttpStatus.OK, adminMetrics.getStatusCode(), adminMetrics.getBody());
+        assertNotNull(adminMetrics.getBody());
+        assertTrue(adminMetrics.getBody().contains("jvm")
+                        || adminMetrics.getBody().contains("names"),
+                "metrics scrape should list JVM meters. Body starts: "
+                        + adminMetrics.getBody().substring(0, Math.min(200, adminMetrics.getBody().length())));
+
+        ResponseEntity<String> adminProm = rest.exchange(
+                "http://localhost:" + port + "/v1/actuator/prometheus",
+                HttpMethod.GET, bearer(adminToken), String.class);
+        assertEquals(HttpStatus.OK, adminProm.getStatusCode(), adminProm.getBody());
+        assertNotNull(adminProm.getBody());
+        assertTrue(adminProm.getBody().contains("jvm")
+                        || adminProm.getBody().contains("http_server_requests")
+                        || adminProm.getBody().contains("gpstore_backup"),
+                "prometheus scrape should include JVM, HTTP, or backup metrics");
+    }
+
+    @Test
+    @DisplayName("public health endpoints stay 200 without auth")
+    void publicHealthStaysOpen() {
+        ResponseEntity<String> health = rest.getForEntity(url("/api/health"), String.class);
+        assertEquals(HttpStatus.OK, health.getStatusCode(), health.getBody());
+        ResponseEntity<String> ready = rest.getForEntity(url("/api/health/ready"), String.class);
+        assertEquals(HttpStatus.OK, ready.getStatusCode(), ready.getBody());
+        ResponseEntity<String> actuator = rest.getForEntity(
+                "http://localhost:" + port + "/v1/actuator/health", String.class);
+        assertEquals(HttpStatus.OK, actuator.getStatusCode(), actuator.getBody());
+    }
 }

@@ -2,7 +2,9 @@
 #
 # Pulls the dump OFF the VPS onto the GitHub runner (a different failure
 # domain than /dev/sda1). Encrypts with BACKUP_GPG_PASSPHRASE before
-# retaining. Never restores into production. Never prints secrets.
+# retaining. Downloads the uploaded artifact back, decrypts it, and
+# restores into an isolated throwaway Postgres. Never restores into
+# production. Never prints secrets.
 #
 # Schedule is a real off-box copy. Dispatch is the operator verification.
 name: Off-box backup
@@ -18,13 +20,28 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   offbox:
     name: Pull encrypted dump off the VPS
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     environment: production
+    services:
+      restore-db:
+        image: postgres:17
+        env:
+          POSTGRES_USER: gpstore
+          POSTGRES_PASSWORD: drill_not_production
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +62,9 @@ jobs:
             fi
           done
           bash -n deploy/production/offbox-pull-from-vps.sh
+          bash -n deploy/production/offbox-decrypt-restore.sh
+          bash -n deploy/production/evaluate-offbox-result.sh
+          bash -n deploy/production/backup-restore-drill.sh
           exit "$missing"
 
       - name: Pull, verify, encrypt
@@ -55,6 +75,7 @@ jobs:
           PROD_PORT: ${{ secrets.PROD_PORT }}
           BACKUP_GPG_PASSPHRASE: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
           OUT_DIR: ${{ runner.temp }}/offbox-out
+          RESULT_FILE: ${{ runner.temp }}/offbox-result.txt
         run: |
           set -Eeuo pipefail
           chmod +x deploy/production/offbox-pull-from-vps.sh
@@ -64,14 +85,17 @@ jobs:
           echo "metadata:"
           cat "$OUT_DIR/metadata.json"
           if [ -z "${BACKUP_GPG_PASSPHRASE:-}" ]; then
-            echo "::error::BACKUP_GPG_PASSPHRASE is not set. Dump was verified off-box on this runner but not retained. Add the secret to keep an encrypted copy."
+            echo "::error::BACKUP_GPG_PASSPHRASE is not set. Dump was verified off-box on this runner but not retained. Add the secret on the production environment."
+            printf 'status=FAILED\nstage=encrypt\ndetail=BACKUP_GPG_PASSPHRASE missing\n' > "$RESULT_FILE"
             rm -f "$OUT_DIR"/gpstore-*.dump
             exit 1
           fi
           test -f "$OUT_DIR"/*.gpg
           rm -f "$OUT_DIR"/gpstore-*.dump
+          printf 'status=SUCCESS\nstage=encrypt\ndetail=encrypted\n' > "$RESULT_FILE"
 
       - name: Upload encrypted dump
+        id: upload
         if: success()
         uses: actions/upload-artifact@v4
         with:
@@ -84,3 +108,81 @@ jobs:
             ${{ runner.temp }}/offbox-out/status.txt
           if-no-files-found: error
           retention-days: 90
+
+      - name: Mark upload failure
+        if: failure() && steps.upload.outcome == 'failure'
+        env:
+          RESULT_FILE: ${{ runner.temp }}/offbox-result.txt
+        run: |
+          printf 'status=UPLOAD_FAILED\nstage=upload\ndetail=artifact upload failed\n' > "$RESULT_FILE"
+          bash deploy/production/evaluate-offbox-result.sh "$RESULT_FILE"
+          exit 1
+
+      - name: Download encrypted artifact (proves GitHub storage, not the VPS)
+        if: success()
+        uses: actions/download-artifact@v4
+        with:
+          name: gpstore-offbox-backup
+          path: ${{ runner.temp }}/offbox-downloaded
+
+      - name: Decrypt downloaded artifact and isolated restore
+        if: success()
+        env:
+          BACKUP_GPG_PASSPHRASE: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
+          RESULT_FILE: ${{ runner.temp }}/offbox-result.txt
+        run: |
+          set -Eeuo pipefail
+          chmod +x deploy/production/offbox-decrypt-restore.sh deploy/production/backup-restore-drill.sh
+          DOWN="${{ runner.temp }}/offbox-downloaded"
+          test -d "$DOWN"
+          GPG="$(find "$DOWN" -maxdepth 1 -name 'gpstore-*.dump.gpg' -type f | head -n 1)"
+          test -n "$GPG"
+          test -s "$GPG"
+          echo "Downloaded encrypted artifact $(basename "$GPG") ($(wc -c < "$GPG" | tr -d ' ') bytes)"
+          ./deploy/production/offbox-decrypt-restore.sh \
+            "$GPG" \
+            127.0.0.1 5432 gpstore gpstore_offbox_probe drill_not_production
+          bash deploy/production/evaluate-offbox-result.sh "$RESULT_FILE"
+          docker run --rm --network=host -e PGPASSWORD=drill_not_production postgres:17 \
+            psql -h 127.0.0.1 -U gpstore -d gpstore_offbox_probe -v ON_ERROR_STOP=1 \
+            -c "SELECT version, description FROM flyway_schema_history ORDER BY installed_rank;" \
+            > "${{ runner.temp }}/offbox-restore-proof.txt"
+          docker run --rm --network=host -e PGPASSWORD=drill_not_production postgres:17 \
+            psql -h 127.0.0.1 -U gpstore -d gpstore_offbox_probe -Atc \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" \
+            >> "${{ runner.temp }}/offbox-restore-proof.txt"
+          echo "Isolated restore proof (no dump contents):"
+          cat "${{ runner.temp }}/offbox-restore-proof.txt"
+          docker run --rm --network=host -e PGPASSWORD=drill_not_production postgres:17 \
+            psql -h 127.0.0.1 -U gpstore -d postgres -v ON_ERROR_STOP=1 \
+            -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='gpstore_offbox_probe' AND pid <> pg_backend_pid();" \
+            >/dev/null 2>&1 || true
+          docker run --rm --network=host -e PGPASSWORD=drill_not_production postgres:17 \
+            psql -h 127.0.0.1 -U gpstore -d postgres -v ON_ERROR_STOP=1 \
+            -c "DROP DATABASE IF EXISTS gpstore_offbox_probe;"
+          echo "Throwaway restore database dropped. Production was not touched."
+
+      - name: Upload restore proof (no dump)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-offbox-restore-proof
+          path: |
+            ${{ runner.temp }}/offbox-restore-proof.txt
+            ${{ runner.temp }}/offbox-result.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Alert on any off-box failure
+        if: failure()
+        env:
+          RESULT_FILE: ${{ runner.temp }}/offbox-result.txt
+        run: |
+          set -Eeuo pipefail
+          if [ ! -s "$RESULT_FILE" ]; then
+            printf 'status=FAILED\nstage=unknown\ndetail=off-box job failed before a result file was written\n' > "$RESULT_FILE"
+          elif grep -q '^status=SUCCESS' "$RESULT_FILE"; then
+            printf 'status=FAILED\nstage=unknown\ndetail=job failed after an earlier successful stage\n' > "$RESULT_FILE"
+          fi
+          bash deploy/production/evaluate-offbox-result.sh "$RESULT_FILE"
+          exit 1
