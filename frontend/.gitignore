@@ -53,7 +53,10 @@ app.*.map.json
 **/android/gradle-wrapper.jar
 *.jks
 *.keystore
+*.p12
+*.b64
 key.properties
+upload-keystore.jks
 
 # Firebase - project-specific credentials, never commit (see
 # FIREBASE_SETUP.md). The backend's own Firebase service account key never
