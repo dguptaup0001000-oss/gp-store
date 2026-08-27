@@ -7,12 +7,19 @@
 # production. Never prints secrets.
 #
 # Schedule is a real off-box copy. Dispatch is the operator verification.
+# A successful Deploy Production on main also starts this job so merge→deploy
+# actually retains an encrypted artifact (CI schema-migrate is not production).
+# Pull-request Deploy Production syntax jobs must NOT start this workflow.
 name: Off-box backup
 
 on:
   workflow_dispatch:
   schedule:
     - cron: "20 1,7,13,19 * * *"
+  workflow_run:
+    workflows: ["Deploy Production"]
+    types:
+      - completed
 
 concurrency:
   group: gpstore-prod-ssh
@@ -20,11 +27,18 @@ concurrency:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
 
 jobs:
   offbox:
     name: Pull encrypted dump off the VPS
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.event != 'pull_request'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: production
@@ -90,7 +104,10 @@ jobs:
             rm -f "$OUT_DIR"/gpstore-*.dump
             exit 1
           fi
-          test -f "$OUT_DIR"/*.gpg
+          GPG="$(find "$OUT_DIR" -maxdepth 1 -name 'gpstore-*.dump.gpg' -type f | head -n 1)"
+          test -n "$GPG"
+          test -s "$GPG"
+          echo "Encrypted artifact $(basename "$GPG") ($(wc -c < "$GPG" | tr -d ' ') bytes)"
           rm -f "$OUT_DIR"/gpstore-*.dump
           printf 'status=SUCCESS\nstage=encrypt\ndetail=encrypted\n' > "$RESULT_FILE"
 
@@ -103,7 +120,6 @@ jobs:
           path: |
             ${{ runner.temp }}/offbox-out/*.gpg
             ${{ runner.temp }}/offbox-out/*.sha256
-            ${{ runner.temp }}/offbox-out/*.status.txt
             ${{ runner.temp }}/offbox-out/metadata.json
             ${{ runner.temp }}/offbox-out/status.txt
           if-no-files-found: error
@@ -161,6 +177,17 @@ jobs:
             psql -h 127.0.0.1 -U gpstore -d postgres -v ON_ERROR_STOP=1 \
             -c "DROP DATABASE IF EXISTS gpstore_offbox_probe;"
           echo "Throwaway restore database dropped. Production was not touched."
+          {
+            echo "OFFBOX_PRODUCTION_EVIDENCE=PASS"
+            echo "github_run_id=${{ github.run_id }}"
+            echo "github_run_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "encrypted_artifact=gpstore-offbox-backup"
+            echo "restore_proof_artifact=gpstore-offbox-restore-proof"
+            echo "isolated_db=gpstore_offbox_probe"
+            echo "production_db_untouched=gpstore"
+          } >> "${{ runner.temp }}/offbox-restore-proof.txt"
+          echo "Production off-box evidence (no dump / no passphrase):"
+          tail -n 8 "${{ runner.temp }}/offbox-restore-proof.txt"
 
       - name: Upload restore proof (no dump)
         if: success()
