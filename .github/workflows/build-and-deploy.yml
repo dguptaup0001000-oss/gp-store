@@ -34,12 +34,15 @@
 # Customer applicationId: com.gpstore.app
 # Worker applicationId:   com.gpstore.worker
 #
-# Play upload keystore: CI never invents a keystore and never commits one.
-# Pull-request APKs may still be Android Debug signed so sideload artifacts
-# stay green. Builds of main (push, workflow_dispatch, or workflow_run whose
-# source branch is main) fail closed if ANDROID_KEYSTORE_* is missing — a
-# main APK named like production must not be CN=Android Debug. Play AAB
-# artifacts are produced only when ANDROID_KEYSTORE_* is set.
+# Release keystore: CI never invents a keystore and never commits one.
+# It only decodes the operator-stored ANDROID_KEYSTORE_* secrets into a
+# runner-local android/upload-keystore.jks + android/key.properties.
+# Pull-request APKs may still be Android Debug signed if those secrets are
+# absent (fork PRs). Builds of main fail closed if ANDROID_KEYSTORE_* is
+# missing — a main APK must not be CN=Android Debug.
+# AAB artifacts are uploaded to GitHub Actions only (no Play Console
+# account is required). Firebase GOOGLE_SERVICES_JSON_BASE64 is optional
+# until push/Crashlytics is configured; missing it uses the placeholder.
 # Customer/admin and worker APKs always use explicit per-ABI names.
 #
 # One-time setup after you push this to GitHub:
@@ -187,6 +190,8 @@ jobs:
       - name: Verify APK permission policy (no device)
         run: |
           python3 tool/verify_apk_release.py --self-test
+          python3 tool/install_release_keystore.py --self-test
+          python3 tool/decode_google_services.py --self-test
           python3 tool/report_apk_artifacts.py --self-test
           python3 ../.github/scripts/resolve_api_base_url.py --self-test
 
@@ -199,10 +204,11 @@ jobs:
           CANDIDATE_API_BASE_URL: ${{ vars.API_BASE_URL }}
         run: python3 .github/scripts/resolve_api_base_url.py --github-env
 
-      - name: Detect Play upload keystore
+      - name: Detect release keystore
         # There is no keystore in git and CI must not invent one. Pull-request
-        # sideload APKs may still be Android Debug signed. A build of main
-        # must fail instead of publishing a production-named debug APK.
+        # sideload APKs may still be Android Debug signed when secrets are
+        # absent. A build of main must fail instead of publishing a
+        # production-named debug APK. Play Console is not required.
         # workflow_run always has github.ref = the default branch, so the
         # source branch is workflow_run.head_branch, not GITHUB_REF.
         id: play_signing
@@ -215,6 +221,7 @@ jobs:
           GIT_REF: ${{ github.ref }}
           WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
+          set +x
           require_release=0
           if [ "$EVENT_NAME" = "pull_request" ]; then
             require_release=0
@@ -231,18 +238,17 @@ jobs:
               {
                 echo "### Android signing"
                 echo ""
-                echo "Play upload keystore is **missing** and this is a main build. The job failed closed so a production-named APK is not Android Debug signed."
-                echo "Add repo secrets \`ANDROID_KEYSTORE_BASE64\`, \`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_PASSWORD\`, and \`ANDROID_KEY_ALIAS\`."
+                echo "Release keystore is **missing** and this is a main build. The job failed closed so a production-named APK is not Android Debug signed."
+                echo "Set repo secrets \`ANDROID_KEYSTORE_BASE64\`, \`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_PASSWORD\`, and \`ANDROID_KEY_ALIAS\`."
               } >> "$GITHUB_STEP_SUMMARY"
               exit 1
             fi
-            echo "::warning::ANDROID_KEYSTORE_BASE64 is unset. Analyze/tests still run. Play-signed APK/AAB artifacts are skipped; sideload APKs will be Android Debug signed."
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is unset. Analyze/tests still run. Sideload APKs will be Android Debug signed."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             {
               echo "### Android signing"
               echo ""
-              echo "Play upload keystore is **not** configured. This pull-request job stays green on analyze, tests, and debug-signed sideload APKs."
-              echo "Set repo secrets \`ANDROID_KEYSTORE_BASE64\`, \`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_PASSWORD\`, and \`ANDROID_KEY_ALIAS\` before a main APK can be Play-signed."
+              echo "Release keystore is **not** configured. This pull-request job stays green on analyze, tests, and debug-signed sideload APKs."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -260,44 +266,28 @@ jobs:
           {
             echo "### Android signing"
             echo ""
-            echo "Play upload keystore is configured. Release APK/AAB artifacts must not be Android Debug signed."
+            echo "Release keystore secrets are present. APK/AAB artifacts on this run must not be Android Debug signed. Play Console is not required."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Decode google-services.json
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-          PLAY_SIGNING: ${{ steps.play_signing.outputs.enabled }}
         run: |
-          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
-            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > android/app/google-services.json
-            python3 tool/verify_google_services.py android/app/google-services.json
-          elif [ "$PLAY_SIGNING" = "true" ]; then
-            echo "::error::GOOGLE_SERVICES_JSON_BASE64 is required for Play-signed artifacts. Do not ship the placeholder google-services.json to Play."
-            exit 1
-          else
-            echo "::warning::GOOGLE_SERVICES_JSON_BASE64 unset; using the committed placeholder (push/Crashlytics will not work). Sideload APKs still compile."
-            cp android/app/google-services.placeholder.json android/app/google-services.json
-          fi
+          set +x
+          python3 tool/decode_google_services.py
 
-      - name: Install Play upload keystore if configured
+      - name: Install release keystore if configured
         # When ANDROID_KEYSTORE_BASE64 is set, password + alias were already
-        # required above. When it is unset, APKs are Android Debug signed and
-        # must not be uploaded under Play-ready artifact names.
+        # required above. Writes runner-local files that are gitignored.
+        # Does not print secret values. Play Console is not required.
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "ANDROID_KEYSTORE_BASE64 unset; APKs will be Android Debug signed."
-            exit 0
-          fi
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/upload-keystore.jks
-          umask 077
-          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' \
-            "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_PASSWORD" "$ANDROID_KEY_ALIAS" \
-            > android/key.properties
+          set +x
+          python3 tool/install_release_keystore.py
 
       - name: Build Delivery Worker APK
         env:
@@ -338,8 +328,9 @@ jobs:
           mv -f app-armeabi-v7a-release.apk gpstore-worker-armv7.apk
 
       - name: Build Delivery Worker App Bundle
-        # Play-only. Skipped when the upload keystore is missing so this job
-        # cannot publish a debug-signed AAB under a release name.
+        # GitHub artifact only. Skipped when the release keystore is missing
+        # so this job cannot publish a debug-signed AAB under a release name.
+        # Play Console is not required and nothing is uploaded to Play.
         if: steps.play_signing.outputs.enabled == 'true'
         # Play serves one ABI from an AAB. Worker applicationId is
         # com.gpstore.worker (see android/app/build.gradle when
@@ -427,10 +418,9 @@ jobs:
       - name: Verify APK signatures and zip alignment
         # assembleRelease already signs (debug key unless key.properties exists)
         # and zip-aligns. This step fails the job if an artifact is actually
-        # unsigned or unaligned. It does not re-sign. When a Play keystore is
-        # configured, a debug signer is a hard failure so Play-bound artifacts
-        # cannot ship unsigned-for-Play. Without a keystore, debug signing is
-        # expected for sideload-only APKs.
+        # unsigned or unaligned. It does not re-sign. When the release
+        # keystore is configured, a debug signer is a hard failure. Without a
+        # keystore, debug signing is expected for sideload-only PR APKs.
         env:
           REQUIRE_RELEASE_SIGNING: ${{ steps.play_signing.outputs.enabled == 'true' && '1' || '0' }}
         run: |
@@ -449,13 +439,14 @@ jobs:
         # be split.
         #
         # Built alongside the APK rather than instead of it: the APK is what
-        # gets sideloaded for testing, and losing that would mean no way to
-        # try a build without going through Play.
+        # gets sideloaded for testing. The AAB is stored as a GitHub Actions
+        # artifact for a later Play Console upload; this job does not need a
+        # Play account and does not upload to Play.
         #
         # This step is also what verifies the R8 configuration. minifyEnabled
         # only runs in release, so a missing ProGuard keep rule cannot fail
         # any debug build - it fails here, or it fails on a customer's phone.
-        # Skipped when the upload keystore is missing so CI cannot upload a
+        # Skipped when the release keystore is missing so CI cannot upload a
         # debug-signed AAB as gpstore-release-aab.
         run: |
           if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then

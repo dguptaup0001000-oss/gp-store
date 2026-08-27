@@ -67,3 +67,11 @@ dump.rdb
 gpstore-*.sql.gz
 /backups/
 **/.secrets/
+
+# Android release signing — never commit the operator keystore or CI copy.
+*.jks
+*.keystore
+*.p12
+*.b64
+key.properties
+upload-keystore.jks
