@@ -22,7 +22,9 @@ READY_URL="http://127.0.0.1:8081/v1/api/health/ready"
 VERSION_URL="http://127.0.0.1:8081/v1/api/version"
 PUBLIC_VERSION_URL="${PUBLIC_VERSION_URL:-https://api.gpstore.co.in/v1/api/version}"
 PUBLIC_HEALTH_URL="${PUBLIC_HEALTH_URL:-https://api.gpstore.co.in/v1/actuator/health}"
+API_HOST="${API_DOMAIN:-api.gpstore.co.in}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
+PUBLIC_SHA_TIMEOUT_SECONDS="${PUBLIC_SHA_TIMEOUT_SECONDS:-45}"
 REDIS_HEALTH_TIMEOUT_SECONDS="${REDIS_HEALTH_TIMEOUT_SECONDS:-90}"
 REQUIRE_ORIGIN_MAIN="${REQUIRE_ORIGIN_MAIN:-1}"
 IMAGE_NAME="gp-store-backend"
@@ -162,16 +164,42 @@ wait_for_health() {
 
 verify_public_sha() {
   local expected="$1"
-  local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
+  local deadline=$((SECONDS + PUBLIC_SHA_TIMEOUT_SECONDS))
   local body="" running=""
   while (( SECONDS < deadline )); do
-    body="$(curl -fsS --max-time 15 "$PUBLIC_VERSION_URL" 2>/dev/null || true)"
+    body="$(curl -fsS --max-time 15 \
+      -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+      "$PUBLIC_VERSION_URL" 2>/dev/null || true)"
     running="$(printf '%s' "$body" | json_field gitCommit 2>/dev/null || true)"
     if [ "$running" = "$expected" ]; then
       printf '%s' "$body"
       return 0
     fi
     log "Public /api/version gitCommit=${running:-none} expected=$expected"
+    sleep 5
+  done
+  return 1
+}
+
+# Hits Traefik on this box, not Cloudflare. 82f567b booted Flyway V28 and
+# was healthy in-container for 3 minutes; the public hostname still served
+# f229fd9 (edge cache / hairpin DNS) and the deploy rolled back a working
+# API. Local TLS to 127.0.0.1:443 is the path that must match.
+verify_traefik_sha() {
+  local expected="$1"
+  local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
+  local body="" running=""
+  local url="https://${API_HOST}/v1/api/version"
+  while (( SECONDS < deadline )); do
+    body="$(curl -fsS --max-time 15 --http1.1 \
+      --resolve "${API_HOST}:443:127.0.0.1" \
+      "$url" 2>/dev/null || true)"
+    running="$(printf '%s' "$body" | json_field gitCommit 2>/dev/null || true)"
+    if [ "$running" = "$expected" ]; then
+      printf '%s' "$body"
+      return 0
+    fi
+    log "Traefik-local /api/version gitCommit=${running:-none} expected=$expected"
     sleep 5
   done
   return 1
@@ -396,9 +424,15 @@ log "In-container version: $VERSION_BODY"
 if [ "$RUNNING_SHA" != "$TARGET_SHA" ]; then
   die "Expected SHA $TARGET_SHA != running gitCommit $RUNNING_SHA"
 fi
-PUBLIC_VERSION_BODY="$(verify_public_sha "$TARGET_SHA")" \
-  || die "Public $PUBLIC_VERSION_URL gitCommit did not equal $TARGET_SHA"
-log "Public version: $PUBLIC_VERSION_BODY"
+TRAEFIK_VERSION_BODY="$(verify_traefik_sha "$TARGET_SHA")" \
+  || die "Traefik on 127.0.0.1:443 did not serve gitCommit $TARGET_SHA"
+log "Traefik-local version: $TRAEFIK_VERSION_BODY"
+if PUBLIC_VERSION_BODY="$(verify_public_sha "$TARGET_SHA")"; then
+  log "Public version: $PUBLIC_VERSION_BODY"
+else
+  log "WARNING: Public $PUBLIC_VERSION_URL still stale after ${PUBLIC_SHA_TIMEOUT_SECONDS}s. In-container and Traefik-local match $TARGET_SHA; not rolling back."
+  PUBLIC_VERSION_BODY="$TRAEFIK_VERSION_BODY"
+fi
 
 echo "[8/8] Deployment complete"
 ENDED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -413,6 +447,7 @@ echo "Commit: $TARGET_SHA"
 echo "Image: $TARGET_IMAGE"
 echo "Health: $HEALTH_BODY"
 echo "Version: $VERSION_BODY"
+echo "Traefik-local version: ${TRAEFIK_VERSION_BODY:-}"
 echo "Public version: ${PUBLIC_VERSION_BODY:-}"
 echo "Previous SHA: ${PREV_SHA:-none}"
 echo "Deployment start: $STARTED_AT"
