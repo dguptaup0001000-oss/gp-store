@@ -250,4 +250,167 @@ public class ProductBrowseRepository {
         }
         return result;
     }
+
+    /**
+     * Instant search IDs, paginated in SQL.
+     *
+     * Spring Data's {@code Page<Product>} native query was wrapping
+     * {@code SELECT p.* ... ORDER BY GREATEST(similarity(...))} in an outer
+     * query. Production answered HTTP 500 for every {@code /search/instant}
+     * (and therefore every smart-search) call, while the JPQL name-contains
+     * {@code /search} path on the same catalogue returned 200. Selecting
+     * only {@code p.id} through {@link EntityManager} matches the working
+     * browse queries in this class and lets {@code ProductService} batch-load
+     * entities the same way the feed does.
+     *
+     * Trigram ({@code %} / {@code similarity()}) is used when pg_trgm is
+     * installed. If the operators are missing, the first failure flips to
+     * ILIKE-only ranking so the shop window stays up instead of 500ing.
+     */
+    public SearchPage searchInstant(String keyword, int page, int size) {
+        String likePattern = toLikePattern(keyword);
+        if (Boolean.FALSE.equals(trigramUsable)) {
+            return searchInstantIlike(keyword, likePattern, page, size);
+        }
+        try {
+            SearchPage result = searchInstantTrigram(keyword, likePattern, page, size);
+            trigramUsable = true;
+            return result;
+        } catch (RuntimeException ex) {
+            log.warn("Trigram search failed; falling back to ILIKE ranking: {}", ex.toString());
+            trigramUsable = false;
+            return searchInstantIlike(keyword, likePattern, page, size);
+        }
+    }
+
+    public record SearchPage(List<Long> productIds, long totalElements) {}
+
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(ProductBrowseRepository.class);
+
+    /**
+     * null = not yet probed. true = trigram worked. false = stick to ILIKE.
+     * Written from request threads; a torn read still only causes one extra
+     * failed query, never a wrong result set.
+     */
+    private volatile Boolean trigramUsable;
+
+    private static final String SELLABLE_EXISTS = """
+            EXISTS (
+                SELECT 1 FROM product_variants v
+                WHERE v.product_id = p.id
+                  AND v.available = true
+                  AND (v.active IS NULL OR v.active = true)
+                  AND v.selling_price IS NOT NULL
+                  AND v.selling_price > 0)
+            """;
+
+    private static final String MATCH_ILIKE = """
+            (p.name ILIKE :likePattern ESCAPE '#'
+             OR p.brand ILIKE :likePattern ESCAPE '#'
+             OR p.search_keywords ILIKE :likePattern ESCAPE '#'
+             OR p.subcategory ILIKE :likePattern ESCAPE '#')
+            """;
+
+    private SearchPage searchInstantTrigram(String keyword, String likePattern, int page, int size) {
+        String where = """
+                FROM products p
+                WHERE p.active = true
+                  AND """ + SELLABLE_EXISTS + """
+                  AND (
+                        p.name % :keyword
+                     OR p.brand % :keyword
+                     OR """ + MATCH_ILIKE + """
+                  )
+                """;
+        String orderBy = """
+                ORDER BY GREATEST(
+                    similarity(COALESCE(p.name, ''), :keyword),
+                    similarity(CONCAT(COALESCE(p.brand, ''), ' ', COALESCE(p.name, '')), :keyword)
+                ) DESC, p.id ASC
+                """;
+        return runSearch(where, orderBy, keyword, likePattern, page, size, true);
+    }
+
+    private SearchPage searchInstantIlike(String keyword, String likePattern, int page, int size) {
+        String where = """
+                FROM products p
+                WHERE p.active = true
+                  AND """ + SELLABLE_EXISTS + """
+                  AND """ + MATCH_ILIKE;
+        String orderBy = """
+                ORDER BY
+                    CASE
+                        WHEN p.name ILIKE :prefixPattern ESCAPE '#' THEN 0
+                        WHEN p.name ILIKE :likePattern ESCAPE '#' THEN 1
+                        WHEN p.brand ILIKE :likePattern ESCAPE '#' THEN 2
+                        ELSE 3
+                    END,
+                    p.id ASC
+                """;
+        return runSearch(where, orderBy, keyword, likePattern, page, size, false);
+    }
+
+    private SearchPage runSearch(
+            String where,
+            String orderBy,
+            String keyword,
+            String likePattern,
+            int page,
+            int size,
+            boolean bindKeyword) {
+        int limit = Math.min(Math.max(size, 1), 50);
+        int offsetPage = Math.max(page, 0);
+        Query dataQuery = entityManager.createNativeQuery(
+                "SELECT p.id " + where + orderBy + " LIMIT :limit OFFSET :offset");
+        Query countQuery = entityManager.createNativeQuery("SELECT COUNT(*) " + where);
+        for (Query q : List.of(dataQuery, countQuery)) {
+            q.setParameter("likePattern", likePattern);
+            if (bindKeyword) {
+                q.setParameter("keyword", keyword);
+            }
+        }
+        if (!bindKeyword) {
+            dataQuery.setParameter("prefixPattern", escapeLike(keyword) + "%");
+        }
+        dataQuery.setParameter("limit", limit);
+        dataQuery.setParameter("offset", (long) offsetPage * limit);
+
+        @SuppressWarnings("unchecked")
+        List<Number> rows = dataQuery.getResultList();
+        List<Long> ids = new ArrayList<>(rows.size());
+        for (Number row : rows) {
+            ids.add(row.longValue());
+        }
+        long total = ((Number) countQuery.getSingleResult()).longValue();
+        return new SearchPage(ids, total);
+    }
+
+    static String toLikePattern(String keyword) {
+        return "%" + escapeLike(keyword) + "%";
+    }
+
+    static String escapeLike(String keyword) {
+        return keyword.replace("#", "##")
+                .replace("%", "#%")
+                .replace("_", "#_");
+    }
+
+    static boolean looksLikeMissingTrigram(Throwable error) {
+        Throwable cursor = error;
+        while (cursor != null) {
+            String message = cursor.getMessage();
+            if (message != null) {
+                String lower = message.toLowerCase();
+                if (lower.contains("similarity")
+                        || lower.contains("operator does not exist")
+                        || lower.contains("pg_trgm")
+                        || lower.contains("42883")) {
+                    return true;
+                }
+            }
+            cursor = cursor.getCause();
+        }
+        return false;
+    }
 }

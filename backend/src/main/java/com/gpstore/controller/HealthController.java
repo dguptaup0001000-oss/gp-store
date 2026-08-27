@@ -65,6 +65,34 @@ public class HealthController {
         return "GP-STORE Backend Running Successfully!";
     }
 
+    /**
+     * Capacity snapshot for a load test. No secrets, no SQL, no env.
+     * VPS host CPU/RAM are not visible from inside this JVM — use Hostinger
+     * hPanel or {@code docker stats} over SSH for those.
+     */
+    @GetMapping("/api/health/runtime")
+    public Map<String, Object> runtime() {
+        Runtime rt = Runtime.getRuntime();
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("heapUsedMb", (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024));
+        body.put("heapMaxMb", rt.maxMemory() / (1024 * 1024));
+        body.put("processors", rt.availableProcessors());
+        body.put("threadCount",
+                java.lang.management.ManagementFactory.getThreadMXBean().getThreadCount());
+        HikariDataSource hikari = unwrapHikari();
+        if (hikari != null) {
+            body.put("hikariMax", hikari.getMaximumPoolSize());
+            HikariPoolMXBean mx = hikari.getHikariPoolMXBean();
+            if (mx != null) {
+                body.put("hikariActive", mx.getActiveConnections());
+                body.put("hikariIdle", mx.getIdleConnections());
+                body.put("hikariWaiting", mx.getThreadsAwaitingConnection());
+                body.put("hikariTotal", mx.getTotalConnections());
+            }
+        }
+        return body;
+    }
+
     @GetMapping("/api/health/ready")
     public ResponseEntity<Map<String, String>> ready() {
         long now = System.currentTimeMillis();

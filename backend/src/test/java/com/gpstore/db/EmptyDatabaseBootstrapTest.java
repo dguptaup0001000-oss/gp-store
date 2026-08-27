@@ -56,6 +56,10 @@ class EmptyDatabaseBootstrapTest {
         assertTrue(tableExists("delivery_pricing_settings"), "V21 creates delivery_pricing_settings");
         assertTrue(tableExists("password_reset_tokens"), "V24 creates password_reset_tokens");
         assertTrue(tableExists("ops_backup_runs"), "V25 creates ops_backup_runs");
+        Integer sellableIdx = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'idx_product_variants_sellable'",
+                Integer.class);
+        assertEquals(1, sellableIdx, "V26 creates idx_product_variants_sellable");
         assertTrue(sequenceExists("order_number_seq"), "V6 creates order_number_seq");
 
         Integer trigram = jdbc.queryForObject(

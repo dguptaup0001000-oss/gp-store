@@ -39,75 +39,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     boolean existsByCategoryId(Long categoryId);
 
-    /**
-     * Instant search: matches on name OR brand, tolerates typos via pg_trgm
-     * similarity (requires the pg_trgm extension - see
-     * db/migration/README-search.md), and ranks results by how close the
-     * match is instead of returning them in arbitrary/insertion order.
-     * ILIKE is included alongside the trigram operator because very short
-     * search terms (2-3 letters) can fall under trigram's similarity
-     * threshold even for a legitimate prefix match.
-     *
-     * SEARCH_KEYWORDS AND SUBCATEGORY ARE MATCHED BY ILIKE ONLY, deliberately,
-     * and are deliberately absent from the ORDER BY.
-     *
-     * They exist so that a customer can find "Fortune Sunlite Refined
-     * Sunflower Oil 1 l" by typing "cooking oil" or "1 litre" - words that
-     * appear nowhere in its name or brand. But keywords is a bag of loosely
-     * related terms, so letting it drive the RANKING would put every product
-     * carrying the word "oil" above the one actually called Sunflower Oil.
-     * Name and brand still decide the order; keywords only decide whether a
-     * product is in the running at all.
-     *
-     * Trigram similarity is not applied to them for the same reason and one
-     * more: a 500-character keyword bag has a low similarity score against
-     * any short query almost by definition, so "%" would match nearly
-     * everything or nearly nothing depending on the threshold. Substring
-     * matching is the honest operation for a keyword list.
-     *
-     * <p>BRAND SIMILARITY IS NOT IN THE ORDER BY ON ITS OWN, and taking it
-     * out is the fix for the worst search result this catalogue produced.
-     * Ranking on GREATEST(name, brand) meant every product of a brand scored
-     * identically the moment the brand matched: for "tata salt", similarity
-     * against the brand "Tata" is 0.500 for Tata Salt, for Tata Tea Gold and
-     * for Tata Besan alike, so all of them tied and the winner was whichever
-     * row Postgres happened to return first. Asking for salt gave tea.
-     *
-     * <p>Comparing against brand and name TOGETHER keeps the brand's
-     * contribution while letting the product word break the tie -
-     * "Tata Tata Salt Lite 1 kg" scores 0.500 against "tata salt" where
-     * "Tata Tata Besan" scores 0.313. A brand-only query still ranks
-     * sensibly, because the brand is part of the string being compared.
-     * The brand stays in the WHERE clause either way: it decides whether a
-     * product is in the running, just no longer where it places.
-     */
-    @Query(
-        value = "SELECT p.* FROM products p " +
-                "WHERE p.active = true " +
-                "AND EXISTS (SELECT 1 FROM product_variants v " +
-                "            WHERE v.product_id = p.id AND v.available = true " +
-                "              AND (v.active IS NULL OR v.active = true) " +
-                "              AND v.selling_price IS NOT NULL AND v.selling_price > 0) " +
-                "AND (p.name % :keyword OR p.brand % :keyword " +
-                "     OR p.name ILIKE CONCAT('%', :keyword, '%') " +
-                "     OR p.brand ILIKE CONCAT('%', :keyword, '%') " +
-                "     OR p.search_keywords ILIKE CONCAT('%', :keyword, '%') " +
-                "     OR p.subcategory ILIKE CONCAT('%', :keyword, '%')) " +
-                "ORDER BY GREATEST(similarity(p.name, :keyword), "
-                + "                  similarity(CONCAT(COALESCE(p.brand, ''), ' ', p.name), :keyword)) DESC",
-        countQuery = "SELECT count(*) FROM products p " +
-                "WHERE p.active = true " +
-                "AND EXISTS (SELECT 1 FROM product_variants v " +
-                "            WHERE v.product_id = p.id AND v.available = true " +
-                "              AND (v.active IS NULL OR v.active = true) " +
-                "              AND v.selling_price IS NOT NULL AND v.selling_price > 0) " +
-                "AND (p.name % :keyword OR p.brand % :keyword " +
-                "     OR p.name ILIKE CONCAT('%', :keyword, '%') " +
-                "     OR p.brand ILIKE CONCAT('%', :keyword, '%') " +
-                "     OR p.search_keywords ILIKE CONCAT('%', :keyword, '%') " +
-                "     OR p.subcategory ILIKE CONCAT('%', :keyword, '%'))",
-        nativeQuery = true)
-    Page<Product> searchInstant(@Param("keyword") String keyword, Pageable pageable);
+    // Instant search lives on ProductBrowseRepository.searchInstant: a
+    // Spring Data native Page<Product> wrapping SELECT p.* plus
+    // ORDER BY similarity() returned HTTP 500 in production while the JPQL
+    // /search path on the same table returned 200.
 
     // Eager-fetch category only (not variants, unlike findByIdIn above) -
     // ProductService maps every result through ProductResponse.from(), which

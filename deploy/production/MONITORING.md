@@ -9,10 +9,13 @@ the admin ops API, and `deploy/production/check-health.sh`.
 |---|---|
 | Backend up | `https://api.gpstore.co.in/v1/api/health` |
 | Ready (Postgres + Redis) | `https://api.gpstore.co.in/v1/api/health/ready` |
+| Runtime snapshot | `https://api.gpstore.co.in/v1/api/health/runtime` (heap, threads, Hikari; no secrets) |
 | Actuator | `https://api.gpstore.co.in/v1/actuator/health` (`show-details=when-authorized`) |
 
 Uptime monitors should hit **`/v1/api/health`** (cheap) or **`/v1/actuator/health`**.
 Do not hammer `/ready` more than once every few seconds; it may `SELECT 1`.
+`/v1/api/health/runtime` is safe to scrape every few seconds during a load test.
+It cannot see Hostinger host CPU/RAM — those remain hPanel / `docker stats` over SSH.
 
 ## Admin-only (JWT, ADMIN role)
 
@@ -52,7 +55,7 @@ take the shop off Traefik. GitHub **Backup alert** emails on a red run.
 | Backup failure | `ops/status` backups.healthy=false; sidecar `backup.sh health` fails immediately on FAILURE; GitHub **Backup alert** workflow |
 | Stale backup | SUCCESS dump older than 26h; sidecar unhealthy; Backup alert workflow red |
 | Disk almost full | `ops/status` disk.healthy=false; `df` on `/backups` |
-| Memory | `docker stats`; backend `mem_limit` 1536m |
+| Memory | `docker stats`; backend `mem_limit` 2560m |
 | Backup failure | `ops/status` backups.healthy=false; sidecar logs |
 | Deploy failure | GitHub Actions Deploy Production; VPS `/var/lib/gp-store/deployment-state` |
 

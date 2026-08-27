@@ -57,10 +57,20 @@ services:
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
       - --entrypoints.websecure.address=:443
+      # HTTP/2 is the Traefik TLS default. Raise the stream cap so one
+      # browser/app connection is not artificially limited to 128.
+      - --entrypoints.websecure.http2.maxConcurrentStreams=256
       - --certificatesresolvers.le.acme.httpchallenge=true
       - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
       - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
       - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      # Pool HTTP/1.1 connections to Tomcat. Default Go http.Transport is
+      # 2 idle conns per host, which forces extra handshakes under browse
+      # load. 256 matches a busy keep-alive set without opening 10k.
+      - --serversTransport.maxIdleConnsPerHost=256
+      - --serversTransport.forwardingTimeouts.dialTimeout=5s
+      - --serversTransport.forwardingTimeouts.responseHeaderTimeout=60s
+      - --serversTransport.forwardingTimeouts.idleConnTimeout=90s
       # Internal /ping for Docker HEALTHCHECK. Do not publish 8080.
       - --ping=true
       # Dashboard / API not enabled. Do not add --api.insecure.
@@ -84,8 +94,12 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
-    mem_limit: 256m
-    cpus: "0.50"
+    mem_limit: 384m
+    cpus: "0.60"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     security_opt:
       - no-new-privileges:true
     networks:
@@ -103,14 +117,37 @@ services:
     volumes:
       - gpstore_pg_data:/var/lib/postgresql/data
       - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    # 1.5 GB container on an 8 GB host. shared_buffers 256 MB is ~17% of
+    # the container, not of the host. Do not set work_mem high: 20 Hikari
+    # backends × a large work_mem OOMs this sidecar under sort-heavy search.
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - idle_in_transaction_session_timeout=30000
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 10
     # Intentionally no `ports:` — Postgres is Docker-network only.
-    mem_limit: 1024m
+    mem_limit: 1536m
     cpus: "1.0"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     logging:
       driver: json-file
       options:
@@ -147,6 +184,10 @@ services:
     # Intentionally no `ports:` — Redis is Docker-network only.
     mem_limit: 640m
     cpus: "0.50"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     read_only: true
     tmpfs:
       - /tmp
@@ -215,7 +256,9 @@ services:
       OPS_BACKUP_VOLUME_PATH: /backups
       JVM_ACTIVE_PROCESSORS: "2"
       JVM_GC: "-XX:+UseG1GC"
+      # 35% of 2560m ≈ 896 MB heap. Direct buffers raised with maxConnections.
       JVM_MAX_RAM_PERCENT: "35"
+      JVM_MAX_DIRECT: "64m"
     depends_on:
       postgres:
         condition: service_healthy
@@ -237,11 +280,21 @@ services:
       - traefik.http.routers.gpstore.rule=Host(`${API_DOMAIN:-api.gpstore.co.in}`)
       - traefik.http.routers.gpstore.entrypoints=websecure
       - traefik.http.routers.gpstore.tls.certresolver=le
+      - traefik.http.routers.gpstore.middlewares=gpstore-compress
+      - traefik.http.middlewares.gpstore-compress.compress=true
       - traefik.http.services.gpstore.loadbalancer.server.port=8081
       - traefik.http.services.gpstore.loadbalancer.server.scheme=http
     stop_grace_period: 40s
-    mem_limit: 1536m
-    cpus: "1.50"
+    # Host is 2 vCPU / 8 GB. Limits (not reservations) so idle sidecars do
+    # not steal quota. 1.70 lets the JVM use the cores Postgres is not
+    # using during cached catalog hits; 2560m gives G1 ~900 MB heap.
+    # Remaining RAM: Postgres 1536m + Redis 640m + Traefik 384m + OS.
+    mem_limit: 2560m
+    cpus: "1.70"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     security_opt:
       - no-new-privileges:true
     cap_drop:

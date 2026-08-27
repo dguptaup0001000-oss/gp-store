@@ -369,6 +369,11 @@ compose up -d dockerproxy
 compose up -d redis backup
 wait_for_redis || die "Redis did not become healthy within ${REDIS_HEALTH_TIMEOUT_SECONDS}s"
 compose up -d traefik
+HOST_TUNING="$DEPLOY_ROOT/deploy/production/apply-host-tuning.sh"
+if [ -f "$HOST_TUNING" ]; then
+  bash "$HOST_TUNING" "$DEPLOY_ROOT/deploy/production/sysctl-gpstore.conf" \
+    || log "Host sysctl tuning skipped (need root once via prepare-vps.sh)"
+fi
 
 echo "[5/8] Starting backend"
 REPLACED=1

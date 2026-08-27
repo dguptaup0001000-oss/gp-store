@@ -142,6 +142,31 @@ class HealthControllerTest {
         verify(redisConnection).close();
     }
 
+    @Test
+    void runtimeReportsHeapAndPoolWithoutSecrets() throws SQLException {
+        HikariPoolMXBean mx = mock(HikariPoolMXBean.class);
+        when(mx.getActiveConnections()).thenReturn(3);
+        when(mx.getIdleConnections()).thenReturn(17);
+        when(mx.getThreadsAwaitingConnection()).thenReturn(0);
+        when(mx.getTotalConnections()).thenReturn(20);
+
+        HikariDataSource hikari = mock(HikariDataSource.class);
+        when(hikari.getMaximumPoolSize()).thenReturn(20);
+        when(hikari.getHikariPoolMXBean()).thenReturn(mx);
+
+        HealthController controller = new HealthController(hikari);
+        var body = controller.runtime();
+
+        assertEquals(20, body.get("hikariMax"));
+        assertEquals(3, body.get("hikariActive"));
+        assertEquals(17, body.get("hikariIdle"));
+        assertEquals(0, body.get("hikariWaiting"));
+        assertEquals(20, body.get("hikariTotal"));
+        org.junit.jupiter.api.Assertions.assertTrue(((Number) body.get("heapMaxMb")).longValue() > 0);
+        org.junit.jupiter.api.Assertions.assertFalse(body.toString().toLowerCase().contains("password"));
+        org.junit.jupiter.api.Assertions.assertFalse(body.toString().toLowerCase().contains("secret"));
+    }
+
     private static void setLastReadyOkFarInThePast(HealthController controller) {
         try {
             var field = HealthController.class.getDeclaredField("lastReadyOkAt");
