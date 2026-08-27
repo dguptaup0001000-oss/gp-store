@@ -58,6 +58,8 @@ jobs:
           sh -n backend/docker/backup/backup.sh
           python3 -m py_compile .github/scripts/wait_for_ci.py
           python3 -m py_compile .github/scripts/automerge_eligible_pr.py
+          python3 -m py_compile .github/scripts/resolve_api_base_url.py
+          python3 .github/scripts/resolve_api_base_url.py --self-test
           python3 -m py_compile backend/docker/redis/materialize-password-file.py
           sh -n backend/docker/redis/docker-entrypoint.sh
           sh -n backend/docker-entrypoint.sh

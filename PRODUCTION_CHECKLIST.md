@@ -98,7 +98,9 @@ Android apps do not use CORS.
 Release Android/web builds must pass `--dart-define=APP_ENV=production` (CI
 does this). The coded production API is `https://api.gpstore.co.in/v1`.
 GitHub `vars.API_BASE_URL` must stay that URL or empty (CI uses the same
-default). Do not set it to Render, localhost, or any other host.
+default). Do not set it to Render, localhost, or any other host. If it is
+still the old Render URL, CI refuses it and bakes `https://api.gpstore.co.in/v1`
+instead — otherwise login is HTTP 404.
 
 As of 2026-08-26 `api.gpstore.co.in` is **A `187.127.173.192`** with a Let's
 Encrypt certificate. Confirm `https://api.gpstore.co.in/v1/api/health` returns
