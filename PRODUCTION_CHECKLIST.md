@@ -71,9 +71,11 @@ Required for a real shop — see `backend/.env.example`:
 
 Optional, fail-closed if unset: Cashfree, SMS/OTP, Firebase, Cloudinary.
 
-**Do not raise** `DB_POOL_MAX_SIZE` (default 10), `TOMCAT_MAX_THREADS`
-(default 40), or JVM memory to “fix” 502s. Those ceilings were set on
-purpose. Latency is not solved by a bigger pool on the same 2 vCPU VPS.
+**Defaults:** `DB_POOL_MAX_SIZE=20`, `TOMCAT_MAX_THREADS=80` on one VPS
+instance with **local** Postgres. Do not raise those further to “fix” 502s
+from a browse flood. Do not drop them back to 10/40 if you still need 100
+concurrent checkouts — that combination sheds. Latency is not solved by a
+100-connection pool on the same 2 vCPU VPS.
 
 ## CORS (code, already in this repo)
 
@@ -85,7 +87,7 @@ Android apps do not use CORS.
 
 - Change production secrets.
 - Enable Mapbox or PostGIS.
-- Increase Hikari / Tomcat / JVM ceilings.
+- Increase Hikari / Tomcat / JVM ceilings past the documented 20 / 80 defaults.
 - Run 1,000+ VU load tests against the live API URL. Use
   `load-tests/browse-cart-checkout.js` locally/staging, smallest stage first.
 - Merge or rewrite Flyway V2–V22.

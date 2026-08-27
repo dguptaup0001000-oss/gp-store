@@ -32,6 +32,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -101,6 +106,46 @@ class IdempotencyFingerprintTest {
                 "A retry must return the ORIGINAL order, not a new one");
         assertEquals(1, ordersFor(fixture.customerId),
                 "Exactly one real order may exist for one idempotency key");
+    }
+
+    @Test
+    void concurrentSameKeyPlaceOrderCreatesExactlyOneOrder() throws InterruptedException {
+        Fixture fixture = newCheckoutReadyCustomer(2);
+        String key = UUID.randomUUID().toString();
+        int n = 10;
+        ExecutorService pool = Executors.newFixedThreadPool(n);
+        CountDownLatch ready = new CountDownLatch(n);
+        CountDownLatch go = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(n);
+        AtomicInteger successes = new AtomicInteger();
+        AtomicInteger errors = new AtomicInteger();
+
+        for (int i = 0; i < n; i++) {
+            pool.submit(() -> {
+                try {
+                    ready.countDown();
+                    go.await();
+                    PlaceOrderResponse response = orderService.placeOrder(
+                            request(fixture), fixture.customerId, key);
+                    if (response != null && response.isSuccess()) {
+                        successes.incrementAndGet();
+                    }
+                } catch (Exception ignored) {
+                    errors.incrementAndGet();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        go.countDown();
+        assertTrue(done.await(60, TimeUnit.SECONDS));
+        pool.shutdown();
+
+        assertEquals(1, ordersFor(fixture.customerId),
+                "Concurrent retries of the same key must not create duplicate orders");
+        assertTrue(successes.get() >= 1, "at least one caller must receive the order");
     }
 
     /**

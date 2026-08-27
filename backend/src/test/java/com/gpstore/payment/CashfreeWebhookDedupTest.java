@@ -24,8 +24,15 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Base64;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(properties = {
         "cashfree.webhook-secret=webhook-dedup-test-secret",
@@ -68,6 +75,58 @@ class CashfreeWebhookDedupTest {
         Payment payment = paymentRepository.findByProviderOrderId(providerOrderId).orElseThrow();
         assertEquals(PaymentStatus.SUCCESS, payment.getPaymentStatus(),
                 "rollback of the duplicate must not un-apply the first delivery");
+    }
+
+    @Test
+    @DisplayName("concurrent duplicate Cashfree events apply at most once")
+    void concurrentDuplicateWebhooksApplyOnce() throws InterruptedException {
+        Order order = persistedOrder();
+        String providerOrderId = "GP-" + order.getId() + "-race";
+        persistedPayment(order, providerOrderId);
+
+        String rawBody = "{\"type\":\"PAYMENT_SUCCESS_WEBHOOK\","
+                + "\"data\":{\"order\":{\"order_id\":\"" + providerOrderId + "\"},"
+                + "\"payment\":{\"cf_payment_id\":\"cf_race_" + order.getId() + "\","
+                + "\"payment_status\":\"SUCCESS\",\"payment_amount\":10.00,"
+                + "\"payment_currency\":\"INR\"}}}";
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = sign(timestamp + rawBody);
+
+        int n = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(n);
+        CountDownLatch ready = new CountDownLatch(n);
+        CountDownLatch go = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(n);
+        AtomicInteger applied = new AtomicInteger();
+
+        for (int i = 0; i < n; i++) {
+            pool.submit(() -> {
+                try {
+                    ready.countDown();
+                    go.await();
+                    GatewayPaymentService.WebhookResult result =
+                            service.applyWebhook(rawBody, signature, timestamp);
+                    if (result.outcome() == PaymentProviderEvent.Outcome.APPLIED) {
+                        applied.incrementAndGet();
+                    }
+                } catch (GatewayPaymentService.DuplicateEventException duplicate) {
+                    // expected for losers
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        go.countDown();
+        assertTrue(done.await(30, TimeUnit.SECONDS));
+        pool.shutdown();
+
+        assertEquals(1, applied.get(), "exactly one delivery may apply");
+        Payment payment = paymentRepository.findByProviderOrderId(providerOrderId).orElseThrow();
+        assertEquals(PaymentStatus.SUCCESS, payment.getPaymentStatus());
     }
 
     private Order persistedOrder() {

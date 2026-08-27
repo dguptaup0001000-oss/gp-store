@@ -1,0 +1,71 @@
+# Actionable alert when production backups fail or go stale.
+# A failed GitHub Actions run emails repository watchers. Does not print
+# secrets. Does not restore or deploy.
+name: Backup alert
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+concurrency:
+  group: gpstore-prod-ssh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  alert:
+    name: Backup freshness and last-attempt status
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Require VPS SSH secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for v in PROD_HOST PROD_USER PROD_SSH_PRIVATE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set"
+              missing=1
+            fi
+          done
+          bash -n deploy/production/evaluate-backup-status.sh
+          exit "$missing"
+
+      - name: Fetch status.txt and evaluate
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+          PROD_APP_DIR: ${{ secrets.PROD_APP_DIR }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          KEY="$(mktemp)"
+          trap 'rm -f "$KEY"' EXIT
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$KEY"
+          chmod 600 "$KEY"
+          APP_DIR="${PROD_APP_DIR:-/opt/gp-store}"
+          ssh -i "$KEY" \
+            -p "${PROD_PORT:-22}" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            "${PROD_USER}@${PROD_HOST}" \
+            "cd '$APP_DIR/backend' && docker compose -f docker-compose.yml exec -T backup cat /backups/status.txt" \
+            > /tmp/status.txt
+          echo "Fetched status.txt (values below are metadata, not credentials):"
+          grep -E '^(taken_at|bytes|filename|status)=' /tmp/status.txt || true
+          MAX_AGE_HOURS=26 bash deploy/production/evaluate-backup-status.sh /tmp/status.txt

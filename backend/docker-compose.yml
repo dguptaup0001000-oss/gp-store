@@ -270,15 +270,16 @@ services:
       BACKUP_DIR: /backups
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-21600}
+      BACKUP_HEALTH_MAX_MINUTES: ${BACKUP_HEALTH_MAX_MINUTES:-1560}
     volumes:
       - gpstore_pg_backups:/backups
       - ./docker/backup/backup.sh:/backup.sh:ro
     entrypoint: ["/bin/sh", "/backup.sh", "daemon"]
     healthcheck:
-      test: ["CMD-SHELL", "test -s /backups/LATEST && test -f /backups/$(cat /backups/LATEST) && find /backups -maxdepth 1 \\( -name 'gpstore-*.dump' -o -name 'gpstore-*.sql.gz' \\) -mmin -2880 | grep -q ."]
-      interval: 10m
+      test: ["CMD-SHELL", "/bin/sh /backup.sh health"]
+      interval: 2m
       timeout: 10s
-      retries: 3
+      retries: 2
       start_period: 15m
     depends_on:
       postgres:

@@ -59,6 +59,7 @@ the GitHub UI as the repo owner:
 | `PROD_SSH_PRIVATE_KEY` | Dedicated deploy key (full PEM). Not the GitHub account password. |
 | `PROD_PORT` | Optional. Defaults to `22`. |
 | `PROD_APP_DIR` | Optional. Defaults to `/opt/gp-store`. |
+| `BACKUP_GPG_PASSPHRASE` | GPG passphrase for off-box dump encryption. Never a database password. |
 
 Do **not** put database passwords, JWT secrets, MSG91, Cashfree, or
 production `.env` values in GitHub. Those remain on the VPS.

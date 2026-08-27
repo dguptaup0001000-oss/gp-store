@@ -36,8 +36,11 @@ docker compose -f backend/docker-compose.yml ps
 docker compose -f backend/docker-compose.yml logs --tail=80 backend
 ```
 
-Compose already restarts unhealthy containers (`restart: unless-stopped`) and
-the backup sidecar healthcheck fails when `LATEST` is missing or stale.
+Compose already restarts unhealthy containers (`restart: unless-stopped`).
+The backup sidecar healthcheck fails when `status.txt` is missing, the last
+attempt is `FAILURE`, or the SUCCESS dump is older than 26 hours. Backend
+`/actuator/health` stays independent of backups so a dump failure does not
+take the shop off Traefik. GitHub **Backup alert** emails on a red run.
 
 ## What to watch
 
@@ -46,6 +49,8 @@ the backup sidecar healthcheck fails when `LATEST` is missing or stale.
 | Backend down | public `/api/health` not 200; Compose `backend` unhealthy |
 | Database down | `/api/health/ready` 503; actuator DOWN |
 | Redis down | `/api/health/ready` 503; `ops/status` redis.healthy=false |
+| Backup failure | `ops/status` backups.healthy=false; sidecar `backup.sh health` fails immediately on FAILURE; GitHub **Backup alert** workflow |
+| Stale backup | SUCCESS dump older than 26h; sidecar unhealthy; Backup alert workflow red |
 | Disk almost full | `ops/status` disk.healthy=false; `df` on `/backups` |
 | Memory | `docker stats`; backend `mem_limit` 1536m |
 | Backup failure | `ops/status` backups.healthy=false; sidecar logs |

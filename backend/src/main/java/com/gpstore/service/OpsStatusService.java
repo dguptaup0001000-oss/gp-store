@@ -50,6 +50,43 @@ public class OpsStatusService {
         this.redisTemplate = redisTemplate;
     }
 
+    /**
+     * Alert categories used by tests and {@link #backupStatus()}.
+     * A failed attempt is unhealthy even when an older SUCCESS file still
+     * exists — that is the 48-hour false-green the sidecar healthcheck had.
+     */
+    public enum BackupAlert {
+        HEALTHY,
+        MISSING,
+        FAILED,
+        STALE
+    }
+
+    public BackupAlert backupAlert() {
+        OpsBackupRun lastOk = backupRunRepository
+                .findFirstByStatusOrderByTakenAtDesc(STATUS_SUCCESS)
+                .orElse(null);
+        OpsBackupRun lastAny = backupRunRepository.findTop20ByOrderByTakenAtDesc()
+                .stream()
+                .findFirst()
+                .orElse(null);
+
+        if (lastAny == null) {
+            return BackupAlert.MISSING;
+        }
+        if (STATUS_FAILURE.equals(lastAny.getStatus())) {
+            return BackupAlert.FAILED;
+        }
+        if (lastOk == null) {
+            return BackupAlert.MISSING;
+        }
+        Duration age = Duration.between(lastOk.getTakenAt(), Instant.now());
+        if (age.isNegative() || age.compareTo(maxAge) > 0) {
+            return BackupAlert.STALE;
+        }
+        return BackupAlert.HEALTHY;
+    }
+
     public Map<String, Object> backupStatus() {
         OpsBackupRun lastOk = backupRunRepository
                 .findFirstByStatusOrderByTakenAtDesc(STATUS_SUCCESS)
@@ -59,29 +96,31 @@ public class OpsStatusService {
                 .findFirst()
                 .orElse(null);
 
+        BackupAlert alert = backupAlert();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("configured", true);
         body.put("maxAgeHours", maxAge.toHours());
-        if (lastOk == null) {
-            body.put("healthy", false);
-            body.put("reason", lastAny == null
+        body.put("alert", alert.name());
+        body.put("healthy", alert == BackupAlert.HEALTHY);
+        switch (alert) {
+            case MISSING -> body.put("reason", lastAny == null
                     ? "No backup has been recorded yet."
                     : "No successful backup has been recorded.");
-            body.put("lastSuccessAt", null);
-            body.put("lastAttempt", summarise(lastAny));
-            return body;
+            case FAILED -> body.put("reason",
+                    "Last backup attempt failed; a previous SUCCESS file is not a substitute.");
+            case STALE -> body.put("reason",
+                    "Last successful backup is older than " + maxAge.toHours() + " hours.");
+            case HEALTHY -> body.put("reason",
+                    "Last successful backup is within the freshness window.");
         }
-
-        Duration age = Duration.between(lastOk.getTakenAt(), Instant.now());
-        boolean healthy = !age.isNegative() && age.compareTo(maxAge) <= 0;
-        body.put("healthy", healthy);
-        body.put("reason", healthy
-                ? "Last successful backup is within the retention window."
-                : "Last successful backup is older than " + maxAge.toHours() + " hours.");
-        body.put("lastSuccessAt", lastOk.getTakenAt().toString());
+        body.put("lastSuccessAt", lastOk != null && lastOk.getTakenAt() != null
+                ? lastOk.getTakenAt().toString() : null);
         body.put("lastSuccess", summarise(lastOk));
         body.put("lastAttempt", summarise(lastAny));
-        body.put("ageHours", Math.round(age.toMinutes() / 6.0) / 10.0);
+        if (lastOk != null && lastOk.getTakenAt() != null) {
+            Duration age = Duration.between(lastOk.getTakenAt(), Instant.now());
+            body.put("ageHours", Math.round(age.toMinutes() / 6.0) / 10.0);
+        }
         return body;
     }
 

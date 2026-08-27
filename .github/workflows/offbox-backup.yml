@@ -1,0 +1,86 @@
+# Off-box copy of the latest production Postgres dump.
+#
+# Pulls the dump OFF the VPS onto the GitHub runner (a different failure
+# domain than /dev/sda1). Encrypts with BACKUP_GPG_PASSPHRASE before
+# retaining. Never restores into production. Never prints secrets.
+#
+# Schedule is a real off-box copy. Dispatch is the operator verification.
+name: Off-box backup
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 1,7,13,19 * * *"
+
+concurrency:
+  group: gpstore-prod-ssh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  offbox:
+    name: Pull encrypted dump off the VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Require VPS SSH secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for v in PROD_HOST PROD_USER PROD_SSH_PRIVATE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set"
+              missing=1
+            fi
+          done
+          bash -n deploy/production/offbox-pull-from-vps.sh
+          exit "$missing"
+
+      - name: Pull, verify, encrypt
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+          BACKUP_GPG_PASSPHRASE: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
+          OUT_DIR: ${{ runner.temp }}/offbox-out
+        run: |
+          set -Eeuo pipefail
+          chmod +x deploy/production/offbox-pull-from-vps.sh
+          mkdir -p "$OUT_DIR"
+          ./deploy/production/offbox-pull-from-vps.sh
+          test -f "$OUT_DIR/metadata.json"
+          echo "metadata:"
+          cat "$OUT_DIR/metadata.json"
+          if [ -z "${BACKUP_GPG_PASSPHRASE:-}" ]; then
+            echo "::error::BACKUP_GPG_PASSPHRASE is not set. Dump was verified off-box on this runner but not retained. Add the secret to keep an encrypted copy."
+            rm -f "$OUT_DIR"/gpstore-*.dump
+            exit 1
+          fi
+          test -f "$OUT_DIR"/*.gpg
+          rm -f "$OUT_DIR"/gpstore-*.dump
+
+      - name: Upload encrypted dump
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-offbox-backup
+          path: |
+            ${{ runner.temp }}/offbox-out/*.gpg
+            ${{ runner.temp }}/offbox-out/*.sha256
+            ${{ runner.temp }}/offbox-out/*.status.txt
+            ${{ runner.temp }}/offbox-out/metadata.json
+            ${{ runner.temp }}/offbox-out/status.txt
+          if-no-files-found: error
+          retention-days: 90

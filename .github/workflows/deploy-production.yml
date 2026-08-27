@@ -48,6 +48,10 @@ jobs:
         run: |
           bash -n deploy/production/deploy.sh
           bash -n deploy/production/prepare-vps.sh
+          bash -n deploy/production/backup-offbox-sync.sh
+          bash -n deploy/production/offbox-pull-from-vps.sh
+          bash -n deploy/production/evaluate-backup-status.sh
+          sh -n backend/docker/backup/backup.sh
           python3 -m py_compile .github/scripts/wait_for_ci.py
           python3 -m py_compile .github/scripts/automerge_eligible_pr.py
           python3 -m py_compile backend/docker/redis/materialize-password-file.py
