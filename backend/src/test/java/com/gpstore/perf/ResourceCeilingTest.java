@@ -151,15 +151,24 @@ class ResourceCeilingTest {
     }
 
     @Test
-    @DisplayName("Tomcat will not accept thousands of connections it cannot serve")
+    @DisplayName("Tomcat holds enough keep-alive sockets without spawning thousands of threads")
     void acceptedConnectionsAreBounded() throws IOException {
         String text = properties();
         int maxConnections = Integer.parseInt(defaultOf(text, "server.tomcat.max-connections").trim());
         int maxThreads = Integer.parseInt(defaultOf(text, "server.tomcat.threads.max").trim());
 
+        // 500 was the measured 500-VU → 1000-VU latency cliff: Traefik held
+        // one HTTP/1.1 socket per VU and Tomcat stopped accepting at 500.
+        // Keep-alive sockets are cheap; 80 worker threads are the CPU budget.
+        assertTrue(maxConnections >= 2000,
+                "max-connections is " + maxConnections + ". Below ~2000, a 1000-VU keep-alive "
+                        + "browse run queues in accept() and p95 explodes with zero HTTP errors.");
         assertTrue(maxConnections < 8192,
-                "max-connections is at or above Tomcat's default of 8192, which on a 512 MB container "
-                        + "is a promise to accept connections there is no memory to hold.");
+                "max-connections is at or above Tomcat's default of 8192, which is still more "
+                        + "NIO state than this VPS should promise.");
+        assertTrue(maxThreads <= 120,
+                "threads.max is " + maxThreads + ". Thousands of Java threads on 2 vCPU make "
+                        + "tail latency worse, which is why this is not raised with max-connections.");
         assertTrue(maxConnections > maxThreads,
                 "max-connections (" + maxConnections + ") must exceed threads.max (" + maxThreads
                         + "), or keep-alive would make every idle client hold a slot another needs.");
@@ -194,5 +203,27 @@ class ResourceCeilingTest {
         assertTrue(text.contains("server.compression.enabled=true"),
                 "HTTP compression is off. Catalog JSON is large enough that a few thousand concurrent "
                         + "browsers saturate the instance with payload, not with queries.");
+    }
+
+    @Test
+    @DisplayName("the backend container is not capped below the 2 vCPU host share")
+    void backendContainerIsNotArtificiallyStarved() throws IOException {
+        Path compose = Path.of("docker-compose.yml");
+        assertTrue(Files.exists(compose), "backend/docker-compose.yml not found");
+        String yaml = Files.readString(compose);
+
+        assertTrue(yaml.contains("mem_limit: 2560m"),
+                "backend mem_limit must be 2560m so G1 has ~900 MB heap inside the container. "
+                        + "1536m with MaxRAMPercentage 35 was a ~537 MB heap, which GC-stalls "
+                        + "while the Hostinger host graph still looks idle.");
+        assertTrue(yaml.contains("cpus: \"1.70\""),
+                "backend cpus must be 1.70. The 1.50 quota starved Tomcat under keep-alive "
+                        + "while the other 0.5 vCPU sat unused in the host graph.");
+        Matcher pool = Pattern.compile("maximum-pool-size=\\$\\{DB_POOL_MAX_SIZE:(\\d+)}").matcher(properties());
+        assertTrue(pool.find());
+        int hikari = Integer.parseInt(pool.group(1));
+        assertTrue(hikari >= 10 && hikari <= 32,
+                "Hikari default " + hikari + " is outside 10–32. Do not size the pool to 500 "
+                        + "because a load test asked for 10k VUs; Postgres on this VPS cannot.");
     }
 }

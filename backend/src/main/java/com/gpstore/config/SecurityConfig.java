@@ -89,6 +89,14 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
             .headers(headers -> headers
+                    // Spring Security's default Cache-Control is no-store on
+                    // every response. That is correct for auth, checkout and
+                    // orders. It is wrong for the public catalogue: phones
+                    // and Traefik were forbidden from reusing a 15-second
+                    // feed page that the application already caches in
+                    // Caffeine. CatalogPublicCacheFilter writes the public
+                    // policy; everything else gets no-store there too.
+                    .cacheControl(cache -> cache.disable())
                     // Forces HTTPS on every subsequent request for a year once a
                     // browser sees this - only actually matters once you're
                     // serving over HTTPS (which any real deployment should be).

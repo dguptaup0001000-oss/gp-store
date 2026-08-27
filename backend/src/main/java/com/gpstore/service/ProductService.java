@@ -150,7 +150,18 @@ public class ProductService {
         if (keyword == null || keyword.isBlank()) {
             throw new BadRequestException("Search keyword is required");
         }
-        return batchFetchWithVariants(productRepository.searchInstant(keyword.trim(), pageable));
+        String trimmed = keyword.trim();
+        if (trimmed.length() > 80) {
+            trimmed = trimmed.substring(0, 80);
+        }
+        int page = Math.max(pageable.getPageNumber(), 0);
+        int size = Math.min(Math.max(pageable.getPageSize(), 1), 50);
+        ProductBrowseRepository.SearchPage found =
+                productBrowseRepository.searchInstant(trimmed, page, size);
+        return new PageImpl<>(
+                batchToResponseList(found.productIds()),
+                org.springframework.data.domain.PageRequest.of(page, size),
+                found.totalElements());
     }
 
     /**

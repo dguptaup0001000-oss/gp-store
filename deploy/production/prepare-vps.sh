@@ -57,6 +57,12 @@ fi
 
 chown -R "$DEPLOY_USER":"$DEPLOY_USER" "$DEPLOY_ROOT" "$STATE_DIR" || true
 
+if [ -f "$DEPLOY_ROOT/deploy/production/apply-host-tuning.sh" ]; then
+  bash "$DEPLOY_ROOT/deploy/production/apply-host-tuning.sh" \
+    "$DEPLOY_ROOT/deploy/production/sysctl-gpstore.conf" \
+    || log "WARNING: host sysctl tuning did not apply"
+fi
+
 AUTH_KEYS="/home/${DEPLOY_USER}/.ssh/authorized_keys"
 if [ "$DEPLOY_USER" = "root" ]; then
   AUTH_KEYS="/root/.ssh/authorized_keys"
