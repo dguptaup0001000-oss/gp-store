@@ -103,6 +103,21 @@ class GatewayPaymentStateTest {
     }
 
     @Test
+    @DisplayName("SUCCESS webhook confirms a pending order and is not lost")
+    void successWebhookConfirmsPendingOrder() {
+        Order order = persistedOrder(OrderStatus.PENDING_CONFIRMATION);
+        String providerOrderId = "GP-" + order.getId() + "-ok";
+        persistedPayment(order, providerOrderId);
+
+        apply("PAYMENT_SUCCESS_WEBHOOK", providerOrderId, "SUCCESS", 10.00, "cf_ok_" + order.getId());
+
+        Payment payment = paymentRepository.findByProviderOrderId(providerOrderId).orElseThrow();
+        assertEquals(PaymentStatus.SUCCESS, payment.getPaymentStatus());
+        assertEquals(OrderStatus.CONFIRMED,
+                orderRepository.findById(order.getId()).orElseThrow().getOrderStatus());
+    }
+
+    @Test
     @DisplayName("SUCCESS after the order is cancelled does not resurrect it")
     void cancelledOrderRejectsLateSuccessWebhook() {
         Order order = persistedOrder(OrderStatus.CANCELLED);

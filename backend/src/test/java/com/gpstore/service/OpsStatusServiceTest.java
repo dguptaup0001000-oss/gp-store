@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.entity.OpsBackupRun;
 import com.gpstore.repository.OpsBackupRunRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -8,6 +9,9 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -18,6 +22,10 @@ class OpsStatusServiceTest {
 
     @TempDir
     Path tempDir;
+
+    private OpsBackupRun run(String status, Instant takenAt) {
+        return new OpsBackupRun(takenAt, "gpstore-test.dump", 100L, "abc", status, "ok");
+    }
 
     @Test
     void redisPingFailureIsUnhealthyWithoutLeakingTheException() {
@@ -54,5 +62,72 @@ class OpsStatusServiceTest {
         Map<String, Object> disk = service.diskStatus();
         assertEquals(false, disk.get("configured"));
         assertEquals(true, disk.get("healthy"));
+    }
+
+    @Test
+    void successfulFreshBackupIsHealthy() {
+        OpsBackupRun success = run("SUCCESS", Instant.now().minus(2, ChronoUnit.HOURS));
+        OpsBackupRunRepository repo = mock(OpsBackupRunRepository.class);
+        when(repo.findFirstByStatusOrderByTakenAtDesc("SUCCESS")).thenReturn(Optional.of(success));
+        when(repo.findTop20ByOrderByTakenAtDesc()).thenReturn(List.of(success));
+
+        OpsStatusService service = new OpsStatusService(repo, 26, "", null);
+        assertEquals(OpsStatusService.BackupAlert.HEALTHY, service.backupAlert());
+        Map<String, Object> body = service.backupStatus();
+        assertEquals(true, body.get("healthy"));
+        assertEquals("HEALTHY", body.get("alert"));
+        assertFalse(body.toString().toLowerCase().contains("password"));
+    }
+
+    @Test
+    void failedAttemptIsUnhealthyEvenWhenAnOlderSuccessExists() {
+        OpsBackupRun success = run("SUCCESS", Instant.now().minus(1, ChronoUnit.HOURS));
+        OpsBackupRun failure = run("FAILURE", Instant.now().minus(5, ChronoUnit.MINUTES));
+        OpsBackupRunRepository repo = mock(OpsBackupRunRepository.class);
+        when(repo.findFirstByStatusOrderByTakenAtDesc("SUCCESS")).thenReturn(Optional.of(success));
+        when(repo.findTop20ByOrderByTakenAtDesc()).thenReturn(List.of(failure, success));
+
+        OpsStatusService service = new OpsStatusService(repo, 26, "", null);
+        assertEquals(OpsStatusService.BackupAlert.FAILED, service.backupAlert());
+        Map<String, Object> body = service.backupStatus();
+        assertEquals(false, body.get("healthy"));
+        assertEquals("FAILED", body.get("alert"));
+        assertTrue(body.get("reason").toString().contains("failed"));
+    }
+
+    @Test
+    void staleSuccessIsUnhealthy() {
+        OpsBackupRun success = run("SUCCESS", Instant.now().minus(40, ChronoUnit.HOURS));
+        OpsBackupRunRepository repo = mock(OpsBackupRunRepository.class);
+        when(repo.findFirstByStatusOrderByTakenAtDesc("SUCCESS")).thenReturn(Optional.of(success));
+        when(repo.findTop20ByOrderByTakenAtDesc()).thenReturn(List.of(success));
+
+        OpsStatusService service = new OpsStatusService(repo, 26, "", null);
+        assertEquals(OpsStatusService.BackupAlert.STALE, service.backupAlert());
+        assertEquals(false, service.backupStatus().get("healthy"));
+    }
+
+    @Test
+    void missingBackupIsUnhealthy() {
+        OpsBackupRunRepository repo = mock(OpsBackupRunRepository.class);
+        when(repo.findFirstByStatusOrderByTakenAtDesc(any())).thenReturn(Optional.empty());
+        when(repo.findTop20ByOrderByTakenAtDesc()).thenReturn(List.of());
+
+        OpsStatusService service = new OpsStatusService(repo, 26, "", null);
+        assertEquals(OpsStatusService.BackupAlert.MISSING, service.backupAlert());
+        assertEquals(false, service.backupStatus().get("healthy"));
+    }
+
+    @Test
+    void successAfterFailureRecovers() {
+        OpsBackupRun recovered = run("SUCCESS", Instant.now().minus(10, ChronoUnit.MINUTES));
+        OpsBackupRun failure = run("FAILURE", Instant.now().minus(2, ChronoUnit.HOURS));
+        OpsBackupRunRepository repo = mock(OpsBackupRunRepository.class);
+        when(repo.findFirstByStatusOrderByTakenAtDesc("SUCCESS")).thenReturn(Optional.of(recovered));
+        when(repo.findTop20ByOrderByTakenAtDesc()).thenReturn(List.of(recovered, failure));
+
+        OpsStatusService service = new OpsStatusService(repo, 26, "", null);
+        assertEquals(OpsStatusService.BackupAlert.HEALTHY, service.backupAlert());
+        assertEquals(true, service.backupStatus().get("healthy"));
     }
 }

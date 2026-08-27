@@ -39,8 +39,8 @@ echo "== Redis (Compose network only) =="
 compose exec -T redis sh -c 'REDISCLI_AUTH="$(tr -d "\r\n" < /run/secrets/redis_password)" redis-cli ping'
 echo
 
-echo "== Backup volume disk =="
-compose exec -T backup df -h /backups
+echo "== Backup sidecar health (26h SUCCESS, not 48h any-file) =="
+compose exec -T backup /bin/sh /backup.sh health
 echo
 
 echo "== Container memory / CPU (no secrets) =="

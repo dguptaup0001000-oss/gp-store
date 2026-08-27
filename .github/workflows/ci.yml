@@ -66,6 +66,12 @@ jobs:
           sh -n docker/redis/docker-entrypoint.sh
           sh -n docker-entrypoint.sh
           python3 docker/redis/test_materialize_password_file.py
+          sh -n docker/backup/backup.sh
+          bash -n ../deploy/production/backup-offbox-sync.sh
+          bash -n ../deploy/production/offbox-pull-from-vps.sh
+          bash -n ../deploy/production/evaluate-backup-status.sh
+          chmod +x docker/backup/test_backup_health.sh
+          ./docker/backup/test_backup_health.sh
 
       # FLYWAY_ENABLED is false below (schema comes from DDL_AUTO=update
       # instead, see that env var's own comment) - so none of the

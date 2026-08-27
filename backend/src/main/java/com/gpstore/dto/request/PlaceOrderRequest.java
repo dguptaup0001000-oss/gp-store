@@ -1,8 +1,10 @@
 package com.gpstore.dto.request;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class PlaceOrderRequest {
 
     // customerId is intentionally NOT a field here - it is always derived

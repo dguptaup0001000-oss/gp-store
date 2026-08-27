@@ -34,6 +34,20 @@ public class OpsBackupRun {
     @Column(length = 1000)
     private String detail;
 
+    public OpsBackupRun() {
+    }
+
+    /** Test fixture and explicit construction. The sidecar inserts via SQL. */
+    public OpsBackupRun(Instant takenAt, String filename, Long bytes, String sha256,
+                        String status, String detail) {
+        this.takenAt = takenAt;
+        this.filename = filename;
+        this.bytes = bytes;
+        this.sha256 = sha256;
+        this.status = status;
+        this.detail = detail;
+    }
+
     public Long getId() { return id; }
     public Instant getTakenAt() { return takenAt; }
     public String getFilename() { return filename; }

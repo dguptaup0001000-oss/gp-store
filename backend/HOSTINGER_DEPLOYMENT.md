@@ -235,7 +235,10 @@ keeps 14 days, and never deletes the latest successful file. Failed dumps
 are not promoted to `LATEST`. Each run inserts a row into `ops_backup_runs`.
 Admins can read status at `GET /v1/api/admin/ops/backups` (JWT, ADMIN role).
 
-That volume is still on this VPS until you copy it off-box:
+That volume is still on this VPS until you copy it off-box. GitHub Actions
+**Off-box backup** pulls an encrypted dump off the machine; see
+`deploy/production/BACKUPS.md`. A second host via `BACKUP_OFFBOX_TARGET` is
+also supported. Local paths are refused.
 
 ```bash
 # systemd timer (recommended) — see deploy/production/gpstore-backup-offbox.*.example

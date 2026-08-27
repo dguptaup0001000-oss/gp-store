@@ -71,7 +71,13 @@ the measured ceiling for that target.
 
 | Stage | VUs | How |
 |---|---|---|
-| A–D | 10, 25, 50, 100 | `BASE_URL=http://localhost:8081/v1 ./run-staged-capacity.sh` |
+| A–D | 10, 25, 50, 100 browse VUs | `BASE_URL=http://localhost:8081/v1 ./run-staged-capacity.sh` |
+| COD orders | 10, 25, 50, 100 concurrent checkouts | `./run-concurrent-orders.sh` against localhost/staging only |
+
+`run-concurrent-orders.sh` **refuses** `api.gpstore.co.in`. It places COD
+orders (no card charges). Seed `accounts.json` first. Duplicate/lost-order
+and negative-stock proofs are `ConcurrentOrderLoadTest` in backend CI, not
+k6.
 | E–G | 250, 500, 1,000 | `STAGES="250" HOLD_TIME=1m ./run-staged-capacity.sh` on staging only |
 
 Browse-only probe (no checkout, no seeded accounts):

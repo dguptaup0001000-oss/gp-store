@@ -130,4 +130,28 @@ class IdempotencyHeaderContractTest {
 
         verify(orderService).placeOrder(any(), any(), eq(null));
     }
+
+    @Test
+    @WithMockUser(roles = "CUSTOMER")
+    void clientSuppliedTotalsAreIgnoredAtTheHttpBoundary() throws Exception {
+        when(currentUser.customerId()).thenReturn(1L);
+        when(orderService.placeOrder(any(), any(), any()))
+                .thenReturn(new com.gpstore.dto.response.PlaceOrderResponse());
+
+        mockMvc.perform(post("/api/orders/place")
+                        .header("Idempotency-Key", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"addressId": 1, "paymentMethod": "COD",
+                                 "totalAmount": 1, "subtotal": 1, "deliveryFee": 0,
+                                 "customerId": 999}
+                                """))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<com.gpstore.dto.request.PlaceOrderRequest> captured =
+                ArgumentCaptor.forClass(com.gpstore.dto.request.PlaceOrderRequest.class);
+        verify(orderService).placeOrder(captured.capture(), eq(1L), any());
+        assertEquals(Long.valueOf(1L), captured.getValue().getAddressId());
+        assertEquals("COD", captured.getValue().getPaymentMethod());
+    }
 }
