@@ -60,4 +60,5 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=accept-new \
             "${PROD_USER}@${PROD_HOST}" \
-            bash -s < deploy/production/verify-backup-restore-live.sh
+            'cat > /tmp/gpstore-verify-backup.sh && bash /tmp/gpstore-verify-backup.sh; rc=$?; rm -f /tmp/gpstore-verify-backup.sh; exit $rc' \
+            < deploy/production/verify-backup-restore-live.sh

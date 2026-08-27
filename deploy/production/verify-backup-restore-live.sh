@@ -31,7 +31,16 @@ compose() {
   if printf '%s' "$*" | grep -Eq -- 'down[[:space:]]+(-v|--volumes)\b'; then
     die "refusing a compose down -v command"
   fi
-  docker compose -f "$COMPOSE_FILE" --project-directory "$COMPOSE_DIR" "$@"
+  # Never attach this script's stdin to a container (bash -s / ssh).
+  docker compose -f "$COMPOSE_FILE" --project-directory "$COMPOSE_DIR" "$@" </dev/null
+}
+
+docker() {
+  if [ "${1:-}" = exec ]; then
+    command docker "$@" </dev/null
+  else
+    command docker "$@"
+  fi
 }
 
 prod_fingerprint() {
@@ -62,6 +71,10 @@ log "RESULT: fingerprint_before=${FP_BEFORE}"
 PROD_DB_NAME="$(printf '%s' "$FP_BEFORE" | awk -F'\t' '{print $1}')"
 [ -n "$PROD_DB_NAME" ] || die "could not read production database name"
 [ "$PROD_DB_NAME" != "$DRILL_DB" ] || die "production database name unexpectedly equals drill name"
+log "CMD: list production databases named like the drill (must not be required for this check)"
+PROBE_ON_PROD="$(compose exec -T postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -Atc "SELECT coalesce(string_agg(datname, \",\"), \"\") FROM pg_database WHERE datname IN ('\''gpstore_restore_probe'\'', '\''gpstore-restore-drill'\'');"')"
+log "RESULT: probe_dbs_on_production_postgres=${PROBE_ON_PROD:-none}"
 
 section "1. scheduler / job identity"
 log "CMD: docker inspect gpstore-backup-1 (command, restart, mounts; no Env)"
@@ -143,7 +156,7 @@ docker run -d --name "$DRILL_NAME" \
 log "CMD: wait for pg_isready inside drill container"
 READY=0
 for _ in $(seq 1 40); do
-  if docker exec "$DRILL_NAME" pg_isready -U "$DRILL_USER" -d postgres >/dev/null 2>&1; then
+  if docker exec "$DRILL_NAME" pg_isready -U "$DRILL_USER" -d postgres </dev/null >/dev/null 2>&1; then
     READY=1
     break
   fi
