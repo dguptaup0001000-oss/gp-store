@@ -116,6 +116,16 @@ capture_previous() {
 dump_diagnostics() {
   log "--- compose ps ---"
   compose ps || true
+  log "--- Traefik-local /api/version ---"
+  curl -sS --max-time 10 --http1.1 \
+    --resolve "${API_HOST}:443:127.0.0.1" \
+    -w "\nhttp_code=%{http_code}\n" \
+    "https://${API_HOST}/v1/api/version" || true
+  log "--- Traefik-local /api/health/live ---"
+  curl -sS --max-time 10 --http1.1 \
+    --resolve "${API_HOST}:443:127.0.0.1" \
+    -w "\nhttp_code=%{http_code}\n" \
+    "https://${API_HOST}/v1/api/health/live" || true
   log "--- boot / Flyway errors ---"
   compose logs --tail=200 backend 2>/dev/null \
     | grep -E 'Flyway|checksum mismatch|APPLICATION FAILED|Refusing to start|Permission denied|IllegalStateException|Caused by: org.flywaydb' \
@@ -185,21 +195,26 @@ verify_public_sha() {
 # was healthy in-container for 3 minutes; the public hostname still served
 # f229fd9 (edge cache / hairpin DNS) and the deploy rolled back a working
 # API. Local TLS to 127.0.0.1:443 is the path that must match.
+# Do not use curl -f: a Traefik 404 body is the diagnosis (router missing
+# .service when two services exist on the backend container).
 verify_traefik_sha() {
   local expected="$1"
   local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
-  local body="" running=""
+  local body="" running="" http_code=""
   local url="https://${API_HOST}/v1/api/version"
   while (( SECONDS < deadline )); do
-    body="$(curl -fsS --max-time 15 --http1.1 \
+    body="$(curl -sS --max-time 15 --http1.1 \
       --resolve "${API_HOST}:443:127.0.0.1" \
-      "$url" 2>/dev/null || true)"
+      -w '\n%{http_code}' \
+      "$url" 2>/dev/null || printf '\n000')"
+    http_code="${body##*$'\n'}"
+    body="${body%$'\n'*}"
     running="$(printf '%s' "$body" | json_field gitCommit 2>/dev/null || true)"
     if [ "$running" = "$expected" ]; then
       printf '%s' "$body"
       return 0
     fi
-    log "Traefik-local /api/version gitCommit=${running:-none} expected=$expected"
+    log "Traefik-local /api/version http=${http_code:-000} gitCommit=${running:-none} expected=$expected body=$(printf '%s' "$body" | tr '\n' ' ' | cut -c1-160)"
     sleep 5
   done
   return 1

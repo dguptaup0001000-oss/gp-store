@@ -295,6 +295,12 @@ services:
       - traefik.http.routers.gpstore.tls.certresolver=le
       - traefik.http.routers.gpstore.priority=10
       - traefik.http.routers.gpstore.middlewares=gpstore-compress
+      # Two services on one container: every router MUST set .service.
+      # Without this, Traefik drops the gpstore router ("cannot create a
+      # router ... too many services") and only PathPrefix live works.
+      # Seen on 2444870: in-container SHA matched, /health/live was 200,
+      # /version /health /ready were Traefik 404, then rollback to f229fd9.
+      - traefik.http.routers.gpstore.service=gpstore
       - traefik.http.middlewares.gpstore-compress.compress=true
       - traefik.http.services.gpstore.loadbalancer.server.port=8081
       - traefik.http.services.gpstore.loadbalancer.server.scheme=http
