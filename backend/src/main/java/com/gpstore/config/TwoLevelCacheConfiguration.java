@@ -31,6 +31,7 @@ public class TwoLevelCacheConfiguration {
     @Primary
     public CacheManager cacheManager(
             RedisConnectionFactory redisConnectionFactory,
+            CacheHitStats cacheHitStats,
             @Value("${CACHE_TTL_MS:600000}") long redisTtlMs,
             @Value("${cache.l1-ttl-seconds:15}") long l1TtlSeconds,
             @Value("${cache.l1-max-entries:2000}") int l1MaxEntries) {
@@ -44,7 +45,8 @@ public class TwoLevelCacheConfiguration {
         CaffeineCacheManager local = new CaffeineCacheManager();
         local.setCaffeine(Caffeine.newBuilder()
                 .expireAfterWrite(l1TtlSeconds, TimeUnit.SECONDS)
-                .maximumSize(l1MaxEntries));
+                .maximumSize(l1MaxEntries)
+                .recordStats());
         local.setAllowNullValues(false);
 
         return new CacheManager() {
@@ -56,7 +58,7 @@ public class TwoLevelCacheConfiguration {
                 if (l1 == null || l2 == null) {
                     return l2;
                 }
-                return new TwoLevelCache(name, l1, l2);
+                return new TwoLevelCache(name, l1, l2, cacheHitStats);
             }
 
             @Override

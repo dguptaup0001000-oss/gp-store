@@ -167,6 +167,14 @@ class HealthControllerTest {
         org.junit.jupiter.api.Assertions.assertFalse(body.toString().toLowerCase().contains("secret"));
     }
 
+    @Test
+    void liveIsAConstantAndDoesNotTouchThePool() throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        HealthController controller = new HealthController(dataSource);
+        assertEquals("live", controller.live().get("status"));
+        verify(dataSource, never()).getConnection();
+    }
+
     private static void setLastReadyOkFarInThePast(HealthController controller) {
         try {
             var field = HealthController.class.getDeclaredField("lastReadyOkAt");

@@ -248,6 +248,9 @@ class AccessDeniedStatusTest {
     void publicHealthStaysOpen() {
         ResponseEntity<String> health = rest.getForEntity(url("/api/health"), String.class);
         assertEquals(HttpStatus.OK, health.getStatusCode(), health.getBody());
+        ResponseEntity<String> live = rest.getForEntity(url("/api/health/live"), String.class);
+        assertEquals(HttpStatus.OK, live.getStatusCode(), live.getBody());
+        assertTrue(live.getBody() != null && live.getBody().contains("live"), live.getBody());
         ResponseEntity<String> ready = rest.getForEntity(url("/api/health/ready"), String.class);
         assertEquals(HttpStatus.OK, ready.getStatusCode(), ready.getBody());
         ResponseEntity<String> actuator = rest.getForEntity(

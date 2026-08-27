@@ -24,4 +24,14 @@ class ProductBrowseRepositorySearchTest {
         org.junit.jupiter.api.Assertions.assertFalse(trigram.contains("ANDEXISTS"));
         org.junit.jupiter.api.Assertions.assertFalse(ilike.contains("ANDEXISTS"));
     }
+
+    @Test
+    void missingTrigramErrorsAreDetected() {
+        assertTrue(ProductBrowseRepository.looksLikeMissingTrigram(
+                new RuntimeException("ERROR: operator does not exist: text % text")));
+        assertTrue(ProductBrowseRepository.looksLikeMissingTrigram(
+                new RuntimeException("function similarity(text, text) does not exist")));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                ProductBrowseRepository.looksLikeMissingTrigram(new RuntimeException("syntax error")));
+    }
 }

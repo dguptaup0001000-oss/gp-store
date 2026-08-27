@@ -23,7 +23,7 @@ class TwoLevelCacheTest {
         Cache l1 = new ConcurrentMapCache("l1");
         Cache l2 = new ConcurrentMapCache("l2");
         l2.put("k", "from-redis");
-        TwoLevelCache cache = new TwoLevelCache("products", l1, l2);
+        TwoLevelCache cache = new TwoLevelCache("products", l1, l2, new CacheHitStats());
 
         assertEquals("from-redis", cache.get("k", String.class));
         assertEquals("from-redis", l1.get("k", String.class));
@@ -35,7 +35,7 @@ class TwoLevelCacheTest {
         Cache l2 = new ConcurrentMapCache("l2");
         l1.put("k", "local");
         l2.put("k", "stale-redis");
-        TwoLevelCache cache = new TwoLevelCache("products", l1, l2);
+        TwoLevelCache cache = new TwoLevelCache("products", l1, l2, new CacheHitStats());
 
         assertEquals("local", cache.get("k", String.class));
     }
@@ -44,7 +44,7 @@ class TwoLevelCacheTest {
     void evictClearsBothLayers() {
         Cache l1 = new ConcurrentMapCache("l1");
         Cache l2 = new ConcurrentMapCache("l2");
-        TwoLevelCache cache = new TwoLevelCache("products", l1, l2);
+        TwoLevelCache cache = new TwoLevelCache("products", l1, l2, new CacheHitStats());
         cache.put("k", "v");
         cache.evict("k");
 
@@ -56,7 +56,7 @@ class TwoLevelCacheTest {
     void getWithLoaderOnlyRunsOnceUnderStampede() throws Exception {
         Cache l1 = new ConcurrentMapCache("l1");
         Cache l2 = new ConcurrentMapCache("l2");
-        TwoLevelCache cache = new TwoLevelCache("products", l1, l2);
+        TwoLevelCache cache = new TwoLevelCache("products", l1, l2, new CacheHitStats());
 
         AtomicInteger loads = new AtomicInteger();
         CountDownLatch start = new CountDownLatch(1);

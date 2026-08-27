@@ -306,6 +306,38 @@ public class GlobalExceptionHandler {
                 .body(body);
     }
 
+    @ExceptionHandler(org.springframework.web.bind.MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiError> handleMissingParam(
+            org.springframework.web.bind.MissingServletRequestParameterException ex,
+            HttpServletRequest req) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), req);
+    }
+
+    /**
+     * {@code @Cacheable(sync = true)} wraps the loader's exception in
+     * {@link org.springframework.cache.Cache.ValueRetrievalException}. Without
+     * this handler a blank search keyword becomes HTTP 500 instead of 400,
+     * which is exactly the "hide a 400 behind a 500" failure the shop had
+     * on {@code /search/instant}.
+     */
+    @ExceptionHandler(org.springframework.cache.Cache.ValueRetrievalException.class)
+    public ResponseEntity<ApiError> handleCacheLoadFailure(
+            org.springframework.cache.Cache.ValueRetrievalException ex,
+            HttpServletRequest req) {
+        Throwable cause = ex.getCause();
+        if (cause instanceof BadRequestException bad) {
+            return handleBadRequest(bad, req);
+        }
+        if (cause instanceof ResourceNotFoundException missing) {
+            return handleNotFound(missing, req);
+        }
+        if (cause instanceof ConflictException conflict) {
+            return handleConflict(conflict, req);
+        }
+        log.error("Cache loader failed on {} {}", req.getMethod(), req.getRequestURI(), ex);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", req);
+    }
+
     // Catch-all: never leak internal exception messages/stack traces to the client,
     // but this is the only handler for genuinely unanticipated failures, so it must
     // log the real exception - otherwise a bug that lands here leaves no trace
