@@ -85,9 +85,11 @@ Until it exists, the workflow verifies the pull then **fails closed** rather
 than uploading a plaintext customer database.
 
 The workflow also starts after a **successful Deploy Production on `main`**
-(`push` or `workflow_dispatch`, never a pull-request syntax job). That is the
-production evidence path: merge → deploy → encrypted `.gpg` artifact →
-download → decrypt → isolated restore into `gpstore_offbox_probe`.
+(`push` or `workflow_dispatch`, never a pull-request syntax job). Deploy
+dispatches Off-box backup with `workflow_dispatch` because `GITHUB_TOKEN`
+merges do not start `workflow_run` listeners. That is the production
+evidence path: merge → deploy → encrypted `.gpg` artifact → download →
+decrypt → isolated restore into `gpstore_offbox_probe`.
 
 CI (`schema-migrate` job) also encrypts the CI dump with a **job-ephemeral**
 passphrase (never the production secret), decrypts it, and isolated-restores
