@@ -3,9 +3,11 @@ package com.gpstore.config;
 import org.flywaydb.core.Flyway;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.flyway.FlywayMigrationInitializer;
+import org.springframework.boot.autoconfigure.flyway.FlywayMigrationStrategy;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
@@ -152,12 +154,22 @@ public class FlywayAfterSchemaConfig {
      * dependency graph at all: it fires once, after every singleton in the
      * context has been created - entityManagerFactory among them, so Hibernate's
      * schema export has already run by the time migrate() is called.
+     *
+     * Goes through {@link FlywayMigrationStrategy} when present so failed V27
+     * is repaired before migrate on this path too (see FlywayRepairAndMigrateConfig).
      */
     @Bean
-    public SmartInitializingSingleton deferredFlywayMigration(Flyway flyway) {
+    public SmartInitializingSingleton deferredFlywayMigration(
+            Flyway flyway,
+            ObjectProvider<FlywayMigrationStrategy> migrationStrategy) {
         return () -> {
             log.info("Running Flyway now that the schema exists (see FlywayAfterSchemaConfig).");
-            flyway.migrate();
+            FlywayMigrationStrategy strategy = migrationStrategy.getIfAvailable();
+            if (strategy != null) {
+                strategy.migrate(flyway);
+            } else {
+                flyway.migrate();
+            }
         };
     }
 }
