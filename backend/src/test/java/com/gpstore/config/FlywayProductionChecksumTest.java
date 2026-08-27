@@ -26,6 +26,15 @@ class FlywayProductionChecksumTest {
         assertEquals(78920826, flywayChecksum("/db/migration/V19__add_delivery_territories.sql"));
     }
 
+    @Test
+    void v27MustNotChangeAfterTheFailedProductionApply() throws Exception {
+        // V27 failed on production (unqualified gin_trgm_ops) and the repair
+        // marks that history row successful without re-running the script.
+        // The checksum stored on that row is then the production checksum of
+        // V27. Editing the file — even a comment — would refuse the next boot.
+        assertEquals(-1932722443, flywayChecksum("/db/migration/V27__search_keyword_trigram_indexes.sql"));
+    }
+
     static int flywayChecksum(String classpath) throws Exception {
         var in = FlywayProductionChecksumTest.class.getResourceAsStream(classpath);
         assertNotNull(in, classpath);
