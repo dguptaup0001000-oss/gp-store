@@ -26,6 +26,10 @@ IGNORE_CHECK_NAMES = {
     "auto-merge eligible prs",
     "auto-merge eligible pr",
     "auto-merge eligible pr into main",
+    # APK builds are a separate release artifact. A missing Play keystore
+    # or Flutter flake must not block merging a backend fix.
+    "build-apk",
+    "build apk and deploy web",
 }
 FAIL_CONCLUSIONS = {
     "FAILURE",
@@ -171,11 +175,33 @@ def same_repo(data: dict[str, Any]) -> bool:
 
 
 def dispatch_production_deploy() -> None:
+    _dispatch_workflow(
+        "deploy-production.yml",
+        "Dispatched Deploy Production on main (backup if the merge push did not start it).",
+        "Could not dispatch Deploy Production from GITHUB_TOKEN. "
+        "If no push-triggered run starts, an admin must grant "
+        "Settings → Actions → General → Workflow permissions → Read and write, "
+        "or run Actions → Deploy Production → Run workflow on main.",
+    )
+
+
+def dispatch_production_apk() -> None:
+    """GITHUB_TOKEN merges do not start push workflows. Dispatch the APK job."""
+    _dispatch_workflow(
+        "build-and-deploy.yml",
+        "Dispatched Build APK and Deploy Web on main so a downloadable "
+        "gpstore-production-latest.apk is produced for this release.",
+        "Could not dispatch Build APK and Deploy Web from GITHUB_TOKEN. "
+        "Run Actions → Build APK and Deploy Web → Run workflow on main.",
+    )
+
+
+def _dispatch_workflow(workflow_file: str, ok_message: str, fail_prefix: str) -> None:
     repo = os.environ["GITHUB_REPOSITORY"]
     proc = gh(
         "workflow",
         "run",
-        "deploy-production.yml",
+        workflow_file,
         "--repo",
         repo,
         "--ref",
@@ -183,15 +209,9 @@ def dispatch_production_deploy() -> None:
         check=False,
     )
     if proc.returncode == 0:
-        log("Dispatched Deploy Production on main (backup if the merge push did not start it).")
+        log(ok_message)
         return
-    log(
-        "Could not dispatch Deploy Production from GITHUB_TOKEN. "
-        "If no push-triggered run starts, an admin must grant "
-        "Settings → Actions → General → Workflow permissions → Read and write, "
-        "or run Actions → Deploy Production → Run workflow on main.\n"
-        f"{(proc.stderr or proc.stdout or '').strip()}"
-    )
+    log(f"{fail_prefix}\n{(proc.stderr or proc.stdout or '').strip()}")
 
 
 def try_native_automerge(number: int) -> tuple[bool, str]:
@@ -291,6 +311,7 @@ def merge_eligible_pr(number: int, *, ci_already_green: bool = False) -> str:
         refreshed = pr_view(number)
         if refreshed.get("state") == "MERGED":
             dispatch_production_deploy()
+            dispatch_production_apk()
             return "merged"
         log("GitHub will merge when remaining required ruleset checks pass.")
         return "queued"
@@ -303,6 +324,7 @@ def merge_eligible_pr(number: int, *, ci_already_green: bool = False) -> str:
     if merged_ok:
         log(merged_text or f"Merged PR #{number} into main.")
         dispatch_production_deploy()
+        dispatch_production_apk()
         return "merged"
 
     if is_permission_error(merged_text) or is_permission_error(native_text):
