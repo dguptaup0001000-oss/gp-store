@@ -1,0 +1,46 @@
+# Harmless SSH proof only. Does not deploy, restore, or change the VPS.
+name: SSH access check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/ssh-access-check-8230
+
+permissions:
+  contents: read
+
+jobs:
+  ssh-access:
+    name: Echo SSH_ACCESS_OK
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Same environment as Deploy Production so PROD_* secrets resolve.
+    environment: production
+    steps:
+      - name: Require VPS SSH secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for v in PROD_HOST PROD_USER PROD_SSH_PRIVATE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: SSH echo
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_PORT != '' && secrets.PROD_PORT || 22 }}
+          script_stop: true
+          command_timeout: 1m
+          script: echo SSH_ACCESS_OK
