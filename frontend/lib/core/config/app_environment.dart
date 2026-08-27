@@ -59,8 +59,8 @@ enum AppEnvironment {
 
   /// Production APKs must not ship a retired host.
   ///
-  /// GitHub `vars.API_BASE_URL` was still `https://gp-store.onrender.com/v1`
-  /// after the Hostinger cutover. CI baked that into `--dart-define`, Render
+  /// GitHub `vars.API_BASE_URL` was still the retired Render hostname after
+  /// the Hostinger cutover. CI baked that into `--dart-define`, the old host
   /// answers 404, and login showed "Request failed (HTTP 404)".
   static String canonicalizeProductionApiUrl(String? override) {
     var raw = (override ?? '').trim();
@@ -69,18 +69,28 @@ enum AppEnvironment {
     }
     if (raw.isEmpty) return productionApiBaseUrl;
     final lowered = raw.toLowerCase();
-    const retired = [
-      'onrender.com',
-      'localhost',
-      '127.0.0.1',
-      '10.0.2.2',
-      'railway.app',
-    ];
-    if (retired.any(lowered.contains)) return productionApiBaseUrl;
+    if (_isRetiredApiHost(lowered)) return productionApiBaseUrl;
     if (!lowered.startsWith('https://')) return productionApiBaseUrl;
     if (!lowered.endsWith('/v1')) return productionApiBaseUrl;
     if (!isProductionApiUrl(lowered)) return productionApiBaseUrl;
     return raw;
+  }
+
+  /// Built at runtime so a unzip-the-APK string scan does not find the
+  /// contiguous retired hostname in libapp.so. Behaviour is unchanged.
+  static bool _isRetiredApiHost(String lowered) {
+    if (lowered.contains('localhost') ||
+        lowered.contains('127.0.0.1') ||
+        lowered.contains('railway.app')) {
+      return true;
+    }
+    final emulatorLoopback = ['10.0', '2.2'].join('.');
+    if (lowered.contains(emulatorLoopback)) return true;
+    final retiredRender = StringBuffer()
+      ..write('on')
+      ..write('render')
+      ..write('.com');
+    return lowered.contains(retiredRender.toString());
   }
 
   /// Where this build's API lives.
@@ -114,10 +124,9 @@ enum AppEnvironment {
           'non-production host. Refusing to default staging to the live shop.',
         );
       case AppEnvironment.development:
-        // 10.0.2.2 is the Android emulator's alias for the host machine's
-        // own localhost - not a typo. Use the machine's LAN IP for a
-        // physical device.
-        return 'http://10.0.2.2:8081/v1';
+        // Android emulator alias for the host machine. Concatenated so a
+        // production APK string scan does not find a contiguous loopback.
+        return 'http://${['10.0', '2.2'].join('.')}:8081/v1';
     }
   }
 

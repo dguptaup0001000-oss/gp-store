@@ -82,6 +82,9 @@ dependencies:
   # the link the backend generates, not just display it as text.
   url_launcher: ^6.3.1
   package_info_plus: ^8.1.2
+  # Direct dep so the password denylist can be stored as SHA-256 digests
+  # instead of plaintext application strings in libapp.so.
+  crypto: ^3.0.6
 
   # Lets an admin pick a real photo from their gallery for a product
   # variant's image, instead of having to paste an already-hosted image URL

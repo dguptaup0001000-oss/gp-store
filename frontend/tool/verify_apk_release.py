@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail if a release APK is unsigned, not zip-aligned, or has the wrong package.
+"""Fail if a release APK is unsigned, not zip-aligned, 4 KiB ELF-aligned, or has the wrong package.
 
 Prints the signer DN so CI logs distinguish Android Debug from a Play key.
 Does not re-sign. Do not unzip/modify/sign APKs by hand.
@@ -12,8 +12,15 @@ from __future__ import annotations
 import glob
 import os
 import re
+import struct
 import subprocess
 import sys
+import tempfile
+import zipfile
+
+# Android 15+ 16 KiB page devices reject PT_LOAD align < 16384.
+MIN_ELF_LOAD_ALIGN = 16384
+PT_LOAD = 1
 
 
 CUSTOMER_PACKAGE = "com.gpstore.app"
@@ -77,6 +84,109 @@ def sdk_tool(name: str) -> str:
     if not matches:
         sys.exit(f"no {name} under {sdk}/build-tools")
     return matches[-1]
+
+
+def elf_pt_load_alignments(blob: bytes) -> list[int]:
+    """Return PT_LOAD p_align values from a 32/64-bit ELF. Raises ValueError."""
+    if len(blob) < 16 or blob[:4] != b"\x7fELF":
+        raise ValueError("not ELF")
+    ei_class = blob[4]  # 1=32, 2=64
+    ei_data = blob[5]  # 1=LE, 2=BE
+    if ei_class not in (1, 2) or ei_data not in (1, 2):
+        raise ValueError("unsupported ELF ident")
+    endian = "<" if ei_data == 1 else ">"
+    if ei_class == 2:
+        if len(blob) < 64:
+            raise ValueError("truncated ELF64 header")
+        _e_type, _e_machine, _e_version, _e_entry, e_phoff, _e_shoff, _e_flags, _e_ehsize, e_phentsize, e_phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from(
+            endian + "HHIQQQIHHHHHH", blob, 16
+        )
+        phdr_fmt = endian + "IIQQQQQQ"
+        phdr_need = 56
+        align_index = 7
+    else:
+        if len(blob) < 52:
+            raise ValueError("truncated ELF32 header")
+        _e_type, _e_machine, _e_version, _e_entry, e_phoff, _e_shoff, _e_flags, _e_ehsize, e_phentsize, e_phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from(
+            endian + "HHIIIIIHHHHHH", blob, 16
+        )
+        phdr_fmt = endian + "IIIIIIII"
+        phdr_need = 32
+        align_index = 7
+    if e_phentsize < phdr_need or e_phnum < 1:
+        raise ValueError("no program headers")
+    aligns: list[int] = []
+    for i in range(e_phnum):
+        off = e_phoff + i * e_phentsize
+        if off + phdr_need > len(blob):
+            raise ValueError("truncated program header")
+        fields = struct.unpack_from(phdr_fmt, blob, off)
+        if fields[0] != PT_LOAD:
+            continue
+        aligns.append(int(fields[align_index]))
+    return aligns
+
+
+def fake_elf64_le(load_aligns: list[int]) -> bytes:
+    """Minimal ET_DYN ELF64 for --self-test. Not a runnable library."""
+    e_phnum = len(load_aligns)
+    e_phoff = 64
+    e_phentsize = 56
+    header = b"\x7fELF" + bytes([2, 1, 1, 0]) + bytes(8)
+    header += struct.pack(
+        "<HHIQQQIHHHHHH",
+        3,  # ET_DYN
+        183,  # EM_AARCH64
+        1,
+        0,
+        e_phoff,
+        0,
+        0,
+        64,
+        e_phentsize,
+        e_phnum,
+        0,
+        0,
+        0,
+    )
+    phdrs = b""
+    for align in load_aligns:
+        phdrs += struct.pack("<IIQQQQQQ", PT_LOAD, 5, 0, 0, 0, 0, 0, align)
+    return header + phdrs
+
+
+def native_lib_elf_problems(apk: str) -> list[str]:
+    """Fail native libs whose PT_LOAD alignment is below 16 KiB."""
+    problems: list[str] = []
+    try:
+        with zipfile.ZipFile(apk) as zf:
+            names = [
+                info.filename
+                for info in zf.infolist()
+                if info.filename.startswith("lib/") and info.filename.endswith(".so")
+            ]
+            if not names:
+                return ["no lib/**/*.so in APK"]
+            for name in names:
+                blob = zf.read(name)
+                try:
+                    aligns = elf_pt_load_alignments(blob)
+                except ValueError as exc:
+                    problems.append(f"{name}: {exc}")
+                    continue
+                if not aligns:
+                    problems.append(f"{name}: no PT_LOAD")
+                    continue
+                min_align = min(aligns)
+                print(f"ELF_ALIGN {name} min={min_align} loads={aligns}")
+                if min_align < MIN_ELF_LOAD_ALIGN:
+                    problems.append(
+                        f"{name}: PT_LOAD align {min_align} < {MIN_ELF_LOAD_ALIGN} "
+                        "(16 KiB page)"
+                    )
+    except zipfile.BadZipFile as exc:
+        return [f"not a zip/apk: {exc}"]
+    return problems
 
 
 def expected_package(apk: str) -> str | None:
@@ -176,6 +286,9 @@ def main() -> None:
             failed = True
         else:
             print(f"ZIPALIGN_OK {os.path.basename(apk)} (16 KiB page / 4-byte)")
+        for problem in native_lib_elf_problems(apk):
+            print(f"ELF_ALIGN_TOO_SMALL {apk}: {problem}")
+            failed = True
 
     worker_pkgs = {pkg for name, pkg in seen.items() if "worker" in name.lower()}
     customer_pkgs = {
@@ -210,6 +323,37 @@ if __name__ == "__main__":
             WORKER_PACKAGE,
             {"android.permission.CAMERA", "android.permission.RECORD_AUDIO"},
         )
+        assert elf_pt_load_alignments(fake_elf64_le([65536, 65536, 65536])) == [
+            65536,
+            65536,
+            65536,
+        ]
+        assert elf_pt_load_alignments(fake_elf64_le([16384, 16384, 16384])) == [
+            16384,
+            16384,
+            16384,
+        ]
+        assert min(elf_pt_load_alignments(fake_elf64_le([4096, 4096]))) < MIN_ELF_LOAD_ALIGN
+        try:
+            elf_pt_load_alignments(b"not-elf")
+            raise AssertionError("non-ELF must raise")
+        except ValueError:
+            pass
+        with tempfile.TemporaryDirectory() as tmp:
+            good = os.path.join(tmp, "good.apk")
+            bad = os.path.join(tmp, "bad.apk")
+            with zipfile.ZipFile(good, "w") as zf:
+                zf.writestr(
+                    "lib/arm64-v8a/libimage_processing_util_jni.so",
+                    fake_elf64_le([16384, 16384, 16384]),
+                )
+            with zipfile.ZipFile(bad, "w") as zf:
+                zf.writestr(
+                    "lib/arm64-v8a/libimage_processing_util_jni.so",
+                    fake_elf64_le([4096, 4096, 4096]),
+                )
+            assert not native_lib_elf_problems(good), native_lib_elf_problems(good)
+            assert native_lib_elf_problems(bad), "4 KiB CameraX jni must fail"
         print("self-test ok")
         sys.exit(0)
     main()

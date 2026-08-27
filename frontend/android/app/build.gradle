@@ -184,6 +184,27 @@ dependencies {
     // provides the actual backported java.time/java.util implementations,
     // the enable flag alone isn't enough on its own.
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
+
+    // mobile_scanner 5.2.3 pulls CameraX 1.3.3, whose
+    // libimage_processing_util_jni.so is 4 KiB ELF-aligned. Android 15+
+    // 16 KiB page devices reject that. CameraX 1.4.2+ ships 16 KiB LOAD
+    // alignment. Force it for every configuration so the customer APK
+    // (which still links mobile_scanner) and the worker APK both pass.
+    def camerax = "1.4.2"
+    implementation "androidx.camera:camera-core:$camerax"
+    implementation "androidx.camera:camera-camera2:$camerax"
+    implementation "androidx.camera:camera-lifecycle:$camerax"
+    implementation "androidx.camera:camera-view:$camerax"
+}
+
+configurations.all {
+    resolutionStrategy {
+        def camerax = "1.4.2"
+        force "androidx.camera:camera-core:$camerax"
+        force "androidx.camera:camera-camera2:$camerax"
+        force "androidx.camera:camera-lifecycle:$camerax"
+        force "androidx.camera:camera-view:$camerax"
+    }
 }
 
 flutter {
