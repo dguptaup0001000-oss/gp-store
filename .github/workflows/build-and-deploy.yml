@@ -34,11 +34,13 @@
 # Customer applicationId: com.gpstore.app
 # Worker applicationId:   com.gpstore.worker
 #
-# Play upload keystore secrets are optional for a green CI job. Without them,
-# analyze/tests still run and APKs are Android Debug signed. CI does not
-# invent a keystore. Play AAB artifacts are produced only when
-# ANDROID_KEYSTORE_* is set. Customer/admin and worker APKs always use
-# explicit per-ABI names (never a duplicate of the same file).
+# Play upload keystore: CI never invents a keystore and never commits one.
+# Pull-request APKs may still be Android Debug signed so sideload artifacts
+# stay green. Builds of main (push, workflow_dispatch, or workflow_run whose
+# source branch is main) fail closed if ANDROID_KEYSTORE_* is missing — a
+# main APK named like production must not be CN=Android Debug. Play AAB
+# artifacts are produced only when ANDROID_KEYSTORE_* is set.
+# Customer/admin and worker APKs always use explicit per-ABI names.
 #
 # One-time setup after you push this to GitHub:
 # 1. Go to your repo's Settings -> Pages -> Source -> select "GitHub Actions".
@@ -198,25 +200,49 @@ jobs:
         run: python3 .github/scripts/resolve_api_base_url.py --github-env
 
       - name: Detect Play upload keystore
-        # Analyze + flutter test above already ran. Missing Play secrets must
-        # not fail the job: there is no keystore in git and CI must not invent
-        # one. Sideload APKs can still build debug-signed. Play AAB artifacts
-        # are skipped until the operator stores a real upload keystore.
+        # There is no keystore in git and CI must not invent one. Pull-request
+        # sideload APKs may still be Android Debug signed. A build of main
+        # must fail instead of publishing a production-named debug APK.
+        # workflow_run always has github.ref = the default branch, so the
+        # source branch is workflow_run.head_branch, not GITHUB_REF.
         id: play_signing
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          EVENT_NAME: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
+          WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
+          require_release=0
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            require_release=0
+          elif [ "$EVENT_NAME" = "workflow_run" ]; then
+            if [ "$WORKFLOW_HEAD_BRANCH" = "main" ]; then
+              require_release=1
+            fi
+          elif [ "$GIT_REF" = "refs/heads/main" ]; then
+            require_release=1
+          fi
           if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            if [ "$require_release" = "1" ]; then
+              echo "::error::ANDROID_KEYSTORE_BASE64 is required for main APK builds. Debug-signed APKs (CN=Android Debug) are not a production artifact. Set repo secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD, and ANDROID_KEY_ALIAS. CI will not generate a keystore."
+              {
+                echo "### Android signing"
+                echo ""
+                echo "Play upload keystore is **missing** and this is a main build. The job failed closed so a production-named APK is not Android Debug signed."
+                echo "Add repo secrets \`ANDROID_KEYSTORE_BASE64\`, \`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_PASSWORD\`, and \`ANDROID_KEY_ALIAS\`."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
             echo "::warning::ANDROID_KEYSTORE_BASE64 is unset. Analyze/tests still run. Play-signed APK/AAB artifacts are skipped; sideload APKs will be Android Debug signed."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             {
               echo "### Android signing"
               echo ""
-              echo "Play upload keystore is **not** configured. This job stays green on analyze, tests, and debug-signed sideload APKs."
-              echo "Set repo secrets \`ANDROID_KEYSTORE_BASE64\`, \`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_PASSWORD\`, and \`ANDROID_KEY_ALIAS\` to produce Play-ready artifacts."
+              echo "Play upload keystore is **not** configured. This pull-request job stays green on analyze, tests, and debug-signed sideload APKs."
+              echo "Set repo secrets \`ANDROID_KEYSTORE_BASE64\`, \`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_PASSWORD\`, and \`ANDROID_KEY_ALIAS\` before a main APK can be Play-signed."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
