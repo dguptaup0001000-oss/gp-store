@@ -206,27 +206,41 @@ class AccessDeniedStatusTest {
     }
 
     @Test
-    @DisplayName("prometheus is not public")
-    void prometheusRequiresAdmin() {
-        ResponseEntity<String> anon = rest.getForEntity(
+    @DisplayName("prometheus and metrics are not public")
+    void actuatorMetricsRequireAdmin() {
+        ResponseEntity<String> anonMetrics = rest.getForEntity(
+                "http://localhost:" + port + "/v1/actuator/metrics", String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, anonMetrics.getStatusCode(), anonMetrics.getBody());
+
+        ResponseEntity<String> anonProm = rest.getForEntity(
                 "http://localhost:" + port + "/v1/actuator/prometheus", String.class);
-        assertEquals(HttpStatus.UNAUTHORIZED, anon.getStatusCode(), anon.getBody());
+        assertEquals(HttpStatus.UNAUTHORIZED, anonProm.getStatusCode(), anonProm.getBody());
 
         ensureIdentities();
-        ResponseEntity<String> customer = rest.exchange(
-                "http://localhost:" + port + "/v1/actuator/prometheus",
+        ResponseEntity<String> customerMetrics = rest.exchange(
+                "http://localhost:" + port + "/v1/actuator/metrics",
                 HttpMethod.GET, bearer(customerToken), String.class);
-        assertEquals(HttpStatus.FORBIDDEN, customer.getStatusCode(), customer.getBody());
+        assertEquals(HttpStatus.FORBIDDEN, customerMetrics.getStatusCode(), customerMetrics.getBody());
 
-        ResponseEntity<String> admin = rest.exchange(
+        ResponseEntity<String> adminMetrics = rest.exchange(
+                "http://localhost:" + port + "/v1/actuator/metrics",
+                HttpMethod.GET, bearer(adminToken), String.class);
+        assertEquals(HttpStatus.OK, adminMetrics.getStatusCode(), adminMetrics.getBody());
+        assertNotNull(adminMetrics.getBody());
+        assertTrue(adminMetrics.getBody().contains("jvm")
+                        || adminMetrics.getBody().contains("names"),
+                "metrics scrape should list JVM meters. Body starts: "
+                        + adminMetrics.getBody().substring(0, Math.min(200, adminMetrics.getBody().length())));
+
+        ResponseEntity<String> adminProm = rest.exchange(
                 "http://localhost:" + port + "/v1/actuator/prometheus",
                 HttpMethod.GET, bearer(adminToken), String.class);
-        assertEquals(HttpStatus.OK, admin.getStatusCode(), admin.getBody());
-        assertNotNull(admin.getBody());
-        assertTrue(admin.getBody().contains("http_server_requests")
-                        || admin.getBody().contains("jvm_memory"),
-                "prometheus scrape should include HTTP or JVM metrics. Body starts: "
-                        + admin.getBody().substring(0, Math.min(200, admin.getBody().length())));
+        assertEquals(HttpStatus.OK, adminProm.getStatusCode(), adminProm.getBody());
+        assertNotNull(adminProm.getBody());
+        assertTrue(adminProm.getBody().contains("jvm")
+                        || adminProm.getBody().contains("http_server_requests")
+                        || adminProm.getBody().contains("gpstore_backup"),
+                "prometheus scrape should include JVM, HTTP, or backup metrics");
     }
 
     @Test
