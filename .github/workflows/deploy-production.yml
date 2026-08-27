@@ -36,7 +36,7 @@ concurrency:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
 
 jobs:
   syntax:
@@ -180,3 +180,25 @@ jobs:
             fi
             chmod +x deploy/production/deploy.sh deploy/production/prepare-vps.sh
             exec ./deploy/production/deploy.sh "$TARGET_SHA"
+
+  # GitHub does not start workflow_run from GITHUB_TOKEN activity except via
+  # workflow_dispatch / repository_dispatch. Merges and deploys in this repo
+  # use GITHUB_TOKEN, so Off-box backup must be dispatched explicitly after a
+  # successful production deploy. PRs must not dump production.
+  start-offbox:
+    name: Start off-box backup
+    needs: [deploy]
+    if: github.event_name != 'pull_request' && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch Off-box backup on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run offbox-backup.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo "Dispatched Off-box backup on main."
