@@ -19,6 +19,7 @@ import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/auth_providers.dart';
 import 'features/orders/presentation/order_detail_screen.dart';
 import 'features/orders/presentation/orders_providers.dart';
+import 'features/profile/presentation/profile_providers.dart';
 
 /// Lets code without a local BuildContext (the FCM tap handler below) still
 /// show a SnackBar on top of whatever the user is currently looking at.
@@ -189,7 +190,25 @@ class GpStoreApp extends ConsumerWidget {
             );
       } else if (!isAuthenticated && wasAuthenticated) {
         ref.read(pushNotificationServiceProvider).stop();
+        ref.read(adminOrderSoundWatcherProvider).stop();
       }
+    });
+
+    ref.listen(myProfileProvider, (previous, next) {
+      next.when(
+        data: (profile) {
+          if (profile.role == 'ADMIN') {
+            ref.read(adminOrderSoundWatcherProvider).start();
+          } else {
+            ref.read(adminOrderSoundWatcherProvider).stop();
+          }
+        },
+        error: (_, __) {
+          // A transient profile fetch failure must not mute the counter.
+          // Logout already stops the watcher via the auth listener.
+        },
+        loading: () {},
+      );
     });
 
     return SessionRefresh(

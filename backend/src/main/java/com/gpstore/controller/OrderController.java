@@ -89,6 +89,15 @@ public class OrderController {
         return orderService.getAllOrdersForAdmin(pageable);
     }
 
+    // Admin only. Shop-counter soundbox: first call (no afterId) returns the
+    // current high-water mark and no orders, so historical orders are not
+    // announced. Later calls return new orders oldest-first.
+    @GetMapping("/admin/since")
+    public com.gpstore.dto.response.AdminNewOrdersSinceResponse getNewOrdersSince(
+            @RequestParam(required = false) Long afterId) {
+        return orderService.getNewOrdersSince(afterId);
+    }
+
     // Full detail for one of the caller's own orders - real items, address,
     // and delivery tracking. Ownership is verified server-side, never
     // trusted from the ID alone. Admins can view ANY order (isAdmin bypasses
