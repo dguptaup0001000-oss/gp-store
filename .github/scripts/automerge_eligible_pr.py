@@ -189,8 +189,8 @@ def dispatch_production_apk() -> None:
     """GITHUB_TOKEN merges do not start push workflows. Dispatch the APK job."""
     _dispatch_workflow(
         "build-and-deploy.yml",
-        "Dispatched Build APK and Deploy Web on main so a downloadable "
-        "gpstore-production-latest.apk is produced for this release.",
+        "Dispatched Build APK and Deploy Web on main so downloadable "
+        "gpstore-customer-admin-arm64.apk is produced for this release.",
         "Could not dispatch Build APK and Deploy Web from GITHUB_TOKEN. "
         "Run Actions → Build APK and Deploy Web → Run workflow on main.",
     )

@@ -2,9 +2,12 @@
 # GitHub Pages lives in deploy-github-pages.yml (push to main only) so this
 # workflow has no job that skips on PRs while build-apk is still queued.
 #
-# Download: Actions run → Artifacts → gpstore-production-latest.apk
-# (and gp-store-release-apk). arm64-v8a customer app, APP_ENV=production,
-# API https://api.gpstore.co.in/v1.
+# Download: Actions run → Artifacts → gpstore-customer-admin-arm64.apk
+# (arm64-v8a customer+admin, APP_ENV=production, API
+# https://api.gpstore.co.in/v1). Worker is a separate app:
+# gpstore-worker-arm64.apk and gpstore-worker-armv7.apk.
+# GitHub UI zip size is not the APK size; the job summary prints
+# actual bytes, MiB, ABI, and SHA-256.
 #
 # GITHUB_TOKEN merges do not start `on: push` workflows. After a merge,
 # automerge_eligible_pr.py dispatches this workflow on main, and
@@ -32,9 +35,10 @@
 # Worker applicationId:   com.gpstore.worker
 #
 # Play upload keystore secrets are optional for a green CI job. Without them,
-# analyze/tests still run and sideload APKs are Android Debug signed under
-# gpstore-*-sideload-apk. CI does not invent a keystore. Play-named artifacts
-# (gpstore-release-apk / AAB) are produced only when ANDROID_KEYSTORE_* is set.
+# analyze/tests still run and APKs are Android Debug signed. CI does not
+# invent a keystore. Play AAB artifacts are produced only when
+# ANDROID_KEYSTORE_* is set. Customer/admin and worker APKs always use
+# explicit per-ABI names (never a duplicate of the same file).
 #
 # One-time setup after you push this to GitHub:
 # 1. Go to your repo's Settings -> Pages -> Source -> select "GitHub Actions".
@@ -179,14 +183,15 @@ jobs:
         run: flutter test
 
       - name: Verify APK permission policy (no device)
-        run: python3 tool/verify_apk_release.py --self-test
+        run: |
+          python3 tool/verify_apk_release.py --self-test
+          python3 tool/report_apk_artifacts.py --self-test
 
       - name: Detect Play upload keystore
         # Analyze + flutter test above already ran. Missing Play secrets must
         # not fail the job: there is no keystore in git and CI must not invent
-        # one. Sideload APKs can still build debug-signed. Play-named artifacts
-        # (gpstore-release-apk / AAB) are skipped until the operator stores a
-        # real upload keystore in GitHub secrets.
+        # one. Sideload APKs can still build debug-signed. Play AAB artifacts
+        # are skipped until the operator stores a real upload keystore.
         id: play_signing
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -289,33 +294,13 @@ jobs:
             --dart-define=API_BASE_URL="$API_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
           cd build/app/outputs/flutter-apk
-          for abi in arm64-v8a armeabi-v7a; do
-            if [ -f "app-$abi-release.apk" ]; then
-              mv "app-$abi-release.apk" "gpstore-worker-$abi-release.apk"
-            fi
-          done
-
-      # THE NUMBER, PRINTED. Every size claim about this app should be
-      # checkable from a build log rather than taken on trust, and an APK that
-      # quietly grows back is exactly the regression nobody notices.
-      - name: Report Worker APK sizes
-        run: |
-          echo "### Delivery Worker APK sizes" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| APK | Size |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          for f in build/app/outputs/flutter-apk/gpstore-worker-*.apk; do
-            [ -f "$f" ] || continue
-            size=$(du -h "$f" | cut -f1)
-            echo "| $(basename "$f") | $size |" >> "$GITHUB_STEP_SUMMARY"
-            echo "$(basename "$f"): $size"
-          done
-
-      - name: Upload Delivery Worker APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.play_signing.outputs.enabled == 'true' && 'gpstore-worker-apk' || 'gpstore-worker-sideload-apk' }}
-          path: frontend/build/app/outputs/flutter-apk/gpstore-worker-*.apk
+          if [ ! -f app-arm64-v8a-release.apk ] || [ ! -f app-armeabi-v7a-release.apk ]; then
+            echo "::error::Worker --split-per-abi did not emit both ARM APKs."
+            ls -la . || true
+            exit 1
+          fi
+          mv -f app-arm64-v8a-release.apk gpstore-worker-arm64.apk
+          mv -f app-armeabi-v7a-release.apk gpstore-worker-armv7.apk
 
       - name: Build Delivery Worker App Bundle
         # Play-only. Skipped when the upload keystore is missing so this job
@@ -386,51 +371,25 @@ jobs:
             --dart-define=API_BASE_URL="$API_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
 
-      - name: Report customer APK sizes
-        run: |
-          echo "### Customer APK sizes (split per ABI)" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| APK | Size |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          for f in build/app/outputs/flutter-apk/app-*-release.apk; do
-            [ -f "$f" ] || continue
-            size=$(du -h "$f" | cut -f1)
-            echo "| $(basename "$f") | $size |" >> "$GITHUB_STEP_SUMMARY"
-          done
-
-      - name: Name production APK
-        # One obvious download for operators. arm64-v8a is every current
-        # Play-supported phone; the armeabi-v7a split stays in the sideload
-        # artifact for older devices.
+      - name: Name customer APKs and report actual sizes
+        # arm64-v8a is the production phone APK. armeabi-v7a is legacy 32-bit
+        # only, uploaded under its own name so it is not mistaken for a bundle.
+        # Do not copy the same file to a second name for upload.
         env:
           PACKAGE_SHA: ${{ steps.src.outputs.sha }}
           PACKAGE_SHORT: ${{ steps.src.outputs.short }}
         run: |
           set -Eeuo pipefail
-          SRC=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-          DEST=build/app/outputs/flutter-apk/gpstore-production-latest.apk
-          if [ ! -f "$SRC" ]; then
-            echo "::error::$SRC was not produced. flutter build apk --split-per-abi did not emit arm64-v8a."
-            ls -la build/app/outputs/flutter-apk || true
+          OUT=build/app/outputs/flutter-apk
+          if [ ! -f "$OUT/app-arm64-v8a-release.apk" ] || [ ! -f "$OUT/app-armeabi-v7a-release.apk" ]; then
+            echo "::error::Customer --split-per-abi did not emit both ARM APKs."
+            ls -la "$OUT" || true
             exit 1
           fi
-          cp -f "$SRC" "$DEST"
-          test -s "$DEST"
+          mv -f "$OUT/app-arm64-v8a-release.apk" "$OUT/gpstore-customer-admin-arm64.apk"
+          mv -f "$OUT/app-armeabi-v7a-release.apk" "$OUT/gpstore-customer-admin-armv7.apk"
           VERSION="$(python3 -c "import pathlib,re; t=pathlib.Path('pubspec.yaml').read_text(); m=re.search(r'^version:\\s*(\\S+)', t, re.M); print(m.group(1) if m else 'unknown')")"
-          SIZE="$(du -h "$DEST" | cut -f1)"
-          {
-            echo "### Production APK"
-            echo ""
-            echo "| Field | Value |"
-            echo "|---|---|"
-            echo "| File | \`gpstore-production-latest.apk\` |"
-            echo "| Size | $SIZE |"
-            echo "| App version | $VERSION |"
-            echo "| Git SHA | \`$PACKAGE_SHA\` |"
-            echo "| API | \`https://api.gpstore.co.in/v1\` (or repo variable API_BASE_URL) |"
-            echo "| APP_ENV | production |"
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "APK $DEST version=$VERSION sha=$PACKAGE_SHORT size=$SIZE"
+          python3 tool/report_apk_artifacts.py "$OUT" "$PACKAGE_SHA" "$PACKAGE_SHORT" "$VERSION"
 
       - name: Verify APK signatures and zip alignment
         # assembleRelease already signs (debug key unless key.properties exists)
@@ -444,9 +403,10 @@ jobs:
         run: |
           chmod +x tool/verify_apk_release.py
           python3 tool/verify_apk_release.py \
-            build/app/outputs/flutter-apk/gpstore-worker-*.apk \
-            build/app/outputs/flutter-apk/app-*-release.apk \
-            build/app/outputs/flutter-apk/gpstore-production-latest.apk
+            build/app/outputs/flutter-apk/gpstore-worker-arm64.apk \
+            build/app/outputs/flutter-apk/gpstore-worker-armv7.apk \
+            build/app/outputs/flutter-apk/gpstore-customer-admin-arm64.apk \
+            build/app/outputs/flutter-apk/gpstore-customer-admin-armv7.apk
 
       - name: Build App Bundle
         if: steps.play_signing.outputs.enabled == 'true'
@@ -475,28 +435,45 @@ jobs:
             --dart-define=API_BASE_URL="$API_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
 
-      - name: Upload production APK
+      - name: Upload customer+admin ARM64 APK
         uses: actions/upload-artifact@v4
         with:
-          name: gpstore-production-latest.apk
-          path: frontend/build/app/outputs/flutter-apk/gpstore-production-latest.apk
+          name: gpstore-customer-admin-arm64.apk
+          path: |
+            frontend/build/app/outputs/flutter-apk/gpstore-customer-admin-arm64.apk
+            frontend/build/app/outputs/flutter-apk/gpstore-customer-admin-arm64.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload gp-store-release-apk
+      - name: Upload customer+admin ARMv7 APK
         uses: actions/upload-artifact@v4
         with:
-          name: gp-store-release-apk
-          path: frontend/build/app/outputs/flutter-apk/gpstore-production-latest.apk
+          name: gpstore-customer-admin-armv7.apk
+          path: |
+            frontend/build/app/outputs/flutter-apk/gpstore-customer-admin-armv7.apk
+            frontend/build/app/outputs/flutter-apk/gpstore-customer-admin-armv7.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload APK
+      - name: Upload worker ARM64 APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.play_signing.outputs.enabled == 'true' && 'gpstore-release-apk' || 'gpstore-sideload-apk' }}
-          path: frontend/build/app/outputs/flutter-apk/app-*-release.apk
+          name: gpstore-worker-arm64.apk
+          path: |
+            frontend/build/app/outputs/flutter-apk/gpstore-worker-arm64.apk
+            frontend/build/app/outputs/flutter-apk/gpstore-worker-arm64.apk.sha256
           if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload worker ARMv7 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-worker-armv7.apk
+          path: |
+            frontend/build/app/outputs/flutter-apk/gpstore-worker-armv7.apk
+            frontend/build/app/outputs/flutter-apk/gpstore-worker-armv7.apk.sha256
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Upload App Bundle
         if: steps.play_signing.outputs.enabled == 'true'

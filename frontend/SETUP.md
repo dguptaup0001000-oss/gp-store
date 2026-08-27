@@ -183,7 +183,7 @@ your backend's real URL with `/v1` on the end. Every build after that
 picks it up automatically.
 
 **What you get, both automatically, on every push to `main`:**
-- A downloadable release APK - open the finished Actions run, look under **Artifacts**, download `gpstore-release-apk`, install it on an Android phone (you'll need to allow "install from unknown sources" since it isn't signed for the Play Store yet).
+- A downloadable customer+admin APK - open the finished Actions run, look under **Artifacts**, download `gpstore-customer-admin-arm64.apk`, install it on an Android phone (you'll need to allow "install from unknown sources" since it isn't signed for the Play Store yet). GitHub's artifact zip size is not the APK size.
 - A live, clickable web version at `https://<your-github-username>.github.io/<repo-name>/` - opens directly in any browser, no download needed.
 
 Every push after the first one rebuilds and redeploys automatically - you
