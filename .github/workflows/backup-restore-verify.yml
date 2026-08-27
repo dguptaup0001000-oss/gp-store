@@ -1,0 +1,63 @@
+# Live backup/restore verification over SSH. Does not deploy or restart
+# production Compose services. Restore target is throwaway container
+# gpstore-restore-drill only.
+name: Backup restore verify
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/ssh-access-check-8230
+
+permissions:
+  contents: read
+
+jobs:
+  backup-restore-verify:
+    name: Isolated backup/restore drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Require VPS SSH secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for v in PROD_HOST PROD_USER PROD_SSH_PRIVATE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set"
+              missing=1
+            fi
+          done
+          test -f deploy/production/verify-backup-restore-live.sh
+          bash -n deploy/production/verify-backup-restore-live.sh
+          exit "$missing"
+
+      - name: SSH backup/restore verification
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          KEY="$(mktemp)"
+          trap 'rm -f "$KEY"' EXIT
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$KEY"
+          chmod 600 "$KEY"
+          ssh -i "$KEY" \
+            -p "${PROD_PORT:-22}" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            "${PROD_USER}@${PROD_HOST}" \
+            bash -s < deploy/production/verify-backup-restore-live.sh
