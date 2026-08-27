@@ -2,6 +2,13 @@
 # GitHub Pages lives in deploy-github-pages.yml (push to main only) so this
 # workflow has no job that skips on PRs while build-apk is still queued.
 #
+# Download: Actions run → Artifacts → gpstore-production-latest.apk
+# (arm64-v8a customer app, APP_ENV=production, API https://api.gpstore.co.in/v1).
+#
+# GITHUB_TOKEN merges do not start `on: push` workflows. After a merge,
+# automerge_eligible_pr.py dispatches this workflow on main, and
+# workflow_run also starts it when Deploy Production completes on main.
+#
 # What this gives you, with ZERO extra accounts beyond GitHub itself:
 # - An APK you can download directly from the Actions run's "Artifacts"
 #   section after every push - install it on an Android phone to test.
@@ -33,23 +40,64 @@ on:
     paths:
       - 'frontend/**'
       - '.github/workflows/build-and-deploy.yml'
-  # Lets you manually re-trigger a build from the Actions tab without
-  # needing a new commit - handy the first time, or after just flipping on
-  # the Pages setting above.
+      - '.github/scripts/automerge_eligible_pr.py'
   workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Full 40-character git SHA to package (empty = this ref / current main)'
+        required: false
+        default: ''
+  # GITHUB_TOKEN merges do not start push workflows. Deploy Production is
+  # dispatched after merge; this watches that (not pull_request syntax runs)
+  # so every production release still gets a downloadable APK even if the
+  # VPS SSH step fails.
+  workflow_run:
+    workflows: ["Deploy Production"]
+    types: [completed]
+
+concurrency:
+  group: gpstore-apk-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build-apk:
+    if: >
+      github.event_name != 'workflow_run'
+      || (github.event.workflow_run.head_branch == 'main'
+          && github.event.workflow_run.event != 'pull_request')
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
+      - name: Resolve commit to package
+        id: src
+        working-directory: .
+        run: |
+          set -Eeuo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
+            SHA="${{ github.event.workflow_run.head_sha }}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.sha }}" ]; then
+            SHA="${{ inputs.sha }}"
+          else
+            SHA="${GITHUB_SHA}"
+          fi
+          if [ "${#SHA}" -lt 7 ]; then
+            echo "::error::Could not resolve a git SHA to package"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "Packaging $SHA"
+
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.src.outputs.sha }}
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -213,7 +261,7 @@ jobs:
             -t lib/worker_main.dart \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_URL" \
-            --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
           cd build/app/outputs/flutter-apk
           for abi in arm64-v8a armeabi-v7a; do
             if [ -f "app-$abi-release.apk" ]; then
@@ -263,7 +311,7 @@ jobs:
             -t lib/worker_main.dart \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_URL" \
-            --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
           mkdir -p build/app/outputs/bundle/worker
           mv build/app/outputs/bundle/release/app-release.aab \
             build/app/outputs/bundle/worker/gpstore-worker-release.aab
@@ -310,7 +358,7 @@ jobs:
           flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_URL" \
-            --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
 
       - name: Report customer APK sizes
         run: |
@@ -323,6 +371,40 @@ jobs:
             size=$(du -h "$f" | cut -f1)
             echo "| $(basename "$f") | $size |" >> "$GITHUB_STEP_SUMMARY"
           done
+
+      - name: Name production APK
+        # One obvious download for operators. arm64-v8a is every current
+        # Play-supported phone; the armeabi-v7a split stays in the sideload
+        # artifact for older devices.
+        env:
+          PACKAGE_SHA: ${{ steps.src.outputs.sha }}
+          PACKAGE_SHORT: ${{ steps.src.outputs.short }}
+        run: |
+          set -Eeuo pipefail
+          SRC=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          DEST=build/app/outputs/flutter-apk/gpstore-production-latest.apk
+          if [ ! -f "$SRC" ]; then
+            echo "::error::$SRC was not produced. flutter build apk --split-per-abi did not emit arm64-v8a."
+            ls -la build/app/outputs/flutter-apk || true
+            exit 1
+          fi
+          cp -f "$SRC" "$DEST"
+          test -s "$DEST"
+          VERSION="$(python3 -c "import pathlib,re; t=pathlib.Path('pubspec.yaml').read_text(); m=re.search(r'^version:\\s*(\\S+)', t, re.M); print(m.group(1) if m else 'unknown')")"
+          SIZE="$(du -h "$DEST" | cut -f1)"
+          {
+            echo "### Production APK"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| File | \`gpstore-production-latest.apk\` |"
+            echo "| Size | $SIZE |"
+            echo "| App version | $VERSION |"
+            echo "| Git SHA | \`$PACKAGE_SHA\` |"
+            echo "| API | \`https://api.gpstore.co.in/v1\` (or repo variable API_BASE_URL) |"
+            echo "| APP_ENV | production |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "APK $DEST version=$VERSION sha=$PACKAGE_SHORT size=$SIZE"
 
       - name: Verify APK signatures and zip alignment
         # assembleRelease already signs (debug key unless key.properties exists)
@@ -337,7 +419,8 @@ jobs:
           chmod +x tool/verify_apk_release.py
           python3 tool/verify_apk_release.py \
             build/app/outputs/flutter-apk/gpstore-worker-*.apk \
-            build/app/outputs/flutter-apk/app-*-release.apk
+            build/app/outputs/flutter-apk/app-*-release.apk \
+            build/app/outputs/flutter-apk/gpstore-production-latest.apk
 
       - name: Build App Bundle
         if: steps.play_signing.outputs.enabled == 'true'
@@ -364,13 +447,22 @@ jobs:
           flutter build appbundle --release \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_URL" \
-            --dart-define=BUILD_SHA="${GITHUB_SHA::7}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+
+      - name: Upload production APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-production-latest.apk
+          path: frontend/build/app/outputs/flutter-apk/gpstore-production-latest.apk
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.play_signing.outputs.enabled == 'true' && 'gpstore-release-apk' || 'gpstore-sideload-apk' }}
           path: frontend/build/app/outputs/flutter-apk/app-*-release.apk
+          if-no-files-found: error
 
       - name: Upload App Bundle
         if: steps.play_signing.outputs.enabled == 'true'
