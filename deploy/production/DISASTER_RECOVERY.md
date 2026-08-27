@@ -25,7 +25,7 @@ These are operator estimates for this architecture, not a vendor SLA.
 | Metric | Realistic value | Why |
 |---|---|---|
 | **RPO** (on-VPS) | up to **6 hours** | Sidecar dumps every `BACKUP_INTERVAL_SECONDS` (default 21600) |
-| **RPO** (off-box) | up to **6 hours** | Off-box workflow runs 01:20, 07:20, 13:20, 19:20 UTC and takes a fresh dump first |
+| **RPO** (off-box) | up to **6 hours** | Off-box workflow runs 01:20, 07:20, 13:20, 19:20 UTC, after each successful production deploy on `main`, and takes a fresh dump first |
 | **RTO** (same VPS, Postgres volume intact) | **15–45 minutes** | Redeploy from `main`; no restore |
 | **RTO** (same VPS, database lost, dump on volume) | **1–3 hours** | Restore latest `.dump` into a recovered Postgres, then boot |
 | **RTO** (VPS gone, recover from off-box `.gpg`) | **several hours** | New VPS + Docker + decrypt artifact + restore + DNS/TLS + `.env` |
