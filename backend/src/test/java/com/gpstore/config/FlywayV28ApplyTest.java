@@ -1,5 +1,6 @@
 package com.gpstore.config;
 
+import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -7,7 +8,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -55,5 +62,78 @@ class FlywayV28ApplyTest {
                 Integer.class);
         assertEquals(1, searchKw);
         assertEquals(1, subcategory);
+    }
+
+    @Test
+    @DisplayName("V28 uses extensions.gin_trgm_ops when that is the only opclass - the production failure")
+    void doBlockCreatesIndexesWhenGinTrgmOpsIsInExtensions() throws Exception {
+        DataSource dataSource = jdbc.getDataSource();
+        assumeTrue(dataSource instanceof HikariDataSource, "need Hikari credentials to open a probe database");
+        HikariDataSource hikari = (HikariDataSource) dataSource;
+        String probeDb = "gpstore_v28_extensions_probe";
+
+        try (Connection admin = dataSource.getConnection(); Statement statement = admin.createStatement()) {
+            admin.setAutoCommit(true);
+            dropDatabase(statement, probeDb);
+            statement.execute("CREATE DATABASE " + probeDb);
+        } catch (SQLException e) {
+            assumeTrue(false, "CREATE DATABASE not permitted: " + e.getMessage());
+            return;
+        }
+
+        String probeUrl = hikari.getJdbcUrl().replaceFirst("(/)([^/?]+)(\\?.*)?$", "$1" + probeDb + "$3");
+        String v28 = new ClassPathResource("db/migration/V28__search_keyword_trigram_indexes_schema_aware.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+        int doAt = v28.indexOf("DO $$");
+        assertTrue(doAt >= 0);
+
+        try (Connection probe = DriverManager.getConnection(probeUrl, hikari.getUsername(), hikari.getPassword());
+             Statement statement = probe.createStatement()) {
+            statement.execute("CREATE SCHEMA extensions");
+            statement.execute("CREATE EXTENSION pg_trgm WITH SCHEMA extensions");
+            statement.execute("""
+                    CREATE TABLE products (
+                        id bigint PRIMARY KEY,
+                        search_keywords text,
+                        subcategory text
+                    )
+                    """);
+
+            boolean v27Failed = false;
+            try {
+                statement.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_products_search_keywords_trgm
+                            ON products USING GIN (search_keywords gin_trgm_ops)
+                        """);
+            } catch (SQLException e) {
+                v27Failed = "42704".equals(e.getSQLState())
+                        || (e.getMessage() != null && e.getMessage().contains("gin_trgm_ops"));
+            }
+            assertTrue(v27Failed, "unqualified gin_trgm_ops must fail when pg_trgm lives in extensions");
+
+            statement.execute(v28.substring(doAt));
+
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_products_search_keywords_trgm'")) {
+                assertTrue(rs.next());
+                String indexDef = rs.getString(1);
+                assertTrue(indexDef.contains("extensions.gin_trgm_ops"), indexDef);
+            }
+        } finally {
+            try (Connection admin = dataSource.getConnection(); Statement statement = admin.createStatement()) {
+                admin.setAutoCommit(true);
+                dropDatabase(statement, probeDb);
+            } catch (SQLException ignored) {
+                // probe DB is only for this test
+            }
+        }
+    }
+
+    private static void dropDatabase(Statement statement, String name) throws SQLException {
+        try {
+            statement.execute("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)");
+        } catch (SQLException e) {
+            statement.execute("DROP DATABASE IF EXISTS " + name);
+        }
     }
 }

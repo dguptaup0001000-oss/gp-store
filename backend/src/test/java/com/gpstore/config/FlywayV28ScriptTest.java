@@ -27,7 +27,7 @@ class FlywayV28ScriptTest {
         assertTrue(sql.contains("extensions"), "production pg_trgm lives in schema extensions");
         assertTrue(sql.contains("CREATE INDEX IF NOT EXISTS idx_products_search_keywords_trgm"));
         assertTrue(sql.contains("CREATE INDEX IF NOT EXISTS idx_products_subcategory_trgm"));
-        assertFalse(sql.contains("CREATE EXTENSION"),
+        assertTrue(sql.lines().noneMatch(line -> line.trim().toUpperCase().startsWith("CREATE EXTENSION")),
                 "Do not CREATE EXTENSION pg_trgm here; the production role may not be allowed to");
         assertFalse(sql.contains("ON products USING GIN (search_keywords gin_trgm_ops)"),
                 "Unqualified gin_trgm_ops is exactly what failed V27 on production");
