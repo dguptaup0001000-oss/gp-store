@@ -305,49 +305,33 @@ public class ProductBrowseRepository {
                   AND v.selling_price > 0)
             """;
 
-    private static final String MATCH_ILIKE = """
-            (p.name ILIKE :likePattern ESCAPE '#'
-             OR p.brand ILIKE :likePattern ESCAPE '#'
-             OR p.search_keywords ILIKE :likePattern ESCAPE '#'
-             OR p.subcategory ILIKE :likePattern ESCAPE '#')
-            """;
+    private static final String MATCH_ILIKE =
+            "(p.name ILIKE :likePattern ESCAPE '#'"
+                    + " OR p.brand ILIKE :likePattern ESCAPE '#'"
+                    + " OR p.search_keywords ILIKE :likePattern ESCAPE '#'"
+                    + " OR p.subcategory ILIKE :likePattern ESCAPE '#')";
 
     private SearchPage searchInstantTrigram(String keyword, String likePattern, int page, int size) {
-        String where = """
-                FROM products p
-                WHERE p.active = true
-                  AND """ + SELLABLE_EXISTS + """
-                  AND (
-                        p.name % :keyword
-                     OR p.brand % :keyword
-                     OR """ + MATCH_ILIKE + """
-                  )
-                """;
-        String orderBy = """
-                ORDER BY GREATEST(
-                    similarity(COALESCE(p.name, ''), :keyword),
-                    similarity(CONCAT(COALESCE(p.brand, ''), ' ', COALESCE(p.name, '')), :keyword)
-                ) DESC, p.id ASC
-                """;
+        // Spaces around AND are plain string literals, not text-block lines.
+        // Java text blocks strip trailing whitespace, which previously produced
+        // "ANDEXISTS" (Postgres 42601) — the same trap documented on browse().
+        String where = "FROM products p WHERE p.active = true AND " + SELLABLE_EXISTS
+                + " AND (p.name % :keyword OR p.brand % :keyword OR " + MATCH_ILIKE + ") ";
+        String orderBy = "ORDER BY GREATEST("
+                + "similarity(COALESCE(p.name, ''), :keyword), "
+                + "similarity(CONCAT(COALESCE(p.brand, ''), ' ', COALESCE(p.name, '')), :keyword)"
+                + ") DESC, p.id ASC ";
         return runSearch(where, orderBy, keyword, likePattern, page, size, true);
     }
 
     private SearchPage searchInstantIlike(String keyword, String likePattern, int page, int size) {
-        String where = """
-                FROM products p
-                WHERE p.active = true
-                  AND """ + SELLABLE_EXISTS + """
-                  AND """ + MATCH_ILIKE;
-        String orderBy = """
-                ORDER BY
-                    CASE
-                        WHEN p.name ILIKE :prefixPattern ESCAPE '#' THEN 0
-                        WHEN p.name ILIKE :likePattern ESCAPE '#' THEN 1
-                        WHEN p.brand ILIKE :likePattern ESCAPE '#' THEN 2
-                        ELSE 3
-                    END,
-                    p.id ASC
-                """;
+        String where = "FROM products p WHERE p.active = true AND " + SELLABLE_EXISTS
+                + " AND " + MATCH_ILIKE + " ";
+        String orderBy = "ORDER BY CASE"
+                + " WHEN p.name ILIKE :prefixPattern ESCAPE '#' THEN 0"
+                + " WHEN p.name ILIKE :likePattern ESCAPE '#' THEN 1"
+                + " WHEN p.brand ILIKE :likePattern ESCAPE '#' THEN 2"
+                + " ELSE 3 END, p.id ASC ";
         return runSearch(where, orderBy, keyword, likePattern, page, size, false);
     }
 
@@ -394,6 +378,17 @@ public class ProductBrowseRepository {
         return keyword.replace("#", "##")
                 .replace("%", "#%")
                 .replace("_", "#_");
+    }
+
+    /** Visible so a unit test can catch the text-block "ANDEXISTS" trap. */
+    static String trigramSqlForTest() {
+        return "SELECT p.id FROM products p WHERE p.active = true AND " + SELLABLE_EXISTS
+                + " AND (p.name % :keyword OR p.brand % :keyword OR " + MATCH_ILIKE + ") ";
+    }
+
+    static String ilikeSqlForTest() {
+        return "SELECT p.id FROM products p WHERE p.active = true AND " + SELLABLE_EXISTS
+                + " AND " + MATCH_ILIKE + " ";
     }
 
     static boolean looksLikeMissingTrigram(Throwable error) {

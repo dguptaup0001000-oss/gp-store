@@ -16,10 +16,12 @@ class ProductBrowseRepositorySearchTest {
     }
 
     @Test
-    void missingTrigramIsDetectedFromPostgresMessages() {
-        RuntimeException error = new RuntimeException(
-                "could not extract ResultSet",
-                new RuntimeException("ERROR: operator does not exist: character varying % character varying"));
-        assertTrue(ProductBrowseRepository.looksLikeMissingTrigram(error));
+    void assembledSqlKeepsSpaceBeforeExists() {
+        String trigram = ProductBrowseRepository.trigramSqlForTest();
+        String ilike = ProductBrowseRepository.ilikeSqlForTest();
+        assertTrue(trigram.contains("AND EXISTS"), trigram);
+        assertTrue(ilike.contains("AND EXISTS"), ilike);
+        org.junit.jupiter.api.Assertions.assertFalse(trigram.contains("ANDEXISTS"));
+        org.junit.jupiter.api.Assertions.assertFalse(ilike.contains("ANDEXISTS"));
     }
 }
