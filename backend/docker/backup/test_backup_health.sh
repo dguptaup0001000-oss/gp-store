@@ -64,4 +64,46 @@ if BACKUP_OFFBOX_TARGET=user@localhost:/backups bash "$ROOT/deploy/production/ba
   fail "localhost must not count as off-box"
 fi
 
+# Isolated restore must refuse production database names even with a dummy dump.
+dummy="$(mktemp)"
+printf 'not-a-real-dump\n' > "$dummy"
+if bash "$ROOT/deploy/production/backup-restore-drill.sh" "$dummy" 127.0.0.1 5432 gpstore gpstore dummy-password; then
+  fail "restore drill must refuse database name gpstore"
+fi
+if bash "$ROOT/deploy/production/backup-restore-drill.sh" "$dummy" api.gpstore.co.in 5432 gpstore gpstore_restore_probe dummy-password; then
+  fail "restore drill must refuse production hostname"
+fi
+rm -f "$dummy"
+
+# GPG AES256 roundtrip with an ephemeral passphrase (never committed).
+if ! command -v gpg >/dev/null 2>&1 || ! command -v openssl >/dev/null 2>&1; then
+  fail "gpg and openssl are required for the off-box encrypt/decrypt self-test"
+fi
+plain_in="$(mktemp)"
+plain_out="$(mktemp)"
+printf 'gpstore-offbox-selftest\n' > "$plain_in"
+bash "$ROOT/deploy/production/offbox-gpg-roundtrip.sh" "$plain_in" "$plain_out"
+cmp "$plain_in" "$plain_out" || fail "gpg roundtrip changed bytes"
+rm -f "$plain_in" "$plain_out"
+
+# Off-box result file alerting.
+eval_off="$ROOT/deploy/production/evaluate-offbox-result.sh"
+res="$(mktemp)"
+if bash "$eval_off" "$res"; then
+  fail "missing offbox result must alert"
+fi
+printf 'status=UPLOAD_FAILED\nstage=upload\ndetail=artifact missing\n' > "$res"
+if bash "$eval_off" "$res"; then
+  fail "UPLOAD_FAILED must alert"
+fi
+bash "$eval_off" "$res" >/tmp/eval-offbox-out 2>/dev/null || true
+grep -q 'ALERT=UPLOAD_FAILED' /tmp/eval-offbox-out || fail "expected ALERT=UPLOAD_FAILED"
+printf 'status=RESTORE_FAILED\nstage=restore\ndetail=drill failed\n' > "$res"
+if bash "$eval_off" "$res"; then
+  fail "RESTORE_FAILED must alert"
+fi
+printf 'status=SUCCESS\nstage=restore\ndetail=ok\n' > "$res"
+bash "$eval_off" "$res" | grep -q 'ALERT=HEALTHY' || fail "SUCCESS result should be HEALTHY"
+rm -f "$res"
+
 echo "backup health fixtures passed"

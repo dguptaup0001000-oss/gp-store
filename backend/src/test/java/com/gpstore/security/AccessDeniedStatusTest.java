@@ -166,4 +166,78 @@ class AccessDeniedStatusTest {
         assertEquals(HttpStatus.UNAUTHORIZED, res.getStatusCode(),
                 "an unparseable token leaves the SecurityContext empty, which is 401. Body: " + res.getBody());
     }
+
+    @Test
+    @DisplayName("admin ops status is 401 without credentials")
+    void adminOpsStatusRequiresAuthentication() {
+        ResponseEntity<String> res = rest.exchange(
+                url("/api/admin/ops/status"), HttpMethod.GET, HttpEntity.EMPTY, String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, res.getStatusCode(), res.getBody());
+    }
+
+    @Test
+    @DisplayName("admin ops backups is 401 without credentials")
+    void adminOpsBackupsRequiresAuthentication() {
+        ResponseEntity<String> res = rest.exchange(
+                url("/api/admin/ops/backups"), HttpMethod.GET, HttpEntity.EMPTY, String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, res.getStatusCode(), res.getBody());
+    }
+
+    @Test
+    @DisplayName("a logged-in CUSTOMER is 403 on admin ops")
+    void customerIsForbiddenOnAdminOps() {
+        ensureIdentities();
+        ResponseEntity<String> res = rest.exchange(
+                url("/api/admin/ops/status"), HttpMethod.GET, bearer(customerToken), String.class);
+        assertEquals(HttpStatus.FORBIDDEN, res.getStatusCode(), res.getBody());
+    }
+
+    @Test
+    @DisplayName("an ADMIN can read ops status")
+    void adminCanReadOpsStatus() {
+        ensureIdentities();
+        ResponseEntity<String> res = rest.exchange(
+                url("/api/admin/ops/status"), HttpMethod.GET, bearer(adminToken), String.class);
+        assertEquals(HttpStatus.OK, res.getStatusCode(), res.getBody());
+        assertNotNull(res.getBody());
+        assertTrue(res.getBody().contains("backups"), res.getBody());
+        assertFalse(res.getBody().toLowerCase().contains("password"));
+        assertFalse(res.getBody().toLowerCase().contains("passphrase"));
+    }
+
+    @Test
+    @DisplayName("prometheus is not public")
+    void prometheusRequiresAdmin() {
+        ResponseEntity<String> anon = rest.getForEntity(
+                "http://localhost:" + port + "/v1/actuator/prometheus", String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, anon.getStatusCode(), anon.getBody());
+
+        ensureIdentities();
+        ResponseEntity<String> customer = rest.exchange(
+                "http://localhost:" + port + "/v1/actuator/prometheus",
+                HttpMethod.GET, bearer(customerToken), String.class);
+        assertEquals(HttpStatus.FORBIDDEN, customer.getStatusCode(), customer.getBody());
+
+        ResponseEntity<String> admin = rest.exchange(
+                "http://localhost:" + port + "/v1/actuator/prometheus",
+                HttpMethod.GET, bearer(adminToken), String.class);
+        assertEquals(HttpStatus.OK, admin.getStatusCode(), admin.getBody());
+        assertNotNull(admin.getBody());
+        assertTrue(admin.getBody().contains("http_server_requests")
+                        || admin.getBody().contains("jvm_memory"),
+                "prometheus scrape should include HTTP or JVM metrics. Body starts: "
+                        + admin.getBody().substring(0, Math.min(200, admin.getBody().length())));
+    }
+
+    @Test
+    @DisplayName("public health endpoints stay 200 without auth")
+    void publicHealthStaysOpen() {
+        ResponseEntity<String> health = rest.getForEntity(url("/api/health"), String.class);
+        assertEquals(HttpStatus.OK, health.getStatusCode(), health.getBody());
+        ResponseEntity<String> ready = rest.getForEntity(url("/api/health/ready"), String.class);
+        assertEquals(HttpStatus.OK, ready.getStatusCode(), ready.getBody());
+        ResponseEntity<String> actuator = rest.getForEntity(
+                "http://localhost:" + port + "/v1/actuator/health", String.class);
+        assertEquals(HttpStatus.OK, actuator.getStatusCode(), actuator.getBody());
+    }
 }

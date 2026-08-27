@@ -55,10 +55,19 @@ Workflow **Off-box backup** (`.github/workflows/offbox-backup.yml`):
 1. SSHs to the VPS and runs `backup.sh once` (fresh dump).
 2. Pulls the dump + checksum + `status.txt` onto the GitHub runner.
 3. Verifies `sha256sum -c` and `pg_restore --list`.
-4. Encrypts with `gpg --symmetric --cipher-algo AES256` using repository
-   secret `BACKUP_GPG_PASSPHRASE`.
+4. Encrypts with `gpg --symmetric --cipher-algo AES256` using GitHub Actions
+   environment secret `BACKUP_GPG_PASSPHRASE` (environment **production**).
 5. Uploads **only** the `.gpg` plus metadata as a 90-day artifact.
-6. Deletes plaintext from the runner.
+6. Downloads that same artifact back from GitHub storage (proves it left the VPS).
+7. Decrypts with the same secret, checks sha256, and restores into a
+   **throwaway** Postgres on the runner (`gpstore_offbox_probe`).
+8. Verifies `flyway_schema_history` and public table count.
+9. Drops the throwaway database. Never restores into production `gpstore`.
+10. Deletes plaintext from the runner.
+
+A failed pull, encrypt, upload, decrypt, checksum, or isolated restore fails
+the workflow (GitHub emails watchers) and writes `ALERT=UPLOAD_FAILED` /
+`ALERT=RESTORE_FAILED` / `ALERT=FAILED` via `evaluate-offbox-result.sh`.
 
 | Item | Value |
 |---|---|
@@ -66,12 +75,19 @@ Workflow **Off-box backup** (`.github/workflows/offbox-backup.yml`):
 | Authentication | `PROD_*` SSH secrets + `GITHUB_TOKEN` (artifact upload) |
 | Encryption | GPG AES256, passphrase in `BACKUP_GPG_PASSPHRASE` |
 | Retention | 90 days (artifact); 14 days on the VPS volume |
-| Restore | download `.gpg`, decrypt locally, isolated `backup-restore-drill.sh` |
-| Verification | `sha256sum -c` + `pg_restore --list` on the runner |
+| Restore | workflow decrypts + `backup-restore-drill.sh` into `gpstore_offbox_probe` |
+| Verification | `sha256sum -c` + isolated restore + Flyway history |
 
-Add `BACKUP_GPG_PASSPHRASE` under Settings → Secrets → Actions (environment
-`production`). Until it exists, the workflow verifies the pull then **fails
-closed** rather than uploading a plaintext customer database.
+Add `BACKUP_GPG_PASSPHRASE` under Settings → Secrets and variables → Actions
+→ Environment **production**. It must be a long random passphrase for
+`gpg --symmetric --cipher-algo AES256`. It is **not** the database password.
+Until it exists, the workflow verifies the pull then **fails closed** rather
+than uploading a plaintext customer database.
+
+CI (`schema-migrate` job) also encrypts the CI dump with a **job-ephemeral**
+passphrase (never the production secret), decrypts it, and isolated-restores
+it. That proves the mechanism. It is not a substitute for a production Off-box
+backup run.
 
 ### B. Operator second host (rsync/scp)
 

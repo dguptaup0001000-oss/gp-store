@@ -75,9 +75,14 @@ the measured ceiling for that target.
 | COD orders | 10, 25, 50, 100 concurrent checkouts | `./run-concurrent-orders.sh` against localhost/staging only |
 
 `run-concurrent-orders.sh` **refuses** `api.gpstore.co.in`. It places COD
-orders (no card charges). Seed `accounts.json` first. Duplicate/lost-order
-and negative-stock proofs are `ConcurrentOrderLoadTest` in backend CI, not
-k6.
+orders (no card charges). Seed `accounts.json` first.
+
+**HTTP 10/25/50/100 concurrent proof in CI** is
+`ConcurrentHttpOrderLoadTest` (real Tomcat, `RANDOM_PORT`, production-like
+pool 20 / threads 80). It measures catalog GET, product GET, cart add,
+checkout preview, and COD `placeOrder`, including p50/p95/p99, Hikari, CPU,
+heap, and `pg_stat_activity`. Service-level `ConcurrentOrderLoadTest` remains
+as the in-process integrity suite. Neither is a production flood.
 | E–G | 250, 500, 1,000 | `STAGES="250" HOLD_TIME=1m ./run-staged-capacity.sh` on staging only |
 
 Browse-only probe (no checkout, no seeded accounts):

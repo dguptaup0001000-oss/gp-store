@@ -83,7 +83,7 @@ if [[ -n "$GPG_PASS" ]]; then
   passfile="$(mktemp)"
   printf '%s' "$GPG_PASS" > "$passfile"
   chmod 600 "$passfile"
-  gpg --batch --yes --symmetric --cipher-algo AES256 \
+  gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 \
     --passphrase-file "$passfile" \
     -o "$WORKDIR/${LATEST}.gpg" "$WORKDIR/$LATEST"
   rm -f "$passfile"

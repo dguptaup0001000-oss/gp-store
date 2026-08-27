@@ -57,7 +57,22 @@ take the shop off Traefik. GitHub **Backup alert** emails on a red run.
 | Deploy failure | GitHub Actions Deploy Production; VPS `/var/lib/gp-store/deployment-state` |
 
 Prometheus scrape (`/v1/actuator/prometheus`) is **admin-only**. Do not
-make it public.
+make it public. Gauges that exist without extra infrastructure:
 
-MSG91, Firebase, and Cashfree remaining unset is an operator configuration
-gap, not a monitoring false-green: those integrations fail closed at use time.
+| Metric | Meaning |
+|---|---|
+| `http.server.requests` (histogram) | HTTP count, error status, p50/p95/p99 |
+| `hikaricp.*` | DB pool |
+| `jvm.memory.*` | Heap |
+| `checkout.place_order` | Place-order timer |
+| `gpstore.backup.healthy` | 1 if last backup attempt is SUCCESS and fresh |
+| `gpstore.backup.alert_code` | 0 HEALTHY / 1 MISSING / 2 FAILED / 3 STALE |
+| `pool.shed.catalog` | Intentional catalog 503s when the pool is saturated |
+| `outbox.*` | Outbox backlog |
+
+There is **no** paid APM (Datadog/New Relic/Sentry) installed. Application
+errors and order/payment webhook failures are INFO/ERROR logs on the backend
+container (`docker compose logs backend`). Cashfree webhook failures log at
+ERROR and return a retryable status to Cashfree.
+
+Single-VPS loss and RTO/RPO: [`DISASTER_RECOVERY.md`](DISASTER_RECOVERY.md).
