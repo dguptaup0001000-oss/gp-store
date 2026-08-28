@@ -5,6 +5,7 @@ import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.CategoryRepository;
 import com.gpstore.repository.ProductRepository;
+import com.gpstore.upload.CatalogImageCleanup;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
@@ -16,10 +17,14 @@ public class CategoryService {
 
     private final CategoryRepository categoryRepository;
     private final ProductRepository productRepository;
+    private final CatalogImageCleanup imageCleanup;
 
-    public CategoryService(CategoryRepository categoryRepository, ProductRepository productRepository) {
+    public CategoryService(CategoryRepository categoryRepository,
+                           ProductRepository productRepository,
+                           CatalogImageCleanup imageCleanup) {
         this.categoryRepository = categoryRepository;
         this.productRepository = productRepository;
+        this.imageCleanup = imageCleanup;
     }
 
     // bestsellerTiles too: the collage carries each category's name and is
@@ -64,6 +69,7 @@ public class CategoryService {
     @CacheEvict(value = {"categories", "bestsellerTiles"}, allEntries = true)
     public Category update(Long id, Category updated) {
         Category existing = getById(id);
+        String previousImage = existing.getImageUrl();
 
         existing.setName(updated.getName());
         existing.setDescription(updated.getDescription());
@@ -74,7 +80,11 @@ public class CategoryService {
         existing.setGstRate(updated.getGstRate());
         existing.setActive(updated.getActive());
 
-        return categoryRepository.save(existing);
+        Category saved = categoryRepository.save(existing);
+        if (updated.getImageUrl() != null) {
+            imageCleanup.deleteReplacedAfterCommit(previousImage, saved.getImageUrl());
+        }
+        return saved;
     }
 
     /**

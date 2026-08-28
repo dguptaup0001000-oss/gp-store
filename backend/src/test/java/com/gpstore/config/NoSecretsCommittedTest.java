@@ -3,6 +3,7 @@ package com.gpstore.config;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -37,8 +38,41 @@ class NoSecretsCommittedTest {
         assertEqualsEmptyOrPlaceholder(lines, "MSG91_AUTH_KEY");
         assertEqualsEmptyOrPlaceholder(lines, "FIREBASE_CREDENTIALS_BASE64");
         assertEqualsEmptyOrPlaceholder(lines, "CLOUDINARY_API_SECRET");
+        assertEqualsEmptyOrPlaceholder(lines, "R2_SECRET_ACCESS_KEY");
+        assertEqualsEmptyOrPlaceholder(lines, "R2_ACCESS_KEY_ID");
+        assertEqualsEmptyOrPlaceholder(lines, "R2_ACCOUNT_ID");
         assertEqualsEmptyOrPlaceholder(lines, "STORE_SUPPORT_PHONE");
         assertEqualsEmptyOrPlaceholder(lines, "STORE_SUPPORT_EMAIL");
+    }
+
+    @Test
+    void flutterLibDoesNotContainStorageSecretsOrCloudinaryUploadClient() throws IOException {
+        Path lib = Path.of("frontend/lib");
+        if (!Files.isDirectory(lib)) {
+            lib = Path.of("../frontend/lib");
+        }
+        assertTrue(Files.isDirectory(lib), "frontend/lib must exist");
+        StringBuilder all = new StringBuilder();
+        try (var walk = Files.walk(lib)) {
+            walk.filter(p -> p.toString().endsWith(".dart")).forEach(p -> {
+                try {
+                    all.append(Files.readString(p)).append('\n');
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+        }
+        String text = all.toString();
+        assertFalse(text.contains("R2_SECRET_ACCESS_KEY"));
+        assertFalse(text.contains("R2_ACCESS_KEY_ID"));
+        assertFalse(text.contains("AWS_SECRET_ACCESS_KEY"));
+        assertFalse(text.contains("CLOUDINARY_API_SECRET"));
+        assertFalse(text.contains("api.cloudinary.com"));
+        assertFalse(text.contains("cloudinary-signature"));
+        assertFalse(text.contains("getCloudinarySignature"));
+        assertFalse(text.contains("CloudinarySignature"));
+        assertTrue(text.contains("ImageUploadService"),
+                "Flutter must upload through ImageUploadService, not a storage SDK");
     }
 
     private static void assertEqualsEmptyOrPlaceholder(List<String> lines, String key) {

@@ -60,7 +60,7 @@ today:
 | Address | Yes | App functionality | Delivery address(es) the customer saves |
 | Order history | Yes | App functionality, analytics | Customer's own purchase history |
 | Payment info | No | N/A | This app never sees card/bank details - UPI payments go directly between the customer and their own UPI app; COD involves no data at all |
-| Photos/media | Shop catalogue only | App functionality | Administrators upload product photos to Cloudinary. The app does not collect customer personal photos. |
+| Photos/media | Shop catalogue only | App functionality | Administrators upload product photos to the shop image host. The app does not collect customer personal photos. |
 | Contacts | No | N/A | Not collected |
 | App activity (in-app actions) | Yes | Analytics, personalization | Used for "Recommended for you" / "Frequently bought together" |
 

@@ -20,7 +20,7 @@ class ProductVariantImageUrlTest {
     @BeforeEach
     void setUp() {
         repository = mock(ProductVariantRepository.class);
-        service = new ProductVariantService(repository);
+        service = new ProductVariantService(repository, mock(com.gpstore.upload.CatalogImageCleanup.class));
     }
 
     @Test

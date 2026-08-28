@@ -31,15 +31,18 @@ public class CatalogAdminController {
     private final CatalogImageBackfillService imageService;
     private final CatalogCleanupService cleanupService;
     private final CatalogAuditService auditService;
+    private final CatalogImageR2MigrationService r2MigrationService;
 
     public CatalogAdminController(CatalogSeedService seedService,
                                   CatalogImageBackfillService imageService,
                                   CatalogCleanupService cleanupService,
-                                  CatalogAuditService auditService) {
+                                  CatalogAuditService auditService,
+                                  CatalogImageR2MigrationService r2MigrationService) {
         this.seedService = seedService;
         this.imageService = imageService;
         this.cleanupService = cleanupService;
         this.auditService = auditService;
+        this.r2MigrationService = r2MigrationService;
     }
 
     /** Idempotent. Running it twice updates rather than duplicating. */
@@ -58,6 +61,24 @@ public class CatalogAdminController {
             @RequestParam(defaultValue = "100") int limit) {
         log.info("Catalog image backfill requested by admin, limit {}", limit);
         return imageService.backfill(Math.max(1, Math.min(limit, 1000)));
+    }
+
+    /**
+     * Copies Cloudinary catalogue bytes into R2 and rewrites image_url.
+     * Does not delete Cloudinary. Requires R2_* on the VPS. confirm=true
+     * is required so a stray tap cannot start a copy job.
+     */
+    @PostMapping("/images/migrate-to-r2")
+    public ResponseEntity<?> migrateImagesToR2(
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "false") boolean confirm) {
+        if (!confirm) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Refused. Re-send with ?confirm=true to copy Cloudinary images into R2.",
+                    "hint", "This does not delete Cloudinary objects. Existing HTTPS URLs keep working."));
+        }
+        log.info("Catalog Cloudinary→R2 migration requested by admin, limit {}", limit);
+        return ResponseEntity.ok(r2MigrationService.migrate(limit));
     }
 
     /** The numbers the pre-launch review needs, counted from the database. */

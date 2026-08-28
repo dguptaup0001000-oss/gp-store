@@ -1,8 +1,7 @@
-import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/api/api_client.dart';
-import 'cloudinary_upload_guard.dart';
+import '../../../core/images/image_upload_service.dart';
 import '../../products/domain/product_models.dart';
 import '../domain/admin_coupon_models.dart';
 import '../domain/admin_customer_model.dart';
@@ -10,16 +9,17 @@ import '../domain/admin_payment_model.dart';
 import '../domain/admin_review_model.dart';
 import '../domain/analytics_models.dart';
 import '../domain/audit_log_model.dart';
-import '../domain/cloudinary_signature.dart';
 import '../domain/delivery_breach_model.dart';
 import '../domain/delivery_partner_models.dart';
 import '../../orders/domain/order_models.dart';
 import '../domain/inventory_models.dart';
 
 class AdminProductsRepository {
-  AdminProductsRepository({required this.apiClient});
+  AdminProductsRepository({required this.apiClient})
+      : _uploads = ImageUploadService(apiClient: apiClient);
 
   final ApiClient apiClient;
+  final ImageUploadService _uploads;
 
   /// Includes deactivated products too, unlike the customer-facing list.
   Future<List<Product>> getAllForAdmin() async {
@@ -129,28 +129,10 @@ class AdminProductsRepository {
     );
   }
 
-  /// Short-lived signature for one direct-to-Cloudinary upload - the API
-  /// secret used to produce it never leaves the backend (see
-  /// CloudinaryUploadService's doc comment). Throws (surfacing the
-  /// backend's own message via extractErrorMessage) if Cloudinary hasn't
-  /// been configured yet.
-  Future<CloudinarySignature> getCloudinarySignature() async {
-    final response =
-        await apiClient.dio.get('/api/uploads/cloudinary-signature');
-    return CloudinarySignature.fromJson(response.data as Map<String, dynamic>);
-  }
-
-  /// Lets the admin pick a photo from their gallery and upload it straight
-  /// to Cloudinary for a variant's image - this app's own backend never
-  /// receives the image bytes, only the short-lived signature above. Uses a
-  /// fresh, unconfigured Dio instance (not apiClient.dio) so this app's JWT
-  /// auth header and error-mapping interceptor - both meant for OUR
-  /// backend's responses - never touch this third-party request. Returns
-  /// null if the admin cancelled the picker instead of choosing a photo.
-  /// The most photos one variant may have. Mirrors the server's own limit
-  /// (VariantImageService.MAX_IMAGES_PER_VARIANT), which is what actually
-  /// enforces it - this is here so the picker can stop before a wasted upload
-  /// rather than after one.
+  /// Lets the admin pick a photo from their gallery. Bytes go to object
+  /// storage with a short-lived signed URL from this backend. The API
+  /// never stores R2 secrets in the app, and the UI does not name the
+  /// storage vendor.
   static const int maxVariantImages = 5;
 
   /// The longest edge any uploaded photo is allowed to have, in pixels.
@@ -168,15 +150,13 @@ class AdminProductsRepository {
   /// packaging text, which is exactly what these photos are of.
   static const int _imageQuality = 85;
 
-  Future<String?> pickAndUploadVariantImage() async {
-    final picked = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
+  Future<String?> pickAndUploadVariantImage({int? ownerId}) {
+    return _uploads.pickAndUpload(
+      kind: CatalogImageKind.product,
+      ownerId: ownerId,
+      maxImageEdge: _maxImageEdge,
       imageQuality: _imageQuality,
-      maxWidth: _maxImageEdge,
-      maxHeight: _maxImageEdge,
     );
-    if (picked == null) return null;
-    return _uploadOne(picked, await getCloudinarySignature());
   }
 
   /// Picks several photos at once and uploads them, in the order picked.
@@ -186,12 +166,11 @@ class AdminProductsRepository {
   /// which is why this returns how many were dropped, so the caller can say
   /// so rather than silently ignoring the admin's last two taps.
   ///
-  /// ONE SIGNATURE FOR THE WHOLE BATCH. Each upload goes straight from this
-  /// phone to Cloudinary and never through the backend; asking the backend to
-  /// sign each one separately would be five round trips to a server that is
-  /// not otherwise involved.
+  /// One signed PUT per file, sequential. Parallel uploads from a shop phone
+  /// on rural mobile data is how they all time out.
   Future<({List<String> urls, int skipped})> pickAndUploadVariantImages({
     required int remaining,
+    int? ownerId,
   }) async {
     if (remaining <= 0) {
       return (urls: const <String>[], skipped: 0);
@@ -210,64 +189,16 @@ class AdminProductsRepository {
         picked.length > remaining ? picked.sublist(0, remaining) : picked;
     final skipped = picked.length - accepted.length;
 
-    final signature = await getCloudinarySignature();
-
-    // SEQUENTIAL, NOT PARALLEL, and on purpose. Five simultaneous multipart
-    // uploads from a shop phone on rural mobile data is how all five get slow
-    // and one times out. One at a time is slower on a good connection and far
-    // more likely to finish on a bad one.
     final urls = <String>[];
     for (final file in accepted) {
-      urls.add(await _uploadOne(file, signature));
+      urls.add(await _uploads.uploadPickedFile(
+        file,
+        kind: CatalogImageKind.product,
+        ownerId: ownerId,
+      ));
     }
 
     return (urls: urls, skipped: skipped);
-  }
-
-  Future<String> _uploadOne(XFile file, CloudinarySignature signature) async {
-    final bytes = await file.readAsBytes();
-    if (bytes.length > CloudinaryUploadGuard.maxBytes) {
-      throw ApiException(
-        statusCode: 400,
-        message: 'That photo is too large. Choose an image under 4 MB.',
-      );
-    }
-    if (!CloudinaryUploadGuard.isAllowedImageBytes(bytes)) {
-      throw ApiException(
-        statusCode: 400,
-        message: 'That file is not a JPEG, PNG, or WebP image.',
-      );
-    }
-
-    final filename = CloudinaryUploadGuard.safeFilename(file.name);
-    final response = await Dio().post(
-      'https://api.cloudinary.com/v1_1/${signature.cloudName}/image/upload',
-      data: FormData.fromMap({
-        'file': MultipartFile.fromBytes(bytes, filename: filename),
-        'api_key': signature.apiKey,
-        'timestamp': signature.timestamp,
-        'signature': signature.signature,
-        'folder': signature.folder,
-      }),
-    );
-
-    final data = response.data;
-    if (data is! Map) {
-      throw ApiException(
-        statusCode: response.statusCode,
-        message:
-            'Image upload did not return a usable link. The product was not changed.',
-      );
-    }
-    final url = data['secure_url'];
-    if (url is! String || !CloudinaryUploadGuard.isAllowedDeliveryUrl(url)) {
-      throw ApiException(
-        statusCode: response.statusCode,
-        message:
-            'Image upload did not return a usable link. The product was not changed.',
-      );
-    }
-    return url;
   }
 
   /// This variant's photos, in order.

@@ -111,7 +111,7 @@ Compose sets `DB_URL=jdbc:postgresql://postgres:5432/${DB_NAME}` and `REDIS_HOST
 
 `SPRING_PROFILES_ACTIVE=prod` → `APP_PRODUCTION=true`, `DDL_AUTO=validate`, forwarded-header trust.
 
-Optional vendor keys: Cashfree, MSG91, Firebase, Cloudinary. Production never uses the mock OTP provider. Missing MSG91 credentials do not block boot; SMS OTP send fails closed until they are set.
+Optional vendor keys: Cashfree, MSG91, Firebase, Cloudflare R2 (new image uploads), Cloudinary (legacy admin APKs until replaced). Production never uses the mock OTP provider. Missing MSG91 credentials do not block boot; SMS OTP send fails closed until they are set.
 
 ## 5. Database — do not destroy shop data
 

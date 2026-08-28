@@ -267,11 +267,11 @@ class VariantImageTest {
 
     @Test
     @DisplayName("arbitrary hosts and non-HTTPS schemes are refused")
-    void imageUrlsMustBeCloudinaryHttps() {
+    void imageUrlsMustBeAllowedCatalogueHttps() {
         BadRequestException arbitrary = assertThrows(BadRequestException.class,
                 () -> imageService.replaceImages(oneKg.getId(),
                         List.of("https://evil.example/payload.jpg")));
-        assertTrue(arbitrary.getMessage().toLowerCase().contains("cloudinary"),
+        assertTrue(arbitrary.getMessage().toLowerCase().contains("https"),
                 arbitrary.getMessage());
 
         assertThrows(BadRequestException.class,
