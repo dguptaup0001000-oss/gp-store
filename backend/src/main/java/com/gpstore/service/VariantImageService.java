@@ -7,6 +7,7 @@ import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.ProductImageRepository;
 import com.gpstore.repository.ProductVariantRepository;
 import com.gpstore.upload.CatalogImageCleanup;
+import com.gpstore.upload.CatalogImageRefs;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
@@ -164,15 +165,21 @@ public class VariantImageService {
             if (trimmed.isEmpty()) {
                 continue;
             }
-            if (trimmed.length() > maxUrlLength) {
+            if (trimmed.length() > CatalogImageRefs.MAX_INCOMING_LENGTH) {
                 throw new BadRequestException(
                         "One of those image links is too long (" + trimmed.length()
+                                + " characters, limit " + CatalogImageRefs.MAX_INCOMING_LENGTH + ").");
+            }
+            String canonical = CatalogImageRefs.canonicalize(trimmed);
+            if (canonical.length() > maxUrlLength) {
+                throw new BadRequestException(
+                        "One of those image links is too long (" + canonical.length()
                                 + " characters, limit " + maxUrlLength + ").");
             }
-            if (!com.gpstore.catalog.CatalogUrlValidator.isAllowedImageUrl(trimmed)) {
+            if (!com.gpstore.catalog.CatalogUrlValidator.isAllowedImageUrl(canonical)) {
                 throw new BadRequestException(com.gpstore.catalog.CatalogUrlValidator.IMAGE_MESSAGE);
             }
-            unique.add(trimmed);
+            unique.add(canonical);
         }
         return List.copyOf(unique);
     }

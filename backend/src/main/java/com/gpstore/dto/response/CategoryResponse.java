@@ -55,7 +55,9 @@ public class CategoryResponse implements Serializable {
                 category.getId(),
                 category.getName(),
                 category.getDescription(),
-                category.getImageUrl(),
+                category.getImageUrl() == null
+                        ? null
+                        : com.gpstore.upload.CatalogImageDelivery.forClient(category.getImageUrl()),
                 category.getGstRate() != null ? category.getGstRate().doubleValue() : null,
                 category.getActive()
         );

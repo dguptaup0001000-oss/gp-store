@@ -157,7 +157,9 @@ public class OrderDetailResponse {
                     product != null ? product.getBrand() : null,
                     variant != null ? variant.getQuantity() : null,
                     variant != null ? variant.getUnit() : null,
-                    variant != null ? variant.getImageUrl() : null,
+                    variant != null && variant.getImageUrl() != null
+                            ? com.gpstore.upload.CatalogImageDelivery.forClient(variant.getImageUrl())
+                            : null,
                     item.getQuantity(),
                     item.getPrice(),
                     item.getTotalPrice(),

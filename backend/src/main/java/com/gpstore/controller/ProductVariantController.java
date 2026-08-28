@@ -48,7 +48,9 @@ public class ProductVariantController {
      */
     @GetMapping("/{id}/images")
     public List<String> getImages(@PathVariable Long id) {
-        return variantImageService.imagesFor(id);
+        return variantImageService.imagesFor(id).stream()
+                .map(com.gpstore.upload.CatalogImageDelivery::forClient)
+                .toList();
     }
 
     /**
@@ -67,7 +69,9 @@ public class ProductVariantController {
     @PutMapping("/{id}/images")
     public List<String> replaceImages(@PathVariable Long id,
                                       @RequestBody VariantImagesRequest request) {
-        return variantImageService.replaceImages(id, request.imageUrls());
+        return variantImageService.replaceImages(id, request.imageUrls()).stream()
+                .map(com.gpstore.upload.CatalogImageDelivery::forClient)
+                .toList();
     }
 
     /** The complete ordered list of photo URLs a variant should have. */

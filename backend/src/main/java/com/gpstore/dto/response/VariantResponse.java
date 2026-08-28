@@ -93,7 +93,9 @@ public class VariantResponse implements Serializable {
                 variant.getId(),
                 variant.getQuantity(),
                 variant.getUnit(),
-                variant.getImageUrl(),
+                variant.getImageUrl() == null
+                        ? null
+                        : com.gpstore.upload.CatalogImageDelivery.forClient(variant.getImageUrl()),
                 variant.getAvailable(),
                 variant.getMrp(),
                 variant.getSellingPrice(),

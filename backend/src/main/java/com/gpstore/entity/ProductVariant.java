@@ -9,6 +9,8 @@ import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.gpstore.upload.CatalogImageUrlSerializer;
 
 @Entity
 @Table(name = "product_variants")
@@ -40,6 +42,7 @@ private Product product;
     
     private String sku;
     
+    @JsonSerialize(using = CatalogImageUrlSerializer.class)
     private String imageUrl;
     
     private Boolean available;

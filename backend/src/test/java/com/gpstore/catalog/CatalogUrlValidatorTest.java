@@ -15,6 +15,14 @@ class CatalogUrlValidatorTest {
     }
 
     @Test
+    void r2StoredRefIsAllowedForImages() {
+        assertTrue(CatalogUrlValidator.isAllowedImageUrl(
+                "r2:gpstore/products/1/original/a.webp"));
+        assertTrue(CatalogUrlValidator.isAllowedImageUrl(
+                "gpstore/products/1/original/a.webp"));
+    }
+
+    @Test
     void r2DevHttpsIsAllowedForImages() {
         assertTrue(CatalogUrlValidator.isAllowedImageUrl(
                 "https://pub-example.r2.dev/gpstore/products/1/original/a.webp"));

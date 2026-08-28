@@ -41,6 +41,8 @@ class NoSecretsCommittedTest {
         assertEqualsEmptyOrPlaceholder(lines, "R2_SECRET_ACCESS_KEY");
         assertEqualsEmptyOrPlaceholder(lines, "R2_ACCESS_KEY_ID");
         assertEqualsEmptyOrPlaceholder(lines, "R2_ACCOUNT_ID");
+        assertEqualsEmptyOrPlaceholder(lines, "R2_ENDPOINT");
+        assertEqualsEmptyOrPlaceholder(lines, "R2_BUCKET_NAME");
         assertEqualsEmptyOrPlaceholder(lines, "STORE_SUPPORT_PHONE");
         assertEqualsEmptyOrPlaceholder(lines, "STORE_SUPPORT_EMAIL");
     }

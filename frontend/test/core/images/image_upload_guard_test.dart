@@ -50,9 +50,19 @@ void main() {
     );
     expect(
       ImageUploadGuard.isAllowedDeliveryUrl(
-        'https://images.gpstore.co.in/gpstore/products/1/original/a.jpg',
+        'https://acct.r2.cloudflarestorage.com/gp-store-images/gpstore/products/1/original/a.jpg',
       ),
       isTrue,
+    );
+    expect(
+      ImageUploadGuard.isAllowedDeliveryUrl('r2:gpstore/products/1/original/a.jpg'),
+      isTrue,
+    );
+    expect(
+      ImageUploadGuard.isAllowedDeliveryUrl(
+        'https://images.gpstore.co.in/gpstore/products/1/original/a.jpg',
+      ),
+      isFalse,
     );
     expect(
       ImageUploadGuard.isAllowedDeliveryUrl(
