@@ -1,6 +1,7 @@
 package com.gpstore.catalog;
 
 import com.gpstore.exception.BadRequestException;
+import com.gpstore.upload.CatalogImageHosts;
 
 import java.net.URI;
 import java.util.Locale;
@@ -9,16 +10,14 @@ import java.util.regex.Pattern;
 /**
  * URLs that this shop will store and later hand to customers' phones.
  *
- * Bytes never pass through this backend (admin uploads go straight to
- * Cloudinary). What we persist is a string that the storefront will load,
- * so the job here is to refuse javascript:, data:, http://, credentialed
- * URLs, and lookalike hosts such as {@code res.cloudinary.com.evil}.
+ * Bytes never pass through this backend (admin uploads go to object storage
+ * with a short-lived signed URL). What we persist is a string that the
+ * storefront will load, so the job here is to refuse javascript:, data:,
+ * http://, credentialed URLs, and lookalike hosts.
  *
- * Image URLs must be Cloudinary HTTPS. 3D-model URLs may be any public
- * HTTPS host — they are not fetched by this server, so the SSRF surface
- * is the customer's device, not ours — but private/loopback hosts are
- * still refused so a compromised admin session cannot plant an internal
- * address in the catalogue.
+ * Image URLs must be HTTPS on an allowed catalogue host: Cloudinary
+ * (legacy rows), Cloudflare R2 public/CDN host, or {@code *.r2.dev}.
+ * 3D-model URLs may be any public HTTPS host.
  */
 public final class CatalogUrlValidator {
 
@@ -26,7 +25,7 @@ public final class CatalogUrlValidator {
     public static final int MAX_LENGTH = 500;
 
     public static final String IMAGE_MESSAGE =
-            "Image URLs must be HTTPS Cloudinary links (https://res.cloudinary.com/...).";
+            "Image URLs must be HTTPS links on the shop image host.";
     public static final String MODEL_MESSAGE =
             "3D model URLs must be HTTPS links on a public host, without credentials.";
 
@@ -37,7 +36,7 @@ public final class CatalogUrlValidator {
 
     public static boolean isAllowedImageUrl(String url) {
         URI uri = parseHttpsPublic(url);
-        return uri != null && CLOUDINARY_HOST.equalsIgnoreCase(uri.getHost());
+        return uri != null && CatalogImageHosts.isAllowed(uri.getHost());
     }
 
     public static boolean isAllowedModel3dUrl(String url) {
@@ -45,7 +44,7 @@ public final class CatalogUrlValidator {
     }
 
     /**
-     * Null, blank, or a Cloudinary HTTPS URL. Anything else is a 400.
+     * Null, blank, or an allowed catalogue HTTPS URL. Anything else is a 400.
      * Blank is allowed: a variant with no photo is a normal product.
      */
     public static void requireAllowedImageUrlOrEmpty(String url) {

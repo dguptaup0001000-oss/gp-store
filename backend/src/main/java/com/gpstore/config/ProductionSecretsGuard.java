@@ -12,7 +12,7 @@ import jakarta.annotation.PostConstruct;
  * secrets. JWT has its own guard in JwtService; this covers the rest of the
  * values a mis-copied .env.example would leave in place.
  *
- * Optional integrations (Cashfree, Firebase, Cloudinary, MSG91) stay
+ * Optional integrations (Cashfree, Firebase, Cloudinary, R2, MSG91) stay
  * fail-closed at use-time rather than blocking boot: a shop can take COD
  * orders without them. Database and Redis cannot.
  *

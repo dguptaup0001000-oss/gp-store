@@ -4,6 +4,7 @@ import com.gpstore.entity.ProductVariant;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.ProductVariantRepository;
+import com.gpstore.upload.CatalogImageCleanup;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -13,9 +14,12 @@ import java.util.List;
 public class ProductVariantService {
 
     private final ProductVariantRepository productVariantRepository;
+    private final CatalogImageCleanup imageCleanup;
 
-    public ProductVariantService(ProductVariantRepository productVariantRepository) {
+    public ProductVariantService(ProductVariantRepository productVariantRepository,
+                                 CatalogImageCleanup imageCleanup) {
         this.productVariantRepository = productVariantRepository;
+        this.imageCleanup = imageCleanup;
     }
 
     // Evicts the "products" cache too - Product's response includes its
@@ -52,6 +56,7 @@ public class ProductVariantService {
     @org.springframework.cache.annotation.CacheEvict(value = "products", allEntries = true)
     public ProductVariant update(Long id, ProductVariant updated, boolean allowBelowCost) {
         ProductVariant existing = getById(id);
+        String previousImage = existing.getImageUrl();
 
         existing.setQuantity(updated.getQuantity());
         existing.setUnit(updated.getUnit());
@@ -68,7 +73,9 @@ public class ProductVariantService {
 
         validatePrices(existing, allowBelowCost);
 
-        return productVariantRepository.save(existing);
+        ProductVariant saved = productVariantRepository.save(existing);
+        imageCleanup.deleteReplacedAfterCommit(previousImage, saved.getImageUrl());
+        return saved;
     }
 
     private static void applyImageUrl(ProductVariant variant, String imageUrl) {

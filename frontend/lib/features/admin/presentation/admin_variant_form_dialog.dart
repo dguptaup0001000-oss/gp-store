@@ -241,7 +241,10 @@ class _AdminVariantFormDialogState
     try {
       final result = await ref
           .read(adminProductsRepositoryProvider)
-          .pickAndUploadVariantImages(remaining: remaining);
+          .pickAndUploadVariantImages(
+        remaining: remaining,
+        ownerId: widget.variant?.id ?? _createdVariantId,
+      );
 
       if (!mounted) return;
 

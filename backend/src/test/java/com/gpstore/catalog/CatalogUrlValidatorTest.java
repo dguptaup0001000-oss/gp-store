@@ -1,6 +1,7 @@
 package com.gpstore.catalog;
 
 import com.gpstore.exception.BadRequestException;
+import com.gpstore.upload.CatalogImageHosts;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -11,6 +12,24 @@ class CatalogUrlValidatorTest {
     void cloudinaryHttpsIsAllowedForImages() {
         assertTrue(CatalogUrlValidator.isAllowedImageUrl(
                 "https://res.cloudinary.com/demo/image/upload/v1/gp/bag.jpg"));
+    }
+
+    @Test
+    void r2DevHttpsIsAllowedForImages() {
+        assertTrue(CatalogUrlValidator.isAllowedImageUrl(
+                "https://pub-example.r2.dev/gpstore/products/1/original/a.webp"));
+    }
+
+    @Test
+    void configuredPublicHostIsAllowedForImages() {
+        CatalogImageHosts.clearForTests();
+        CatalogImageHosts.allow("images.gpstore.co.in");
+        try {
+            assertTrue(CatalogUrlValidator.isAllowedImageUrl(
+                    "https://images.gpstore.co.in/gpstore/products/1/original/a.jpg"));
+        } finally {
+            CatalogImageHosts.clearForTests();
+        }
     }
 
     @Test

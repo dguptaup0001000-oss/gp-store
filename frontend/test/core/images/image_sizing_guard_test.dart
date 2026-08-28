@@ -71,8 +71,8 @@ void main() {
 
     expect(source.contains('imageUrl: _sizedUrl('), isTrue,
         reason: 'The URL handed to CachedNetworkImage must go through _sizedUrl');
-    expect(source.contains('ProductImageUrl.'), isTrue,
-        reason: '_sizedUrl must resolve through ProductImageUrl - memCacheWidth limits the '
+    expect(source.contains('ImageUrlService.'), isTrue,
+        reason: '_sizedUrl must resolve through ImageUrlService - memCacheWidth limits the '
             'DECODE, not the DOWNLOAD');
   });
 

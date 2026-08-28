@@ -50,7 +50,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
           ]),
           _section('Store staff', [
             'Shop administrators may connect a paired Bluetooth thermal printer for receipts. Bluetooth is not used to scan for people.',
-            'Catalogue photos that an administrator picks are uploaded to our image host (Cloudinary) as shop product pictures, not as customer personal photos.',
+            'Catalogue photos that an administrator picks are uploaded to our shop image host as product pictures, not as customer personal photos.',
           ]),
           _section('How We Use Your Information', [
             'To fulfil and deliver your orders inside our delivery areas.',

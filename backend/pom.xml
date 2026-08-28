@@ -146,6 +146,15 @@
             <version>9.4.1</version>
         </dependency>
 
+        <!-- Cloudflare R2 is S3-compatible. Used only on the Hostinger
+             backend to mint short-lived upload URLs. Credentials never go
+             to Flutter. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.29.51</version>
+        </dependency>
+
 
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

@@ -4,7 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
-import 'product_image_url.dart';
+import 'image_url_service.dart';
 
 /// Every remote image in the shop, drawn the same way.
 ///
@@ -136,9 +136,9 @@ class GpNetworkImage extends StatelessWidget {
   String _sizedUrl(String source, double width) {
     // Thresholds sit at the render widths the app actually uses: cart and
     // collage thumbnails, grid and carousel cards, then the detail page hero.
-    if (width <= 100) return ProductImageUrl.tile(source);
-    if (width <= 220) return ProductImageUrl.card(source);
-    return ProductImageUrl.detail(source);
+    if (width <= 100) return ImageUrlService.thumbnail(source);
+    if (width <= 220) return ImageUrlService.medium(source);
+    return ImageUrlService.large(source);
   }
 
   /// One shape for "still coming" and "never coming".

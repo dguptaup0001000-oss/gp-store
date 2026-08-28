@@ -21,7 +21,8 @@ class CategoryServiceUpdateTest {
     void setUp() {
         categoryRepository = mock(CategoryRepository.class);
         ProductRepository productRepository = mock(ProductRepository.class);
-        service = new CategoryService(categoryRepository, productRepository);
+        service = new CategoryService(categoryRepository, productRepository,
+                mock(com.gpstore.upload.CatalogImageCleanup.class));
     }
 
     @Test

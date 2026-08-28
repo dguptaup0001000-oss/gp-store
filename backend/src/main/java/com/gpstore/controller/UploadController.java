@@ -1,23 +1,54 @@
 package com.gpstore.controller;
 
+import com.gpstore.dto.request.ConfirmUploadRequest;
+import com.gpstore.dto.request.DeleteUploadRequest;
+import com.gpstore.dto.request.SignUploadRequest;
 import com.gpstore.dto.response.CloudinarySignatureResponse;
+import com.gpstore.dto.response.ConfirmedUploadResponse;
+import com.gpstore.dto.response.SignedUploadResponse;
 import com.gpstore.service.CloudinaryUploadService;
-import org.springframework.web.bind.annotation.*;
+import com.gpstore.upload.R2ObjectStorageService;
+import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Admin-only image upload (SecurityConfig). Flutter never receives R2
+ * secrets. {@code /cloudinary-signature} remains for already-installed
+ * admin APKs until they are replaced.
+ */
 @RestController
 @RequestMapping("/api/uploads")
 public class UploadController {
 
     private final CloudinaryUploadService cloudinaryUploadService;
+    private final R2ObjectStorageService r2;
 
-    public UploadController(CloudinaryUploadService cloudinaryUploadService) {
+    public UploadController(
+            CloudinaryUploadService cloudinaryUploadService,
+            R2ObjectStorageService r2) {
         this.cloudinaryUploadService = cloudinaryUploadService;
+        this.r2 = r2;
     }
 
-    // Admin only (enforced in SecurityConfig) - hands the app just enough to
-    // upload one image directly to Cloudinary itself; see
-    // CloudinaryUploadService's doc comment for why the API secret never
-    // leaves this endpoint.
+    @PostMapping("/sign")
+    public SignedUploadResponse sign(@Valid @RequestBody SignUploadRequest request) {
+        return r2.sign(request);
+    }
+
+    @PostMapping("/confirm")
+    public ConfirmedUploadResponse confirm(@Valid @RequestBody ConfirmUploadRequest request) {
+        return r2.confirm(request.getObjectKey());
+    }
+
+    @PostMapping("/delete")
+    public void delete(@Valid @RequestBody DeleteUploadRequest request) {
+        r2.deletePublicUrl(request.getPublicUrl());
+    }
+
     @GetMapping("/cloudinary-signature")
     public CloudinarySignatureResponse getCloudinarySignature() {
         return cloudinaryUploadService.generateSignedUploadParams();

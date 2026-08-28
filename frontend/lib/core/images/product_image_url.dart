@@ -8,10 +8,10 @@
 /// photographs fetched to render twenty thumbnails, on a phone that may be on
 /// mobile data in a village.
 ///
-/// Product images are Cloudinary-hosted, and Cloudinary resizes on delivery
-/// from parameters in the URL path. So the fix needs no backend change, no
-/// new API field, no migration, and no dependency: ask for a narrower image
-/// and a narrower image is what arrives.
+/// Product images may still be Cloudinary-hosted (legacy rows). Cloudinary
+/// resizes on delivery from parameters in the URL path. New uploads go to
+/// R2 and are already resized on the phone, so those URLs are returned
+/// unchanged.
 ///
 ///   .../image/upload/v123/gp-store/products/atta.jpg
 ///   .../image/upload/w_400,c_limit,f_auto,q_auto/v123/gp-store/products/atta.jpg

@@ -6,6 +6,7 @@ import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.ProductImageRepository;
 import com.gpstore.repository.ProductVariantRepository;
+import com.gpstore.upload.CatalogImageCleanup;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
@@ -31,10 +32,9 @@ import java.util.List;
  * primary photo from the one the customer sees. Sending the list you want is
  * one operation with one outcome, and re-sending it is harmless.
  *
- * WHAT IT IS NOT. This does not upload anything. Image bytes go straight from
- * the admin's phone to Cloudinary and never pass through this backend - see
- * admin_products_repository.dart's uploadVariantImage. What arrives here is a
- * list of URLs, which is why this service is small.
+ * WHAT IT IS NOT. This does not upload anything. Image bytes go from the
+ * admin's phone to object storage with a short-lived signed URL - see
+ * ImageUploadService. What arrives here is a list of HTTPS URLs.
  */
 @Service
 public class VariantImageService {
@@ -51,13 +51,16 @@ public class VariantImageService {
 
     private final ProductImageRepository imageRepository;
     private final ProductVariantRepository variantRepository;
+    private final CatalogImageCleanup imageCleanup;
     private final int maxUrlLength;
 
     public VariantImageService(ProductImageRepository imageRepository,
                                ProductVariantRepository variantRepository,
+                               CatalogImageCleanup imageCleanup,
                                @Value("${catalog.image-url-max-length:500}") int maxUrlLength) {
         this.imageRepository = imageRepository;
         this.variantRepository = variantRepository;
+        this.imageCleanup = imageCleanup;
         this.maxUrlLength = maxUrlLength;
     }
 
@@ -83,6 +86,7 @@ public class VariantImageService {
         ProductVariant variant = variantRepository.findById(variantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product variant not found"));
 
+        List<String> previous = imagesFor(variantId);
         List<String> cleaned = clean(urls);
 
         if (cleaned.size() > MAX_IMAGES_PER_VARIANT) {
@@ -130,6 +134,10 @@ public class VariantImageService {
             variant.setImageUrl(cleaned.get(0));
             variantRepository.save(variant);
         }
+
+        // Database already has the new list. Drop unused R2 objects only —
+        // Cloudinary URLs are ignored by CatalogImageCleanup / R2 delete.
+        imageCleanup.deleteRemovedAfterCommit(previous, cleaned);
 
         return cleaned;
     }
