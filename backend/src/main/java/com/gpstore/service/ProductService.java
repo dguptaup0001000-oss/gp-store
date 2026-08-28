@@ -229,7 +229,7 @@ public class ProductService {
             tile.getProductIds().add(row.productId());
             // Added even when null - see BestsellerTileResponse.imageUrls for
             // why the slot is kept rather than skipped.
-            tile.getImageUrls().add(row.imageUrl());
+            tile.getImageUrls().add(com.gpstore.upload.CatalogImageDelivery.forClient(row.imageUrl()));
         }
         return new ArrayList<>(tiles.values());
     }
@@ -410,6 +410,7 @@ public class ProductService {
         List<String> gallery = productImageRepository.findByProductIdOrderBySortOrderAsc(id).stream()
                 .map(com.gpstore.entity.ProductImage::getImageUrl)
                 .filter(url -> url != null && !url.isBlank())
+                .map(com.gpstore.upload.CatalogImageDelivery::forClient)
                 .toList();
 
         // No gallery rows means an existing product that predates this
@@ -444,7 +445,7 @@ public class ProductService {
                     continue;
                 }
                 byVariant.computeIfAbsent(image.getProductVariant().getId(), k -> new ArrayList<>())
-                        .add(image.getImageUrl());
+                        .add(com.gpstore.upload.CatalogImageDelivery.forClient(image.getImageUrl()));
             }
             product = product.withVariantImages(byVariant);
         }

@@ -123,7 +123,9 @@ public class CartResponse {
                     item.getQuantity(),
                     variant != null ? variant.getQuantity() : null,
                     variant != null ? variant.getUnit() : null,
-                    variant != null ? variant.getImageUrl() : null,
+                    variant != null && variant.getImageUrl() != null
+                            ? com.gpstore.upload.CatalogImageDelivery.forClient(variant.getImageUrl())
+                            : null,
                     item.getPrice(),
                     item.getTotalPrice(),
                     variant != null ? variant.getMrp() : null,

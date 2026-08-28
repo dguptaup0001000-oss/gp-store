@@ -15,9 +15,10 @@ import java.util.regex.Pattern;
  * storefront will load, so the job here is to refuse javascript:, data:,
  * http://, credentialed URLs, and lookalike hosts.
  *
- * Image URLs must be HTTPS on an allowed catalogue host: Cloudinary
- * (legacy rows), Cloudflare R2 public/CDN host, or {@code *.r2.dev}.
- * 3D-model URLs may be any public HTTPS host.
+ * Image URLs must be HTTPS on an allowed catalogue host (Cloudinary
+ * legacy rows) or a stored R2 object reference {@code r2:gpstore/...}.
+ * Presigned R2 GET URLs are accepted on write and canonicalised to the
+ * stored reference so the private bucket never needs public access.
  */
 public final class CatalogUrlValidator {
 
@@ -25,7 +26,7 @@ public final class CatalogUrlValidator {
     public static final int MAX_LENGTH = 500;
 
     public static final String IMAGE_MESSAGE =
-            "Image URLs must be HTTPS links on the shop image host.";
+            "Image URLs must be HTTPS links on the shop image host, or an R2 object reference.";
     public static final String MODEL_MESSAGE =
             "3D model URLs must be HTTPS links on a public host, without credentials.";
 
@@ -35,7 +36,14 @@ public final class CatalogUrlValidator {
     private CatalogUrlValidator() {}
 
     public static boolean isAllowedImageUrl(String url) {
-        URI uri = parseHttpsPublic(url);
+        if (url == null || url.isBlank()) {
+            return false;
+        }
+        String canonical = com.gpstore.upload.CatalogImageRefs.canonicalize(url.trim());
+        if (com.gpstore.upload.CatalogImageRefs.isStoredR2Ref(canonical)) {
+            return true;
+        }
+        URI uri = parseHttpsPublic(canonical);
         return uri != null && CatalogImageHosts.isAllowed(uri.getHost());
     }
 
@@ -52,8 +60,14 @@ public final class CatalogUrlValidator {
             return;
         }
         String trimmed = url.trim();
-        rejectIfTooLong(trimmed);
-        if (!isAllowedImageUrl(trimmed)) {
+        if (trimmed.length() > com.gpstore.upload.CatalogImageRefs.MAX_INCOMING_LENGTH) {
+            throw new BadRequestException(
+                    "URL is too long (" + trimmed.length()
+                            + " characters, limit " + com.gpstore.upload.CatalogImageRefs.MAX_INCOMING_LENGTH + ").");
+        }
+        String canonical = com.gpstore.upload.CatalogImageRefs.canonicalize(trimmed);
+        rejectIfTooLong(canonical);
+        if (!isAllowedImageUrl(canonical)) {
             throw new BadRequestException(IMAGE_MESSAGE);
         }
     }
@@ -77,7 +91,11 @@ public final class CatalogUrlValidator {
             return null;
         }
         String trimmed = url.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        String canonical = com.gpstore.upload.CatalogImageRefs.canonicalize(trimmed);
+        return canonical.isEmpty() ? null : canonical;
     }
 
     private static void rejectIfTooLong(String url) {

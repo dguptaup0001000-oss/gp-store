@@ -51,24 +51,25 @@ class ImageUploadService {
       '/api/uploads/confirm',
       data: {'objectKey': signed.objectKey},
     );
-    final publicUrl = confirmed.data?['publicUrl'];
-    if (publicUrl is! String ||
-        publicUrl.isEmpty ||
-        !ImageUploadGuard.isAllowedDeliveryUrl(publicUrl)) {
+    final objectKey = confirmed.data?['objectKey'];
+    if (objectKey is! String || objectKey != signed.objectKey) {
       throw ApiException(
         statusCode: confirmed.statusCode,
         message:
             'Image upload did not return a usable link. The product was not changed.',
       );
     }
-    if (publicUrl != signed.publicUrl) {
+    final delivery = confirmed.data?['publicUrl'];
+    if (delivery is! String ||
+        delivery.isEmpty ||
+        !ImageUploadGuard.isAllowedDeliveryUrl(delivery)) {
       throw ApiException(
         statusCode: confirmed.statusCode,
         message:
             'Image upload did not return a usable link. The product was not changed.',
       );
     }
-    return publicUrl;
+    return delivery;
   }
 
   Future<String> replaceImage({
@@ -137,10 +138,8 @@ class ImageUploadService {
     }
     final uploadUrl = data['uploadUrl'];
     final objectKey = data['objectKey'];
-    final publicUrl = data['publicUrl'];
     if (uploadUrl is! String ||
         objectKey is! String ||
-        publicUrl is! String ||
         uploadUrl.isEmpty ||
         !uploadUrl.startsWith('https://')) {
       throw ApiException(
@@ -160,7 +159,6 @@ class ImageUploadService {
     return _SignedUpload(
       uploadUrl: uploadUrl,
       objectKey: objectKey,
-      publicUrl: publicUrl,
       headers: headers,
     );
   }
@@ -201,12 +199,10 @@ class _SignedUpload {
   const _SignedUpload({
     required this.uploadUrl,
     required this.objectKey,
-    required this.publicUrl,
     required this.headers,
   });
 
   final String uploadUrl;
   final String objectKey;
-  final String publicUrl;
   final Map<String, String> headers;
 }

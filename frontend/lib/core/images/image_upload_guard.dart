@@ -48,6 +48,10 @@ class ImageUploadGuard {
   /// Delivery URLs the storefront will load. Dual-read during migration:
   /// Cloudinary (existing rows) and R2 / custom CDN (new uploads).
   static bool isAllowedDeliveryUrl(String url) {
+    if (url.startsWith('r2:gpstore/products/') ||
+        url.startsWith('r2:gpstore/categories/')) {
+      return !url.contains('..');
+    }
     final uri = Uri.tryParse(url);
     if (uri == null) return false;
     if (uri.scheme.toLowerCase() != 'https') return false;
@@ -62,6 +66,9 @@ class ImageUploadGuard {
         host.endsWith('.local')) {
       return false;
     }
-    return true;
+    if (host.endsWith('.r2.cloudflarestorage.com')) return true;
+    if (host.endsWith('.r2.dev')) return true;
+    if (host == 'res.cloudinary.com') return true;
+    return false;
   }
 }

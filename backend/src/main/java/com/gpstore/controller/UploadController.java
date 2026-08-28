@@ -5,6 +5,7 @@ import com.gpstore.dto.request.DeleteUploadRequest;
 import com.gpstore.dto.request.SignUploadRequest;
 import com.gpstore.dto.response.CloudinarySignatureResponse;
 import com.gpstore.dto.response.ConfirmedUploadResponse;
+import com.gpstore.dto.response.R2ConnectionTestResponse;
 import com.gpstore.dto.response.SignedUploadResponse;
 import com.gpstore.service.CloudinaryUploadService;
 import com.gpstore.upload.R2ObjectStorageService;
@@ -42,6 +43,15 @@ public class UploadController {
     @PostMapping("/confirm")
     public ConfirmedUploadResponse confirm(@Valid @RequestBody ConfirmUploadRequest request) {
         return r2.confirm(request.getObjectKey());
+    }
+
+    /**
+     * Puts a tiny JPEG, heads it, lists that key, then deletes it.
+     * Admin-only. Never returns credentials.
+     */
+    @PostMapping("/r2-connection-test")
+    public R2ConnectionTestResponse r2ConnectionTest() {
+        return r2.connectionTest();
     }
 
     @PostMapping("/delete")

@@ -1,6 +1,7 @@
 package com.gpstore.catalog;
 
 import com.gpstore.exception.ConflictException;
+import com.gpstore.upload.CatalogImageRefs;
 import com.gpstore.upload.ImageKind;
 import com.gpstore.upload.R2ObjectStorageService;
 import com.gpstore.upload.UploadPolicy;
@@ -91,15 +92,15 @@ public class CatalogImageR2MigrationService {
                 }
                 String key = UploadPolicy.objectKey(row.kind, row.ownerId, contentType);
                 r2.putBytes(key, contentType, bytes);
-                String publicUrl = r2.publicUrl(key);
-                if (publicUrl.length() > 500) {
+                String storedRef = CatalogImageRefs.storedRef(key);
+                if (storedRef.length() > 500) {
                     failed++;
-                    errors.add(row.table + "#" + row.id + " public URL too long");
+                    errors.add(row.table + "#" + row.id + " image ref too long");
                     continue;
                 }
                 int n = jdbc.update(
                         "UPDATE " + row.table + " SET image_url = ? WHERE id = ?",
-                        publicUrl, row.id);
+                        storedRef, row.id);
                 if (n == 1) {
                     migrated++;
                     updated++;
@@ -172,8 +173,9 @@ public class CatalogImageR2MigrationService {
     }
 
     private static String safeMessage(Exception ex) {
-        String message = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
-        return message.replaceAll("(?i)secret|password|key", "[redacted]");
+        // Class name only: AWS/R2 error bodies can include access-key ids
+        // or signed-URL query strings.
+        return ex.getClass().getSimpleName();
     }
 
     public record MigrationReport(

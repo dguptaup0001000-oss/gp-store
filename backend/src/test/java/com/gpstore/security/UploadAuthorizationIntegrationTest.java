@@ -84,6 +84,26 @@ class UploadAuthorizationIntegrationTest {
     }
 
     @Test
+    void unauthenticatedR2ConnectionTestIsDenied() throws Exception {
+        mockMvc.perform(post("/api/uploads/r2-connection-test"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @WithMockUser(roles = "CUSTOMER")
+    void customerCannotRunR2ConnectionTest() throws Exception {
+        mockMvc.perform(post("/api/uploads/r2-connection-test"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void adminR2ConnectionTestFailsClosedWhenR2IsUnset() throws Exception {
+        mockMvc.perform(post("/api/uploads/r2-connection-test"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
     @WithMockUser(roles = "CUSTOMER")
     void customerCannotStartCloudinaryToR2Copy() throws Exception {
         mockMvc.perform(post("/api/admin/catalog/images/migrate-to-r2")

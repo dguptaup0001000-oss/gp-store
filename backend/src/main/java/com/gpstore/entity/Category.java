@@ -6,6 +6,8 @@ import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.gpstore.upload.CatalogImageUrlSerializer;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
@@ -27,6 +29,7 @@ public class Category implements Serializable {
 
     private String description;
 
+    @JsonSerialize(using = CatalogImageUrlSerializer.class)
     private String imageUrl;
 
     // GST rate as a percentage (e.g. 5.00 for 5%, 0 for exempt staples).
