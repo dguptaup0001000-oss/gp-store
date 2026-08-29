@@ -1,12 +1,10 @@
-# Actionable alert when production backups fail or go stale.
-# A failed GitHub Actions run emails repository watchers. Does not print
-# secrets. Does not restore or deploy.
-name: Backup alert
+# Harmless SSH probe. Does not deploy, restore, or change production.
+# Prints the deploy *public* key fingerprint so the operator can compare
+# it to ~/.ssh/authorized_keys. Never prints the private key.
+name: SSH access check
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 * * * *"
 
 concurrency:
   group: gpstore-prod-ssh
@@ -16,8 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  alert:
-    name: Backup freshness and last-attempt status
+  check:
+    name: Identify deploy key and probe SSH
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: production
@@ -40,7 +38,6 @@ jobs:
               missing=1
             fi
           done
-          bash -n deploy/production/evaluate-backup-status.sh
           exit "$missing"
 
       - name: Identify deploy public key
@@ -51,13 +48,12 @@ jobs:
           chmod +x .github/scripts/identify_deploy_pubkey.sh
           .github/scripts/identify_deploy_pubkey.sh
 
-      - name: Fetch status.txt and evaluate
+      - name: Probe SSH without deploying
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
           PROD_USER: ${{ secrets.PROD_USER }}
           PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           PROD_PORT: ${{ secrets.PROD_PORT }}
-          PROD_APP_DIR: ${{ secrets.PROD_APP_DIR }}
         run: |
           set -Eeuo pipefail
           umask 077
@@ -65,15 +61,11 @@ jobs:
           trap 'rm -f "$KEY"' EXIT
           printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$KEY"
           chmod 600 "$KEY"
-          APP_DIR="${PROD_APP_DIR:-/opt/gp-store}"
           ssh -i "$KEY" \
             -p "${PROD_PORT:-22}" \
             -o IdentitiesOnly=yes \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=accept-new \
             "${PROD_USER}@${PROD_HOST}" \
-            "cd '$APP_DIR/backend' && docker compose -f docker-compose.yml exec -T backup cat /backups/status.txt" \
-            > /tmp/status.txt
-          echo "Fetched status.txt (values below are metadata, not credentials):"
-          grep -E '^(taken_at|bytes|filename|status)=' /tmp/status.txt || true
-          MAX_AGE_HOURS=26 bash deploy/production/evaluate-backup-status.sh /tmp/status.txt
+            'echo SSH_OK; id -un; test -d /opt/gp-store/.git && echo CHECKOUT_OK; test -f /opt/gp-store/backend/.env && echo ENV_OK'
+          echo "SSH probe succeeded. This workflow did not deploy."

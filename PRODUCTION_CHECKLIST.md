@@ -90,7 +90,7 @@ Android apps do not use CORS.
 - Increase Hikari / Tomcat / JVM ceilings past the documented 20 / 80 defaults.
 - Run 1,000+ VU load tests against the live API URL. Use
   `load-tests/browse-cart-checkout.js` locally/staging, smallest stage first.
-- Merge or rewrite Flyway V2–V22.
+- Merge or rewrite Flyway V2–V29.
 - Require leftover third-party PaaS GitHub status checks. Production is the
   Hostinger VPS.
 - Treat **Render** as a production dependency. It is removed.

@@ -263,6 +263,9 @@ services:
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
       CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
       CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      # Interpolated from backend/.env in this directory. Do NOT add
+      # env_file: /opt/gpstore/env-production — these ${R2_*:-} lines
+      # would still override it with empty values from the compose .env.
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_ENDPOINT: ${R2_ENDPOINT:-}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}

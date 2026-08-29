@@ -64,12 +64,21 @@ jobs:
           sh -n backend/docker/redis/docker-entrypoint.sh
           sh -n backend/docker-entrypoint.sh
           python3 backend/docker/redis/test_materialize_password_file.py
+          bash -n .github/scripts/identify_deploy_pubkey.sh
+          bash -n deploy/production/merge-r2-env.sh
+          chmod +x .github/scripts/identify_deploy_pubkey.sh deploy/production/merge-r2-env.sh
+          IDENTIFY_DEPLOY_PUBKEY_SELFTEST=1 .github/scripts/identify_deploy_pubkey.sh
+          MERGE_R2_ENV_SELFTEST=1 deploy/production/merge-r2-env.sh
           test -x deploy/production/deploy.sh || chmod +x deploy/production/deploy.sh
           grep -F 'set -Eeuo pipefail' deploy/production/deploy.sh
           grep -F 'verify_traefik_sha' deploy/production/deploy.sh
           grep -F 'not rolling back' deploy/production/deploy.sh
+          grep -F 'set_or_unset R2_ACCESS_KEY_ID' deploy/production/deploy.sh
+          grep -F 'set_or_unset R2_SECRET_ACCESS_KEY' deploy/production/deploy.sh
           grep -F 'traefik.http.routers.gpstore.service=gpstore' backend/docker-compose.yml
           grep -F 'traefik.http.routers.gpstore-live.service=gpstore-live' backend/docker-compose.yml
+          python3 -m py_compile .github/scripts/check_compose_host_ports.py
+          python3 .github/scripts/check_compose_host_ports.py backend/docker-compose.yml
           if grep -vE '^[[:space:]]*#' deploy/production/deploy.sh | grep -E 'compose[[:space:]]+down[[:space:]]+(-v|--volumes)'; then
             echo "deploy.sh must never destroy Compose volumes" >&2
             exit 1
@@ -145,6 +154,15 @@ jobs:
             fi
           done
           exit "$missing"
+
+      - name: Identify deploy public key
+        if: github.event_name != 'pull_request'
+        env:
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          chmod +x .github/scripts/identify_deploy_pubkey.sh
+          .github/scripts/identify_deploy_pubkey.sh
 
       - name: SSH deploy
         id: ssh_deploy

@@ -16,6 +16,7 @@ void main() {
         'R2_ACCESS_KEY_ID',
         'AWS_SECRET_ACCESS_KEY',
         'AWS_ACCESS_KEY_ID',
+        'MSG91_AUTH_KEY',
         'CLOUDINARY_API_SECRET',
         'CLOUDINARY_API_KEY',
         'api.cloudinary.com',

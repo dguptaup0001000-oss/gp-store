@@ -113,6 +113,13 @@ Compose sets `DB_URL=jdbc:postgresql://postgres:5432/${DB_NAME}` and `REDIS_HOST
 
 Optional vendor keys: Cashfree, MSG91, Firebase, Cloudflare R2 (new image uploads), Cloudinary (legacy admin APKs until replaced). Production never uses the mock OTP provider. Missing MSG91 credentials do not block boot; SMS OTP send fails closed until they are set.
 
+Cloudflare R2 and MSG91 must live in **`/opt/gp-store/backend/.env`**. Compose
+interpolates `R2_*: ${R2_*:-}` from that file. `/opt/gpstore/env-production`
+is not read. Do not add `env_file: /opt/gpstore/env-production` while those
+empty-default `environment:` lines remain — they override `env_file` with
+blank values. Use `deploy/production/merge-r2-env.sh` to copy `R2_*` names
+without printing secrets. See `deploy/production/CLOSEOUT.md`.
+
 ## 5. Database — do not destroy shop data
 
 Compose Postgres 17 is the **production database** (named volume `gpstore_pg_data`). Restarting containers does **not** wipe it.
