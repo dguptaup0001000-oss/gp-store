@@ -391,6 +391,19 @@ not need ListBucket on the API token):
 Do not apply that rule to `gpstore/products/` or `gpstore/categories/`.
 Keep `R2_PUBLIC_BASE_URL` empty. Do not make the bucket public.
 
+## 19. Cloudflare Worker for catalogue images (optional)
+
+Presigned GET URLs change every time (`X-Amz-Date`), so Flutter's image
+cache re-downloads every catalogue rotation. A Worker bound to the
+**private** bucket serves a stable URL per object:
+
+1. Deploy `deploy/cloudflare/r2-image-worker.js` with an R2 binding.
+2. Attach a custom hostname (`img.gpstore.co.in`).
+3. Set `R2_IMAGE_WORKER_BASE_URL=https://img.gpstore.co.in` on the VPS.
+4. Recreate **backend only**. Do not make the bucket public.
+
+Until that variable is set, the API keeps issuing presigned GET URLs.
+
 GitHub Actions **does** SSH to Hostinger when secrets `PROD_HOST`,
 `PROD_USER`, and `PROD_SSH_PRIVATE_KEY` are set (workflow
 `deploy-production.yml`). Until those secrets exist, a green `main` build

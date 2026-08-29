@@ -77,6 +77,7 @@ public class R2ObjectStorageService {
     private final String secretAccessKey;
     private final String bucket;
     private final String publicBaseUrl;
+    private final String imageWorkerBaseUrl;
     private final R2StagingObjectRepository stagingObjects;
 
     private S3Client s3;
@@ -89,7 +90,18 @@ public class R2ObjectStorageService {
             String secretAccessKey,
             String bucket,
             String publicBaseUrl) {
-        this(accountId, endpoint, accessKeyId, secretAccessKey, bucket, publicBaseUrl, null);
+        this(accountId, endpoint, accessKeyId, secretAccessKey, bucket, publicBaseUrl, "", null);
+    }
+
+    R2ObjectStorageService(
+            String accountId,
+            String endpoint,
+            String accessKeyId,
+            String secretAccessKey,
+            String bucket,
+            String publicBaseUrl,
+            String imageWorkerBaseUrl) {
+        this(accountId, endpoint, accessKeyId, secretAccessKey, bucket, publicBaseUrl, imageWorkerBaseUrl, null);
     }
 
     public R2ObjectStorageService(
@@ -99,6 +111,7 @@ public class R2ObjectStorageService {
             @Value("${r2.secret-access-key:}") String secretAccessKey,
             @Value("${r2.bucket-name:}") String bucket,
             @Value("${r2.public-base-url:}") String publicBaseUrl,
+            @Value("${r2.image-worker-base-url:}") String imageWorkerBaseUrl,
             R2StagingObjectRepository stagingObjects) {
         this.accountId = trim(accountId);
         this.endpoint = trimTrailingSlash(trim(endpoint));
@@ -106,6 +119,7 @@ public class R2ObjectStorageService {
         this.secretAccessKey = trim(secretAccessKey);
         this.bucket = trim(bucket);
         this.publicBaseUrl = trimTrailingSlash(trim(publicBaseUrl));
+        this.imageWorkerBaseUrl = trimTrailingSlash(trim(imageWorkerBaseUrl));
         this.stagingObjects = stagingObjects;
     }
 
@@ -137,6 +151,10 @@ public class R2ObjectStorageService {
         if (!publicBaseUrl.isBlank() && publicBaseUrl.startsWith("https://")) {
             URI publicUri = URI.create(publicBaseUrl);
             CatalogImageHosts.allow(publicUri.getHost());
+        }
+        if (workerBaseConfigured()) {
+            URI workerUri = URI.create(imageWorkerBaseUrl);
+            CatalogImageHosts.allow(workerUri.getHost());
         }
         CatalogImageDelivery.bind(this);
         log.info("R2 object storage ready for private-bucket uploads (credentials not logged).");
@@ -239,7 +257,7 @@ public class R2ObjectStorageService {
             forgetStaging(key);
             key = permanent;
         }
-        return new ConfirmedUploadResponse(key, signGet(key));
+        return new ConfirmedUploadResponse(key, deliveryUrl(key));
     }
 
     /**
@@ -300,7 +318,24 @@ public class R2ObjectStorageService {
                 RequestBody.fromBytes(bytes));
     }
 
+    /**
+     * Stable Worker URL when {@code R2_IMAGE_WORKER_BASE_URL} is set; otherwise
+     * a presigned GET. Never returns a public-bucket URL. Bytes do not
+     * transit Tomcat.
+     */
+    public String deliveryUrl(String objectKey) {
+        String key = requireOwnedKey(objectKey);
+        if (workerBaseConfigured() && !UploadPolicy.isStagingKey(key)) {
+            return imageWorkerBaseUrl + "/" + key;
+        }
+        return presignedGet(key);
+    }
+
     public String signGet(String objectKey) {
+        return deliveryUrl(objectKey);
+    }
+
+    private String presignedGet(String objectKey) {
         requireConfigured();
         String key = requireOwnedKey(objectKey);
         if (!publicBaseUrl.isBlank() && publicBaseUrl.startsWith("https://")) {
@@ -430,6 +465,10 @@ public class R2ObjectStorageService {
         } catch (RuntimeException ex) {
             log.warn("R2 delete failed (key not logged).");
         }
+    }
+
+    private boolean workerBaseConfigured() {
+        return !imageWorkerBaseUrl.isBlank() && imageWorkerBaseUrl.startsWith("https://");
     }
 
     private void requireConfigured() {

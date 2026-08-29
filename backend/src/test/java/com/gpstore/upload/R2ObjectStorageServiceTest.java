@@ -48,6 +48,34 @@ class R2ObjectStorageServiceTest {
     }
 
     @Test
+    void workerBaseUrlIsStableAndDoesNotNeedPresign() {
+        R2ObjectStorageService r2 = new R2ObjectStorageService(
+                "acct", "", "key", "secret", "bucket", "", "https://img.gpstore.co.in");
+        String first = r2.deliveryUrl("gpstore/products/1/original/a.jpg");
+        String second = r2.deliveryUrl("gpstore/products/1/original/a.jpg");
+        assertEquals("https://img.gpstore.co.in/gpstore/products/1/original/a.jpg", first);
+        assertEquals(first, second);
+        assertFalse(first.contains("X-Amz-"), first);
+    }
+
+    @Test
+    void workerUrlIsNotUsedForStagingKeys() {
+        R2ObjectStorageService r2 = new R2ObjectStorageService(
+                "acct", "", "key", "secret", "bucket", "", "https://img.gpstore.co.in");
+        assertThrows(ConflictException.class,
+                () -> r2.deliveryUrl("gpstore/staging/products/1/original/a.jpg"),
+                "staging must not be served from the Worker URL");
+    }
+
+    @Test
+    void httpWorkerBaseUrlIsIgnored() {
+        R2ObjectStorageService r2 = new R2ObjectStorageService(
+                "acct", "", "key", "secret", "bucket", "", "http://img.gpstore.co.in");
+        assertThrows(ConflictException.class,
+                () -> r2.deliveryUrl("gpstore/products/1/original/a.jpg"));
+    }
+
+    @Test
     void storedRefsAndPublicBasePathsMapToOwnedKeys() {
         R2ObjectStorageService r2 = new R2ObjectStorageService(
                 "acct", "", "key", "secret", "bucket", "https://cdn.example.r2.dev");

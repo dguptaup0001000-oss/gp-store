@@ -103,6 +103,7 @@ jobs:
           ../deploy/production/test_harden_ssh.sh
           ../deploy/production/test_disk_guard.sh
           ../deploy/production/test_prune_backend_images.sh
+          python3 ../deploy/cloudflare/test_r2_image_worker.py
           chmod +x docker/backup/test_backup_health.sh
           ./docker/backup/test_backup_health.sh
 

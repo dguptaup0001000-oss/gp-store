@@ -2,8 +2,9 @@ package com.gpstore.upload;
 
 /**
  * Turns a stored catalogue image reference into a URL the phone can load.
- * R2 objects stay in a private bucket; customers receive a short-lived
- * signed GET. Cloudinary and other HTTPS rows pass through.
+ * R2 objects stay in a private bucket. When a Worker base URL is configured
+ * the client gets a stable CDN URL; otherwise a short-lived signed GET.
+ * Cloudinary and other HTTPS rows pass through. Bytes never transit Tomcat.
  */
 public final class CatalogImageDelivery {
 
@@ -32,7 +33,7 @@ public final class CatalogImageDelivery {
             return stored;
         }
         try {
-            return service.signGet(key);
+            return service.deliveryUrl(key);
         } catch (RuntimeException ex) {
             return stored;
         }
