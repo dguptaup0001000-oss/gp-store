@@ -26,8 +26,8 @@ chmod 600 ~/.ssh/authorized_keys
 
 The public key is printed (safe) by:
 
-1. Actions → **SSH access check** → Run workflow, or
-2. The **Identify deploy public key** step on **Deploy Production** / **Backup alert**
+1. **SSH access check** (prints `public_key=` / fingerprint; does not deploy), or
+2. The **Identify deploy public key** step on **Backup alert**
 
 Copy that `public_key=` line onto the VPS. Never copy the private key.
 

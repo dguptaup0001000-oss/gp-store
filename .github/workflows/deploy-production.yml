@@ -75,20 +75,25 @@ jobs:
           grep -F 'not rolling back' deploy/production/deploy.sh
           grep -F 'set_or_unset R2_ACCESS_KEY_ID' deploy/production/deploy.sh
           grep -F 'set_or_unset R2_SECRET_ACCESS_KEY' deploy/production/deploy.sh
-          # Deploy job must check out the repo before identify_deploy_pubkey.sh.
+          # Deploy must not run the public-key identify script. That script is
+          # diagnostic-only (SSH access check / backup-alert). A missing
+          # runner checkout used to abort deploy (run 33237217036).
           python3 - <<'PY'
 from pathlib import Path
+
 text = Path(".github/workflows/deploy-production.yml").read_text()
 start = text.index("\n  deploy:\n")
 end = text.index("\n  start-offbox:\n")
-block = text[start:end]
-if "actions/checkout@v4" not in block:
-    raise SystemExit("deploy job must checkout before identify_deploy_pubkey.sh")
-if "identify_deploy_pubkey.sh" not in block:
-    raise SystemExit("deploy job must run identify_deploy_pubkey.sh")
-if block.index("actions/checkout@v4") > block.index("identify_deploy_pubkey.sh"):
-    raise SystemExit("checkout must appear before identify_deploy_pubkey.sh")
-print("deploy_identify_checkout_ok")
+code = "\n".join(
+    line
+    for line in text[start:end].splitlines()
+    if not line.lstrip().startswith("#")
+)
+if "identify_deploy_pubkey.sh" in code:
+    raise SystemExit("deploy job must not call identify_deploy_pubkey.sh")
+if "Identify deploy public key" in code:
+    raise SystemExit("deploy job must not identify the deploy public key")
+print("deploy_job_has_no_identify_ok")
 PY
           grep -F 'traefik.http.routers.gpstore.service=gpstore' backend/docker-compose.yml
           grep -F 'traefik.http.routers.gpstore-live.service=gpstore-live' backend/docker-compose.yml
@@ -170,24 +175,9 @@ PY
           done
           exit "$missing"
 
-      # This job historically had no checkout (SSH runs on the VPS). The
-      # identify script lives in the repo, so fetch it first. Identify must
-      # never block SSH: continue-on-error keeps a script miss from aborting
-      # deploy the way run 33237217036 did.
-      - uses: actions/checkout@v4
-        if: github.event_name != 'pull_request'
-        with:
-          fetch-depth: 1
-
-      - name: Identify deploy public key
-        if: github.event_name != 'pull_request'
-        continue-on-error: true
-        env:
-          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-        run: |
-          set -Eeuo pipefail
-          chmod +x .github/scripts/identify_deploy_pubkey.sh
-          .github/scripts/identify_deploy_pubkey.sh
+      # Public-key identify lives in ssh-access-check.yml (and backup-alert).
+      # Do not run it here: deploy does not use that output, and a missing
+      # runner checkout aborted SSH (run 33237217036).
 
       - name: SSH deploy
         id: ssh_deploy
