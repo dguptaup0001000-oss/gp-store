@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Production health from the VPS. Uses Compose exec — backend 8081 and Redis
-# are not published on the host.
+# Production health from the VPS. Uses Compose exec — backend 8081/8082 and
+# Redis are not published on the host. Probes use the live connector (8082).
 #
 # Usage (on the VPS):
 #   API_HOST=api.gpstore.co.in ./deploy/production/check-health.sh
@@ -19,16 +19,20 @@ echo "== Compose =="
 compose ps
 
 echo
-echo "== JVM via docker exec (not host :8081) =="
-compose exec -T backend curl -fsS --max-time 5 http://127.0.0.1:8081/v1/api/health
+echo "== Live connector (8082, not catalog pool) =="
+compose exec -T backend curl -fsS --max-time 5 http://127.0.0.1:8082/v1/api/health/live
+echo
+
+echo "== JVM via docker exec (live connector) =="
+compose exec -T backend curl -fsS --max-time 5 http://127.0.0.1:8082/v1/api/health
 echo
 
 echo "== Readiness (Postgres SELECT 1 + Redis PING) =="
-compose exec -T backend curl -fsS --max-time 8 http://127.0.0.1:8081/v1/api/health/ready
+compose exec -T backend curl -fsS --max-time 8 http://127.0.0.1:8082/v1/api/health/ready
 echo
 
 echo "== Actuator =="
-compose exec -T backend curl -fsS --max-time 8 http://127.0.0.1:8081/v1/actuator/health
+compose exec -T backend curl -fsS --max-time 8 http://127.0.0.1:8082/v1/actuator/health
 echo
 
 echo "== HTTPS via Traefik =="

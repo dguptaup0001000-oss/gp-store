@@ -37,6 +37,8 @@ build/
 *.env
 !.env.example
 .env.production
+env-production
+**/env-production
 deploy/hostinger/env.production
 .deployment-state
 **/.deployment-state

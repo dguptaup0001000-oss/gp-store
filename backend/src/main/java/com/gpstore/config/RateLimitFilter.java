@@ -81,11 +81,12 @@ import java.util.concurrent.TimeUnit;
    *       Preview is here because a coupon code on the query string is the
    *       same brute-force surface as /coupons/validate.
    *
-   *   rate-limit.admin-per-minute             default 30, per admin/worker account
-   *       POST /api/notifications/broadcast, writes under /api/admin/**,
-   *       and writes under /api/worker/**, /api/deliveries, /api/inventory,
-   *       /api/products, /api/categories, /api/product-variants, and
-   *       /api/orders (except place, which is CHECKOUT).
+ *   rate-limit.admin-per-minute             default 30, per admin/worker account
+ *       POST /api/notifications/broadcast, writes under /api/admin/**,
+ *       and writes under /api/worker/**, /api/deliveries, /api/inventory,
+ *       /api/products, /api/categories, /api/product-variants,
+ *       /api/uploads, /api/payments/webhooks (IP-keyed, no JWT), and
+ *       /api/orders (except place, which is CHECKOUT).
    *       DELETE /api/customers/me and PUT /api/customers/me are AUTH
        (account destruction and phone-number rebind).
  *
@@ -273,6 +274,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/products")
                 || path.startsWith("/api/categories")
                 || path.startsWith("/api/product-variants")
+                || path.startsWith("/api/uploads")
+                || path.startsWith("/api/payments/webhooks")
                 || (path.startsWith("/api/orders") && !path.equals("/api/orders/place")))) {
             return Bucket.ADMIN;
         }

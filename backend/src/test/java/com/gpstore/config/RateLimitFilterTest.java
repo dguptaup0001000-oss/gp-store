@@ -209,6 +209,19 @@ class RateLimitFilterTest {
         assertEquals(429, pack.getStatus());
     }
 
+    @Test
+    void uploadsAndCashfreeWebhooksAreAdminRateLimited() throws Exception {
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(31L);
+
+        MockHttpServletResponse sign = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/uploads/sign"), sign, new MockFilterChain());
+        assertEquals(429, sign.getStatus());
+
+        MockHttpServletResponse webhook = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/payments/webhooks/cashfree"), webhook, new MockFilterChain());
+        assertEquals(429, webhook.getStatus());
+    }
+
     private static MockHttpServletRequest request(String method, String path) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
         request.setServletPath(path);

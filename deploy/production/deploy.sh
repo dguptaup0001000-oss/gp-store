@@ -16,9 +16,12 @@ COMPOSE_DIR="${DEPLOY_ROOT}/backend"
 COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.yml"
 STATE_FILE="${STATE_DIR}/deployment-state"
 LOCK_FILE="${STATE_DIR}/deploy.lock"
-HEALTH_URL="http://127.0.0.1:8081/v1/actuator/health"
-API_HEALTH_URL="http://127.0.0.1:8081/v1/api/health"
-READY_URL="http://127.0.0.1:8081/v1/api/health/ready"
+# Live Tomcat connector (8082), not the catalog pool on 8081. Docker
+# HEALTHCHECK already uses 8082; deploy must not queue behind browse traffic.
+HEALTH_URL="http://127.0.0.1:8082/v1/actuator/health"
+API_HEALTH_URL="http://127.0.0.1:8082/v1/api/health"
+READY_URL="http://127.0.0.1:8082/v1/api/health/ready"
+LIVE_URL="http://127.0.0.1:8082/v1/api/health/live"
 VERSION_URL="http://127.0.0.1:8081/v1/api/version"
 PUBLIC_VERSION_URL="${PUBLIC_VERSION_URL:-https://api.gpstore.co.in/v1/api/version}"
 PUBLIC_HEALTH_URL="${PUBLIC_HEALTH_URL:-https://api.gpstore.co.in/v1/actuator/health}"
@@ -154,13 +157,16 @@ wait_for_health() {
   local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
   local actuator="" api_health="" ready=""
   while (( SECONDS < deadline )); do
+    local live=""
+    live="$(backend_curl "$LIVE_URL" 2>/dev/null || true)"
     actuator="$(backend_curl "$HEALTH_URL" 2>/dev/null || true)"
     api_health="$(backend_curl "$API_HEALTH_URL" 2>/dev/null || true)"
     ready="$(backend_curl "$READY_URL" 2>/dev/null || true)"
     local actuator_status ready_status
     actuator_status="$(printf '%s' "$actuator" | json_field status 2>/dev/null || true)"
     ready_status="$(printf '%s' "$ready" | json_field status 2>/dev/null || true)"
-    if [ "$actuator_status" = "UP" ] \
+    if [ -n "$live" ] \
+      && [ "$actuator_status" = "UP" ] \
       && printf '%s' "$api_health" | grep -q "GP-STORE Backend Running Successfully" \
       && [ "$ready_status" = "ready" ]; then
       printf '%s' "$actuator"
