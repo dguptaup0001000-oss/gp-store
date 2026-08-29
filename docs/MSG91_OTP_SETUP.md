@@ -36,7 +36,9 @@ before calling MSG91. Flutter must never call MSG91.
    OTP copy only.
 5. Copy the **template ID**.
 6. Copy the MSG91 **Auth Key** from the dashboard. Treat it like `JWT_SECRET`.
-7. On the **VPS** (`/opt/gpstore/env.production`), set (no quotes, no git commit):
+7. On the **VPS**, set these in **`/opt/gp-store/backend/.env`** (the file
+   Docker Compose interpolates). `/opt/gpstore/env-production` is **not**
+   read by the running backend. No quotes, no git commit:
 
    ```
    APP_PRODUCTION=true
@@ -51,6 +53,20 @@ before calling MSG91. Flutter must never call MSG91.
 
    You can keep using `OTP_SMS_SENDING_ENABLED` / `MSG91_TEMPLATE_ID` if those
    are already in that env file; `MSG91_ENABLED` and `MSG91_OTP_TEMPLATE_ID` alias them.
+
+## MSG91 dashboard fields (do not paste secrets here)
+
+| Dashboard field | What it must be |
+|---|---|
+| Auth Key | Copied into `MSG91_AUTH_KEY` on the VPS only. Never Flutter, never git. |
+| OTP template / template ID | Transactional OTP template with an `otp` variable. Same ID in `MSG91_OTP_TEMPLATE_ID` and `MSG91_TEMPLATE_ID`. |
+| Sender / header | DLT-approved 6-character header. Same value as `MSG91_SENDER_ID` (example in repo: `GPSTOR`). |
+| OTP length | **6** digits (backend verify requires `^\d{6}$`). |
+| OTP expiry | Backend sends `otp_expiry` **5** minutes (`OTP_EXPIRY_MINUTES`, capped 1–5). Dashboard default may be longer; the API query wins. |
+| API used | Send OTP v5: `POST /api/v5/otp`, verify `GET /api/v5/otp/verify`. Not the OTP widget, not Flow. |
+| IP allowlist (optional) | If you enable it, allow the VPS egress IP. Do not lock to GitHub Actions IPs. |
+| Inbound webhook | Not used. Verification is server-to-MSG91. No callback URL to configure. |
+| KYC / DLT | Required for Indian transactional OTP. Without DLT, send may return success and still not arrive. |
 8. Redeploy. Production **starts** without MSG91 credentials; LOGIN and
    password-reset OTP then fail closed (generic send error, no mock, no
    universal code such as `123456`). Set the Auth Key and template ID when

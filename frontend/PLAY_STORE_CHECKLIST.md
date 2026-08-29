@@ -60,7 +60,7 @@ today:
 | Address | Yes | App functionality | Delivery address(es) the customer saves |
 | Order history | Yes | App functionality, analytics | Customer's own purchase history |
 | Payment info | No | N/A | This app never sees card/bank details - UPI payments go directly between the customer and their own UPI app; COD involves no data at all |
-| Photos/media | Shop catalogue only | App functionality | Administrators upload product photos to the shop image host. The app does not collect customer personal photos. |
+| Photos/media | Shop catalogue only | App functionality | Administrators upload product photos to a private Cloudflare R2 bucket via the shop API (short-lived signed URLs). The app does not collect customer personal photos and does not embed R2 keys. |
 | Contacts | No | N/A | Not collected |
 | App activity (in-app actions) | Yes | Analytics, personalization | Used for "Recommended for you" / "Frequently bought together" |
 
@@ -70,10 +70,11 @@ advertising - there's no ad SDK integrated anywhere in this app.
 **Data deletion**: a customer can delete their own reviews and addresses
 directly in-app, and can now delete their entire account and personal data
 self-service - either in-app (Profile → Delete Account) or via the public
-web page at `<your-domain>/account-deletion.html`, with no need to contact
-support first. When filling out Play Console's Data Safety form, select
-"Users can request that their data be deleted" and enter that web page's
-full URL (e.g. `https://<you>.github.io/<repo>/account-deletion.html`).
+web page at
+`https://dguptaup0001000-oss.github.io/gp-store/account-deletion.html`,
+with no need to contact support first. When filling out Play Console's
+Data Safety form, select "Users can request that their data be deleted"
+and enter that URL.
 
 ## Building the actual submission file
 

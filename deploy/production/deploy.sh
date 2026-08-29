@@ -243,6 +243,12 @@ report_optional_config() {
     echo "  CASHFREE_ENVIRONMENT=${CASHFREE_ENVIRONMENT:-}"
     set_or_unset CASHFREE_WEBHOOK_SECRET
     echo "  FIREBASE_PUSH_ENABLED=${FIREBASE_PUSH_ENABLED:-}"
+    set_or_unset R2_ACCOUNT_ID
+    set_or_unset R2_ENDPOINT
+    set_or_unset R2_ACCESS_KEY_ID
+    set_or_unset R2_SECRET_ACCESS_KEY
+    set_or_unset R2_BUCKET_NAME
+    set_or_unset R2_PUBLIC_BASE_URL
   ' || log "Could not inspect optional config inside the container"
 }
 

@@ -68,6 +68,7 @@ class NoSecretsCommittedTest {
         assertFalse(text.contains("R2_SECRET_ACCESS_KEY"));
         assertFalse(text.contains("R2_ACCESS_KEY_ID"));
         assertFalse(text.contains("AWS_SECRET_ACCESS_KEY"));
+        assertFalse(text.contains("MSG91_AUTH_KEY"));
         assertFalse(text.contains("CLOUDINARY_API_SECRET"));
         assertFalse(text.contains("api.cloudinary.com"));
         assertFalse(text.contains("cloudinary-signature"));

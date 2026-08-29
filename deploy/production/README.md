@@ -8,21 +8,21 @@ Cursor/agent PR → required CI green → automatic merge into `main` →
 Do not put SSH keys, database passwords, MSG91 keys, Cashfree keys, or JWT
 secrets in git. Shop credentials stay in `backend/.env` on the VPS.
 
-## Verified in this repository (2026-08-26)
+## Verified in this repository (2026-08-29)
+
+Live close-out steps: [`CLOSEOUT.md`](CLOSEOUT.md).
 
 | Check | Result |
 |---|---|
-| `push` to `main` starts **Deploy Production** | Yes. Run [32984341028](https://github.com/dguptaup0001000-oss/gp-store/actions/runs/32984341028) on `8627de1` (merge of #94), actor `cursor[bot]`. |
-| That deploy succeeded | **No.** `Wait for backend CI` was skipped (job `if` referenced `inputs` on a push event). `Check deploy scripts` stayed queued. The run failed in 19s. No SSH step ran. |
-| CI on merge SHA `8627de1` | **No CI run.** Deploy must accept successful PR CI on the merge commit's second parent. |
-| Live `https://api.gpstore.co.in/v1/actuator/health` | `{"status":"UP"}` |
-| Live `https://api.gpstore.co.in/v1/api/version` | **401** — production is not running the SHA-tagged backend from #94. |
-| `allow_auto_merge` | **false** (this token cannot PATCH repository settings: HTTP 403) |
-| Branch rulesets | **none** (`GET /rulesets` → `[]`) |
-| Branch protection API | **403** Resource not accessible by integration |
-| GitHub Actions secrets API | **403** — this token cannot create `PROD_*` secrets |
-| SSH to `187.127.173.192` | **Permission denied** from this environment (no deploy key) |
-| PR CI `startup_failure` | Yes, on this branch. `build-and-push-image` skipped immediately on non-main while `build-and-test` was still queued. Job `if` conditions now wait on `needs.*`. |
+| PR **#125** on `main` | Merged as `29959e47d079f774aebbff28f1f36e0e68becb4d`. |
+| CI on #125 | 8/8 green. |
+| Live `https://api.gpstore.co.in/v1/api/health` | HTTP 200. |
+| Live `https://api.gpstore.co.in/v1/api/version` | `gitCommit=13858c87411714654df9d297827a6e9d80f77396` — **stale**. Not #124/#125. |
+| Live TLS | Let's Encrypt `CN=api.gpstore.co.in`, valid through 2026-11-24. HSTS + nosniff + frame deny. |
+| Public 5432 / 6379 / 8081 / 8082 | TCP timeout from the public internet (UFW / unpublished ports). |
+| Deploy of `29959e4` | **Failed.** Both SSH attempts: `unable to authenticate, attempted methods [none publickey]`. Run [33235765201](https://github.com/dguptaup0001000-oss/gp-store/actions/runs/33235765201). |
+| Last green **Off-box backup** | 2026-08-28 19:26 UTC, run [33203883046](https://github.com/dguptaup0001000-oss/gp-store/actions/runs/33203883046). Later jobs skipped/failed because SSH failed. |
+| Latest **Backup alert** | Failed 2026-08-29 02:48 UTC (same SSH secret). |
 
 YAML files alone do not complete production. The remaining items are GitHub
 settings and VPS secrets this token cannot write.
@@ -123,20 +123,38 @@ checkout to `/opt/gp-store` **without** recreating Docker volumes. The
 Compose project name is `gpstore`; volume names must stay
 `gpstore_gpstore_pg_data` and `gpstore_gpstore_redis_data`.
 
-Create the deploy key on a trusted machine (not in this repo):
+Create the deploy key on a trusted machine (not in this repo). Do **not**
+rotate `PROD_SSH_PRIVATE_KEY` unless the public half is already on the VPS
+and you intend to replace both sides together.
 
 ```bash
 ssh-keygen -t ed25519 -f gpstore-deploy -C "gp-store-github-deploy" -N ""
-# private → GitHub secret PROD_SSH_PRIVATE_KEY
-# public  → VPS ~/.ssh/authorized_keys for PROD_USER
+# private PEM/OpenSSH file → GitHub secret PROD_SSH_PRIVATE_KEY
+# matching .pub line     → VPS authorized_keys for PROD_USER
+```
+
+| Piece | Where |
+|---|---|
+| Private key | GitHub → Settings → Secrets → Actions → **`PROD_SSH_PRIVATE_KEY`** |
+| Public key | `~PROD_USER/.ssh/authorized_keys` (`/root/.ssh/authorized_keys` if root) |
+| `~/.ssh` mode | `700` |
+| `authorized_keys` mode | `600` |
+| Host / user / port | Secrets `PROD_HOST`, `PROD_USER`, optional `PROD_PORT` (default 22) |
+
+If the secret already exists, do **not** generate a new key. Run
+**SSH access check** and append the printed `public_key=` line:
+
+```bash
+install -d -m 700 ~/.ssh
+# append the one public line from the Actions log
+chmod 600 ~/.ssh/authorized_keys
+ssh-keygen -lf ~/.ssh/authorized_keys
 ```
 
 ```bash
 sudo bash deploy/production/prepare-vps.sh
 # If the repo already existed elsewhere, copy backend/.env into
 # $DEPLOY_ROOT/backend/.env (gitignored).
-sudo -u "$USER" mkdir -p ~/.ssh
-# append the deploy public key to ~/.ssh/authorized_keys
 ```
 
 The deploy user must be able to run `docker compose` (docker group).
