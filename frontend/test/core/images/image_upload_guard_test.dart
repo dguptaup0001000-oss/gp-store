@@ -78,4 +78,19 @@ void main() {
             'https://user:pass@res.cloudinary.com/x.jpg'),
         isFalse);
   });
+
+  test('confirm must return a permanent catalogue object key', () {
+    expect(
+      ImageUploadGuard.isPermanentCatalogObjectKey(
+        'gpstore/products/1/original/a.jpg',
+      ),
+      isTrue,
+    );
+    expect(
+      ImageUploadGuard.isPermanentCatalogObjectKey(
+        'gpstore/staging/products/1/original/a.jpg',
+      ),
+      isFalse,
+    );
+  });
 }

@@ -42,18 +42,30 @@ class UploadPolicyTest {
     @Test
     void objectKeyIgnoresClientFilenamesAndUsesSafeIds() {
         String key = UploadPolicy.objectKey(ImageKind.PRODUCT, 42L, "image/jpeg");
-        assertTrue(key.startsWith("gpstore/products/42/original/"), key);
+        assertTrue(key.startsWith("gpstore/staging/products/42/original/"), key);
         assertTrue(key.endsWith(".jpg"), key);
         assertFalse(key.contains(".."), key);
         assertFalse(key.contains(" "), key);
         assertFalse(key.toLowerCase().contains("passwd"));
+        assertEquals(
+                "gpstore/products/42/original/" + key.substring(key.lastIndexOf('/') + 1),
+                UploadPolicy.permanentKeyFromStaging(key));
     }
 
     @Test
     void unknownOwnerUsesNewFolder() {
         String key = UploadPolicy.objectKey(ImageKind.CATEGORY, null, "image/png");
-        assertTrue(key.startsWith("gpstore/categories/new/original/"), key);
+        assertTrue(key.startsWith("gpstore/staging/categories/new/original/"), key);
         assertTrue(key.endsWith(".png"), key);
+        assertTrue(UploadPolicy.permanentKeyFromStaging(key).startsWith("gpstore/categories/new/original/"),
+                UploadPolicy.permanentKeyFromStaging(key));
+    }
+
+    @Test
+    void permanentObjectKeyNeverUsesStaging() {
+        String key = UploadPolicy.permanentObjectKey(ImageKind.PRODUCT, 7L, "image/webp");
+        assertTrue(key.startsWith("gpstore/products/7/original/"), key);
+        assertFalse(UploadPolicy.isStagingKey(key));
     }
 
     @Test

@@ -372,6 +372,25 @@ Full (strict) means Cloudflare presents a public cert and origin TLS to
 Traefik uses the Let's Encrypt cert. Flexible/HTTP-only origin is wrong
 for this stack.
 
+## 18. R2 staging lifecycle (orphan backstop)
+
+New uploads are signed to `gpstore/staging/…` and copied to
+`gpstore/products/…` or `gpstore/categories/…` on confirm. The API token
+must **not** have ListBucket. The app tracks staging keys in
+`r2_staging_objects` and deletes rows older than 24 hours.
+
+In the Cloudflare dashboard, add a **lifecycle rule** as a backstop (does
+not need ListBucket on the API token):
+
+| Field | Value |
+|---|---|
+| Prefix | `gpstore/staging/` |
+| Action | Expire / delete objects |
+| Age | 2 days |
+
+Do not apply that rule to `gpstore/products/` or `gpstore/categories/`.
+Keep `R2_PUBLIC_BASE_URL` empty. Do not make the bucket public.
+
 GitHub Actions **does** SSH to Hostinger when secrets `PROD_HOST`,
 `PROD_USER`, and `PROD_SSH_PRIVATE_KEY` are set (workflow
 `deploy-production.yml`). Until those secrets exist, a green `main` build

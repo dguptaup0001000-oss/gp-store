@@ -52,7 +52,8 @@ class ImageUploadService {
       data: {'objectKey': signed.objectKey},
     );
     final objectKey = confirmed.data?['objectKey'];
-    if (objectKey is! String || objectKey != signed.objectKey) {
+    if (objectKey is! String ||
+        !ImageUploadGuard.isPermanentCatalogObjectKey(objectKey)) {
       throw ApiException(
         statusCode: confirmed.statusCode,
         message:

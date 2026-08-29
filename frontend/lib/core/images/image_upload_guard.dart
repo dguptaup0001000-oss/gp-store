@@ -71,4 +71,13 @@ class ImageUploadGuard {
     if (host == 'res.cloudinary.com') return true;
     return false;
   }
+
+  /// Confirm promotes a staging PUT to this prefix. Staging keys must not
+  /// be persisted on the product.
+  static bool isPermanentCatalogObjectKey(String key) {
+    return (key.startsWith('gpstore/products/') ||
+            key.startsWith('gpstore/categories/')) &&
+        !key.contains('..') &&
+        !key.contains('staging');
+  }
 }

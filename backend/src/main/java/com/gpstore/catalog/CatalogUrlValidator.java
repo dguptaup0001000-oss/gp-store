@@ -41,7 +41,8 @@ public final class CatalogUrlValidator {
         }
         String canonical = com.gpstore.upload.CatalogImageRefs.canonicalize(url.trim());
         if (com.gpstore.upload.CatalogImageRefs.isStoredR2Ref(canonical)) {
-            return true;
+            String key = com.gpstore.upload.CatalogImageRefs.objectKeyFrom(canonical);
+            return key != null && !com.gpstore.upload.UploadPolicy.isStagingKey(key);
         }
         URI uri = parseHttpsPublic(canonical);
         return uri != null && CatalogImageHosts.isAllowed(uri.getHost());

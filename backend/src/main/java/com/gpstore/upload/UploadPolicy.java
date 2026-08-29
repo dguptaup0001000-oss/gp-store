@@ -75,12 +75,40 @@ public final class UploadPolicy {
         return type;
     }
 
+    public static final String STAGING_ROOT = "gpstore/staging/";
+
     /**
-     * gpstore/{kind}/{owner}/original/{uuid}.ext
-     * Owner is a numeric id when known, otherwise {@code new}. Client
-     * filenames are ignored.
+     * Staging key for a client PUT. Confirm copies this to
+     * {@link #permanentObjectKey} so a lifecycle rule can expire leftovers.
      */
     public static String objectKey(ImageKind kind, Long ownerId, String contentType) {
+        return STAGING_ROOT + relativeObjectKey(kind, ownerId, contentType);
+    }
+
+    /**
+     * Permanent catalogue key. Used after confirm and for operator migrations
+     * of images that are already known-good.
+     */
+    public static String permanentObjectKey(ImageKind kind, Long ownerId, String contentType) {
+        return "gpstore/" + relativeObjectKey(kind, ownerId, contentType);
+    }
+
+    public static boolean isStagingKey(String key) {
+        return key != null && key.startsWith(STAGING_ROOT);
+    }
+
+    public static String permanentKeyFromStaging(String stagingKey) {
+        if (!isStagingKey(stagingKey)) {
+            throw new BadRequestException("Invalid object path.");
+        }
+        String permanent = "gpstore/" + stagingKey.substring(STAGING_ROOT.length());
+        if (isStagingKey(permanent) || CatalogImageRefs.ownedKeyOrNull(permanent) == null) {
+            throw new BadRequestException("Invalid object path.");
+        }
+        return permanent;
+    }
+
+    private static String relativeObjectKey(ImageKind kind, Long ownerId, String contentType) {
         requireAllowedUpload(kind, contentType, 1);
         String ext = EXTENSIONS.get(normalizedContentType(contentType));
         String owner = "new";
@@ -90,7 +118,7 @@ public final class UploadPolicy {
             }
             owner = Long.toString(ownerId);
         }
-        return kind.prefix() + "/" + owner + "/original/" + UUID.randomUUID() + ext;
+        return kind.storageFolder() + "/" + owner + "/original/" + UUID.randomUUID() + ext;
     }
 
     /**
