@@ -8,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -114,6 +115,13 @@ class UploadAuthorizationIntegrationTest {
     void customerCannotRunR2ConnectionTest() throws Exception {
         mockMvc.perform(post("/api/uploads/r2-connection-test"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void adminCloudinarySignatureIsOffByDefault() throws Exception {
+        mockMvc.perform(get("/api/uploads/cloudinary-signature"))
+                .andExpect(status().isConflict());
     }
 
     @Test

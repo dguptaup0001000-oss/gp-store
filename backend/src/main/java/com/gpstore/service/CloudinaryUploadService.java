@@ -30,19 +30,31 @@ public class CloudinaryUploadService {
     private final String apiKey;
     private final String apiSecret;
     private final String uploadFolder;
+    private final boolean signatureEnabled;
 
+    CloudinaryUploadService(String cloudName, String apiKey, String apiSecret, String uploadFolder) {
+        this(cloudName, apiKey, apiSecret, uploadFolder, false);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public CloudinaryUploadService(
             @Value("${cloudinary.cloud-name:}") String cloudName,
             @Value("${cloudinary.api-key:}") String apiKey,
             @Value("${cloudinary.api-secret:}") String apiSecret,
-            @Value("${cloudinary.upload-folder:gp-store/products}") String uploadFolder) {
+            @Value("${cloudinary.upload-folder:gp-store/products}") String uploadFolder,
+            @Value("${cloudinary.signature-enabled:false}") boolean signatureEnabled) {
         this.cloudName = cloudName;
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;
         this.uploadFolder = uploadFolder;
+        this.signatureEnabled = signatureEnabled;
     }
 
     public CloudinarySignatureResponse generateSignedUploadParams() {
+        if (!signatureEnabled) {
+            throw new ConflictException(
+                    "Cloudinary signed upload is turned off. New photos use R2.");
+        }
         if (cloudName.isBlank() || apiKey.isBlank() || apiSecret.isBlank()) {
             throw new ConflictException(
                     "Image upload isn't configured yet - set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, "
