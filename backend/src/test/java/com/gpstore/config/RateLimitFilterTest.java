@@ -215,16 +215,46 @@ class RateLimitFilterTest {
     }
 
     @Test
-    void uploadsAndCashfreeWebhooksAreAdminRateLimited() throws Exception {
+    void uploadsStayOnTheAdminBucket() throws Exception {
         when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(31L);
 
         MockHttpServletResponse sign = new MockHttpServletResponse();
         filter.doFilter(request("POST", "/api/uploads/sign"), sign, new MockFilterChain());
         assertEquals(429, sign.getStatus());
+    }
 
-        MockHttpServletResponse webhook = new MockHttpServletResponse();
-        filter.doFilter(request("POST", "/api/payments/webhooks/cashfree"), webhook, new MockFilterChain());
-        assertEquals(429, webhook.getStatus());
+    @Test
+    void cashfreeWebhooksUseAHigherFailClosedBucket() throws Exception {
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(31L);
+        MockHttpServletResponse under = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request("POST", "/api/payments/webhooks/cashfree"), under, chain);
+        assertNotNull(chain.getRequest(), "31 hits/min must stay under the 300 webhook default");
+        assertEquals(200, under.getStatus());
+
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(301L);
+        MockHttpServletResponse over = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/payments/webhooks/cashfree"), over, new MockFilterChain());
+        assertEquals(429, over.getStatus());
+    }
+
+    @Test
+    void webhookLimitFailsClosedWhenRedisIsDown() throws Exception {
+        when(redis.execute(any(RedisScript.class), anyList(), any()))
+                .thenThrow(new RuntimeException("Redis unavailable"));
+        RateLimitFilter tight = new RateLimitFilter(
+                redis,
+                new ClientIpResolver(false, ClientIpResolver.DEFAULT_TRUSTED_CIDRS),
+                20, 20, 60, 30, 60, 2);
+
+        tight.doFilter(request("POST", "/api/payments/webhooks/cashfree"),
+                new MockHttpServletResponse(), new MockFilterChain());
+        tight.doFilter(request("POST", "/api/payments/webhooks/cashfree"),
+                new MockHttpServletResponse(), new MockFilterChain());
+        MockHttpServletResponse third = new MockHttpServletResponse();
+        tight.doFilter(request("POST", "/api/payments/webhooks/cashfree"), third, new MockFilterChain());
+        assertEquals(429, third.getStatus(),
+                "a Redis outage must not open the webhook bucket");
     }
 
     @Test

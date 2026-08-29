@@ -85,8 +85,12 @@ import java.util.concurrent.TimeUnit;
  *       POST /api/notifications/broadcast, writes under /api/admin/**,
  *       and writes under /api/worker/**, /api/deliveries, /api/inventory,
  *       /api/products, /api/categories, /api/product-variants,
- *       /api/uploads, /api/payments/webhooks (IP-keyed, no JWT), and
+ *       /api/uploads, and
  *       /api/orders (except place, which is CHECKOUT).
+ *
+ *   rate-limit.webhook-per-minute           default 300, per IP, fail-closed
+ *       POST /api/payments/webhooks/**. Separate from ADMIN so a Cashfree
+ *       retry burst does not share the 30/min admin write quota.
    *       DELETE /api/customers/me and PUT /api/customers/me are AUTH
        (account destruction and phone-number rebind).
  *
@@ -128,6 +132,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final int mutationPerMinute;
     private final int adminPerMinute;
     private final int searchPerMinute;
+    private final int webhookPerMinute;
     private final LocalFixedWindowRateLimiter localLimiter =
             new LocalFixedWindowRateLimiter(TimeUnit.SECONDS.toMillis(WINDOW_SECONDS));
 
@@ -141,7 +146,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             int searchPerMinute) {
         this(redisTemplate,
                 new ClientIpResolver(trustForwardedFor, ClientIpResolver.DEFAULT_TRUSTED_CIDRS),
-                authPerMinute, checkoutPerMinute, mutationPerMinute, adminPerMinute, searchPerMinute);
+                authPerMinute, checkoutPerMinute, mutationPerMinute, adminPerMinute, searchPerMinute,
+                300);
     }
 
     public RateLimitFilter(
@@ -151,7 +157,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @Value("${rate-limit.checkout-per-minute:20}") int checkoutPerMinute,
             @Value("${rate-limit.mutation-per-minute:60}") int mutationPerMinute,
             @Value("${rate-limit.admin-per-minute:30}") int adminPerMinute,
-            @Value("${rate-limit.search-per-minute:60}") int searchPerMinute) {
+            @Value("${rate-limit.search-per-minute:60}") int searchPerMinute,
+            @Value("${rate-limit.webhook-per-minute:300}") int webhookPerMinute) {
         this.redisTemplate = redisTemplate;
         this.clientIpResolver = clientIpResolver;
         this.authPerMinute = authPerMinute;
@@ -159,10 +166,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.mutationPerMinute = mutationPerMinute;
         this.adminPerMinute = adminPerMinute;
         this.searchPerMinute = searchPerMinute;
+        this.webhookPerMinute = webhookPerMinute;
     }
 
     /** Which bucket a request falls into, or null if it is not limited at all. */
-    enum Bucket { AUTH, CHECKOUT, MUTATION, ADMIN, SEARCH }
+    enum Bucket { AUTH, CHECKOUT, MUTATION, ADMIN, SEARCH, WEBHOOK }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -180,6 +188,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             case MUTATION -> mutationPerMinute;
             case ADMIN -> adminPerMinute;
             case SEARCH -> searchPerMinute;
+            case WEBHOOK -> webhookPerMinute;
         };
 
         String clientKey = "ratelimit:" + identity(bucket, request) + ":" + limitPath(request.getServletPath());
@@ -279,6 +288,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return Bucket.MUTATION;
         }
 
+        if (path.startsWith("/api/payments/webhooks")) {
+            return Bucket.WEBHOOK;
+        }
+
         if (isWrite && (path.equals("/api/notifications/broadcast")
                 || path.startsWith("/api/admin/")
                 || path.startsWith("/api/worker/")
@@ -288,7 +301,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/categories")
                 || path.startsWith("/api/product-variants")
                 || path.startsWith("/api/uploads")
-                || path.startsWith("/api/payments/webhooks")
                 || (path.startsWith("/api/orders") && !path.equals("/api/orders/place")))) {
             return Bucket.ADMIN;
         }
@@ -344,7 +356,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * everyone else's search box.
      */
     private String identity(Bucket bucket, HttpServletRequest request) {
-        if (bucket != Bucket.AUTH) {
+        if (bucket != Bucket.AUTH && bucket != Bucket.WEBHOOK) {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
             if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedUser user
                     && user.getCustomerId() != null) {
