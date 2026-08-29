@@ -5,6 +5,11 @@ name: SSH access check
 
 on:
   workflow_dispatch:
+  # Also run on main so a merge prints public_key/fingerprint without a
+  # manual dispatch (this token cannot create workflow_dispatch events).
+  # Does not deploy.
+  push:
+    branches: [main]
 
 concurrency:
   group: gpstore-prod-ssh
