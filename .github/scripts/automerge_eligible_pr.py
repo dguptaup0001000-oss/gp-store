@@ -174,6 +174,16 @@ def same_repo(data: dict[str, Any]) -> bool:
     return True
 
 
+def dispatch_ssh_access_check() -> None:
+    """GITHUB_TOKEN merges do not start push workflows. Print public_key."""
+    _dispatch_workflow(
+        "ssh-access-check.yml",
+        "Dispatched SSH access check on main (does not deploy).",
+        "Could not dispatch SSH access check from GITHUB_TOKEN. "
+        "Run Actions → SSH access check → Run workflow on main.",
+    )
+
+
 def dispatch_production_deploy() -> None:
     _dispatch_workflow(
         "deploy-production.yml",
@@ -310,6 +320,7 @@ def merge_eligible_pr(number: int, *, ci_already_green: bool = False) -> str:
         log(native_text or f"Native auto-merge enabled for PR #{number}.")
         refreshed = pr_view(number)
         if refreshed.get("state") == "MERGED":
+            dispatch_ssh_access_check()
             dispatch_production_deploy()
             dispatch_production_apk()
             return "merged"
@@ -323,6 +334,7 @@ def merge_eligible_pr(number: int, *, ci_already_green: bool = False) -> str:
     merged_ok, merged_text = try_merge_now(number)
     if merged_ok:
         log(merged_text or f"Merged PR #{number} into main.")
+        dispatch_ssh_access_check()
         dispatch_production_deploy()
         dispatch_production_apk()
         return "merged"
