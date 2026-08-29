@@ -1,13 +1,11 @@
 # Harmless SSH probe. Does not deploy, restore, or change production.
-# Prints the deploy *public* key fingerprint so the operator can compare
-# it to ~/.ssh/authorized_keys. Never prints the private key.
+# Uses existing secret PROD_SSH_PRIVATE_KEY. Never prints the private key.
 name: SSH access check
 
 on:
   workflow_dispatch:
-  # Also run on main so a merge prints public_key/fingerprint without a
-  # manual dispatch (this token cannot create workflow_dispatch events).
-  # Does not deploy.
+  # Push to main is a no-op when the merger is GITHUB_TOKEN. Automerge
+  # dispatches this workflow explicitly after merge.
   push:
     branches: [main]
 
@@ -70,7 +68,9 @@ jobs:
             -p "${PROD_PORT:-22}" \
             -o IdentitiesOnly=yes \
             -o BatchMode=yes \
+            -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no \
             -o StrictHostKeyChecking=accept-new \
             "${PROD_USER}@${PROD_HOST}" \
-            'echo SSH_OK; id -un; test -d /opt/gp-store/.git && echo CHECKOUT_OK; test -f /opt/gp-store/backend/.env && echo ENV_OK'
+            'echo SSH_OK; id; hostname; pwd; test -d /opt/gp-store/.git && echo CHECKOUT_OK; test -f /opt/gp-store/backend/.env && echo ENV_OK'
           echo "SSH probe succeeded. This workflow did not deploy."
