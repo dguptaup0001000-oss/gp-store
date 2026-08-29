@@ -67,6 +67,8 @@ ENV APP_VERSION=${APP_VERSION}
 # Context-path is /v1 (see application.properties). Actuator health is
 # public; other actuator endpoints require ADMIN.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
-    CMD curl -fsS http://127.0.0.1:8081/v1/actuator/health >/dev/null || exit 1
+    CMD curl -fsS http://127.0.0.1:8082/v1/api/health/live >/dev/null \
+        || curl -fsS http://127.0.0.1:8081/v1/actuator/health >/dev/null \
+        || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

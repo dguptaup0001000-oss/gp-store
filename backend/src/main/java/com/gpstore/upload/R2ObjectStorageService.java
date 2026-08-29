@@ -22,8 +22,6 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
-import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
-import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -202,6 +200,10 @@ public class R2ObjectStorageService {
             tryDelete(key);
             throw new BadRequestException("That file type is not allowed.");
         }
+        if (!hasAllowedImageMagic(key)) {
+            tryDelete(key);
+            throw new BadRequestException("That file is not a JPEG, PNG, or WebP image.");
+        }
         return new ConfirmedUploadResponse(key, signGet(key));
     }
 
@@ -260,9 +262,8 @@ public class R2ObjectStorageService {
             HeadObjectResponse head = s3.headObject(
                     HeadObjectRequest.builder().bucket(bucket).key(key).build());
             long size = head.contentLength() == null ? 0L : head.contentLength();
-            ListObjectsV2Response listed = s3.listObjectsV2(
-                    ListObjectsV2Request.builder().bucket(bucket).prefix(key).maxKeys(1).build());
-            verified = size == TINY_JPEG.length && listed.keyCount() >= 1;
+            // Head is enough. Many R2 API tokens omit ListBucket (403).
+            verified = size == TINY_JPEG.length;
             tryDelete(key);
             deleted = !objectExists(key);
             boolean ok = uploaded && verified && deleted;
@@ -275,6 +276,21 @@ public class R2ObjectStorageService {
             return new R2ConnectionTestResponse(
                     true, uploaded, verified, deleted, false,
                     "R2 connection test failed. Check bucket name, endpoint, and API token on the VPS.");
+        }
+    }
+
+    private boolean hasAllowedImageMagic(String key) {
+        try (var in = s3.getObject(GetObjectRequest.builder()
+                .bucket(bucket)
+                .key(key)
+                .range("bytes=0-15")
+                .build())) {
+            byte[] prefix = in.readNBytes(16);
+            String detected = UploadPolicy.detectContentType(prefix);
+            return detected != null && UploadPolicy.ALLOWED_CONTENT_TYPES.contains(detected);
+        } catch (RuntimeException | java.io.IOException ex) {
+            log.warn("R2 magic-byte check failed (key not logged).");
+            return false;
         }
     }
 

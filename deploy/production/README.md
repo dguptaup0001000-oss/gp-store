@@ -99,9 +99,11 @@ for CI starved GitHub-hosted runners in this repo (CI `startup_failure`).
    - records the currently running backend image/SHA
    - builds `gp-store-backend:<sha>` while the old backend keeps running
    - recreates **only** the backend container (`docker compose up -d --no-deps --no-build backend`)
-   - waits for `/v1/actuator/health` UP, `/v1/api/health`, `/v1/api/health/ready`
-   - requires the running container healthy and in-container plus public
-     `https://api.gpstore.co.in/v1/api/version` `gitCommit` == SHA
+   - waits on the **live** Tomcat connector (`127.0.0.1:8082`): live, actuator UP,
+     `/v1/api/health`, `/v1/api/health/ready` (not the catalog pool on 8081)
+   - succeeds when in-container and Traefik-local (`127.0.0.1:443`) `gitCommit`
+     match the SHA. A stale public `api.gpstore.co.in` version is a warning,
+     not a rollback.
 6. On failure after the new container is started, it rolls back to the
    previous SHA-tagged image, re-checks health, and **fails the job**.
 

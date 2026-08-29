@@ -303,7 +303,14 @@ backup-volume disk, and TLS expiry. Not public.
 
 ## 14. Rollback
 
-Application: previous git commit, then `docker compose build backend && docker compose up -d backend`.
+Application: previous 40-char SHA via the gated script (not a raw compose rebuild):
+
+```bash
+cd /opt/gp-store
+./deploy/production/deploy.sh "$(awk -F= '/^CURRENT_SHA=/{print $2}' /var/lib/gp-store/deployment-state)"
+```
+
+Or pass the last known-good SHA explicitly. That path health-checks the live connector and can roll back.
 
 Database: restore a dump from section 13. Flyway is forward-only; do not edit applied SQL.
 
