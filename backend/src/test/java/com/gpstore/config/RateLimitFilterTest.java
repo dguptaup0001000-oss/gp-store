@@ -8,9 +8,14 @@ import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
@@ -220,6 +225,49 @@ class RateLimitFilterTest {
         MockHttpServletResponse webhook = new MockHttpServletResponse();
         filter.doFilter(request("POST", "/api/payments/webhooks/cashfree"), webhook, new MockFilterChain());
         assertEquals(429, webhook.getStatus());
+    }
+
+    @Test
+    void spoofedForwardedHeadersFromUntrustedPeerDoNotChangeTheAuthKey() throws Exception {
+        RateLimitFilter trusting = new RateLimitFilter(redis, true, 20, 20, 60, 30, 60);
+        AtomicReference<String> key = captureRedisKey();
+
+        MockHttpServletRequest req = request("POST", "/api/auth/login");
+        req.addHeader("X-Forwarded-For", "198.51.100.1");
+        req.addHeader("CF-Connecting-IP", "198.51.100.1");
+        trusting.doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertNotNull(key.get());
+        assertTrue(key.get().contains("203.0.113.10"), key.get());
+        assertFalse(key.get().contains("198.51.100.1"), key.get());
+    }
+
+    @Test
+    void trustedProxyUsesRealClientIpAsTheAuthKey() throws Exception {
+        RateLimitFilter trusting = new RateLimitFilter(redis, true, 20, 20, 60, 30, 60);
+        AtomicReference<String> key = captureRedisKey();
+
+        MockHttpServletRequest req = request("POST", "/api/auth/login");
+        req.setRemoteAddr("172.18.0.2");
+        req.addHeader("CF-Connecting-IP", "198.51.100.77");
+        req.addHeader("X-Forwarded-For", "203.0.113.9, 172.64.0.8");
+        trusting.doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertNotNull(key.get());
+        assertTrue(key.get().contains("198.51.100.77"), key.get());
+        assertFalse(key.get().contains("172.18.0.2"), key.get());
+        assertFalse(key.get().contains("203.0.113.9"), key.get());
+    }
+
+    @SuppressWarnings("unchecked")
+    private AtomicReference<String> captureRedisKey() {
+        AtomicReference<String> key = new AtomicReference<>();
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenAnswer(invocation -> {
+            List<String> keys = invocation.getArgument(1);
+            key.set(keys.getFirst());
+            return 1L;
+        });
+        return key;
     }
 
     private static MockHttpServletRequest request(String method, String path) {

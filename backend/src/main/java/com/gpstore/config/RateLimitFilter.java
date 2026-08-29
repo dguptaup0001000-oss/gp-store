@@ -122,7 +122,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             """, Long.class);
 
     private final StringRedisTemplate redisTemplate;
-    private final boolean trustForwardedFor;
+    private final ClientIpResolver clientIpResolver;
     private final int authPerMinute;
     private final int checkoutPerMinute;
     private final int mutationPerMinute;
@@ -131,16 +131,29 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final LocalFixedWindowRateLimiter localLimiter =
             new LocalFixedWindowRateLimiter(TimeUnit.SECONDS.toMillis(WINDOW_SECONDS));
 
+    RateLimitFilter(
+            StringRedisTemplate redisTemplate,
+            boolean trustForwardedFor,
+            int authPerMinute,
+            int checkoutPerMinute,
+            int mutationPerMinute,
+            int adminPerMinute,
+            int searchPerMinute) {
+        this(redisTemplate,
+                new ClientIpResolver(trustForwardedFor, ClientIpResolver.DEFAULT_TRUSTED_CIDRS),
+                authPerMinute, checkoutPerMinute, mutationPerMinute, adminPerMinute, searchPerMinute);
+    }
+
     public RateLimitFilter(
             StringRedisTemplate redisTemplate,
-            @Value("${rate-limit.trust-forwarded-for:false}") boolean trustForwardedFor,
+            ClientIpResolver clientIpResolver,
             @Value("${rate-limit.auth-per-minute:20}") int authPerMinute,
             @Value("${rate-limit.checkout-per-minute:20}") int checkoutPerMinute,
             @Value("${rate-limit.mutation-per-minute:60}") int mutationPerMinute,
             @Value("${rate-limit.admin-per-minute:30}") int adminPerMinute,
             @Value("${rate-limit.search-per-minute:60}") int searchPerMinute) {
         this.redisTemplate = redisTemplate;
-        this.trustForwardedFor = trustForwardedFor;
+        this.clientIpResolver = clientIpResolver;
         this.authPerMinute = authPerMinute;
         this.checkoutPerMinute = checkoutPerMinute;
         this.mutationPerMinute = mutationPerMinute;
@@ -342,18 +355,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private String clientIp(HttpServletRequest request) {
-        // X-Forwarded-For is trivially spoofable by the client unless a real
-        // proxy/load balancer in front of this app is overwriting it - trusting
-        // it blindly would let an attacker fake a new IP on every request and
-        // bypass the whole rate limit. Only enable rate-limit.trust-forwarded-for
-        // once you've confirmed you're actually behind a proxy that sets it
-        // (e.g. a managed platform's load balancer).
-        if (trustForwardedFor) {
-            String forwarded = request.getHeader("X-Forwarded-For");
-            if (forwarded != null && !forwarded.isBlank()) {
-                return forwarded.split(",")[0].trim();
-            }
-        }
-        return request.getRemoteAddr();
+        return clientIpResolver.resolve(request);
     }
 }

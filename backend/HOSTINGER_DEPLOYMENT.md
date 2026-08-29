@@ -346,9 +346,31 @@ CI already defaults to `https://api.gpstore.co.in/v1` when `vars.API_BASE_URL` i
 | 502 | `docker compose ps` — backend healthy? `docker compose logs backend` |
 | App refuses to start | `JWT_SECRET` still the repo default, or `DDL_AUTO` is not `validate` |
 | Search errors `similarity` | V5 should create `pg_trgm`. Confirm Flyway in logs |
-| Login rate-limit all from one IP | `RATE_LIMIT_TRUST_FORWARDED_FOR=true` is set in Compose |
+| Login rate-limit all from one IP | Confirm Cloudflare is **proxied** (not DNS-only) and Traefik has `forwardedHeaders.trustedIPs` for Cloudflare ranges. See §17. |
 | Redis down, login still works but caps per JVM | AUTH/CHECKOUT/ADMIN fail closed to a local limiter; SEARCH/cart fail open (documented in `RateLimitFilter`) |
 | Port 80/443 already in use | leftover Nginx/systemd from `deploy/hostinger/`. Stop them. |
+
+## 17. Cloudflare proxy mode (real client IPs)
+
+`api.gpstore.co.in` must be **proxied** (orange cloud) with SSL/TLS
+**Full (strict)**. DNS-only (grey cloud) sends browsers straight to the
+VPS; Traefik then sees the real client as the TCP peer and must not trust
+forwarded headers from the internet.
+
+Verify without opening the Cloudflare dashboard:
+
+```bash
+# Must be a Cloudflare anycast address (104.16/13, 172.64/13, 162.158/15, …),
+# not the VPS A record.
+dig +short api.gpstore.co.in
+
+# cf-ray present => the request went through Cloudflare. Missing => DNS-only.
+curl -sI https://api.gpstore.co.in/v1/api/health | grep -i '^cf-ray:'
+```
+
+Full (strict) means Cloudflare presents a public cert and origin TLS to
+Traefik uses the Let's Encrypt cert. Flexible/HTTP-only origin is wrong
+for this stack.
 
 GitHub Actions **does** SSH to Hostinger when secrets `PROD_HOST`,
 `PROD_USER`, and `PROD_SSH_PRIVATE_KEY` are set (workflow
