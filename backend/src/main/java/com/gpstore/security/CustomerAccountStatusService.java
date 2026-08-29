@@ -1,12 +1,14 @@
 package com.gpstore.security;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.Role;
 import com.gpstore.repository.CustomerRepository;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Live account-status lookup for the JWT filter, with a short cache so a
@@ -32,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CustomerAccountStatusService {
 
     static final long TTL_MS = 2_000L;
+    static final long DEFAULT_MAX_ENTRIES = 50_000L;
 
     public record Snapshot(boolean usable, String role) {
         public static Snapshot unusable() {
@@ -39,13 +42,22 @@ public class CustomerAccountStatusService {
         }
     }
 
-    private record Cached(boolean usable, String role, long expiresAtMs) {}
+    private record Cached(boolean usable, String role) {}
 
     private final CustomerRepository customerRepository;
-    private final ConcurrentHashMap<Long, Cached> cache = new ConcurrentHashMap<>();
+    private final Cache<Long, Cached> cache;
 
     public CustomerAccountStatusService(CustomerRepository customerRepository) {
+        this(customerRepository, DEFAULT_MAX_ENTRIES);
+    }
+
+    CustomerAccountStatusService(CustomerRepository customerRepository, long maximumSize) {
         this.customerRepository = customerRepository;
+        this.cache = Caffeine.newBuilder()
+                .expireAfterWrite(Duration.ofMillis(TTL_MS))
+                .maximumSize(maximumSize)
+                .executor(Runnable::run)
+                .build();
     }
 
     /**
@@ -65,22 +77,30 @@ public class CustomerAccountStatusService {
         if (customerId == null) {
             return Snapshot.unusable();
         }
-        long now = System.currentTimeMillis();
-        Cached cached = cache.get(customerId);
-        if (cached != null && cached.expiresAtMs > now) {
+        Cached cached = cache.getIfPresent(customerId);
+        if (cached != null) {
             return new Snapshot(cached.usable, cached.role);
         }
         Customer customer = customerRepository.findById(customerId).orElse(null);
         boolean usable = isCustomerUsable(customer);
         String role = roleName(customer);
-        cache.put(customerId, new Cached(usable, role, now + TTL_MS));
+        cache.put(customerId, new Cached(usable, role));
         return new Snapshot(usable, role);
     }
 
     public void invalidate(Long customerId) {
         if (customerId != null) {
-            cache.remove(customerId);
+            cache.invalidate(customerId);
         }
+    }
+
+    void evictForTests() {
+        cache.cleanUp();
+    }
+
+    long estimatedSizeForTests() {
+        cache.cleanUp();
+        return cache.estimatedSize();
     }
 
     /**
