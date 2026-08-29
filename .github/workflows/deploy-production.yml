@@ -59,6 +59,7 @@ jobs:
           python3 -m py_compile .github/scripts/wait_for_ci.py
           python3 -m py_compile .github/scripts/automerge_eligible_pr.py
           python3 -m py_compile .github/scripts/resolve_api_base_url.py
+          python3 -m py_compile .github/scripts/check_deploy_job_has_no_identify.py
           python3 .github/scripts/resolve_api_base_url.py --self-test
           python3 -m py_compile backend/docker/redis/materialize-password-file.py
           sh -n backend/docker/redis/docker-entrypoint.sh
@@ -75,26 +76,8 @@ jobs:
           grep -F 'not rolling back' deploy/production/deploy.sh
           grep -F 'set_or_unset R2_ACCESS_KEY_ID' deploy/production/deploy.sh
           grep -F 'set_or_unset R2_SECRET_ACCESS_KEY' deploy/production/deploy.sh
-          # Deploy must not run the public-key identify script. That script is
-          # diagnostic-only (SSH access check / backup-alert). A missing
-          # runner checkout used to abort deploy (run 33237217036).
-          python3 - <<'PY'
-from pathlib import Path
-
-text = Path(".github/workflows/deploy-production.yml").read_text()
-start = text.index("\n  deploy:\n")
-end = text.index("\n  start-offbox:\n")
-code = "\n".join(
-    line
-    for line in text[start:end].splitlines()
-    if not line.lstrip().startswith("#")
-)
-if "identify_deploy_pubkey.sh" in code:
-    raise SystemExit("deploy job must not call identify_deploy_pubkey.sh")
-if "Identify deploy public key" in code:
-    raise SystemExit("deploy job must not identify the deploy public key")
-print("deploy_job_has_no_identify_ok")
-PY
+          # Deploy must not run the public-key identify script.
+          python3 .github/scripts/check_deploy_job_has_no_identify.py
           grep -F 'traefik.http.routers.gpstore.service=gpstore' backend/docker-compose.yml
           grep -F 'traefik.http.routers.gpstore-live.service=gpstore-live' backend/docker-compose.yml
           python3 -m py_compile .github/scripts/check_compose_host_ports.py
