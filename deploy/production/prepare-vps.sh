@@ -63,6 +63,11 @@ if [ -f "$DEPLOY_ROOT/deploy/production/apply-host-tuning.sh" ]; then
     || log "WARNING: host sysctl tuning did not apply"
 fi
 
+if [ -f "$DEPLOY_ROOT/deploy/production/harden-ssh.sh" ]; then
+  bash "$DEPLOY_ROOT/deploy/production/harden-ssh.sh" \
+    || log "WARNING: SSH hardening did not apply"
+fi
+
 AUTH_KEYS="/home/${DEPLOY_USER}/.ssh/authorized_keys"
 if [ "$DEPLOY_USER" = "root" ]; then
   AUTH_KEYS="/root/.ssh/authorized_keys"

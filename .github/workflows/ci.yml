@@ -96,6 +96,9 @@ jobs:
           bash -n ../deploy/production/evaluate-backup-status.sh
           bash -n ../deploy/production/evaluate-offbox-result.sh
           bash -n ../deploy/production/backup-restore-drill.sh
+          bash -n ../deploy/production/harden-ssh.sh
+          chmod +x ../deploy/production/test_harden_ssh.sh
+          ../deploy/production/test_harden_ssh.sh
           chmod +x docker/backup/test_backup_health.sh
           ./docker/backup/test_backup_health.sh
 
