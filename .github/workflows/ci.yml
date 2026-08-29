@@ -75,6 +75,14 @@ jobs:
           fi
           echo "No tracked .env or credential files."
 
+      - name: Refuse non-loopback Compose publishes of 5432/6379/8081
+        working-directory: .
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile .github/scripts/check_compose_published_ports.py
+          python3 .github/scripts/test_check_compose_published_ports.py
+          python3 .github/scripts/check_compose_published_ports.py .
+
       - name: Check Redis secret scripts
         run: |
           sh -n docker/redis/docker-entrypoint.sh

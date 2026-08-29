@@ -83,8 +83,11 @@ optional cleanup:
      URL instead (e.g. `https://api.gpstore.co.in/v1`).
 
 4. **Backend must actually be running and reachable** at whatever URL you
-   pass in step 3 - via `docker compose up`, the Hostinger VPS, or
-   similar. This app has nothing to talk to otherwise.
+   pass in step 3 - via `docker compose -f docker-compose.local.yml up`
+   at the repo root (binds 127.0.0.1:8081), the Hostinger VPS, or
+   similar. This app has nothing to talk to otherwise. For a physical
+   phone, use `adb reverse tcp:8081 tcp:8081` or the production HTTPS API;
+   laptop Compose does not publish 8081 on the LAN.
 
 ## Platform folders (android/, web/) - what's real and what needs one more step
 

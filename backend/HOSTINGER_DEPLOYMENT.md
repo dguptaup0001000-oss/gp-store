@@ -22,8 +22,12 @@ Canonical files:
 | Image | `backend/Dockerfile` |
 | Legacy systemd/Nginx (do not enable) | `deploy/hostinger/` |
 
-Laptop Compose (published 5432/6379/8081): `docker compose -f docker-compose.dev.yml up`.
-Never use that file, or the repo-root `docker-compose.yml`, on the VPS.
+Laptop Compose binds 5432/6379/8081 on loopback only:
+`docker compose -f docker-compose.local.yml up` (repo root) or
+`docker compose -f docker-compose.dev.yml up` (from `backend/`).
+There is no repo-root `docker-compose.yml` — a bare `docker compose up`
+at `/opt/gp-store` must fail instead of starting a second stack.
+Never use the laptop files on the VPS.
 
 Java 21, Spring Boot 3.5.3, Maven Wrapper `./mvnw`.
 

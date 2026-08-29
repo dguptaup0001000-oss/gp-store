@@ -41,7 +41,7 @@ has booted successfully:
 2. Set `DDL_AUTO=validate` (create the line if it is missing).
 3. Leave `FLYWAY_ENABLED=true`. Do not change pool size, Tomcat
    threads, or JVM flags as part of this step.
-4. `docker compose up -d backend`
+4. From `backend/` (never the repo root): `docker compose up -d backend`
 5. Confirm `GET /v1/api/health` and `GET /v1/actuator/health`.
 
 ### Rollback if the new deploy does not start
@@ -51,7 +51,7 @@ as it was.
 
 1. Set `DDL_AUTO` back to `update`, or comment the line so the app uses its
    default.
-2. `docker compose up -d backend`
+2. From `backend/` (never the repo root): `docker compose up -d backend`
 3. Do **not** rewrite Flyway history and do **not** restore
    `backend/docs/production-schema-reference.sql` as a bootstrap script
    (it is a 2026-08-19 snapshot and is missing later columns).
