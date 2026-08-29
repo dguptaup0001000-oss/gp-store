@@ -49,8 +49,12 @@ jobs:
           bash -n deploy/production/deploy.sh
           bash -n deploy/production/prepare-vps.sh
           bash -n deploy/production/harden-ssh.sh
-          chmod +x deploy/production/test_harden_ssh.sh
+          bash -n deploy/production/disk-guard.sh
+          bash -n deploy/production/prune-backend-images.sh
+          chmod +x deploy/production/test_harden_ssh.sh deploy/production/test_disk_guard.sh deploy/production/test_prune_backend_images.sh
           deploy/production/test_harden_ssh.sh
+          deploy/production/test_disk_guard.sh
+          deploy/production/test_prune_backend_images.sh
           bash -n deploy/production/backup-offbox-sync.sh
           bash -n deploy/production/offbox-pull-from-vps.sh
           bash -n deploy/production/offbox-decrypt-restore.sh

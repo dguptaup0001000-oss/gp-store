@@ -97,8 +97,12 @@ jobs:
           bash -n ../deploy/production/evaluate-offbox-result.sh
           bash -n ../deploy/production/backup-restore-drill.sh
           bash -n ../deploy/production/harden-ssh.sh
-          chmod +x ../deploy/production/test_harden_ssh.sh
+          bash -n ../deploy/production/disk-guard.sh
+          bash -n ../deploy/production/prune-backend-images.sh
+          chmod +x ../deploy/production/test_harden_ssh.sh ../deploy/production/test_disk_guard.sh ../deploy/production/test_prune_backend_images.sh
           ../deploy/production/test_harden_ssh.sh
+          ../deploy/production/test_disk_guard.sh
+          ../deploy/production/test_prune_backend_images.sh
           chmod +x docker/backup/test_backup_health.sh
           ./docker/backup/test_backup_health.sh
 
