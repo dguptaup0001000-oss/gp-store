@@ -47,6 +47,7 @@ public class CustomerAccountStatusService {
     private final CustomerRepository customerRepository;
     private final Cache<Long, Cached> cache;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public CustomerAccountStatusService(CustomerRepository customerRepository) {
         this(customerRepository, DEFAULT_MAX_ENTRIES);
     }

@@ -1,8 +1,13 @@
 package com.gpstore.upload;
 
+import com.gpstore.dto.request.SignUploadRequest;
+import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -88,5 +93,40 @@ class R2ObjectStorageServiceTest {
                 CatalogImageRefs.objectKeyFrom("r2:gpstore/products/9/original/a.webp"));
         assertNull(CatalogImageRefs.objectKeyFrom("https://res.cloudinary.com/demo/image/upload/v1/x.jpg"));
         assertNull(CatalogImageRefs.objectKeyFrom("r2:gpstore/products/../secret"));
+    }
+
+    @Test
+    void batchSignRejectsMoreThanTwenty() {
+        R2ObjectStorageService r2 = new R2ObjectStorageService("", "", "", "", "", "");
+        List<SignUploadRequest> items = new ArrayList<>();
+        for (int i = 0; i < UploadPolicy.BATCH_MAX + 1; i++) {
+            SignUploadRequest request = new SignUploadRequest();
+            request.setImageType(ImageKind.PRODUCT);
+            request.setContentType("image/jpeg");
+            request.setContentLength(1024);
+            items.add(request);
+        }
+        BadRequestException ex = assertThrows(BadRequestException.class, () -> r2.signBatch(items));
+        assertTrue(ex.getMessage().contains("at most " + UploadPolicy.BATCH_MAX), ex.getMessage());
+    }
+
+    @Test
+    void batchConfirmRejectsEmpty() {
+        R2ObjectStorageService r2 = new R2ObjectStorageService("", "", "", "", "", "");
+        assertThrows(BadRequestException.class, () -> r2.confirmBatch(List.of()));
+    }
+
+    @Test
+    void batchOfTwentyPassesTheSizeGateThenFailsClosedWithoutR2() {
+        R2ObjectStorageService r2 = new R2ObjectStorageService("", "", "", "", "", "");
+        List<SignUploadRequest> items = new ArrayList<>();
+        for (int i = 0; i < UploadPolicy.BATCH_MAX; i++) {
+            SignUploadRequest request = new SignUploadRequest();
+            request.setImageType(ImageKind.PRODUCT);
+            request.setContentType("image/jpeg");
+            request.setContentLength(1024);
+            items.add(request);
+        }
+        assertThrows(ConflictException.class, () -> r2.signBatch(items));
     }
 }

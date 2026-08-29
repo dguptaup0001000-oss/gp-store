@@ -37,6 +37,8 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -104,6 +106,7 @@ public class R2ObjectStorageService {
         this(accountId, endpoint, accessKeyId, secretAccessKey, bucket, publicBaseUrl, imageWorkerBaseUrl, null);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
     public R2ObjectStorageService(
             @Value("${r2.account-id:}") String accountId,
             @Value("${r2.endpoint:}") String endpoint,
@@ -206,6 +209,34 @@ public class R2ObjectStorageService {
                 "PUT",
                 Map.of("Content-Type", contentType),
                 expiresAt);
+    }
+
+    public List<SignedUploadResponse> signBatch(List<SignUploadRequest> items) {
+        requireBatchSize(items == null ? 0 : items.size());
+        List<SignedUploadResponse> signed = new ArrayList<>(items.size());
+        for (SignUploadRequest item : items) {
+            signed.add(sign(item));
+        }
+        return signed;
+    }
+
+    public List<ConfirmedUploadResponse> confirmBatch(List<String> objectKeys) {
+        requireBatchSize(objectKeys == null ? 0 : objectKeys.size());
+        List<ConfirmedUploadResponse> confirmed = new ArrayList<>(objectKeys.size());
+        for (String key : objectKeys) {
+            confirmed.add(confirm(key));
+        }
+        return confirmed;
+    }
+
+    static void requireBatchSize(int size) {
+        if (size <= 0) {
+            throw new BadRequestException("A batch must include at least one image.");
+        }
+        if (size > UploadPolicy.BATCH_MAX) {
+            throw new BadRequestException(
+                    "A batch may include at most " + UploadPolicy.BATCH_MAX + " images.");
+        }
     }
 
     public ConfirmedUploadResponse confirm(String objectKey) {

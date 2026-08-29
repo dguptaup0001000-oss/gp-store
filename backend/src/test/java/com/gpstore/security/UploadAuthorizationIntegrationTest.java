@@ -37,6 +37,10 @@ class UploadAuthorizationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(SIGN_BODY))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/uploads/sign-batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"items\":[" + SIGN_BODY + "]}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -80,6 +84,22 @@ class UploadAuthorizationIntegrationTest {
         mockMvc.perform(post("/api/uploads/confirm")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"objectKey\":\"../etc/passwd\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void adminBatchLargerThanTwentyIsDenied() throws Exception {
+        StringBuilder items = new StringBuilder();
+        for (int i = 0; i < 21; i++) {
+            if (i > 0) {
+                items.append(',');
+            }
+            items.append(SIGN_BODY.trim());
+        }
+        mockMvc.perform(post("/api/uploads/sign-batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"items\":[" + items + "]}"))
                 .andExpect(status().isBadRequest());
     }
 

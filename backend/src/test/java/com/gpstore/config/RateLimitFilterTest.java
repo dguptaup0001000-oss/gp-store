@@ -215,12 +215,42 @@ class RateLimitFilterTest {
     }
 
     @Test
-    void uploadsStayOnTheAdminBucket() throws Exception {
+    void uploadsUseTheirOwnHigherBucket() throws Exception {
         when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(31L);
 
         MockHttpServletResponse sign = new MockHttpServletResponse();
-        filter.doFilter(request("POST", "/api/uploads/sign"), sign, new MockFilterChain());
-        assertEquals(429, sign.getStatus());
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request("POST", "/api/uploads/sign"), sign, chain);
+        assertNotNull(chain.getRequest(), "31 hits/min must stay under the 240 upload default");
+        assertEquals(200, sign.getStatus());
+
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(241L);
+        MockHttpServletResponse over = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/uploads/sign-batch"), over, new MockFilterChain());
+        assertEquals(429, over.getStatus());
+
+        MockHttpServletResponse adminStillTight = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/products"), adminStillTight, new MockFilterChain());
+        assertEquals(429, adminStillTight.getStatus(), "ADMIN stays at 30/min");
+    }
+
+    @Test
+    void uploadLimitFailsClosedWhenRedisIsDown() throws Exception {
+        when(redis.execute(any(RedisScript.class), anyList(), any()))
+                .thenThrow(new RuntimeException("Redis unavailable"));
+        RateLimitFilter tight = new RateLimitFilter(
+                redis,
+                new ClientIpResolver(false, ClientIpResolver.DEFAULT_TRUSTED_CIDRS),
+                20, 20, 60, 30, 60, 300, 2);
+
+        tight.doFilter(request("POST", "/api/uploads/sign"),
+                new MockHttpServletResponse(), new MockFilterChain());
+        tight.doFilter(request("POST", "/api/uploads/sign"),
+                new MockHttpServletResponse(), new MockFilterChain());
+        MockHttpServletResponse third = new MockHttpServletResponse();
+        tight.doFilter(request("POST", "/api/uploads/sign"), third, new MockFilterChain());
+        assertEquals(429, third.getStatus(),
+                "a Redis outage must not open the upload bucket");
     }
 
     @Test

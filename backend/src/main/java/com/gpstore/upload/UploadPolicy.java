@@ -15,6 +15,8 @@ public final class UploadPolicy {
 
     public static final int DEFAULT_MAX_BYTES = 4 * 1024 * 1024;
     public static final int SIGN_TTL_SECONDS = 300;
+    /** One HTTP request may sign or confirm at most this many objects. */
+    public static final int BATCH_MAX = 20;
 
     public static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
             "image/jpeg",
