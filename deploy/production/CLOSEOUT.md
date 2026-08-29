@@ -139,7 +139,19 @@ After SSH works, confirm a green **Off-box backup** run and a green
 **Backup alert** run. Do not treat a skipped/failed deploy-triggered
 off-box job as proof.
 
-## 6. What this agent will not do
+## 6. Play Store legal URLs (live check 2026-08-29)
+
+| URL | HTTP |
+|---|---|
+| `https://dguptaup0001000-oss.github.io/gp-store/account-deletion.html` | 200 |
+| `https://dguptaup0001000-oss.github.io/gp-store/privacy-policy.html` | **404** |
+
+The HTML is in `frontend/web/privacy-policy.html`. The **Deploy GitHub Pages**
+workflow has not published a build that includes it. Run that workflow on
+`main` after merge (or copy the file onto the existing Pages site). Do not
+paste a 404 URL into Play Console.
+
+## 7. What this agent will not do
 
 - Rotate or replace `PROD_SSH_PRIVATE_KEY`
 - Ask you to paste a private key or R2 secret
