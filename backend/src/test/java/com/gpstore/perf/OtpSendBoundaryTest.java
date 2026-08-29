@@ -37,6 +37,7 @@ import static org.mockito.Mockito.verify;
  * the network call moved out.
  */
 @SpringBootTest(properties = {
+        "otp.channel=SMS",
         "otp.sms-sending-enabled=false",
         "msg91.enabled=false",
         "otp.resend-cooldown-seconds=0",

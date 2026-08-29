@@ -1,7 +1,9 @@
 package com.gpstore.service;
 
+import com.gpstore.auth.EmailIdentities;
 import com.gpstore.auth.IndianPhoneNumbers;
 import com.gpstore.auth.OtpPurpose;
+import com.gpstore.otp.OtpChannel;
 import com.gpstore.auth.PasswordPolicy;
 import com.gpstore.dto.AuthRequest;
 import com.gpstore.dto.AuthResponse;
@@ -55,6 +57,7 @@ public class AuthService {
     private final TransactionTemplate transactionTemplate;
     private final SecureRandom secureRandom = new SecureRandom();
     private final int passwordResetTokenMinutes;
+    private final OtpChannel otpChannel;
 
     public AuthService(CustomerRepository customerRepository,
                         JwtService jwtService,
@@ -64,7 +67,8 @@ public class AuthService {
                         PasswordResetTokenRepository passwordResetTokenRepository,
                         ObjectProvider<Clock> clocks,
                         PlatformTransactionManager transactionManager,
-                        @Value("${otp.password-reset-token-minutes:10}") int passwordResetTokenMinutes) {
+                        @Value("${otp.password-reset-token-minutes:10}") int passwordResetTokenMinutes,
+                        @Value("${otp.channel:EMAIL}") String otpChannel) {
         this.customerRepository = customerRepository;
         this.jwtService = jwtService;
         this.passwordEncoder = passwordEncoder;
@@ -74,6 +78,7 @@ public class AuthService {
         this.clock = clocks.getIfAvailable(Clock::systemDefaultZone);
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.passwordResetTokenMinutes = Math.max(1, passwordResetTokenMinutes);
+        this.otpChannel = OtpChannel.from(otpChannel);
     }
 
     @Transactional
@@ -143,21 +148,11 @@ public class AuthService {
      * only ever be accessed via OTP unless the customer later sets one
      * through a profile/security settings flow.
      */
-    public AuthResponse verifyOtpAndAuthenticate(String mobileNumber, String otpCode) {
-        String local10 = IndianPhoneNumbers.toLocal10(mobileNumber);
-        otpService.verifyOtp(mobileNumber, otpCode, OtpPurpose.LOGIN);
+    public AuthResponse verifyOtpAndAuthenticate(String identity, String otpCode) {
+        otpService.verifyOtp(identity, otpCode, OtpPurpose.LOGIN);
 
         return transactionTemplate.execute(status -> {
-            Customer customer = findByPhone(local10)
-                    .orElseGet(() -> {
-                        Customer newCustomer = new Customer();
-                        newCustomer.setMobileNumber(local10);
-                        newCustomer.setRole(Role.CUSTOMER);
-                        newCustomer.setEnabled(true);
-                        newCustomer.setVerified(true);
-                        newCustomer.setActive(true);
-                        return customerRepository.save(newCustomer);
-                    });
+            Customer customer = findOrCreateAfterLoginOtp(identity);
 
             if (!com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer)) {
                 throw new AuthException("This account is no longer active");
@@ -167,24 +162,19 @@ public class AuthService {
         });
     }
 
-    public String requestPasswordResetOtp(String phone) {
-        String local10 = IndianPhoneNumbers.toLocal10(phone);
-        // Deactivated/disabled accounts are treated like unknown numbers:
-        // no SMS, same generic message. Sending a reset code to a banned
-        // phone is wasted cost and a path back into the account.
-        boolean deliver = findByPhone(local10)
-                .filter(com.gpstore.security.CustomerAccountStatusService::isCustomerUsable)
-                .isPresent();
-        otpService.requestOtp(phone, OtpPurpose.PASSWORD_RESET, deliver);
+    public String requestPasswordResetOtp(String identity) {
+        // Deactivated/disabled accounts are treated like unknown identities:
+        // no delivery, same generic message.
+        boolean deliver = findUsableForReset(identity).isPresent();
+        otpService.requestOtp(identity, OtpPurpose.PASSWORD_RESET, deliver);
         return GENERIC_OTP_REQUEST;
     }
 
-    public PasswordResetTokenResponse verifyPasswordResetOtp(String phone, String otp) {
-        otpService.verifyOtp(phone, otp, OtpPurpose.PASSWORD_RESET);
-        String local10 = IndianPhoneNumbers.toLocal10(phone);
+    public PasswordResetTokenResponse verifyPasswordResetOtp(String identity, String otp) {
+        otpService.verifyOtp(identity, otp, OtpPurpose.PASSWORD_RESET);
 
         return transactionTemplate.execute(status -> {
-            Customer customer = findByPhone(local10)
+            Customer customer = findUsableForReset(identity)
                     .orElseThrow(() -> new BadRequestException(OtpService.INVALID_OTP_MESSAGE));
             if (!com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer)) {
                 throw new BadRequestException(OtpService.INVALID_OTP_MESSAGE);
@@ -226,11 +216,9 @@ public class AuthService {
         passwordResetTokenRepository.save(token);
         passwordResetTokenRepository.consumeAllOpenForCustomer(customer.getId(), LocalDateTime.now(clock));
 
-        if (customer.getMobileNumber() != null) {
-            otpService.consumeOpenChallenges(customer.getMobileNumber(), OtpPurpose.PASSWORD_RESET);
-        }
+        consumeResetChallenges(customer);
         refreshTokenService.revokeAllForCustomer(customer.getId());
-        log.info("PASSWORD_RESET_SUCCESS phone={}", IndianPhoneNumbers.mask(customer.getMobileNumber()));
+        log.info("PASSWORD_RESET_SUCCESS dest={}", maskCustomer(customer));
     }
 
     /**
@@ -269,15 +257,15 @@ public class AuthService {
      * Does not reveal whether the account exists — invalid OTP is the only
      * public failure.
      */
-    public void resetPasswordWithOtp(String mobileNumber, String otpCode, String newPassword) {
+    public void resetPasswordWithOtp(String identity, String otpCode, String newPassword) {
         try {
-            otpService.verifyOtp(mobileNumber, otpCode, OtpPurpose.PASSWORD_RESET);
+            otpService.verifyOtp(identity, otpCode, OtpPurpose.PASSWORD_RESET);
         } catch (BadRequestException ex) {
             throw new BadRequestException(OtpService.INVALID_OTP_MESSAGE);
         }
 
         transactionTemplate.executeWithoutResult(status -> {
-            Optional<Customer> customer = findByPhone(mobileNumber);
+            Optional<Customer> customer = findUsableForReset(identity);
             if (customer.isEmpty()
                     || !com.gpstore.security.CustomerAccountStatusService.isCustomerUsable(customer.get())) {
                 throw new BadRequestException(OtpService.INVALID_OTP_MESSAGE);
@@ -286,7 +274,7 @@ public class AuthService {
             customer.get().setPassword(passwordEncoder.encode(newPassword));
             customerRepository.save(customer.get());
             refreshTokenService.revokeAllForCustomer(customer.get().getId());
-            log.info("PASSWORD_RESET_SUCCESS phone={}", IndianPhoneNumbers.mask(mobileNumber));
+            log.info("PASSWORD_RESET_SUCCESS dest={}", maskCustomer(customer.get()));
         });
     }
 
@@ -316,6 +304,59 @@ public class AuthService {
         String local10 = IndianPhoneNumbers.toLocal10(rawPhone);
         return customerRepository.findByMobileNumber(local10)
                 .or(() -> customerRepository.findByMobileNumber(IndianPhoneNumbers.normalizeTo91(rawPhone)));
+    }
+
+    private Customer findOrCreateAfterLoginOtp(String identity) {
+        if (otpChannel == OtpChannel.EMAIL) {
+            String email = EmailIdentities.normalize(identity);
+            return customerRepository.findByEmailIgnoreCase(email)
+                    .orElseGet(() -> {
+                        Customer newCustomer = new Customer();
+                        newCustomer.setEmail(email);
+                        newCustomer.setRole(Role.CUSTOMER);
+                        newCustomer.setEnabled(true);
+                        newCustomer.setVerified(true);
+                        newCustomer.setActive(true);
+                        return customerRepository.save(newCustomer);
+                    });
+        }
+        String local10 = IndianPhoneNumbers.toLocal10(identity);
+        return findByPhone(local10)
+                .orElseGet(() -> {
+                    Customer newCustomer = new Customer();
+                    newCustomer.setMobileNumber(local10);
+                    newCustomer.setRole(Role.CUSTOMER);
+                    newCustomer.setEnabled(true);
+                    newCustomer.setVerified(true);
+                    newCustomer.setActive(true);
+                    return customerRepository.save(newCustomer);
+                });
+    }
+
+    private Optional<Customer> findUsableForReset(String identity) {
+        Optional<Customer> found;
+        if (otpChannel == OtpChannel.EMAIL) {
+            found = customerRepository.findByEmailIgnoreCase(EmailIdentities.normalize(identity));
+        } else {
+            found = findByPhone(identity);
+        }
+        return found.filter(com.gpstore.security.CustomerAccountStatusService::isCustomerUsable);
+    }
+
+    private void consumeResetChallenges(Customer customer) {
+        if (otpChannel == OtpChannel.EMAIL && customer.getEmail() != null && !customer.getEmail().isBlank()) {
+            otpService.consumeOpenChallenges(customer.getEmail(), OtpPurpose.PASSWORD_RESET);
+        } else if (otpChannel == OtpChannel.SMS && customer.getMobileNumber() != null
+                && !customer.getMobileNumber().isBlank()) {
+            otpService.consumeOpenChallenges(customer.getMobileNumber(), OtpPurpose.PASSWORD_RESET);
+        }
+    }
+
+    private String maskCustomer(Customer customer) {
+        if (otpChannel == OtpChannel.EMAIL) {
+            return EmailIdentities.mask(customer.getEmail());
+        }
+        return IndianPhoneNumbers.mask(customer.getMobileNumber());
     }
 
     private AuthResponse issueTokens(Customer customer) {

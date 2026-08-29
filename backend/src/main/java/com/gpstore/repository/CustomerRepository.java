@@ -40,6 +40,8 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
 
     Optional<Customer> findByEmail(String email);
 
+    Optional<Customer> findByEmailIgnoreCase(String email);
+
     Optional<Customer> findByMobileNumber(String mobileNumber);
 
     // Backs the "new order" push-to-admin alert (see NotificationService) -

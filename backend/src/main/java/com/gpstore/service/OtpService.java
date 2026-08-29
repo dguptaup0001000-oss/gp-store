@@ -1,11 +1,12 @@
 package com.gpstore.service;
 
+import com.gpstore.auth.EmailIdentities;
 import com.gpstore.auth.IndianPhoneNumbers;
 import com.gpstore.auth.OtpPurpose;
+import com.gpstore.otp.OtpChannel;
 import com.gpstore.entity.OtpVerification;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.TooManyRequestsException;
-import com.gpstore.otp.MockOtpProvider;
 import com.gpstore.otp.OtpProvider;
 import com.gpstore.otp.OtpProviderException;
 import com.gpstore.repository.OtpVerificationRepository;
@@ -38,7 +39,7 @@ public class OtpService {
     private static final int OTP_CLEANUP_MAX_BATCHES = 40;
 
     public static final String INVALID_OTP_MESSAGE = "Invalid or expired OTP";
-    public static final String GENERIC_REQUEST_MESSAGE = "If this number is eligible, an OTP has been sent.";
+    public static final String GENERIC_REQUEST_MESSAGE = "If this account is eligible, an OTP has been sent.";
     public static final String GENERIC_SEND_FAILURE = "Unable to send OTP right now. Please try again.";
     public static final String TOO_MANY_SENDS_MESSAGE = "Too many OTP requests. Please try again later.";
 
@@ -53,6 +54,7 @@ public class OtpService {
     private final int maxSendsPerWindow;
     private final int sendWindowMinutes;
     private final int resendCooldownSeconds;
+    private final OtpChannel channel;
 
     public OtpService(
             OtpVerificationRepository repository,
@@ -63,7 +65,8 @@ public class OtpService {
             @Value("${otp.max-verify-attempts}") int maxVerifyAttempts,
             @Value("${otp.max-sends-per-window}") int maxSendsPerWindow,
             @Value("${otp.send-window-minutes}") int sendWindowMinutes,
-            @Value("${otp.resend-cooldown-seconds:45}") int resendCooldownSeconds) {
+            @Value("${otp.resend-cooldown-seconds:45}") int resendCooldownSeconds,
+            @Value("${otp.channel:EMAIL}") String channel) {
         this.repository = repository;
         this.otpProvider = otpProvider;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -74,6 +77,7 @@ public class OtpService {
         this.maxSendsPerWindow = maxSendsPerWindow;
         this.sendWindowMinutes = sendWindowMinutes;
         this.resendCooldownSeconds = Math.max(0, resendCooldownSeconds);
+        this.channel = OtpChannel.from(channel);
     }
 
     /**
@@ -107,21 +111,21 @@ public class OtpService {
      * phone is registered. {@code deliverSms=false} still records the rate-limit
      * row so unknown password-reset numbers cannot be enumerated by quota.
      */
-    public String requestOtp(String rawPhone, OtpPurpose purpose, boolean deliverSms) {
-        String local10 = IndianPhoneNumbers.toLocal10(rawPhone);
-        String mobileE164 = IndianPhoneNumbers.normalizeTo91(rawPhone);
-        log.info("OTP_REQUESTED phone={} purpose={}", IndianPhoneNumbers.mask(local10), purpose);
+    public String requestOtp(String rawIdentity, OtpPurpose purpose, boolean deliverSms) {
+        String destination = normalizeIdentity(rawIdentity);
+        String providerDest = providerDestination(destination);
+        log.info("OTP_REQUESTED dest={} purpose={}", maskIdentity(destination), purpose);
 
-        if (isWithinResendCooldown(local10, purpose)) {
-            log.info("OTP_RATE_LIMITED phone={} reason=cooldown", IndianPhoneNumbers.mask(local10));
+        if (isWithinResendCooldown(destination, purpose)) {
+            log.info("OTP_RATE_LIMITED dest={} reason=cooldown", maskIdentity(destination));
             return GENERIC_REQUEST_MESSAGE;
         }
 
         PreparedChallenge prepared;
         try {
-            prepared = transactionTemplate.execute(status -> recordChallenge(local10, purpose, deliverSms));
+            prepared = transactionTemplate.execute(status -> recordChallenge(destination, purpose, deliverSms));
         } catch (TooManyRequestsException ex) {
-            log.info("OTP_RATE_LIMITED phone={} reason=window", IndianPhoneNumbers.mask(local10));
+            log.info("OTP_RATE_LIMITED dest={} reason=window", maskIdentity(destination));
             throw ex;
         }
 
@@ -131,7 +135,7 @@ public class OtpService {
 
         try {
             OtpProvider.SendResult result = otpProvider.send(
-                    mobileE164, purpose, Duration.ofMinutes(expiryMinutes), prepared.plaintextOtp());
+                    providerDest, purpose, Duration.ofMinutes(expiryMinutes), prepared.plaintextOtp());
             transactionTemplate.executeWithoutResult(status -> {
                 repository.findById(prepared.id()).ifPresent(row -> {
                     row.setProviderReference(result.providerReference());
@@ -140,12 +144,33 @@ public class OtpService {
                 });
             });
         } catch (OtpProviderException ex) {
-            log.info("OTP_SEND_FAILURE phone={} purpose={}", IndianPhoneNumbers.mask(local10), purpose);
+            log.info("OTP_SEND_FAILURE dest={} purpose={}", maskIdentity(destination), purpose);
             transactionTemplate.executeWithoutResult(status -> repository.deleteById(prepared.id()));
             throw new BadRequestException(GENERIC_SEND_FAILURE);
         }
 
         return GENERIC_REQUEST_MESSAGE;
+    }
+
+    public String normalizeIdentity(String rawIdentity) {
+        if (channel == OtpChannel.EMAIL) {
+            return EmailIdentities.normalize(rawIdentity);
+        }
+        return IndianPhoneNumbers.toLocal10(rawIdentity);
+    }
+
+    private String providerDestination(String destination) {
+        if (channel == OtpChannel.EMAIL) {
+            return destination;
+        }
+        return IndianPhoneNumbers.normalizeTo91(destination);
+    }
+
+    private String maskIdentity(String destination) {
+        if (channel == OtpChannel.EMAIL) {
+            return EmailIdentities.mask(destination);
+        }
+        return IndianPhoneNumbers.mask(destination);
     }
 
     private boolean isWithinResendCooldown(String local10, OtpPurpose purpose) {
@@ -178,7 +203,7 @@ public class OtpService {
         String hash;
         if (!deliverSms) {
             hash = "UNDELIVERED";
-        } else if (otpProvider instanceof MockOtpProvider) {
+        } else if (otpProvider.issuesLocalCode()) {
             plaintext = generateSixDigitCode();
             hash = hash(plaintext);
         } else {
@@ -221,48 +246,48 @@ public class OtpService {
     }
 
     public void verifyOtp(String mobileNumber, String otpCode, OtpPurpose purpose) {
-        String local10 = IndianPhoneNumbers.toLocal10(mobileNumber);
-        String mobileE164 = IndianPhoneNumbers.normalizeTo91(mobileNumber);
+        String destination = normalizeIdentity(mobileNumber);
+        String providerDest = providerDestination(destination);
 
-        ChallengeSnapshot snapshot = transactionTemplate.execute(status -> loadOpenChallenge(local10, purpose));
+        ChallengeSnapshot snapshot = transactionTemplate.execute(status -> loadOpenChallenge(destination, purpose));
         if (snapshot == null) {
-            log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=no_challenge",
-                    IndianPhoneNumbers.mask(local10), purpose);
+            log.info("OTP_VERIFY_FAILURE dest={} purpose={} reason=no_challenge",
+                    maskIdentity(destination), purpose);
             throw new BadRequestException(INVALID_OTP_MESSAGE);
         }
         if (snapshot.expired()) {
-            log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=expired",
-                    IndianPhoneNumbers.mask(local10), purpose);
+            log.info("OTP_VERIFY_FAILURE dest={} purpose={} reason=expired",
+                    maskIdentity(destination), purpose);
             throw new BadRequestException(INVALID_OTP_MESSAGE);
         }
         if (snapshot.maxAttempts()) {
-            log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=max_attempts",
-                    IndianPhoneNumbers.mask(local10), purpose);
+            log.info("OTP_VERIFY_FAILURE dest={} purpose={} reason=max_attempts",
+                    maskIdentity(destination), purpose);
             throw new BadRequestException("Too many incorrect attempts - please request a new OTP");
         }
 
         boolean matches;
         try {
             if (OtpVerification.PROVIDER_MANAGED_HASH.equals(snapshot.otpHash())) {
-                matches = otpProvider.verify(mobileE164, otpCode, purpose);
+                matches = otpProvider.verify(providerDest, otpCode, purpose);
             } else if ("UNDELIVERED".equals(snapshot.otpHash())) {
                 matches = false;
             } else {
                 matches = snapshot.otpHash().equals(hash(otpCode));
             }
         } catch (OtpProviderException ex) {
-            log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=provider",
-                    IndianPhoneNumbers.mask(local10), purpose);
+            log.info("OTP_VERIFY_FAILURE dest={} purpose={} reason=provider",
+                    maskIdentity(destination), purpose);
             throw new BadRequestException(GENERIC_SEND_FAILURE);
         }
 
         Boolean accepted = transactionTemplate.execute(status -> applyVerifyResult(snapshot.id(), matches));
         if (!Boolean.TRUE.equals(accepted)) {
-            log.info("OTP_VERIFY_FAILURE phone={} purpose={} reason=mismatch",
-                    IndianPhoneNumbers.mask(local10), purpose);
+            log.info("OTP_VERIFY_FAILURE dest={} purpose={} reason=mismatch",
+                    maskIdentity(destination), purpose);
             throw new BadRequestException(INVALID_OTP_MESSAGE);
         }
-        log.info("OTP_VERIFY_SUCCESS phone={} purpose={}", IndianPhoneNumbers.mask(local10), purpose);
+        log.info("OTP_VERIFY_SUCCESS dest={} purpose={}", maskIdentity(destination), purpose);
     }
 
     private ChallengeSnapshot loadOpenChallenge(String local10, OtpPurpose purpose) {
@@ -300,9 +325,9 @@ public class OtpService {
     }
 
     @Transactional
-    public void consumeOpenChallenges(String rawPhone, OtpPurpose purpose) {
-        String local10 = IndianPhoneNumbers.toLocal10(rawPhone);
-        repository.consumeOpenChallenges(local10, purpose.name(), now());
+    public void consumeOpenChallenges(String rawIdentity, OtpPurpose purpose) {
+        String destination = normalizeIdentity(rawIdentity);
+        repository.consumeOpenChallenges(destination, purpose.name(), now());
     }
 
     private String generateSixDigitCode() {

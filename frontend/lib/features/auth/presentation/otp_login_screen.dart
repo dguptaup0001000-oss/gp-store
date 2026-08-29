@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
-import '../domain/indian_phone.dart';
+import '../domain/shop_email.dart';
 import 'otp_providers.dart';
 
 class OtpLoginScreen extends ConsumerStatefulWidget {
@@ -80,8 +80,8 @@ class _OtpLoginScreenState extends ConsumerState<OtpLoginScreen> {
     final isVerifying = otpState.step == OtpFlowStep.verifying;
     final showOtpEntry = otpState.step == OtpFlowStep.otpSent || isVerifying;
     final masked = otpState.mobileNumber == null
-        ? '******'
-        : IndianPhone.mask(otpState.mobileNumber!);
+        ? '****'
+        : ShopEmail.mask(otpState.mobileNumber!);
 
     return Scaffold(
       appBar: AppBar(
@@ -110,7 +110,7 @@ class _OtpLoginScreenState extends ConsumerState<OtpLoginScreen> {
                 const SizedBox(height: 28),
                 if (isPhoneStep || isSendingOtp) ...[
                   Text(
-                    'Log in with mobile number',
+                    'Log in with email',
                     style: Theme.of(context).textTheme.headlineSmall,
                     textAlign: TextAlign.center,
                   ),
@@ -124,27 +124,23 @@ class _OtpLoginScreenState extends ConsumerState<OtpLoginScreen> {
                   Form(
                     key: _phoneFormKey,
                     child: Semantics(
-                      label: 'Indian mobile number',
+                      label: 'Email address',
                       textField: true,
                       child: TextFormField(
                         controller: _phoneController,
                         autofocus: true,
                         enabled: !isSendingOtp,
-                        keyboardType: TextInputType.phone,
+                        keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.done,
-                        autofillHints: const [AutofillHints.telephoneNumber],
-                        maxLength: 10,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        autofillHints: const [AutofillHints.email],
                         decoration: const InputDecoration(
-                          labelText: 'Mobile number',
-                          prefixText: '+91 ',
-                          counterText: '',
+                          labelText: 'Email',
                         ),
                         onFieldSubmitted: (_) => _sendOtp(),
                         validator: (value) {
-                          if (value == null || value.isEmpty) return 'Mobile number is required';
-                          if (!IndianPhone.isValid(value)) {
-                            return 'Please enter a valid Indian mobile number.';
+                          if (value == null || value.isEmpty) return 'Email is required';
+                          if (!ShopEmail.isValid(value)) {
+                            return 'Please enter a valid email address.';
                           }
                           return null;
                         },
@@ -236,7 +232,7 @@ class _OtpLoginScreenState extends ConsumerState<OtpLoginScreen> {
                             _otpController.clear();
                             ref.read(otpFlowControllerProvider.notifier).resetToPhoneEntry();
                           }),
-                    child: const Text('Use a different number'),
+                    child: const Text('Use a different email'),
                   ),
                 ],
               ],

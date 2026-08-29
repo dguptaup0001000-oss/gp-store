@@ -110,17 +110,17 @@ class AuthRepository {
 
   /// Sends a login OTP. Uses the purpose-separated Part 1 endpoint so a
   /// LOGIN code cannot later be used to reset a password.
-  Future<void> requestLoginOtp({required String phone}) async {
+  Future<void> requestLoginOtp({required String email}) async {
     await apiClient.dio
-        .post('/api/auth/otp/login/request', data: {'phone': phone});
+        .post('/api/auth/otp/login/request', data: {'email': email});
   }
 
   /// Verifies a LOGIN OTP and stores the existing JWT pair.
   Future<AuthResponse> verifyLoginOtp(
-      {required String phone, required String otp}) async {
+      {required String email, required String otp}) async {
     final response = await apiClient.dio.post(
       '/api/auth/otp/login/verify',
-      data: {'phone': phone, 'otp': otp},
+      data: {'email': email, 'otp': otp},
     );
 
     final auth = AuthResponse.fromJson(response.data as Map<String, dynamic>);
@@ -129,18 +129,18 @@ class AuthRepository {
     return auth;
   }
 
-  Future<void> requestPasswordResetOtp({required String phone}) async {
+  Future<void> requestPasswordResetOtp({required String email}) async {
     await apiClient.dio
-        .post('/api/auth/password-reset/request', data: {'phone': phone});
+        .post('/api/auth/password-reset/request', data: {'email': email});
   }
 
   /// Returns a short-lived reset token. This is not a session JWT and must
   /// not be written to secure storage or logs.
   Future<String> verifyPasswordResetOtp(
-      {required String phone, required String otp}) async {
+      {required String email, required String otp}) async {
     final response = await apiClient.dio.post(
       '/api/auth/password-reset/verify',
-      data: {'phone': phone, 'otp': otp},
+      data: {'email': email, 'otp': otp},
     );
     final body = response.data as Map<String, dynamic>;
     final token =

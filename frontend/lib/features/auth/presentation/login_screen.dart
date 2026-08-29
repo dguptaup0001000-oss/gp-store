@@ -246,8 +246,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
                             OutlinedButton.icon(
                               onPressed: hapticize(() => context.push('/login/otp')),
-                              icon: const Icon(Icons.phone_android_outlined, size: 18),
-                              label: const Text('Login with Mobile OTP'),
+                              icon: const Icon(Icons.email_outlined, size: 18),
+                              label: const Text('Login with email OTP'),
                               style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
                             ),
                           ],

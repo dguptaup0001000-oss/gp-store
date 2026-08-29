@@ -45,36 +45,36 @@ public class AuthController {
     // customers (the actual account is only created/found on verify).
     @PostMapping("/otp/send")
     public Map<String, String> sendOtp(@Valid @RequestBody SendOtpRequest request) {
-        authService.sendLoginOtp(request.getMobileNumber());
+        authService.sendLoginOtp(request.identity());
         return Map.of("message", "OTP sent");
     }
 
     // Verifies the OTP and logs in - auto-creating a bare account if this
-    // phone number has never been seen before (same pattern as
+    // identity has never been seen before (same pattern as
     // Swiggy/Zomato's OTP-only signup).
     @PostMapping("/otp/verify")
     public AuthResponse verifyOtp(@Valid @RequestBody VerifyOtpRequest request) {
-        return authService.verifyOtpAndAuthenticate(request.getMobileNumber(), request.getOtp());
+        return authService.verifyOtpAndAuthenticate(request.identity(), request.getOtp());
     }
 
     @PostMapping("/otp/login/request")
     public Map<String, String> requestLoginOtp(@Valid @RequestBody PhoneOtpRequest request) {
-        return Map.of("message", authService.requestLoginOtp(request.getPhone()));
+        return Map.of("message", authService.requestLoginOtp(request.identity()));
     }
 
     @PostMapping("/otp/login/verify")
     public AuthResponse verifyLoginOtp(@Valid @RequestBody PhoneOtpVerifyRequest request) {
-        return authService.verifyOtpAndAuthenticate(request.getPhone(), request.getOtp());
+        return authService.verifyOtpAndAuthenticate(request.identity(), request.getOtp());
     }
 
     @PostMapping("/password-reset/request")
     public Map<String, String> requestPasswordReset(@Valid @RequestBody PhoneOtpRequest request) {
-        return Map.of("message", authService.requestPasswordResetOtp(request.getPhone()));
+        return Map.of("message", authService.requestPasswordResetOtp(request.identity()));
     }
 
     @PostMapping("/password-reset/verify")
     public PasswordResetTokenResponse verifyPasswordReset(@Valid @RequestBody PhoneOtpVerifyRequest request) {
-        return authService.verifyPasswordResetOtp(request.getPhone(), request.getOtp());
+        return authService.verifyPasswordResetOtp(request.identity(), request.getOtp());
     }
 
     @PostMapping("/password-reset/complete")
@@ -107,7 +107,7 @@ public class AuthController {
     // available verification mechanism, not a fallback choice.
     @PostMapping("/reset-password-with-otp")
     public Map<String, String> resetPasswordWithOtp(@Valid @RequestBody ResetPasswordWithOtpRequest request) {
-        authService.resetPasswordWithOtp(request.getMobileNumber(), request.getOtp(), request.getNewPassword());
+        authService.resetPasswordWithOtp(request.identity(), request.getOtp(), request.getNewPassword());
         return Map.of("message", "Password reset - you can now log in with your new password");
     }
 

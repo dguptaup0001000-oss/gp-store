@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../domain/indian_phone.dart';
 import '../domain/otp_user_messages.dart';
+import '../domain/shop_email.dart';
 import 'auth_providers.dart';
 
 enum OtpFlowStep { enteringPhone, sendingOtp, otpSent, verifying }
@@ -54,21 +54,21 @@ class OtpFlowController extends StateNotifier<OtpFlowState> {
   static const resendCooldown = Duration(seconds: 45);
   static const otpLifetime = Duration(minutes: 5);
 
-  Future<bool> sendOtp(String mobileNumber) async {
-    final local = IndianPhone.toLocal10(mobileNumber);
-    if (local == null) {
-      state = state.copyWith(errorMessage: OtpUserMessages.invalidPhone);
+  Future<bool> sendOtp(String rawEmail) async {
+    final email = ShopEmail.normalize(rawEmail);
+    if (email == null) {
+      state = state.copyWith(errorMessage: OtpUserMessages.invalidEmail);
       return false;
     }
 
     state = state.copyWith(
       step: OtpFlowStep.sendingOtp,
-      mobileNumber: local,
+      mobileNumber: email,
       errorMessage: null,
     );
 
     try {
-      await _ref.read(authRepositoryProvider).requestLoginOtp(phone: local);
+      await _ref.read(authRepositoryProvider).requestLoginOtp(email: email);
       _sentAt = DateTime.now();
       state = state.copyWith(
         step: OtpFlowStep.otpSent,
@@ -99,7 +99,7 @@ class OtpFlowController extends StateNotifier<OtpFlowState> {
 
     try {
       final auth = await _ref.read(authRepositoryProvider).verifyLoginOtp(
-            phone: state.mobileNumber!,
+            email: state.mobileNumber!,
             otp: otp,
           );
 
