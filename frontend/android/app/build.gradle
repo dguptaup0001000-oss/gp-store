@@ -160,6 +160,18 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+
+            // Customer/admin applicationIds are not yet registered in the
+            // Firebase project that GOOGLE_SERVICES_JSON_BASE64 describes
+            // (it still lists com.gpstore.app). Crashlytics mapping upload
+            // then returns HTTP 400 and fails assembleRelease. Set
+            // CRASHLYTICS_MAPPING_UPLOAD=1 after both flavor clients exist
+            // in that JSON. Worker slim builds do not apply this plugin.
+            if (!workerApk) {
+                firebaseCrashlytics {
+                    mappingFileUploadEnabled (System.getenv("CRASHLYTICS_MAPPING_UPLOAD") ?: "0") == "1"
+                }
+            }
         }
     }
 

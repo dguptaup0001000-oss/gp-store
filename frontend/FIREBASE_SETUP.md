@@ -29,7 +29,8 @@ backend and the try/catch around `Firebase.initializeApp()` in
    app in the project). Until that secret is updated, CI clones the existing
    `com.gpstore.app` client so Gradle can match the new applicationIds;
    push/Crashlytics for those IDs are not fully registered until you add
-   the apps in Firebase.
+   the apps in Firebase. Release builds skip Crashlytics mapping upload
+   unless `CRASHLYTICS_MAPPING_UPLOAD=1` (a cloned app id returns HTTP 400).
 3. Download the `google-services.json` file it offers you.
 4. Put that file at `android/app/google-services.json` in this project
    (same folder as `android/app/build.gradle`). This file is
