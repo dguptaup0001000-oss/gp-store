@@ -118,15 +118,17 @@ genuinely cannot generate myself, both quick to resolve:
    at your installed Flutter SDK, the first time you run `flutter run` or
    `flutter build apk` in this project. You don't need to create it by hand.
 
-**Build the APK:**
+**Build the APKs** (separate customer and admin applications — never one combined APK):
 ```
-flutter build apk --release
+flutter build apk --release --flavor customer -t lib/customer_main.dart --dart-define=GPSTORE_APP=customer
+flutter build apk --release --flavor admin -t lib/admin_main.dart --dart-define=GPSTORE_APP=admin
 ```
-Output lands at `build/app/outputs/flutter-apk/app-release.apk`. Note the
-`android/app/build.gradle` signing config currently falls back to debug
-signing so this command succeeds out of the box for testing - replace it
-with a real release keystore before publishing to the Play Store, or Google
-will reject the upload.
+Outputs land under `build/app/outputs/flutter-apk/` as
+`app-customer-release.apk` and `app-admin-release.apk`. CI renames the
+arm64 artifacts to `gpstore-customer-release.apk` and
+`gpstore-admin-release.apk`. Release signing requires
+`android/key.properties` (or `ALLOW_DEBUG_RELEASE_SIGNING=1` for a
+sideload-only debug-signed APK).
 
 ### Web - fully ready to build, nothing missing
 
@@ -186,7 +188,7 @@ your backend's real URL with `/v1` on the end. Every build after that
 picks it up automatically.
 
 **What you get, both automatically, on every push to `main`:**
-- A downloadable customer+admin APK - open the finished Actions run, look under **Artifacts**, download `gpstore-customer-admin-arm64.apk`, install it on an Android phone (you'll need to allow "install from unknown sources" since it isn't signed for the Play Store yet). GitHub's artifact zip size is not the APK size.
+- Downloadable **separate** APKs - open the finished Actions run, look under **Artifacts**, download `gpstore-customer-release.apk` (shop) and `gpstore-admin-release.apk` (staff). They have different application IDs and can be installed side by side. GitHub's artifact zip size is not the APK size.
 - A live, clickable web version at `https://<your-github-username>.github.io/<repo-name>/` - opens directly in any browser, no download needed.
 
 Every push after the first one rebuilds and redeploys automatically - you

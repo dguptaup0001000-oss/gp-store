@@ -61,6 +61,25 @@ void main() {
     test('a signed-in customer on home stays put', () {
       expect(resolveStartupRedirect(status: AuthStatus.authenticated, location: '/'), isNull);
     });
+
+    test('the admin app does not treat /register as an auth route', () {
+      expect(
+        resolveStartupRedirect(
+          status: AuthStatus.unauthenticated,
+          location: '/register',
+          allowRegister: false,
+        ),
+        '/login',
+      );
+      expect(
+        resolveStartupRedirect(
+          status: AuthStatus.unknown,
+          location: '/register',
+          allowRegister: false,
+        ),
+        '/splash',
+      );
+    });
   });
 
   test('no status/route pair can leave the app on the splash forever', () {

@@ -200,7 +200,7 @@ def dispatch_production_apk() -> None:
     _dispatch_workflow(
         "build-and-deploy.yml",
         "Dispatched Build APK and Deploy Web on main so downloadable "
-        "gpstore-customer-admin-arm64.apk is produced for this release.",
+        "gpstore-customer-release.apk and gpstore-admin-release.apk are produced for this release.",
         "Could not dispatch Build APK and Deploy Web from GITHUB_TOKEN. "
         "Run Actions → Build APK and Deploy Web → Run workflow on main.",
     )

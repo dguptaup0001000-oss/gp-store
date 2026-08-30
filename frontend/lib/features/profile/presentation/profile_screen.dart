@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/app_haptics.dart';
 import '../../address/presentation/address_list_screen.dart';
-import '../../admin/presentation/admin_home_screen.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'change_password_screen.dart';
 import '../../notifications/presentation/notifications_screen.dart';
@@ -91,13 +90,6 @@ class ProfileScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 16),
-            if (profile.role == 'ADMIN')
-              _menuTile(
-                context,
-                icon: Icons.storefront_outlined,
-                label: 'Store Management',
-                onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminHomeScreen()))),
-              ),
             _menuTile(
               context,
               icon: Icons.receipt_long_outlined,

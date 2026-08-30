@@ -69,11 +69,30 @@ android {
         jvmTarget = "11"
     }
 
+    // Three Android applications from one Flutter project. Flavor, not
+    // dart-define, is what sets applicationId. Customer and admin MUST
+    // never share an id or installing one replaces the other.
+    flavorDimensions += "app"
+    productFlavors {
+        customer {
+            dimension "app"
+            applicationId "in.gpstore.customer"
+            resValue "string", "app_name", "GP-STORE"
+        }
+        admin {
+            dimension "app"
+            applicationId "in.gpstore.admin"
+            resValue "string", "app_name", "GP-STORE Admin"
+        }
+        worker {
+            dimension "app"
+            applicationId "com.gpstore.worker"
+            resValue "string", "app_name", "GP-STORE Worker"
+        }
+    }
+
     defaultConfig {
-        // Worker slim builds MUST use a different applicationId. Sharing
-        // com.gpstore.app with the customer app made installing the worker
-        // APK replace the shop app (and collide on token/storage).
-        applicationId workerApk ? "com.gpstore.worker" : "com.gpstore.app"
+        applicationId "in.gpstore.customer"
         // geolocator, flutter_secure_storage, url_launcher, and
         // firebase_messaging all work at Flutter's own recommended minSdk -
         // no need to raise it further for anything this app uses. If a
@@ -88,8 +107,10 @@ android {
 
     sourceSets {
         main {
+            // Complete worker manifest lives outside src/worker/ so the
+            // flavor overlay does not merge a second full <application>.
             if (workerApk) {
-                manifest.srcFile "src/worker/AndroidManifest.xml"
+                manifest.srcFile "src/workerStandalone/AndroidManifest.xml"
             }
         }
     }
@@ -175,7 +196,9 @@ gradle.taskGraph.whenReady { graph ->
 
 tasks.register("printApplicationId") {
     doLast {
-        println(android.defaultConfig.applicationId)
+        android.productFlavors.each { flavor ->
+            println("${flavor.name}=${flavor.applicationId}")
+        }
     }
 }
 

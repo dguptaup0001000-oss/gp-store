@@ -9,7 +9,10 @@ import 'auth_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.allowRegister = true});
+
+  /// Customer APK only. The admin APK must not offer shopper signup.
+  final bool allowRegister;
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -254,6 +257,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ),
 
+                      if (widget.allowRegister) ...[
                       const SizedBox(height: 16),
 
                       Container(
@@ -294,6 +298,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ],
                         ),
                       ),
+                      ],
 
                       const SizedBox(height: 20),
                       Row(

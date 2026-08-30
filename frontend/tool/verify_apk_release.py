@@ -4,8 +4,9 @@
 Prints the signer DN so CI logs distinguish Android Debug from a Play key.
 Does not re-sign. Do not unzip/modify/sign APKs by hand.
 
-Customer APKs must be com.gpstore.app. Worker APKs must be com.gpstore.worker.
-Sharing one applicationId would make installing one replace the other.
+Customer APKs must be in.gpstore.customer. Admin APKs must be in.gpstore.admin.
+Worker APKs must be com.gpstore.worker. Sharing an applicationId would make
+installing one replace another.
 """
 from __future__ import annotations
 
@@ -23,12 +24,20 @@ MIN_ELF_LOAD_ALIGN = 16384
 PT_LOAD = 1
 
 
-CUSTOMER_PACKAGE = "com.gpstore.app"
+CUSTOMER_PACKAGE = "in.gpstore.customer"
+ADMIN_PACKAGE = "in.gpstore.admin"
 WORKER_PACKAGE = "com.gpstore.worker"
 
 CUSTOMER_FORBIDDEN_PERMISSIONS = {
     "android.permission.CAMERA",
     "android.permission.ACCESS_BACKGROUND_LOCATION",
+    "android.permission.BLUETOOTH_CONNECT",
+    "android.permission.BLUETOOTH_SCAN",
+}
+ADMIN_FORBIDDEN_PERMISSIONS = {
+    "android.permission.CAMERA",
+    "android.permission.ACCESS_BACKGROUND_LOCATION",
+    "android.permission.RECORD_AUDIO",
 }
 WORKER_FORBIDDEN_PERMISSIONS = {
     "android.permission.ACCESS_BACKGROUND_LOCATION",
@@ -66,6 +75,10 @@ def permission_violations(package: str, perms: set[str]) -> list[str]:
         extra = sorted(perms & CUSTOMER_FORBIDDEN_PERMISSIONS)
         if extra:
             problems.append(f"customer APK must not declare {extra}")
+    if package == ADMIN_PACKAGE:
+        extra = sorted(perms & ADMIN_FORBIDDEN_PERMISSIONS)
+        if extra:
+            problems.append(f"admin APK must not declare {extra}")
     if package == WORKER_PACKAGE:
         extra = sorted(perms & WORKER_FORBIDDEN_PERMISSIONS)
         if extra:
@@ -193,7 +206,9 @@ def expected_package(apk: str) -> str | None:
     name = os.path.basename(apk).lower()
     if "worker" in name:
         return WORKER_PACKAGE
-    if name.startswith("app-") and name.endswith("-release.apk"):
+    if "admin" in name:
+        return ADMIN_PACKAGE
+    if "customer" in name:
         return CUSTOMER_PACKAGE
     return None
 
@@ -291,16 +306,25 @@ def main() -> None:
             failed = True
 
     worker_pkgs = {pkg for name, pkg in seen.items() if "worker" in name.lower()}
+    admin_pkgs = {pkg for name, pkg in seen.items() if "admin" in name.lower()}
     customer_pkgs = {
-        pkg for name, pkg in seen.items()
-        if name.startswith("app-") and name.endswith("-release.apk")
+        pkg for name, pkg in seen.items() if "customer" in name.lower()
     }
-    if worker_pkgs and customer_pkgs and worker_pkgs & customer_pkgs:
-        print(
-            "SHARED_APPLICATION_ID worker and customer APKs must not use "
-            f"the same package: {sorted(worker_pkgs & customer_pkgs)}"
-        )
-        failed = True
+    groups = (
+        ("worker", worker_pkgs),
+        ("admin", admin_pkgs),
+        ("customer", customer_pkgs),
+    )
+    for i, (left_name, left) in enumerate(groups):
+        for right_name, right in groups[i + 1 :]:
+            overlap = left & right
+            if left and right and overlap:
+                print(
+                    "SHARED_APPLICATION_ID "
+                    f"{left_name} and {right_name} APKs must not use "
+                    f"the same package: {sorted(overlap)}"
+                )
+                failed = True
     sys.exit(1 if failed else 0)
 
 
@@ -309,8 +333,17 @@ if __name__ == "__main__":
         assert permission_violations(
             CUSTOMER_PACKAGE, {"android.permission.CAMERA"}
         ), "customer CAMERA must fail"
+        assert permission_violations(
+            CUSTOMER_PACKAGE, {"android.permission.BLUETOOTH_CONNECT"}
+        ), "customer Bluetooth must fail"
         assert not permission_violations(
             CUSTOMER_PACKAGE, {"android.permission.INTERNET"}
+        )
+        assert permission_violations(
+            ADMIN_PACKAGE, {"android.permission.RECORD_AUDIO"}
+        ), "admin RECORD_AUDIO must fail"
+        assert not permission_violations(
+            ADMIN_PACKAGE, {"android.permission.BLUETOOTH_CONNECT"}
         )
         assert permission_violations(
             WORKER_PACKAGE, {"android.permission.INTERNET"}

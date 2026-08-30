@@ -20,8 +20,13 @@ backend and the try/catch around `Firebase.initializeApp()` in
 ## 2. Register your Android app
 
 1. In the new project, click the Android icon ("Add app").
-2. **Android package name**: `com.gpstore.app` (must match exactly - see
-   `android/app/build.gradle`'s customer `applicationId`).
+2. **Register two Android apps** in the same Firebase project:
+   - Customer package name: `in.gpstore.customer`
+   - Admin package name: `in.gpstore.admin`
+   Both must match `android/app/build.gradle` productFlavors exactly.
+   Download one `google-services.json` that lists **both** clients (Firebase
+   Console → Project settings → Your apps → the JSON includes every Android
+   app in the project).
 3. Download the `google-services.json` file it offers you.
 4. Put that file at `android/app/google-services.json` in this project
    (same folder as `android/app/build.gradle`). This file is
@@ -43,7 +48,7 @@ plugin, so they do not need a second `google-services.json` entry today.
 If you later add Firebase to the worker app, register a second Android
 app in the same Firebase project with package `com.gpstore.worker` and
 include both clients in `google-services.json`. Do not reuse
-`com.gpstore.app` for the worker APK.
+`in.gpstore.customer` or `in.gpstore.admin` for the worker APK.
 
 ## 3. Get a service account key for the backend
 
