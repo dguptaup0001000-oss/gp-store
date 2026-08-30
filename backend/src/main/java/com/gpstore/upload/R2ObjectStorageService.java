@@ -58,11 +58,15 @@ public class R2ObjectStorageService {
     private static final Logger log = LoggerFactory.getLogger(R2ObjectStorageService.class);
     static final String CACHE_CONTROL = "private, max-age=31536000, immutable";
     /**
-     * Java's HttpClient sets these from the URL / body. They still belong in
-     * the advertised map so Flutter (and any other client) sends them.
+     * Set by the HTTP transport from the URL and body. A client cannot
+     * meaningfully set these: Dart's HttpClient uses {@code host} for the
+     * Host header and TLS SNI, and parses {@code content-length} against
+     * the body. They must not be advertised.
      */
-    private static final Set<String> HTTP_CLIENT_MANAGED_HEADERS = Set.of(
-            "host", "content-length", "connection", "expect", "upgrade", "transfer-encoding");
+    static final Set<String> TRANSPORT_MANAGED_HEADERS = Set.of("host", "content-length");
+    /** Extra request-line headers Java's HttpClient also owns. */
+    private static final Set<String> HTTP_CLIENT_OWNED_HEADERS = Set.of(
+            "connection", "expect", "upgrade", "transfer-encoding");
     /** Must outlive CACHE_TTL_MS (default 10 minutes). Signed URLs are cached on catalogue DTOs. */
     static final int GET_TTL_SECONDS = 3600;
 
@@ -240,13 +244,17 @@ public class R2ObjectStorageService {
 
     /**
      * The advertised map is the only list of headers a client must send.
-     * ANY header the presigner signed MUST appear here. Flutter's
-     * {@code _putBytes} sends this map and nothing else.
+     * ANY header the presigner signed MUST appear here unless it is in
+     * {@link #TRANSPORT_MANAGED_HEADERS}. Flutter's {@code _putBytes}
+     * sends this map and nothing else.
      */
     static Map<String, String> advertisedHeaders(PresignedPutObjectRequest presigned) {
         Map<String, String> headers = new LinkedHashMap<>();
         presigned.signedHeaders().forEach((name, values) -> {
             if (values == null || values.isEmpty()) {
+                return;
+            }
+            if (TRANSPORT_MANAGED_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
                 return;
             }
             headers.put(name, values.getFirst());
@@ -502,7 +510,8 @@ public class R2ObjectStorageService {
                     .timeout(Duration.ofSeconds(20))
                     .PUT(HttpRequest.BodyPublishers.ofByteArray(bytes));
             for (Map.Entry<String, String> header : signed.getHeaders().entrySet()) {
-                if (HTTP_CLIENT_MANAGED_HEADERS.contains(header.getKey().toLowerCase(Locale.ROOT))) {
+                String name = header.getKey().toLowerCase(Locale.ROOT);
+                if (TRANSPORT_MANAGED_HEADERS.contains(name) || HTTP_CLIENT_OWNED_HEADERS.contains(name)) {
                     continue;
                 }
                 builder.header(header.getKey(), header.getValue());

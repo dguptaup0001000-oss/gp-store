@@ -35,7 +35,7 @@ class R2PresignedUploadTest {
     }
 
     @Test
-    @DisplayName("every header SigV4 signed is advertised so the client can send it")
+    @DisplayName("every signed header is advertised or transport-managed")
     void advertisedHeadersCoverEverySignedHeader() throws Exception {
         try (PresignedPutStub stub = new PresignedPutStub()) {
             R2ObjectStorageService r2 = service(stub.endpoint());
@@ -51,9 +51,18 @@ class R2PresignedUploadTest {
             Map<String, String> advertised = signed.getHeaders();
             for (String name : signedHeaderList.split(";")) {
                 String header = name.trim();
-                assertTrue(containsHeader(advertised, header),
-                        header + " is signed but missing from advertised headers");
+                boolean transportManaged = R2ObjectStorageService.TRANSPORT_MANAGED_HEADERS
+                        .contains(header.toLowerCase(Locale.ROOT));
+                boolean inAdvertised = containsHeader(advertised, header);
+                assertTrue(inAdvertised || transportManaged,
+                        header + " is signed but neither advertised nor transport-managed");
+                if (transportManaged) {
+                    assertFalse(inAdvertised,
+                            header + " is transport-managed and must not be advertised");
+                }
             }
+            assertTrue(containsHeader(advertised, "content-type"),
+                    "content-type must be advertised");
         }
     }
 
