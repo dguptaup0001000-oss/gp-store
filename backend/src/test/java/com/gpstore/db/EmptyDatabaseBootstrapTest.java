@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=update",
         "spring.flyway.enabled=true",
+        "gpstore.flyway.reset-owned-tables=true",
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",
@@ -68,6 +69,18 @@ class EmptyDatabaseBootstrapTest {
                 "SELECT COUNT(*) FROM coupons WHERE coupon_code = 'FREEDEL10' AND discount_type = 'DELIVERY_FLAT'",
                 Integer.class);
         assertEquals(1, freeDel, "V29 seeds FREEDEL10 as a delivery coupon");
+        assertTrue(tableExists("r2_staging_objects"), "V30 creates r2_staging_objects");
+        Integer objectKeyLen = jdbc.queryForObject(
+                "SELECT character_maximum_length FROM information_schema.columns "
+                        + "WHERE table_schema = current_schema() AND table_name = 'r2_staging_objects' "
+                        + "AND column_name = 'object_key'",
+                Integer.class);
+        assertEquals(512, objectKeyLen, "V30, not Hibernate, must define object_key VARCHAR(512)");
+        Integer stagingIdx = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'idx_r2_staging_objects_created_at'",
+                Integer.class);
+        assertEquals(1, stagingIdx, "V30 creates idx_r2_staging_objects_created_at");
+
         assertTrue(sequenceExists("order_number_seq"), "V6 creates order_number_seq");
 
         Integer trigram = jdbc.queryForObject(

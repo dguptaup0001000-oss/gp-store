@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.flyway.FlywayMigrationStrategy;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 
 /**
  * Runs Flyway AFTER Hibernate has created the schema, not before it.
@@ -32,10 +33,11 @@ import org.springframework.context.annotation.Configuration;
  * environment could not be brought up. Production only works because its
  * tables predate the migrations.
  *
- * NOBODY NOTICED BECAUSE THE DEFAULT CI JOB NEVER RAN THEM. ci.yml's
- * build-and-test job sets FLYWAY_ENABLED=false and builds the schema from
- * DDL_AUTO=update. The sibling schema-migrate job is what actually executes
- * V2 through current against an empty database.
+ * NOBODY NOTICED BECAUSE THE DEFAULT CI JOB USED TO SKIP THEM. ci.yml's
+ * build-and-test job now bootstraps with update+Flyway, then runs verify
+ * under ddl-auto=validate so Hibernate cannot invent columns. The sibling
+ * schema-migrate job still executes V2 through current against a clean
+ * database of its own.
  *
  * WHY NOT JUST FIX THE MIGRATIONS. Guarding each script on table existence
  * would change its checksum, and Flyway validates checksums of already-applied
@@ -162,7 +164,25 @@ public class FlywayAfterSchemaConfig {
     public SmartInitializingSingleton deferredFlywayMigration(
             Flyway flyway,
             ObjectProvider<FlywayMigrationStrategy> migrationStrategy) {
-        return () -> {
+        return new DeferredFlywayMigration(flyway, migrationStrategy);
+    }
+
+    /**
+     * Runs after {@link FlywayOwnedTableReset} (highest precedence) so
+     * Flyway recreates tables Hibernate just inferred.
+     */
+    static final class DeferredFlywayMigration implements SmartInitializingSingleton, Ordered {
+
+        private final Flyway flyway;
+        private final ObjectProvider<FlywayMigrationStrategy> migrationStrategy;
+
+        DeferredFlywayMigration(Flyway flyway, ObjectProvider<FlywayMigrationStrategy> migrationStrategy) {
+            this.flyway = flyway;
+            this.migrationStrategy = migrationStrategy;
+        }
+
+        @Override
+        public void afterSingletonsInstantiated() {
             log.info("Running Flyway now that the schema exists (see FlywayAfterSchemaConfig).");
             FlywayMigrationStrategy strategy = migrationStrategy.getIfAvailable();
             if (strategy != null) {
@@ -170,6 +190,11 @@ public class FlywayAfterSchemaConfig {
             } else {
                 flyway.migrate();
             }
-        };
+        }
+
+        @Override
+        public int getOrder() {
+            return Ordered.LOWEST_PRECEDENCE;
+        }
     }
 }
