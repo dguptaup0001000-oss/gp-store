@@ -7,6 +7,7 @@ import com.gpstore.otp.OtpChannel;
 import com.gpstore.entity.OtpVerification;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.TooManyRequestsException;
+import com.gpstore.otp.OtpCodeHasher;
 import com.gpstore.otp.OtpProvider;
 import com.gpstore.otp.OtpProviderException;
 import com.gpstore.repository.OtpVerificationRepository;
@@ -20,14 +21,10 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.HexFormat;
 import java.util.List;
 
 @Service
@@ -45,6 +42,7 @@ public class OtpService {
 
     private final OtpVerificationRepository repository;
     private final OtpProvider otpProvider;
+    private final OtpCodeHasher codeHasher;
     private final TransactionTemplate transactionTemplate;
     private final SecureRandom secureRandom = new SecureRandom();
     private final Clock clock;
@@ -59,6 +57,7 @@ public class OtpService {
     public OtpService(
             OtpVerificationRepository repository,
             OtpProvider otpProvider,
+            OtpCodeHasher codeHasher,
             PlatformTransactionManager transactionManager,
             ObjectProvider<Clock> clocks,
             @Value("${otp.expiry-minutes}") int expiryMinutes,
@@ -69,6 +68,7 @@ public class OtpService {
             @Value("${otp.channel:EMAIL}") String channel) {
         this.repository = repository;
         this.otpProvider = otpProvider;
+        this.codeHasher = codeHasher;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.clock = clocks.getIfAvailable(Clock::systemDefaultZone);
@@ -205,7 +205,7 @@ public class OtpService {
             hash = "UNDELIVERED";
         } else if (otpProvider.issuesLocalCode()) {
             plaintext = generateSixDigitCode();
-            hash = hash(plaintext);
+            hash = codeHasher.hash(plaintext);
         } else {
             hash = OtpVerification.PROVIDER_MANAGED_HASH;
         }
@@ -273,7 +273,7 @@ public class OtpService {
             } else if ("UNDELIVERED".equals(snapshot.otpHash())) {
                 matches = false;
             } else {
-                matches = snapshot.otpHash().equals(hash(otpCode));
+                matches = codeHasher.matches(otpCode, snapshot.otpHash());
             }
         } catch (OtpProviderException ex) {
             log.info("OTP_VERIFY_FAILURE dest={} purpose={} reason=provider",
@@ -333,16 +333,6 @@ public class OtpService {
     private String generateSixDigitCode() {
         int code = 100000 + secureRandom.nextInt(900000);
         return String.valueOf(code);
-    }
-
-    private String hash(String code) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hashBytes = digest.digest(code.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hashBytes);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
     }
 
     private LocalDateTime now() {
