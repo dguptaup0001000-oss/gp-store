@@ -176,6 +176,13 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
                     _latitude != null ? 'Location captured ✓' : 'Use my current location',
                   ),
                 ),
+                const SizedBox(height: 8),
+                Text(
+                  _latitude == null
+                      ? 'Required. We use your pin to check we deliver to this address. Typing the address is not enough.'
+                      : 'Pin saved. Checkout can calculate delivery from this location.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
                 const SizedBox(height: 16),
                 _field(_fullNameController, 'Full name'),
                 _field(_mobileController, 'Mobile number', keyboardType: TextInputType.phone),

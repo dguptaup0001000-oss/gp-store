@@ -32,20 +32,44 @@ public class ProductionSecretsGuard {
     private final String supportPhone;
     private final String supportWhatsapp;
     private final String supportEmail;
+    private final boolean pushEnabled;
+    private final String otpChannel;
+    private final String smtpHost;
+    private final String otpEmailFrom;
 
+    ProductionSecretsGuard(
+            boolean production,
+            String dbPassword,
+            String redisPassword,
+            String supportPhone,
+            String supportWhatsapp,
+            String supportEmail) {
+        this(production, dbPassword, redisPassword, supportPhone, supportWhatsapp, supportEmail,
+                false, "EMAIL", "", "");
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public ProductionSecretsGuard(
             @Value("${app.production:false}") boolean production,
             @Value("${spring.datasource.password:}") String dbPassword,
             @Value("${spring.data.redis.password:}") String redisPassword,
             @Value("${store.support-phone:}") String supportPhone,
             @Value("${store.support-whatsapp:}") String supportWhatsapp,
-            @Value("${store.support-email:}") String supportEmail) {
+            @Value("${store.support-email:}") String supportEmail,
+            @Value("${firebase.push-enabled:false}") boolean pushEnabled,
+            @Value("${otp.channel:EMAIL}") String otpChannel,
+            @Value("${spring.mail.host:}") String smtpHost,
+            @Value("${otp.email.from:}") String otpEmailFrom) {
         this.production = production;
         this.dbPassword = dbPassword;
         this.redisPassword = redisPassword;
         this.supportPhone = supportPhone;
         this.supportWhatsapp = supportWhatsapp;
         this.supportEmail = supportEmail;
+        this.pushEnabled = pushEnabled;
+        this.otpChannel = otpChannel;
+        this.smtpHost = smtpHost;
+        this.otpEmailFrom = otpEmailFrom;
     }
 
     @PostConstruct
@@ -73,6 +97,16 @@ public class ProductionSecretsGuard {
         rejectIfPlaceholder("STORE_SUPPORT_PHONE", supportPhone);
         rejectIfPlaceholder("STORE_SUPPORT_WHATSAPP", supportWhatsapp);
         rejectIfPlaceholder("STORE_SUPPORT_EMAIL", supportEmail);
+        if (!pushEnabled) {
+            log.error("FIREBASE_PUSH_ENABLED is false. Shop new-order sound is poll-only "
+                    + "while the admin app is open. Background alerts need Firebase on the VPS.");
+        }
+        if (!"SMS".equalsIgnoreCase(otpChannel.trim())
+                && (PlaceholderValues.isBlankOrPlaceholder(smtpHost)
+                        || PlaceholderValues.isBlankOrPlaceholder(otpEmailFrom))) {
+            log.error("OTP_CHANNEL is EMAIL but SMTP is not configured. Email OTP login "
+                    + "will fail until SMTP_HOST and OTP_EMAIL_FROM are set. Password login still works.");
+        }
     }
 
     /**

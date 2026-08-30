@@ -288,6 +288,9 @@ public class NotificationService {
     public void notifyAdminsOfNewOrder(Order order) {
         try {
             if (order == null) return;
+            if (order.getOrderStatus() == com.gpstore.enums.OrderStatus.PENDING_CONFIRMATION) {
+                return;
+            }
 
             List<Customer> admins = customerRepository.findByRole(com.gpstore.entity.Role.ADMIN);
             if (admins.isEmpty()) return;

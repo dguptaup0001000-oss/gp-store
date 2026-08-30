@@ -2,6 +2,8 @@ package com.gpstore.service;
 
 import com.gpstore.entity.*;
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.enums.PaymentMethod;
+import com.gpstore.enums.PaymentStatus;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.repository.*;
 import org.junit.jupiter.api.DisplayName;
@@ -40,6 +42,21 @@ class OrderStatusStateMachineTest {
     @Autowired private OrderService orderService;
     @Autowired private OrderRepository orderRepository;
     @Autowired private CustomerRepository customerRepository;
+    @Autowired private PaymentRepository paymentRepository;
+
+    @Test
+    @DisplayName("Admin cannot confirm an unpaid ONLINE order")
+    void unpaidOnlineCannotBeConfirmed() {
+        Long orderId = newOrder(OrderStatus.PENDING_CONFIRMATION);
+        Payment payment = paymentRepository.findByOrderId(orderId).orElseThrow();
+        payment.setPaymentStatus(PaymentStatus.PENDING);
+        paymentRepository.save(payment);
+
+        ConflictException ex = assertThrows(ConflictException.class,
+                () -> orderService.updateOrderStatus(orderId, OrderStatus.CONFIRMED));
+        assertTrue(ex.getMessage().toLowerCase().contains("payment"));
+        assertEquals(OrderStatus.PENDING_CONFIRMATION, statusOf(orderId));
+    }
 
     @Test
     @DisplayName("The happy path walks one step at a time, all the way to delivered")
@@ -252,6 +269,16 @@ class OrderStatusStateMachineTest {
         order.setTotalAmount(new BigDecimal("100.00"));
         order.setOrderNumber("SM-" + System.nanoTime());
         order.setOrderDate(java.time.LocalDateTime.now());
-        return orderRepository.save(order).getId();
+        order = orderRepository.save(order);
+
+        Payment payment = new Payment();
+        payment.setOrder(order);
+        payment.setAmount(order.getTotalAmount());
+        payment.setPaymentMethod(PaymentMethod.ONLINE);
+        payment.setPaymentStatus(PaymentStatus.SUCCESS);
+        payment.setActive(true);
+        paymentRepository.save(payment);
+
+        return order.getId();
     }
 }

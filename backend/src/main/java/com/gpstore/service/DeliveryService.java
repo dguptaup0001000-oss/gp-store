@@ -170,6 +170,14 @@ public class DeliveryService {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public void autoAssignBestEffort(Long orderId) {
         try {
+            Order order = orderRepository.findById(orderId).orElse(null);
+            if (order == null || order.getOrderStatus() == OrderStatus.PENDING_CONFIRMATION) {
+                if (order != null) {
+                    auditLogService.log("AUTO_ASSIGN_SKIPPED_UNPAID", "Order", orderId,
+                            "Delivery is assigned after payment is confirmed.");
+                }
+                return;
+            }
             autoAssignDelivery(orderId);
         } catch (Exception ex) {
             auditLogService.log("AUTO_ASSIGN_FAILED", "Order", orderId,

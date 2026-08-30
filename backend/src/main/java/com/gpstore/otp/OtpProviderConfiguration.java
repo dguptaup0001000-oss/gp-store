@@ -64,7 +64,9 @@ public class OtpProviderConfiguration {
             return new EmailOtpProvider(mailSender, from, redis);
         }
         if (production) {
-            return new UnconfiguredOtpProvider();
+            return new UnconfiguredOtpProvider(
+                    "Email OTP is unconfigured. Set SMTP_HOST and OTP_EMAIL_FROM on the VPS. "
+                            + "Password login still works.");
         }
         return new EmailOtpProvider(null, from, redis);
     }

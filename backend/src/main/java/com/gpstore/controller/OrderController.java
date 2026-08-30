@@ -32,12 +32,12 @@ public class OrderController {
 
     // Place a new order for the logged-in customer.
     //
-    // Idempotency-Key is optional (older/not-yet-updated clients simply don't
-    // send it, and behave exactly as before) but strongly recommended: the
-    // client should generate one UUID per checkout attempt and re-send that
-    // same value on any retry of that attempt (e.g. after a network timeout,
-    // or a double-tap on Place Order). With the key, a retried request
-    // returns the original order instead of creating a second, separate one.
+    // Idempotency-Key is required by default (orders.require-idempotency-key).
+    // The client generates one UUID per checkout attempt and re-sends that
+    // same value on any retry (network timeout or a double-tap on Place
+    // Order). A retried request returns the original order instead of
+    // creating a second one. The flag exists only so one deploy can accept
+    // an older APK; leaving it off removes retry protection.
     // Timed at INFO - this is the first of two sequential calls checkout
     // makes right after the "Place Order" countdown, and how long it takes
     // is exactly what determines how long the customer stares at a spinner.
