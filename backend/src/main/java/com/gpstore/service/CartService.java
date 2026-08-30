@@ -309,15 +309,23 @@ public class CartService {
         if (cart == null) {
             return com.gpstore.dto.response.CartResponse.from(null);
         }
-        java.util.Map<Long, Integer> stock = new java.util.HashMap<>();
+        java.util.LinkedHashSet<Long> variantIds = new java.util.LinkedHashSet<>();
         for (CartItem item : cart.getItems()) {
             if (item.getProductVariant() == null || item.getProductVariant().getId() == null) {
                 continue;
             }
-            Long variantId = item.getProductVariant().getId();
-            stock.putIfAbsent(variantId, inventoryRepository.findByProductVariantId(variantId)
-                    .map(Inventory::getStock)
-                    .orElse(0));
+            variantIds.add(item.getProductVariant().getId());
+        }
+        java.util.Map<Long, Integer> stock = new java.util.HashMap<>();
+        if (!variantIds.isEmpty()) {
+            for (Object[] row : inventoryRepository.findStockByProductVariantIds(variantIds)) {
+                Long variantId = (Long) row[0];
+                Integer qty = row[1] instanceof Number n ? n.intValue() : 0;
+                stock.put(variantId, qty);
+            }
+            for (Long variantId : variantIds) {
+                stock.putIfAbsent(variantId, 0);
+            }
         }
         return com.gpstore.dto.response.CartResponse.from(cart, stock);
     }

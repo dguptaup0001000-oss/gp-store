@@ -7,13 +7,22 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
     Optional<Inventory> findByProductVariantId(Long productVariantId);
+
+    /**
+     * One round trip for a customer's cart GET. Selecting the variant id and
+     * stock only so this does not lazy-load every Inventory.productVariant.
+     */
+    @Query("select i.productVariant.id, i.stock from Inventory i where i.productVariant.id in :variantIds")
+    List<Object[]> findStockByProductVariantIds(@Param("variantIds") Collection<Long> variantIds);
 
     // Real pagination (see admin_inventory_screen.dart's infinite scroll) -
     // was a plain unbounded findAll() before, loading every inventory row

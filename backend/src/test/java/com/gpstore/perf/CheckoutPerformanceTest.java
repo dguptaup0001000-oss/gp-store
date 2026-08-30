@@ -271,9 +271,10 @@ class CheckoutPerformanceTest {
         System.out.println("[PERF] cart-read (cart of " + CART_SIZE + "): " + result);
 
         assertTrue(result.queryCount() <= 2,
-                "A cart read must be one fetch-joined query regardless of how many items are in the "
-                        + "cart. A count that scales with cart size is an N+1 on the most-called "
-                        + "authenticated endpoint in the application. Was: " + result);
+                "A cart read must be one fetch-joined cart query plus one batched stock read, "
+                        + "regardless of how many items are in the cart. A count that scales with "
+                        + "cart size is an N+1 on the most-called authenticated endpoint. Was: "
+                        + result);
     }
 
     /**
