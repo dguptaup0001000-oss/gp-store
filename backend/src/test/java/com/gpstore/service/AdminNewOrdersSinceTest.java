@@ -57,15 +57,56 @@ class AdminNewOrdersSinceTest {
     }
 
     @Test
-    void unpaidOnlineOrderHoldsTheCursorSoALaterConfirmIsNotSkipped() {
+    void unpaidOnlineOrderHoldsTheCursorButDoesNotSilenceOrdersBehindIt() {
         Order pending = order(43L, "Ramesh Kumar", "520.00");
         pending.setOrderStatus(OrderStatus.PENDING_CONFIRMATION);
         Order paid = order(44L, "Priya", "780.50");
         paid.setOrderStatus(OrderStatus.CONFIRMED);
         AdminNewOrdersSinceResponse response =
                 OrderService.composeNewOrdersSince(42L, List.of(pending, paid));
+        // Cursor stays behind 43 so the unpaid order is re-checked once paid.
         assertEquals(42L, response.getAfterId());
-        assertTrue(response.getOrders().isEmpty());
+        // But 44 is CONFIRMED and the shop must still hear it.
+        assertEquals(1, response.getOrders().size());
+        assertEquals(44L, response.getOrders().get(0).getOrderId());
+    }
+
+    @Test
+    void oneAbandonedPaymentDoesNotSilenceAnEntireRush() {
+        // An abandoned UPI order sits PENDING_CONFIRMATION for up to 30
+        // minutes. Every paid order placed behind it must still be announced,
+        // or the counter goes deaf for that whole window.
+        Order abandoned = order(43L, "Ramesh Kumar", "520.00");
+        abandoned.setOrderStatus(OrderStatus.PENDING_CONFIRMATION);
+        Order cod1 = order(44L, "Priya", "780.50");
+        cod1.setOrderStatus(OrderStatus.CONFIRMED);
+        Order cod2 = order(45L, "Anil", "220.00");
+        cod2.setOrderStatus(OrderStatus.CONFIRMED);
+
+        AdminNewOrdersSinceResponse response =
+                OrderService.composeNewOrdersSince(42L, List.of(abandoned, cod1, cod2));
+
+        assertEquals(42L, response.getAfterId());
+        assertEquals(2, response.getOrders().size());
+        assertEquals(44L, response.getOrders().get(0).getOrderId());
+        assertEquals(45L, response.getOrders().get(1).getOrderId());
+    }
+
+    @Test
+    void twoUnpaidOrdersHoldTheCursorAtTheOldestOne() {
+        Order firstUnpaid = order(43L, "Ramesh Kumar", "520.00");
+        firstUnpaid.setOrderStatus(OrderStatus.PENDING_CONFIRMATION);
+        Order paid = order(44L, "Priya", "780.50");
+        paid.setOrderStatus(OrderStatus.CONFIRMED);
+        Order secondUnpaid = order(45L, "Anil", "220.00");
+        secondUnpaid.setOrderStatus(OrderStatus.PENDING_CONFIRMATION);
+
+        AdminNewOrdersSinceResponse response = OrderService.composeNewOrdersSince(
+                42L, List.of(firstUnpaid, paid, secondUnpaid));
+
+        assertEquals(42L, response.getAfterId());
+        assertEquals(1, response.getOrders().size());
+        assertEquals(44L, response.getOrders().get(0).getOrderId());
     }
 
     @Test

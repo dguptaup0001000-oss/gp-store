@@ -810,8 +810,21 @@ public class OrderService {
         Long lastAdvanced = null;
         for (Order order : found) {
             if (order.getOrderStatus() == OrderStatus.PENDING_CONFIRMATION) {
-                unpaidHold = order.getId();
-                break;
+                // HOLD THE CURSOR, DO NOT STOP SCANNING. An abandoned UPI or
+                // ONLINE payment sits PENDING_CONFIRMATION for up to
+                // payment.upi-timeout-minutes (30) before the expiry sweep
+                // clears it. Breaking here meant every CONFIRMED order placed
+                // behind it went unannounced for that whole window - one
+                // customer closing the payment page silenced the shop counter
+                // through a dinner rush. Keep the cursor pinned so the unpaid
+                // order is re-examined once it is paid, but let everything
+                // behind it through. Re-sending an alert is free: the app
+                // claims each order id once in AnnouncementLog (bounded at
+                // 200, this page at 20), so a repeat is never spoken twice.
+                if (unpaidHold == null) {
+                    unpaidHold = order.getId();
+                }
+                continue;
             }
             if (shouldAnnounceAsNewShopOrder(order)) {
                 alerts.add(new AdminNewOrdersSinceResponse.AdminNewOrderAlert(
@@ -819,7 +832,9 @@ public class OrderService {
                         displayNameOf(order),
                         plainAmountOf(order)));
             }
-            lastAdvanced = order.getId();
+            if (unpaidHold == null) {
+                lastAdvanced = order.getId();
+            }
         }
         if (unpaidHold != null) {
             // Do not skip past an unpaid ONLINE/UPI order. When it confirms,
