@@ -11,13 +11,22 @@ plugins {
 def workerSlim = (System.getenv("GPSTORE_WORKER_SLIM") ?: "0") == "1"
 def workerApplicationId = (project.findProperty("gpstore.applicationId") ?: "").toString()
 def workerApk = workerSlim || workerApplicationId == "com.gpstore.worker"
+// Cloned in.gpstore.customer / admin clients are not in the Firebase
+// project. The Crashlytics Gradle plugin then uploads mappings and
+// gets HTTP 400, failing assembleRelease. Apply it only after both
+// flavor packages exist in GOOGLE_SERVICES_JSON_BASE64 and the
+// operator sets CRASHLYTICS_MAPPING_UPLOAD=1. Runtime Crashlytics
+// (the Dart plugin) does not need this Gradle plugin.
+def crashlyticsMappingUpload = (System.getenv("CRASHLYTICS_MAPPING_UPLOAD") ?: "0") == "1"
 if (!workerApk) {
     // Needs android/app/google-services.json to exist (see
     // FIREBASE_SETUP.md) - without it, this line makes the build fail
     // loudly with a clear "File google-services.json is missing" error
     // rather than silently shipping an app where push never works.
     apply plugin: "com.google.gms.google-services"
-    apply plugin: "com.google.firebase.crashlytics"
+    if (crashlyticsMappingUpload) {
+        apply plugin: "com.google.firebase.crashlytics"
+    }
 }
 
 def localProperties = new Properties()
@@ -181,6 +190,16 @@ android {
     }
 }
 
+def disableCrashlyticsUpload = { task ->
+    def n = task.name
+    if (n.startsWith("uploadCrashlyticsMappingFile") || n.startsWith("uploadCrashlyticsSymbolFile")) {
+        task.enabled = crashlyticsMappingUpload
+    }
+}
+if (!workerApk && !crashlyticsMappingUpload) {
+    tasks.configureEach { t -> disableCrashlyticsUpload(t) }
+}
+
 gradle.taskGraph.whenReady { graph ->
     def assemblingRelease = graph.allTasks.any { t ->
         def n = t.name.toLowerCase()
@@ -191,6 +210,9 @@ gradle.taskGraph.whenReady { graph ->
             "Release signing is not configured. Create android/key.properties from "
             + "key.properties.example, or set ALLOW_DEBUG_RELEASE_SIGNING=1 for a "
             + "sideload-only debug-signed APK. Play uploads must never use debug signing.")
+    }
+    if (!workerApk && !crashlyticsMappingUpload) {
+        graph.allTasks.each { t -> disableCrashlyticsUpload(t) }
     }
 }
 
