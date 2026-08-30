@@ -48,8 +48,10 @@ public class SignedUploadResponse {
 
     /**
      * Headers the client must send on the presigned PUT. This map is the
-     * only contract: any header signed into the URL that is missing here
-     * is a 403. Do not add extra headers the client was not told to send.
+     * only contract for headers a client can set. Transport-managed
+     * headers ({@code host}, {@code content-length}) are signed by SigV4
+     * but must not appear here — the HTTP client sets them. Any other
+     * signed header missing from this map is a 403.
      */
     public Map<String, String> getHeaders() {
         return headers;
