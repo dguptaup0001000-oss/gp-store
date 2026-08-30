@@ -380,23 +380,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   ),
                   const SizedBox(height: 20),
                   _sectionLabel('Coupon Code'),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _couponController,
-                          textCapitalization: TextCapitalization.characters,
-                          decoration: const InputDecoration(
-                              hintText: 'Enter coupon code (optional)'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed:
-                            _selectedAddress == null ? null : _fetchPreview,
-                        child: const Text('Apply'),
-                      ),
-                    ],
+                  CheckoutCouponRow(
+                    controller: _couponController,
+                    onApply: _fetchPreview,
+                    applyEnabled: _selectedAddress != null,
                   ),
                   const SizedBox(height: 20),
                   _sectionLabel('Payment Method'),
@@ -509,6 +496,47 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(text, style: Theme.of(context).textTheme.titleMedium),
       );
+}
+
+/// Coupon field + Apply. [AppTheme] sets [FilledButton] min size via
+/// [Size.fromHeight], which is infinite width. Inside a [Row] that
+/// constraint cannot be satisfied, so the whole row fails to lay out
+/// and checkout shows only the "Coupon Code" heading. Override min
+/// width so the field and button actually appear.
+class CheckoutCouponRow extends StatelessWidget {
+  const CheckoutCouponRow({
+    super.key,
+    required this.controller,
+    required this.onApply,
+    this.applyEnabled = true,
+  });
+
+  final TextEditingController controller;
+  final VoidCallback onApply;
+  final bool applyEnabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: controller,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              hintText: 'Enter coupon code (optional)',
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
+          onPressed: applyEnabled ? onApply : null,
+          child: const Text('Apply'),
+        ),
+      ],
+    );
+  }
 }
 
 class _PreviewSummary extends StatelessWidget {
