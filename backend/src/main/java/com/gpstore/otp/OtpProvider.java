@@ -19,6 +19,14 @@ public interface OtpProvider {
     SendResult resend(String mobileE164);
 
     /**
+     * When true, {@code OtpService} generates and hashes the six-digit code
+     * locally (email and mock). MSG91 generates the code itself.
+     */
+    default boolean issuesLocalCode() {
+        return false;
+    }
+
+    /**
      * Test-only. Production providers return empty so a leaked test helper
      * cannot become a backdoor.
      */

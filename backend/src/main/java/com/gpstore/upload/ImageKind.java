@@ -20,6 +20,12 @@ public enum ImageKind {
         return prefix;
     }
 
+    /** Last path segment ({@code products} or {@code categories}). */
+    public String storageFolder() {
+        int slash = prefix.lastIndexOf('/');
+        return slash < 0 ? prefix : prefix.substring(slash + 1);
+    }
+
     public int maxBytes() {
         return maxBytes;
     }

@@ -45,6 +45,10 @@ class NoSecretsCommittedTest {
         assertEqualsEmptyOrPlaceholder(lines, "R2_BUCKET_NAME");
         assertEqualsEmptyOrPlaceholder(lines, "STORE_SUPPORT_PHONE");
         assertEqualsEmptyOrPlaceholder(lines, "STORE_SUPPORT_EMAIL");
+        assertEqualsEmptyOrPlaceholder(lines, "SMTP_HOST");
+        assertEqualsEmptyOrPlaceholder(lines, "SMTP_USERNAME");
+        assertEqualsEmptyOrPlaceholder(lines, "SMTP_PASSWORD");
+        assertEqualsEmptyOrPlaceholder(lines, "SMTP_FROM");
     }
 
     @Test

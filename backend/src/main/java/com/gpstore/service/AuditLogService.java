@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.config.ClientIpResolver;
 import com.gpstore.entity.AuditLog;
 import com.gpstore.repository.AuditLogRepository;
 import com.gpstore.security.AuthenticatedUser;
@@ -17,9 +18,11 @@ import java.time.LocalDateTime;
 public class AuditLogService {
 
     private final AuditLogRepository repository;
+    private final ClientIpResolver clientIpResolver;
 
-    public AuditLogService(AuditLogRepository repository) {
+    public AuditLogService(AuditLogRepository repository, ClientIpResolver clientIpResolver) {
         this.repository = repository;
+        this.clientIpResolver = clientIpResolver;
     }
 
     /**
@@ -66,7 +69,7 @@ public class AuditLogService {
             if (attrs == null) {
                 return "";
             }
-            String ip = attrs.getRequest().getRemoteAddr();
+            String ip = clientIpResolver.resolve(attrs.getRequest());
             return ip == null ? "" : ", clientIp=" + ip;
         } catch (Exception ex) {
             return "";

@@ -36,19 +36,19 @@ class _FakeAuthRepository extends AuthRepository {
   int loginOtpVerifies = 0;
   int resetRequests = 0;
   int resetCompletes = 0;
-  String? lastPhone;
+  String? lastEmail;
   String? lastCompletedResetToken;
 
   @override
-  Future<void> requestLoginOtp({required String phone}) async {
-    lastPhone = phone;
+  Future<void> requestLoginOtp({required String email}) async {
+    lastEmail = email;
     loginOtpRequests++;
     if (holdRequest != null) await holdRequest!.future;
     if (requestError != null) throw requestError!;
   }
 
   @override
-  Future<AuthResponse> verifyLoginOtp({required String phone, required String otp}) async {
+  Future<AuthResponse> verifyLoginOtp({required String email, required String otp}) async {
     loginOtpVerifies++;
     if (verifyError != null) throw verifyError!;
     await tokenStorage.saveTokens(accessToken: 'access', refreshToken: 'refresh');
@@ -61,14 +61,14 @@ class _FakeAuthRepository extends AuthRepository {
   }
 
   @override
-  Future<void> requestPasswordResetOtp({required String phone}) async {
-    lastPhone = phone;
+  Future<void> requestPasswordResetOtp({required String email}) async {
+    lastEmail = email;
     resetRequests++;
     if (resetRequestError != null) throw resetRequestError!;
   }
 
   @override
-  Future<String> verifyPasswordResetOtp({required String phone, required String otp}) async {
+  Future<String> verifyPasswordResetOtp({required String email, required String otp}) async {
     if (resetVerifyError != null) throw resetVerifyError!;
     return 'reset-token';
   }
@@ -133,39 +133,39 @@ void main() {
     await tester.pump();
 
     expect(find.text('Log in'), findsOneWidget);
-    expect(find.text('Login with Mobile OTP'), findsOneWidget);
+    expect(find.text('Login with email OTP'), findsOneWidget);
     expect(find.text('Forgot password?'), findsOneWidget);
   });
 
-  testWidgets('invalid phone is rejected before a network call', (tester) async {
+  testWidgets('invalid email is rejected before a network call', (tester) async {
     await tester.pumpWidget(otpApp());
-    await tester.enterText(find.byType(TextFormField), '12345');
+    await tester.enterText(find.byType(TextFormField), 'not-an-email');
     await tester.tap(find.text('Continue'));
     await tester.pump();
-    expect(find.text('Please enter a valid Indian mobile number.'), findsOneWidget);
+    expect(find.text('Please enter a valid email address.'), findsOneWidget);
     expect(repo.loginOtpRequests, 0);
   });
 
-  testWidgets('requesting an OTP shows loading then the masked number', (tester) async {
+  testWidgets('requesting an OTP shows loading then the masked email', (tester) async {
     repo.holdRequest = Completer<void>();
     await tester.pumpWidget(otpApp());
-    await tester.enterText(find.byType(TextFormField), '9876543210');
+    await tester.enterText(find.byType(TextFormField), 'shop@example.com');
     await tester.tap(find.text('Continue'));
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
     repo.holdRequest!.complete();
     await tester.pump();
-    expect(find.text('Enter the OTP sent to ******3210'), findsOneWidget);
+    expect(find.text('Enter the OTP sent to s***@example.com'), findsOneWidget);
     expect(find.textContaining('Resend code in'), findsOneWidget);
     expect(repo.loginOtpRequests, 1);
-    expect(repo.lastPhone, '9876543210');
+    expect(repo.lastEmail, 'shop@example.com');
   });
 
   testWidgets('wrong OTP shows an error and does not log the user in', (tester) async {
     repo.verifyError = ApiException(statusCode: 400, message: 'Invalid or expired OTP');
     await tester.pumpWidget(otpApp());
-    await tester.enterText(find.byType(TextFormField), '9876543210');
+    await tester.enterText(find.byType(TextFormField), 'shop@example.com');
     await tester.tap(find.text('Continue'));
     await tester.pump();
 
@@ -178,7 +178,7 @@ void main() {
   testWidgets('network failure on request is actionable', (tester) async {
     repo.requestError = ApiException(statusCode: null, message: 'You appear to be offline. Check your connection and try again.');
     await tester.pumpWidget(otpApp());
-    await tester.enterText(find.byType(TextFormField), '9876543210');
+    await tester.enterText(find.byType(TextFormField), 'shop@example.com');
     await tester.tap(find.text('Continue'));
     await tester.pump();
     expect(find.textContaining('offline'), findsWidgets);
@@ -187,7 +187,7 @@ void main() {
 
   testWidgets('resend is held until the cooldown elapses', (tester) async {
     await tester.pumpWidget(otpApp());
-    await tester.enterText(find.byType(TextFormField), '9876543210');
+    await tester.enterText(find.byType(TextFormField), 'shop@example.com');
     await tester.tap(find.text('Continue'));
     await tester.pump();
     expect(find.text('Resend OTP'), findsNothing);
@@ -203,7 +203,7 @@ void main() {
 
   testWidgets('successful OTP verify authenticates with the existing session', (tester) async {
     await tester.pumpWidget(otpApp());
-    await tester.enterText(find.byType(TextFormField), '9876543210');
+    await tester.enterText(find.byType(TextFormField), 'shop@example.com');
     await tester.tap(find.text('Continue'));
     await tester.pump();
 
@@ -219,7 +219,7 @@ void main() {
   testWidgets('an expired OTP asks the customer to request a new code', (tester) async {
     repo.verifyError = ApiException(statusCode: 400, message: 'Invalid or expired OTP');
     await tester.pumpWidget(otpApp());
-    await tester.enterText(find.byType(TextFormField), '9876543210');
+    await tester.enterText(find.byType(TextFormField), 'shop@example.com');
     await tester.tap(find.text('Continue'));
     await tester.pump();
 
@@ -238,10 +238,10 @@ void main() {
       child: const MaterialApp(home: ForgotPasswordScreen()),
     ));
 
-    await tester.enterText(find.byType(TextField), '9876543210');
+    await tester.enterText(find.byType(TextField), 'shop@example.com');
     await tester.tap(find.text('Send OTP'));
     await tester.pump();
-    expect(find.text('Enter the OTP sent to ******3210'), findsOneWidget);
+    expect(find.text('Enter the OTP sent to s***@example.com'), findsOneWidget);
     expect(repo.resetRequests, 1);
 
     await tester.enterText(find.byType(TextField), '123456');
@@ -262,10 +262,10 @@ void main() {
       child: const MaterialApp(home: ForgotPasswordScreen()),
     ));
 
-    await tester.enterText(find.byType(TextField), '9876543210');
+    await tester.enterText(find.byType(TextField), 'shop@example.com');
     await tester.tap(find.text('Send OTP'));
     await tester.pump();
-    expect(find.text("Enter your account's mobile number. If it is eligible, we'll send a reset code."), findsNothing);
+    expect(find.text("Enter your account's email. If it is eligible, we'll send a reset code."), findsNothing);
 
     await tester.enterText(find.byType(TextField), '123456');
     await tester.pump();
@@ -288,7 +288,7 @@ void main() {
       child: const MaterialApp(home: ForgotPasswordScreen()),
     ));
 
-    await tester.enterText(find.byType(TextField), '9876543210');
+    await tester.enterText(find.byType(TextField), 'shop@example.com');
     await tester.tap(find.text('Send OTP'));
     await tester.pump();
     ProviderScope.containerOf(tester.element(find.byType(ForgotPasswordScreen)))

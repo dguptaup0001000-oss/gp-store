@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../domain/indian_phone.dart';
 import '../domain/otp_user_messages.dart';
+import '../domain/shop_email.dart';
 import '../domain/password_policy.dart';
 import 'auth_providers.dart';
 
@@ -62,21 +62,21 @@ class PasswordResetController extends StateNotifier<PasswordResetState> {
   static const resendCooldown = Duration(seconds: 45);
   static const otpLifetime = Duration(minutes: 5);
 
-  Future<bool> requestOtp(String mobileNumber) async {
-    final local = IndianPhone.toLocal10(mobileNumber);
-    if (local == null) {
-      state = state.copyWith(errorMessage: OtpUserMessages.invalidPhone);
+  Future<bool> requestOtp(String rawEmail) async {
+    final email = ShopEmail.normalize(rawEmail);
+    if (email == null) {
+      state = state.copyWith(errorMessage: OtpUserMessages.invalidEmail);
       return false;
     }
 
     state = state.copyWith(
       step: PasswordResetStep.sendingOtp,
-      mobileNumber: local,
+      mobileNumber: email,
       errorMessage: null,
     );
 
     try {
-      await _ref.read(authRepositoryProvider).requestPasswordResetOtp(phone: local);
+      await _ref.read(authRepositoryProvider).requestPasswordResetOtp(email: email);
       _sentAt = DateTime.now();
       _resetToken = null;
       state = state.copyWith(
@@ -107,7 +107,7 @@ class PasswordResetController extends StateNotifier<PasswordResetState> {
 
     try {
       _resetToken = await _ref.read(authRepositoryProvider).verifyPasswordResetOtp(
-            phone: state.mobileNumber!,
+            email: state.mobileNumber!,
             otp: otp,
           );
       _countdown?.cancel();

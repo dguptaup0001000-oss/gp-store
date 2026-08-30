@@ -1,11 +1,15 @@
 package com.gpstore.controller;
 
+import com.gpstore.dto.request.ConfirmBatchRequest;
 import com.gpstore.dto.request.ConfirmUploadRequest;
 import com.gpstore.dto.request.DeleteUploadRequest;
+import com.gpstore.dto.request.SignBatchRequest;
 import com.gpstore.dto.request.SignUploadRequest;
 import com.gpstore.dto.response.CloudinarySignatureResponse;
+import com.gpstore.dto.response.ConfirmedUploadBatchResponse;
 import com.gpstore.dto.response.ConfirmedUploadResponse;
 import com.gpstore.dto.response.R2ConnectionTestResponse;
+import com.gpstore.dto.response.SignedUploadBatchResponse;
 import com.gpstore.dto.response.SignedUploadResponse;
 import com.gpstore.service.CloudinaryUploadService;
 import com.gpstore.upload.R2ObjectStorageService;
@@ -43,6 +47,16 @@ public class UploadController {
     @PostMapping("/confirm")
     public ConfirmedUploadResponse confirm(@Valid @RequestBody ConfirmUploadRequest request) {
         return r2.confirm(request.getObjectKey());
+    }
+
+    @PostMapping("/sign-batch")
+    public SignedUploadBatchResponse signBatch(@Valid @RequestBody SignBatchRequest request) {
+        return new SignedUploadBatchResponse(r2.signBatch(request.getItems()));
+    }
+
+    @PostMapping("/confirm-batch")
+    public ConfirmedUploadBatchResponse confirmBatch(@Valid @RequestBody ConfirmBatchRequest request) {
+        return new ConfirmedUploadBatchResponse(r2.confirmBatch(request.getObjectKeys()));
     }
 
     /**

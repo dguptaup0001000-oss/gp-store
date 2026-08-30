@@ -22,8 +22,12 @@ Canonical files:
 | Image | `backend/Dockerfile` |
 | Legacy systemd/Nginx (do not enable) | `deploy/hostinger/` |
 
-Laptop Compose (published 5432/6379/8081): `docker compose -f docker-compose.dev.yml up`.
-Never use that file, or the repo-root `docker-compose.yml`, on the VPS.
+Laptop Compose binds 5432/6379/8081 on loopback only:
+`docker compose -f docker-compose.local.yml up` (repo root) or
+`docker compose -f docker-compose.dev.yml up` (from `backend/`).
+There is no repo-root `docker-compose.yml` — a bare `docker compose up`
+at `/opt/gp-store` must fail instead of starting a second stack.
+Never use the laptop files on the VPS.
 
 Java 21, Spring Boot 3.5.3, Maven Wrapper `./mvnw`.
 
@@ -342,9 +346,63 @@ CI already defaults to `https://api.gpstore.co.in/v1` when `vars.API_BASE_URL` i
 | 502 | `docker compose ps` — backend healthy? `docker compose logs backend` |
 | App refuses to start | `JWT_SECRET` still the repo default, or `DDL_AUTO` is not `validate` |
 | Search errors `similarity` | V5 should create `pg_trgm`. Confirm Flyway in logs |
-| Login rate-limit all from one IP | `RATE_LIMIT_TRUST_FORWARDED_FOR=true` is set in Compose |
+| Login rate-limit all from one IP | Confirm Cloudflare is **proxied** (not DNS-only) and Traefik has `forwardedHeaders.trustedIPs` for Cloudflare ranges. See §17. |
 | Redis down, login still works but caps per JVM | AUTH/CHECKOUT/ADMIN fail closed to a local limiter; SEARCH/cart fail open (documented in `RateLimitFilter`) |
 | Port 80/443 already in use | leftover Nginx/systemd from `deploy/hostinger/`. Stop them. |
+
+## 17. Cloudflare proxy mode (real client IPs)
+
+`api.gpstore.co.in` must be **proxied** (orange cloud) with SSL/TLS
+**Full (strict)**. DNS-only (grey cloud) sends browsers straight to the
+VPS; Traefik then sees the real client as the TCP peer and must not trust
+forwarded headers from the internet.
+
+Verify without opening the Cloudflare dashboard:
+
+```bash
+# Must be a Cloudflare anycast address (104.16/13, 172.64/13, 162.158/15, …),
+# not the VPS A record.
+dig +short api.gpstore.co.in
+
+# cf-ray present => the request went through Cloudflare. Missing => DNS-only.
+curl -sI https://api.gpstore.co.in/v1/api/health | grep -i '^cf-ray:'
+```
+
+Full (strict) means Cloudflare presents a public cert and origin TLS to
+Traefik uses the Let's Encrypt cert. Flexible/HTTP-only origin is wrong
+for this stack.
+
+## 18. R2 staging lifecycle (orphan backstop)
+
+New uploads are signed to `gpstore/staging/…` and copied to
+`gpstore/products/…` or `gpstore/categories/…` on confirm. The API token
+must **not** have ListBucket. The app tracks staging keys in
+`r2_staging_objects` and deletes rows older than 24 hours.
+
+In the Cloudflare dashboard, add a **lifecycle rule** as a backstop (does
+not need ListBucket on the API token):
+
+| Field | Value |
+|---|---|
+| Prefix | `gpstore/staging/` |
+| Action | Expire / delete objects |
+| Age | 2 days |
+
+Do not apply that rule to `gpstore/products/` or `gpstore/categories/`.
+Keep `R2_PUBLIC_BASE_URL` empty. Do not make the bucket public.
+
+## 19. Cloudflare Worker for catalogue images (optional)
+
+Presigned GET URLs change every time (`X-Amz-Date`), so Flutter's image
+cache re-downloads every catalogue rotation. A Worker bound to the
+**private** bucket serves a stable URL per object:
+
+1. Deploy `deploy/cloudflare/r2-image-worker.js` with an R2 binding.
+2. Attach a custom hostname (`img.gpstore.co.in`).
+3. Set `R2_IMAGE_WORKER_BASE_URL=https://img.gpstore.co.in` on the VPS.
+4. Recreate **backend only**. Do not make the bucket public.
+
+Until that variable is set, the API keeps issuing presigned GET URLs.
 
 GitHub Actions **does** SSH to Hostinger when secrets `PROD_HOST`,
 `PROD_USER`, and `PROD_SSH_PRIVATE_KEY` are set (workflow

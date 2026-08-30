@@ -75,6 +75,14 @@ jobs:
           fi
           echo "No tracked .env or credential files."
 
+      - name: Refuse non-loopback Compose publishes of 5432/6379/8081
+        working-directory: .
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile .github/scripts/check_compose_published_ports.py
+          python3 .github/scripts/test_check_compose_published_ports.py
+          python3 .github/scripts/check_compose_published_ports.py .
+
       - name: Check Redis secret scripts
         run: |
           sh -n docker/redis/docker-entrypoint.sh
@@ -88,6 +96,14 @@ jobs:
           bash -n ../deploy/production/evaluate-backup-status.sh
           bash -n ../deploy/production/evaluate-offbox-result.sh
           bash -n ../deploy/production/backup-restore-drill.sh
+          bash -n ../deploy/production/harden-ssh.sh
+          bash -n ../deploy/production/disk-guard.sh
+          bash -n ../deploy/production/prune-backend-images.sh
+          chmod +x ../deploy/production/test_harden_ssh.sh ../deploy/production/test_disk_guard.sh ../deploy/production/test_prune_backend_images.sh
+          ../deploy/production/test_harden_ssh.sh
+          ../deploy/production/test_disk_guard.sh
+          ../deploy/production/test_prune_backend_images.sh
+          python3 ../deploy/cloudflare/test_r2_image_worker.py
           chmod +x docker/backup/test_backup_health.sh
           ./docker/backup/test_backup_health.sh
 

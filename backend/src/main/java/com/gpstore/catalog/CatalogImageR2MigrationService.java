@@ -90,7 +90,7 @@ public class CatalogImageR2MigrationService {
                     skipped++;
                     continue;
                 }
-                String key = UploadPolicy.objectKey(row.kind, row.ownerId, contentType);
+                String key = UploadPolicy.permanentObjectKey(row.kind, row.ownerId, contentType);
                 r2.putBytes(key, contentType, bytes);
                 String storedRef = CatalogImageRefs.storedRef(key);
                 if (storedRef.length() > 500) {

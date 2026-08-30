@@ -50,6 +50,11 @@ public class MockOtpProvider implements OtpProvider {
     }
 
     @Override
+    public boolean issuesLocalCode() {
+        return true;
+    }
+
+    @Override
     public Optional<String> peekIssuedOtpForTests(String mobileE164, OtpPurpose purpose) {
         return Optional.ofNullable(issued.get(key(mobileE164, purpose)));
     }

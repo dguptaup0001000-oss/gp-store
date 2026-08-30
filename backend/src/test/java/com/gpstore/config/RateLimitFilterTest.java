@@ -8,9 +8,14 @@ import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
@@ -210,16 +215,119 @@ class RateLimitFilterTest {
     }
 
     @Test
-    void uploadsAndCashfreeWebhooksAreAdminRateLimited() throws Exception {
+    void uploadsUseTheirOwnHigherBucket() throws Exception {
         when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(31L);
 
         MockHttpServletResponse sign = new MockHttpServletResponse();
-        filter.doFilter(request("POST", "/api/uploads/sign"), sign, new MockFilterChain());
-        assertEquals(429, sign.getStatus());
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request("POST", "/api/uploads/sign"), sign, chain);
+        assertNotNull(chain.getRequest(), "31 hits/min must stay under the 240 upload default");
+        assertEquals(200, sign.getStatus());
 
-        MockHttpServletResponse webhook = new MockHttpServletResponse();
-        filter.doFilter(request("POST", "/api/payments/webhooks/cashfree"), webhook, new MockFilterChain());
-        assertEquals(429, webhook.getStatus());
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(241L);
+        MockHttpServletResponse over = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/uploads/sign-batch"), over, new MockFilterChain());
+        assertEquals(429, over.getStatus());
+
+        MockHttpServletResponse adminStillTight = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/products"), adminStillTight, new MockFilterChain());
+        assertEquals(429, adminStillTight.getStatus(), "ADMIN stays at 30/min");
+    }
+
+    @Test
+    void uploadLimitFailsClosedWhenRedisIsDown() throws Exception {
+        when(redis.execute(any(RedisScript.class), anyList(), any()))
+                .thenThrow(new RuntimeException("Redis unavailable"));
+        RateLimitFilter tight = new RateLimitFilter(
+                redis,
+                new ClientIpResolver(false, ClientIpResolver.DEFAULT_TRUSTED_CIDRS),
+                20, 20, 60, 30, 60, 300, 2);
+
+        tight.doFilter(request("POST", "/api/uploads/sign"),
+                new MockHttpServletResponse(), new MockFilterChain());
+        tight.doFilter(request("POST", "/api/uploads/sign"),
+                new MockHttpServletResponse(), new MockFilterChain());
+        MockHttpServletResponse third = new MockHttpServletResponse();
+        tight.doFilter(request("POST", "/api/uploads/sign"), third, new MockFilterChain());
+        assertEquals(429, third.getStatus(),
+                "a Redis outage must not open the upload bucket");
+    }
+
+    @Test
+    void cashfreeWebhooksUseAHigherFailClosedBucket() throws Exception {
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(31L);
+        MockHttpServletResponse under = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request("POST", "/api/payments/webhooks/cashfree"), under, chain);
+        assertNotNull(chain.getRequest(), "31 hits/min must stay under the 300 webhook default");
+        assertEquals(200, under.getStatus());
+
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(301L);
+        MockHttpServletResponse over = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/payments/webhooks/cashfree"), over, new MockFilterChain());
+        assertEquals(429, over.getStatus());
+    }
+
+    @Test
+    void webhookLimitFailsClosedWhenRedisIsDown() throws Exception {
+        when(redis.execute(any(RedisScript.class), anyList(), any()))
+                .thenThrow(new RuntimeException("Redis unavailable"));
+        RateLimitFilter tight = new RateLimitFilter(
+                redis,
+                new ClientIpResolver(false, ClientIpResolver.DEFAULT_TRUSTED_CIDRS),
+                20, 20, 60, 30, 60, 2);
+
+        tight.doFilter(request("POST", "/api/payments/webhooks/cashfree"),
+                new MockHttpServletResponse(), new MockFilterChain());
+        tight.doFilter(request("POST", "/api/payments/webhooks/cashfree"),
+                new MockHttpServletResponse(), new MockFilterChain());
+        MockHttpServletResponse third = new MockHttpServletResponse();
+        tight.doFilter(request("POST", "/api/payments/webhooks/cashfree"), third, new MockFilterChain());
+        assertEquals(429, third.getStatus(),
+                "a Redis outage must not open the webhook bucket");
+    }
+
+    @Test
+    void spoofedForwardedHeadersFromUntrustedPeerDoNotChangeTheAuthKey() throws Exception {
+        RateLimitFilter trusting = new RateLimitFilter(redis, true, 20, 20, 60, 30, 60);
+        AtomicReference<String> key = captureRedisKey();
+
+        MockHttpServletRequest req = request("POST", "/api/auth/login");
+        req.addHeader("X-Forwarded-For", "198.51.100.1");
+        req.addHeader("CF-Connecting-IP", "198.51.100.1");
+        trusting.doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertNotNull(key.get());
+        assertTrue(key.get().contains("203.0.113.10"), key.get());
+        assertFalse(key.get().contains("198.51.100.1"), key.get());
+    }
+
+    @Test
+    void trustedProxyUsesRealClientIpAsTheAuthKey() throws Exception {
+        RateLimitFilter trusting = new RateLimitFilter(redis, true, 20, 20, 60, 30, 60);
+        AtomicReference<String> key = captureRedisKey();
+
+        MockHttpServletRequest req = request("POST", "/api/auth/login");
+        req.setRemoteAddr("172.18.0.2");
+        req.addHeader("CF-Connecting-IP", "198.51.100.77");
+        req.addHeader("X-Forwarded-For", "203.0.113.9, 172.64.0.8");
+        trusting.doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertNotNull(key.get());
+        assertTrue(key.get().contains("198.51.100.77"), key.get());
+        assertFalse(key.get().contains("172.18.0.2"), key.get());
+        assertFalse(key.get().contains("203.0.113.9"), key.get());
+    }
+
+    @SuppressWarnings("unchecked")
+    private AtomicReference<String> captureRedisKey() {
+        AtomicReference<String> key = new AtomicReference<>();
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenAnswer(invocation -> {
+            List<String> keys = invocation.getArgument(1);
+            key.set(keys.getFirst());
+            return 1L;
+        });
+        return key;
     }
 
     private static MockHttpServletRequest request(String method, String path) {

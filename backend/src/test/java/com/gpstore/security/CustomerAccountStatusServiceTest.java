@@ -10,8 +10,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -80,6 +82,28 @@ class CustomerAccountStatusServiceTest {
         assertTrue(service.isUsable(7L));
         assertTrue(service.isUsable(7L));
         verify(customerRepository, times(1)).findById(7L);
+    }
+
+    @Test
+    void cacheEvictsWhenMaximumSizeIsExceeded() {
+        service = new CustomerAccountStatusService(customerRepository, 2);
+        when(customerRepository.findById(anyLong())).thenAnswer(invocation -> {
+            Long id = invocation.getArgument(0);
+            Customer customer = customer(true, true);
+            customer.setId(id);
+            return Optional.of(customer);
+        });
+
+        for (long id = 1; id <= 8; id++) {
+            assertTrue(service.isUsable(id));
+        }
+        assertTrue(service.estimatedSizeForTests() <= 2,
+                "Caffeine maximumSize must bound the map; was " + service.estimatedSizeForTests());
+    }
+
+    @Test
+    void cacheTtlRemainsTwoSeconds() {
+        assertEquals(2_000L, CustomerAccountStatusService.TTL_MS);
     }
 
     @Test

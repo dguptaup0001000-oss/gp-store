@@ -20,6 +20,8 @@ class CatalogUrlValidatorTest {
                 "r2:gpstore/products/1/original/a.webp"));
         assertTrue(CatalogUrlValidator.isAllowedImageUrl(
                 "gpstore/products/1/original/a.webp"));
+        assertFalse(CatalogUrlValidator.isAllowedImageUrl(
+                "r2:gpstore/staging/products/1/original/a.webp"));
     }
 
     @Test

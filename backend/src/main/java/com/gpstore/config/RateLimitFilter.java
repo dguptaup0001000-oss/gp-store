@@ -85,8 +85,16 @@ import java.util.concurrent.TimeUnit;
  *       POST /api/notifications/broadcast, writes under /api/admin/**,
  *       and writes under /api/worker/**, /api/deliveries, /api/inventory,
  *       /api/products, /api/categories, /api/product-variants,
- *       /api/uploads, /api/payments/webhooks (IP-keyed, no JWT), and
- *       /api/orders (except place, which is CHECKOUT).
+ *       and /api/orders (except place, which is CHECKOUT).
+ *
+ *   rate-limit.upload-per-minute            default 240, per admin account, fail-closed
+ *       writes under /api/uploads/**. ADMIN at 30/min made each photo
+ *       (sign + confirm) cost 2 of 30, ~15 images/min. 240/min is 120
+ *       images/min; batch sign/confirm of 20 keys is 20 images / 2 requests.
+ *
+ *   rate-limit.webhook-per-minute           default 300, per IP, fail-closed
+ *       POST /api/payments/webhooks/**. Separate from ADMIN so a Cashfree
+ *       retry burst does not share the 30/min admin write quota.
    *       DELETE /api/customers/me and PUT /api/customers/me are AUTH
        (account destruction and phone-number rebind).
  *
@@ -122,34 +130,68 @@ public class RateLimitFilter extends OncePerRequestFilter {
             """, Long.class);
 
     private final StringRedisTemplate redisTemplate;
-    private final boolean trustForwardedFor;
+    private final ClientIpResolver clientIpResolver;
     private final int authPerMinute;
     private final int checkoutPerMinute;
     private final int mutationPerMinute;
     private final int adminPerMinute;
     private final int searchPerMinute;
+    private final int webhookPerMinute;
+    private final int uploadPerMinute;
     private final LocalFixedWindowRateLimiter localLimiter =
             new LocalFixedWindowRateLimiter(TimeUnit.SECONDS.toMillis(WINDOW_SECONDS));
 
+    RateLimitFilter(
+            StringRedisTemplate redisTemplate,
+            boolean trustForwardedFor,
+            int authPerMinute,
+            int checkoutPerMinute,
+            int mutationPerMinute,
+            int adminPerMinute,
+            int searchPerMinute) {
+        this(redisTemplate,
+                new ClientIpResolver(trustForwardedFor, ClientIpResolver.DEFAULT_TRUSTED_CIDRS),
+                authPerMinute, checkoutPerMinute, mutationPerMinute, adminPerMinute, searchPerMinute,
+                300, 240);
+    }
+
+    RateLimitFilter(
+            StringRedisTemplate redisTemplate,
+            ClientIpResolver clientIpResolver,
+            int authPerMinute,
+            int checkoutPerMinute,
+            int mutationPerMinute,
+            int adminPerMinute,
+            int searchPerMinute,
+            int webhookPerMinute) {
+        this(redisTemplate, clientIpResolver, authPerMinute, checkoutPerMinute, mutationPerMinute,
+                adminPerMinute, searchPerMinute, webhookPerMinute, 240);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public RateLimitFilter(
             StringRedisTemplate redisTemplate,
-            @Value("${rate-limit.trust-forwarded-for:false}") boolean trustForwardedFor,
+            ClientIpResolver clientIpResolver,
             @Value("${rate-limit.auth-per-minute:20}") int authPerMinute,
             @Value("${rate-limit.checkout-per-minute:20}") int checkoutPerMinute,
             @Value("${rate-limit.mutation-per-minute:60}") int mutationPerMinute,
             @Value("${rate-limit.admin-per-minute:30}") int adminPerMinute,
-            @Value("${rate-limit.search-per-minute:60}") int searchPerMinute) {
+            @Value("${rate-limit.search-per-minute:60}") int searchPerMinute,
+            @Value("${rate-limit.webhook-per-minute:300}") int webhookPerMinute,
+            @Value("${rate-limit.upload-per-minute:240}") int uploadPerMinute) {
         this.redisTemplate = redisTemplate;
-        this.trustForwardedFor = trustForwardedFor;
+        this.clientIpResolver = clientIpResolver;
         this.authPerMinute = authPerMinute;
         this.checkoutPerMinute = checkoutPerMinute;
         this.mutationPerMinute = mutationPerMinute;
         this.adminPerMinute = adminPerMinute;
         this.searchPerMinute = searchPerMinute;
+        this.webhookPerMinute = webhookPerMinute;
+        this.uploadPerMinute = uploadPerMinute;
     }
 
     /** Which bucket a request falls into, or null if it is not limited at all. */
-    enum Bucket { AUTH, CHECKOUT, MUTATION, ADMIN, SEARCH }
+    enum Bucket { AUTH, CHECKOUT, MUTATION, ADMIN, SEARCH, WEBHOOK, UPLOAD }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -167,6 +209,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             case MUTATION -> mutationPerMinute;
             case ADMIN -> adminPerMinute;
             case SEARCH -> searchPerMinute;
+            case WEBHOOK -> webhookPerMinute;
+            case UPLOAD -> uploadPerMinute;
         };
 
         String clientKey = "ratelimit:" + identity(bucket, request) + ":" + limitPath(request.getServletPath());
@@ -266,6 +310,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return Bucket.MUTATION;
         }
 
+        if (path.startsWith("/api/payments/webhooks")) {
+            return Bucket.WEBHOOK;
+        }
+
+        if (isWrite && path.startsWith("/api/uploads")) {
+            return Bucket.UPLOAD;
+        }
+
         if (isWrite && (path.equals("/api/notifications/broadcast")
                 || path.startsWith("/api/admin/")
                 || path.startsWith("/api/worker/")
@@ -274,8 +326,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/products")
                 || path.startsWith("/api/categories")
                 || path.startsWith("/api/product-variants")
-                || path.startsWith("/api/uploads")
-                || path.startsWith("/api/payments/webhooks")
                 || (path.startsWith("/api/orders") && !path.equals("/api/orders/place")))) {
             return Bucket.ADMIN;
         }
@@ -331,7 +381,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * everyone else's search box.
      */
     private String identity(Bucket bucket, HttpServletRequest request) {
-        if (bucket != Bucket.AUTH) {
+        if (bucket != Bucket.AUTH && bucket != Bucket.WEBHOOK) {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
             if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedUser user
                     && user.getCustomerId() != null) {
@@ -342,18 +392,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private String clientIp(HttpServletRequest request) {
-        // X-Forwarded-For is trivially spoofable by the client unless a real
-        // proxy/load balancer in front of this app is overwriting it - trusting
-        // it blindly would let an attacker fake a new IP on every request and
-        // bypass the whole rate limit. Only enable rate-limit.trust-forwarded-for
-        // once you've confirmed you're actually behind a proxy that sets it
-        // (e.g. a managed platform's load balancer).
-        if (trustForwardedFor) {
-            String forwarded = request.getHeader("X-Forwarded-For");
-            if (forwarded != null && !forwarded.isBlank()) {
-                return forwarded.split(",")[0].trim();
-            }
-        }
-        return request.getRemoteAddr();
+        return clientIpResolver.resolve(request);
     }
 }

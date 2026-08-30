@@ -8,6 +8,7 @@ class OtpUserMessages {
   OtpUserMessages._();
 
   static const invalidPhone = 'Please enter a valid Indian mobile number.';
+  static const invalidEmail = 'Please enter a valid email address.';
   static const tooManyAttempts = 'Too many attempts. Please try again later.';
   static const otpExpired = 'This OTP has expired. Please request a new OTP.';
   static const wrongOtp = 'Incorrect OTP. Please try again.';
@@ -30,6 +31,9 @@ class OtpUserMessages {
     }
     if (lower.contains('valid indian mobile') || lower.contains('valid 10-digit')) {
       return invalidPhone;
+    }
+    if (lower.contains('valid email')) {
+      return invalidEmail;
     }
     if (lower.contains('unable to send otp')) {
       return sendFailure;

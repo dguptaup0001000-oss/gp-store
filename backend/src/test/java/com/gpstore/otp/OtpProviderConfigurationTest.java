@@ -61,6 +61,21 @@ class OtpProviderConfigurationTest {
     }
 
     @Test
+    void emailChannelUsesEmailProviderLocallyWithoutSmtp() {
+        OtpProvider provider = OtpProviderConfiguration.createEmail(
+                false, "", "", null);
+        assertInstanceOf(EmailOtpProvider.class, provider);
+        assertTrue(provider.issuesLocalCode());
+    }
+
+    @Test
+    void emailChannelProductionWithoutSmtpIsUnconfigured() {
+        OtpProvider provider = OtpProviderConfiguration.createEmail(
+                true, "", "", null);
+        assertInstanceOf(UnconfiguredOtpProvider.class, provider);
+    }
+
+    @Test
     void unconfiguredSendFailsClosedWithoutIssuingACode() {
         UnconfiguredOtpProvider provider = new UnconfiguredOtpProvider();
         OtpProviderException ex = assertThrows(OtpProviderException.class, () ->

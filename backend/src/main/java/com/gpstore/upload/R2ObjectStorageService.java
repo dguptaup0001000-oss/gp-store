@@ -4,8 +4,10 @@ import com.gpstore.dto.request.SignUploadRequest;
 import com.gpstore.dto.response.ConfirmedUploadResponse;
 import com.gpstore.dto.response.R2ConnectionTestResponse;
 import com.gpstore.dto.response.SignedUploadResponse;
+import com.gpstore.entity.R2StagingObject;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
+import com.gpstore.repository.R2StagingObjectRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -18,6 +20,7 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
@@ -33,6 +36,9 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -73,23 +79,51 @@ public class R2ObjectStorageService {
     private final String secretAccessKey;
     private final String bucket;
     private final String publicBaseUrl;
+    private final String imageWorkerBaseUrl;
+    private final R2StagingObjectRepository stagingObjects;
 
     private S3Client s3;
     private S3Presigner presigner;
 
+    R2ObjectStorageService(
+            String accountId,
+            String endpoint,
+            String accessKeyId,
+            String secretAccessKey,
+            String bucket,
+            String publicBaseUrl) {
+        this(accountId, endpoint, accessKeyId, secretAccessKey, bucket, publicBaseUrl, "", null);
+    }
+
+    R2ObjectStorageService(
+            String accountId,
+            String endpoint,
+            String accessKeyId,
+            String secretAccessKey,
+            String bucket,
+            String publicBaseUrl,
+            String imageWorkerBaseUrl) {
+        this(accountId, endpoint, accessKeyId, secretAccessKey, bucket, publicBaseUrl, imageWorkerBaseUrl, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public R2ObjectStorageService(
             @Value("${r2.account-id:}") String accountId,
             @Value("${r2.endpoint:}") String endpoint,
             @Value("${r2.access-key-id:}") String accessKeyId,
             @Value("${r2.secret-access-key:}") String secretAccessKey,
             @Value("${r2.bucket-name:}") String bucket,
-            @Value("${r2.public-base-url:}") String publicBaseUrl) {
+            @Value("${r2.public-base-url:}") String publicBaseUrl,
+            @Value("${r2.image-worker-base-url:}") String imageWorkerBaseUrl,
+            R2StagingObjectRepository stagingObjects) {
         this.accountId = trim(accountId);
         this.endpoint = trimTrailingSlash(trim(endpoint));
         this.accessKeyId = trim(accessKeyId);
         this.secretAccessKey = trim(secretAccessKey);
         this.bucket = trim(bucket);
         this.publicBaseUrl = trimTrailingSlash(trim(publicBaseUrl));
+        this.imageWorkerBaseUrl = trimTrailingSlash(trim(imageWorkerBaseUrl));
+        this.stagingObjects = stagingObjects;
     }
 
     @PostConstruct
@@ -120,6 +154,10 @@ public class R2ObjectStorageService {
         if (!publicBaseUrl.isBlank() && publicBaseUrl.startsWith("https://")) {
             URI publicUri = URI.create(publicBaseUrl);
             CatalogImageHosts.allow(publicUri.getHost());
+        }
+        if (workerBaseConfigured()) {
+            URI workerUri = URI.create(imageWorkerBaseUrl);
+            CatalogImageHosts.allow(workerUri.getHost());
         }
         CatalogImageDelivery.bind(this);
         log.info("R2 object storage ready for private-bucket uploads (credentials not logged).");
@@ -163,6 +201,7 @@ public class R2ObjectStorageService {
                         .putObjectRequest(put)
                         .build());
         long expiresAt = System.currentTimeMillis() / 1000 + UploadPolicy.SIGN_TTL_SECONDS;
+        rememberStaging(objectKey);
         return new SignedUploadResponse(
                 presigned.url().toString(),
                 objectKey,
@@ -170,6 +209,34 @@ public class R2ObjectStorageService {
                 "PUT",
                 Map.of("Content-Type", contentType),
                 expiresAt);
+    }
+
+    public List<SignedUploadResponse> signBatch(List<SignUploadRequest> items) {
+        requireBatchSize(items == null ? 0 : items.size());
+        List<SignedUploadResponse> signed = new ArrayList<>(items.size());
+        for (SignUploadRequest item : items) {
+            signed.add(sign(item));
+        }
+        return signed;
+    }
+
+    public List<ConfirmedUploadResponse> confirmBatch(List<String> objectKeys) {
+        requireBatchSize(objectKeys == null ? 0 : objectKeys.size());
+        List<ConfirmedUploadResponse> confirmed = new ArrayList<>(objectKeys.size());
+        for (String key : objectKeys) {
+            confirmed.add(confirm(key));
+        }
+        return confirmed;
+    }
+
+    static void requireBatchSize(int size) {
+        if (size <= 0) {
+            throw new BadRequestException("A batch must include at least one image.");
+        }
+        if (size > UploadPolicy.BATCH_MAX) {
+            throw new BadRequestException(
+                    "A batch may include at most " + UploadPolicy.BATCH_MAX + " images.");
+        }
     }
 
     public ConfirmedUploadResponse confirm(String objectKey) {
@@ -204,7 +271,54 @@ public class R2ObjectStorageService {
             tryDelete(key);
             throw new BadRequestException("That file is not a JPEG, PNG, or WebP image.");
         }
-        return new ConfirmedUploadResponse(key, signGet(key));
+        if (UploadPolicy.isStagingKey(key)) {
+            String permanent = UploadPolicy.permanentKeyFromStaging(key);
+            try {
+                s3.copyObject(CopyObjectRequest.builder()
+                        .sourceBucket(bucket)
+                        .sourceKey(key)
+                        .destinationBucket(bucket)
+                        .destinationKey(permanent)
+                        .build());
+            } catch (RuntimeException ex) {
+                log.warn("R2 staging promote failed (key not logged).");
+                throw new BadRequestException("That upload could not be verified. Try again.");
+            }
+            tryDelete(key);
+            forgetStaging(key);
+            key = permanent;
+        }
+        return new ConfirmedUploadResponse(key, deliveryUrl(key));
+    }
+
+    /**
+     * Sweeper entry point. Refuses permanent catalogue keys so a confirmed
+     * image cannot be reclaimed.
+     */
+    public void deleteStagingObject(String objectKey) {
+        String key = requireOwnedKey(objectKey);
+        if (!UploadPolicy.isStagingKey(key)) {
+            log.warn("Refusing to delete a non-staging R2 object from the sweeper.");
+            return;
+        }
+        if (s3 != null) {
+            tryDelete(key);
+        }
+        forgetStaging(key);
+    }
+
+    private void rememberStaging(String objectKey) {
+        if (stagingObjects == null || !UploadPolicy.isStagingKey(objectKey)) {
+            return;
+        }
+        stagingObjects.save(new R2StagingObject(objectKey, Instant.now()));
+    }
+
+    private void forgetStaging(String objectKey) {
+        if (stagingObjects == null) {
+            return;
+        }
+        stagingObjects.deleteById(objectKey);
     }
 
     public void deletePublicUrl(String storedOrUrl) {
@@ -235,7 +349,24 @@ public class R2ObjectStorageService {
                 RequestBody.fromBytes(bytes));
     }
 
+    /**
+     * Stable Worker URL when {@code R2_IMAGE_WORKER_BASE_URL} is set; otherwise
+     * a presigned GET. Never returns a public-bucket URL. Bytes do not
+     * transit Tomcat.
+     */
+    public String deliveryUrl(String objectKey) {
+        String key = requireOwnedKey(objectKey);
+        if (workerBaseConfigured() && !UploadPolicy.isStagingKey(key)) {
+            return imageWorkerBaseUrl + "/" + key;
+        }
+        return presignedGet(key);
+    }
+
     public String signGet(String objectKey) {
+        return deliveryUrl(objectKey);
+    }
+
+    private String presignedGet(String objectKey) {
         requireConfigured();
         String key = requireOwnedKey(objectKey);
         if (!publicBaseUrl.isBlank() && publicBaseUrl.startsWith("https://")) {
@@ -365,6 +496,10 @@ public class R2ObjectStorageService {
         } catch (RuntimeException ex) {
             log.warn("R2 delete failed (key not logged).");
         }
+    }
+
+    private boolean workerBaseConfigured() {
+        return !imageWorkerBaseUrl.isBlank() && imageWorkerBaseUrl.startsWith("https://");
     }
 
     private void requireConfigured() {

@@ -399,6 +399,14 @@ log "HEAD is $WORKING_SHA on branch $(git -C "$DEPLOY_ROOT" branch --show-curren
 python3 "$COMPOSE_DIR/docker/redis/materialize-password-file.py" "$COMPOSE_DIR" \
   || die "Could not materialize Redis password file after checkout"
 
+DISK_GUARD="$DEPLOY_ROOT/deploy/production/disk-guard.sh"
+if [ -f "$DISK_GUARD" ]; then
+  # shellcheck source=deploy/production/disk-guard.sh
+  source "$DISK_GUARD"
+  require_free_disk /var/lib/docker "${DISK_MIN_FREE_KB:-1048576}" \
+    || die "Not enough free disk to build a new backend image"
+fi
+
 echo "[3/8] Building image"
 if docker image inspect "$TARGET_IMAGE" >/dev/null 2>&1; then
   log "Image $TARGET_IMAGE already exists; rebuilding to match this tree"
@@ -480,3 +488,12 @@ echo "Previous SHA: ${PREV_SHA:-none}"
 echo "Deployment start: $STARTED_AT"
 echo "Deployment end: $ENDED_AT"
 echo "===================================="
+
+PRUNE="$DEPLOY_ROOT/deploy/production/prune-backend-images.sh"
+if [ -f "$PRUNE" ]; then
+  CURRENT_TAG="$TARGET_SHA" \
+    ROLLBACK_TAG="${PREV_SHA:-}" \
+    KEEP="${BACKEND_IMAGE_KEEP:-3}" \
+    bash "$PRUNE" \
+    || log "WARNING: image prune after success did not fully complete"
+fi

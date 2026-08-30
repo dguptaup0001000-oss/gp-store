@@ -54,11 +54,23 @@ class IdentitySequenceDriftTest {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private IdentitySequenceGuard guard;
 
+    private long categoryId;
+
+    @org.junit.jupiter.api.BeforeEach
+    void ownCategory() {
+        jdbc.update("INSERT INTO categories (name, active) VALUES ('DriftTest category', true)");
+        Long id = jdbc.queryForObject(
+                "SELECT max(id) FROM categories WHERE name = 'DriftTest category'", Long.class);
+        assertNotNull(id);
+        categoryId = id;
+    }
+
     @AfterEach
     void leaveTheSequenceUsable() {
         // Whatever a test did, no other test may inherit a broken sequence.
         guard.resync();
         jdbc.update("DELETE FROM products WHERE name LIKE 'DriftTest %'");
+        jdbc.update("DELETE FROM categories WHERE name = 'DriftTest category'");
     }
 
     private long maxProductId() {
@@ -74,7 +86,9 @@ class IdentitySequenceDriftTest {
 
     /** Exactly what a dump restore that preserves ids leaves behind. */
     private void windSequenceBackBelowTheTable() {
-        jdbc.queryForObject("SELECT setval('products_id_seq', 1, false)", Long.class);
+        Long occupied = jdbc.queryForObject("SELECT COALESCE(max(id), 0) FROM products", Long.class);
+        long nextTaken = occupied == null || occupied < 1 ? 1 : occupied;
+        jdbc.queryForObject("SELECT setval('products_id_seq', ?, false)", Long.class, nextTaken);
     }
 
     private long ensureAProductExists() {
@@ -85,8 +99,6 @@ class IdentitySequenceDriftTest {
     }
 
     private MvcResult postProduct(String name) throws Exception {
-        Long categoryId = jdbc.queryForObject("SELECT min(id) FROM categories", Long.class);
-        assertNotNull(categoryId, "test database has no categories to attach a product to");
         // Byte for byte the body AdminProductsRepository.createProduct sends.
         String body = """
                 {"name":"%s","brand":"Tata","category":{"id":%d},"active":true}

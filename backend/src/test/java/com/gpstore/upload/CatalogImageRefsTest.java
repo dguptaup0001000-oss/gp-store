@@ -17,6 +17,9 @@ class CatalogImageRefsTest {
         assertEquals(
                 "r2:gpstore/products/1/original/a.jpg",
                 CatalogImageRefs.canonicalize("gpstore/products/1/original/a.jpg"));
+        assertEquals(
+                "gpstore/staging/products/1/original/a.jpg",
+                CatalogImageRefs.objectKeyFrom("r2:gpstore/staging/products/1/original/a.jpg"));
     }
 
     @Test

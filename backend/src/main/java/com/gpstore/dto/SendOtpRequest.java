@@ -1,7 +1,6 @@
 package com.gpstore.dto;
 
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
+import com.gpstore.exception.BadRequestException;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -9,7 +8,16 @@ import lombok.Setter;
 @Setter
 public class SendOtpRequest {
 
-    @NotBlank(message = "Mobile number is required")
-    @Pattern(regexp = "^[6-9]\\d{9}$", message = "Enter a valid 10-digit Indian mobile number")
     private String mobileNumber;
+    private String email;
+
+    public String identity() {
+        if (email != null && !email.isBlank()) {
+            return email.trim();
+        }
+        if (mobileNumber != null && !mobileNumber.isBlank()) {
+            return mobileNumber.trim();
+        }
+        throw new BadRequestException("Email is required");
+    }
 }

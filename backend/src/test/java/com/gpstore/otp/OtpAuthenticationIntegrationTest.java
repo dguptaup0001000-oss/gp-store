@@ -45,6 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
+        "otp.channel=SMS",
         "msg91.enabled=false",
         "otp.sms-sending-enabled=false",
         "otp.resend-cooldown-seconds=45",

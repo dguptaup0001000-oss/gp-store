@@ -35,7 +35,10 @@ public final class CatalogImageRefs {
         if (trimmed.startsWith(R2_PREFIX)) {
             return ownedKeyOrNull(trimmed.substring(R2_PREFIX.length()));
         }
-        if (trimmed.startsWith("gpstore/products/") || trimmed.startsWith("gpstore/categories/")) {
+        if (trimmed.startsWith("gpstore/products/")
+                || trimmed.startsWith("gpstore/categories/")
+                || trimmed.startsWith("gpstore/staging/products/")
+                || trimmed.startsWith("gpstore/staging/categories/")) {
             return ownedKeyOrNull(trimmed);
         }
         URI uri;
@@ -54,9 +57,10 @@ public final class CatalogImageRefs {
             return null;
         }
         String path = uri.getPath();
+        int staging = path.indexOf("/gpstore/staging/");
         int products = path.indexOf("/gpstore/products/");
         int categories = path.indexOf("/gpstore/categories/");
-        int at = products >= 0 ? products : categories;
+        int at = firstIndex(staging, products, categories);
         if (at < 0) {
             return null;
         }
@@ -96,12 +100,25 @@ public final class CatalogImageRefs {
             return null;
         }
         String lower = normalised.toLowerCase(Locale.ROOT);
-        if (!lower.startsWith("gpstore/products/") && !lower.startsWith("gpstore/categories/")) {
+        if (!lower.startsWith("gpstore/products/")
+                && !lower.startsWith("gpstore/categories/")
+                && !lower.startsWith("gpstore/staging/products/")
+                && !lower.startsWith("gpstore/staging/categories/")) {
             return null;
         }
         if (lower.contains("%") || lower.contains("\r") || lower.contains("\n")) {
             return null;
         }
         return normalised;
+    }
+
+    private static int firstIndex(int... indexes) {
+        int best = -1;
+        for (int index : indexes) {
+            if (index >= 0 && (best < 0 || index < best)) {
+                best = index;
+            }
+        }
+        return best;
     }
 }

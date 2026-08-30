@@ -19,15 +19,15 @@ void main() {
     repository = AuthRepository(apiClient: client, tokenStorage: tokenStorage);
   });
 
-  test('login OTP request posts phone to the Part 1 endpoint', () async {
+  test('login OTP request posts email to the Part 1 endpoint', () async {
     Map<String, dynamic>? body;
     adapter.on('POST', '/api/auth/otp/login/request', (options) {
       body = Map<String, dynamic>.from(options.data as Map);
-      return const FakeResponse({'message': 'If this number is eligible, an OTP has been sent.'});
+      return const FakeResponse({'message': 'If this account is eligible, an OTP has been sent.'});
     });
 
-    await repository.requestLoginOtp(phone: '9876543210');
-    expect(body, {'phone': '9876543210'});
+    await repository.requestLoginOtp(email: 'shop@example.com');
+    expect(body, {'email': 'shop@example.com'});
   });
 
   test('login OTP verify stores the existing JWT pair', () async {
@@ -43,18 +43,18 @@ void main() {
       });
     });
 
-    final auth = await repository.verifyLoginOtp(phone: '9876543210', otp: '654321');
-    expect(body, {'phone': '9876543210', 'otp': '654321'});
+    final auth = await repository.verifyLoginOtp(email: 'shop@example.com', otp: '654321');
+    expect(body, {'email': 'shop@example.com', 'otp': '654321'});
     expect(auth.token, 'access-1');
     expect(await tokenStorage.getAccessToken(), 'access-1');
     expect(await tokenStorage.getRefreshToken(), 'refresh-1');
   });
 
-  test('password reset request never claims the number is unregistered', () async {
+  test('password reset request never claims the address is unregistered', () async {
     adapter.on('POST', '/api/auth/password-reset/request', (options) {
-      return const FakeResponse({'message': 'If this number is eligible, an OTP has been sent.'});
+      return const FakeResponse({'message': 'If this account is eligible, an OTP has been sent.'});
     });
-    await repository.requestPasswordResetOtp(phone: '9123456789');
+    await repository.requestPasswordResetOtp(email: 'unknown@example.com');
   });
 
   test('password reset verify returns a reset token that is not persisted', () async {
@@ -62,7 +62,7 @@ void main() {
       return const FakeResponse({'reset_token': 'reset-abc', 'expires_in_seconds': 600});
     });
 
-    final token = await repository.verifyPasswordResetOtp(phone: '9876543210', otp: '111111');
+    final token = await repository.verifyPasswordResetOtp(email: 'shop@example.com', otp: '111111');
     expect(token, 'reset-abc');
     expect(await tokenStorage.getAccessToken(), isNull);
     expect(await tokenStorage.getRefreshToken(), isNull);

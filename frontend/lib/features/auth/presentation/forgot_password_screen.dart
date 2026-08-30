@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/util/haptic_widgets.dart';
-import '../domain/indian_phone.dart';
 import '../domain/otp_user_messages.dart';
+import '../domain/shop_email.dart';
 import 'password_reset_providers.dart';
 
 class ForgotPasswordScreen extends ConsumerStatefulWidget {
@@ -86,7 +86,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
     final phoneStep = state.step == PasswordResetStep.enteringPhone || sending;
     final otpStep = state.step == PasswordResetStep.otpSent || verifying;
     final passwordStep = state.step == PasswordResetStep.settingPassword || completing;
-    final masked = state.mobileNumber == null ? '******' : IndianPhone.mask(state.mobileNumber!);
+    final masked = state.mobileNumber == null ? '****' : ShopEmail.mask(state.mobileNumber!);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Reset Password')),
@@ -99,7 +99,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             children: [
               Text(
                 phoneStep
-                    ? "Enter your account's mobile number. If it is eligible, we'll send a reset code."
+                    ? "Enter your account's email. If it is eligible, we'll send a reset code."
                     : otpStep
                         ? 'Enter the OTP sent to $masked'
                         : 'Choose a new password',
@@ -109,20 +109,16 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
               const SizedBox(height: 24),
               if (phoneStep) ...[
                 Semantics(
-                  label: 'Indian mobile number',
+                  label: 'Email address',
                   textField: true,
                   child: TextField(
                     controller: _mobileController,
                     autofocus: true,
                     enabled: !sending,
-                    keyboardType: TextInputType.phone,
-                    autofillHints: const [AutofillHints.telephoneNumber],
-                    maxLength: 10,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    keyboardType: TextInputType.emailAddress,
+                    autofillHints: const [AutofillHints.email],
                     decoration: const InputDecoration(
-                      labelText: 'Mobile number',
-                      prefixText: '+91 ',
-                      counterText: '',
+                      labelText: 'Email',
                     ),
                     onSubmitted: (_) => _sendOtp(),
                   ),
