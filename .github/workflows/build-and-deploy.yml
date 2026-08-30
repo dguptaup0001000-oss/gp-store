@@ -193,6 +193,7 @@ jobs:
       - name: Verify APK permission policy (no device)
         run: |
           python3 tool/verify_apk_release.py --self-test
+          python3 tool/rename_flavor_apks.py --self-test
           python3 tool/assert_app_separation.py --self-test
           python3 tool/assert_app_separation.py
           python3 tool/install_release_keystore.py --self-test
@@ -324,14 +325,8 @@ jobs:
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
-          cd build/app/outputs/flutter-apk
-          if [ ! -f app-worker-arm64-v8a-release.apk ] || [ ! -f app-worker-armeabi-v7a-release.apk ]; then
-            echo "::error::Worker --split-per-abi did not emit both ARM APKs."
-            ls -la . || true
-            exit 1
-          fi
-          mv -f app-worker-arm64-v8a-release.apk gpstore-worker-arm64.apk
-          mv -f app-worker-armeabi-v7a-release.apk gpstore-worker-armv7.apk
+          python3 tool/rename_flavor_apks.py build/app/outputs/flutter-apk \
+            worker gpstore-worker-arm64.apk gpstore-worker-armv7.apk
 
       - name: Build Delivery Worker App Bundle
         # GitHub artifact only. Skipped when the release keystore is missing
@@ -420,20 +415,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           OUT=build/app/outputs/flutter-apk
-          if [ ! -f "$OUT/app-customer-arm64-v8a-release.apk" ] || [ ! -f "$OUT/app-customer-armeabi-v7a-release.apk" ]; then
-            echo "::error::Customer --split-per-abi did not emit both ARM APKs."
-            ls -la "$OUT" || true
-            exit 1
-          fi
-          if [ ! -f "$OUT/app-admin-arm64-v8a-release.apk" ] || [ ! -f "$OUT/app-admin-armeabi-v7a-release.apk" ]; then
-            echo "::error::Admin --split-per-abi did not emit both ARM APKs."
-            ls -la "$OUT" || true
-            exit 1
-          fi
-          mv -f "$OUT/app-customer-arm64-v8a-release.apk" "$OUT/gpstore-customer-release.apk"
-          mv -f "$OUT/app-customer-armeabi-v7a-release.apk" "$OUT/gpstore-customer-armv7.apk"
-          mv -f "$OUT/app-admin-arm64-v8a-release.apk" "$OUT/gpstore-admin-release.apk"
-          mv -f "$OUT/app-admin-armeabi-v7a-release.apk" "$OUT/gpstore-admin-armv7.apk"
+          python3 tool/rename_flavor_apks.py "$OUT" \
+            customer gpstore-customer-release.apk gpstore-customer-armv7.apk \
+            admin gpstore-admin-release.apk gpstore-admin-armv7.apk
           VERSION="$(python3 -c "import pathlib,re; t=pathlib.Path('pubspec.yaml').read_text(); m=re.search(r'^version:\\s*(\\S+)', t, re.M); print(m.group(1) if m else 'unknown')")"
           python3 tool/report_apk_artifacts.py "$OUT" "$PACKAGE_SHA" "$PACKAGE_SHORT" "$VERSION"
 
