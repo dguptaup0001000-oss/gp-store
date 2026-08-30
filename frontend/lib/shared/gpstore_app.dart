@@ -26,6 +26,7 @@ class GpstoreApp extends ConsumerWidget {
     required this.onNotificationTap,
     this.onForegroundExtras,
     this.onAdminSession,
+    this.onStaleResume,
   });
 
   final String title;
@@ -39,6 +40,9 @@ class GpstoreApp extends ConsumerWidget {
   /// Start/stop admin-only watchers when the signed-in role is known.
   /// Customer leaves this null.
   final void Function(WidgetRef ref, String? role)? onAdminSession;
+
+  /// Customer invalidates cart + offers after a long background. Admin omits.
+  final void Function(WidgetRef ref)? onStaleResume;
 
   void _showForegroundBanner(RemoteMessage message) {
     final title = message.notification?.title;
@@ -87,6 +91,7 @@ class GpstoreApp extends ConsumerWidget {
     }
 
     return SessionRefresh(
+      onStaleResume: onStaleResume,
       child: MaterialApp.router(
         title: title,
         debugShowCheckedModeBanner: false,

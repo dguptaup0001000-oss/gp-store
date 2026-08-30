@@ -12,7 +12,7 @@ class CustomerRootScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SignedInHome(builder: _homeFor);
+    return const SignedInHome(builder: _homeFor);
   }
 
   static Widget _homeFor(Profile profile) {

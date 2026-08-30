@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/cart/presentation/cart_providers.dart';
-import '../../features/products/presentation/products_providers.dart';
-
 /// Refreshes the few things that genuinely go stale while the app sits in
 /// the background.
 ///
@@ -26,27 +23,35 @@ import '../../features/products/presentation/products_providers.dart';
 ///   - trending / new arrivals / recommended: slow-moving by construction,
 ///     and each one is a request for content that is probably off screen.
 ///
-/// So two requests, not nine: the CART, which is the one thing that can
-/// change from another device or another session and is shown on nearly
-/// every screen, and OFFERS, which are time-limited by definition and can
-/// expire while the app is backgrounded.
+/// The customer APK passes cart + offers invalidation. The admin APK passes
+/// nothing - it has no shopping cart, and importing cart providers here
+/// would pull the shop graph into the staff APK.
 ///
 /// And only after a real gap. Flicking to another app to check a message and
 /// coming straight back is a resume too, and refetching on every one of
 /// those would put the counter phone in a loop.
 class SessionRefresh extends ConsumerStatefulWidget {
-  const SessionRefresh({super.key, required this.child, this.staleAfter = const Duration(minutes: 5)});
+  const SessionRefresh({
+    super.key,
+    required this.child,
+    this.onStaleResume,
+    this.staleAfter = const Duration(minutes: 5),
+  });
 
   final Widget child;
 
   /// How long the app must have been away before a resume is worth a refetch.
   final Duration staleAfter;
 
+  /// Customer: invalidate cart + offers. Admin: omit.
+  final void Function(WidgetRef ref)? onStaleResume;
+
   @override
   ConsumerState<SessionRefresh> createState() => _SessionRefreshState();
 }
 
-class _SessionRefreshState extends ConsumerState<SessionRefresh> with WidgetsBindingObserver {
+class _SessionRefreshState extends ConsumerState<SessionRefresh>
+    with WidgetsBindingObserver {
   DateTime? _leftAt;
 
   @override
@@ -91,8 +96,7 @@ class _SessionRefreshState extends ConsumerState<SessionRefresh> with WidgetsBin
     // screen re-request what it is actually showing. ref.refresh would build
     // a provider nothing is watching, which is how a resume turns into a
     // request for a screen the customer cannot see.
-    ref.invalidate(cartControllerProvider);
-    ref.invalidate(activeOffersProvider);
+    widget.onStaleResume?.call(ref);
   }
 
   @override

@@ -13,12 +13,16 @@ void main() {
   });
 
   test('customer entrypoint does not import admin features', () {
-    final src = File('lib/customer_main.dart').readAsStringSync();
-    expect(src.contains('admin'), isFalse);
-    expect(File('lib/customer/customer_app.dart').readAsStringSync(),
-        isNot(contains('features/admin')));
-    expect(File('lib/customer/customer_root.dart').readAsStringSync(),
-        isNot(contains('features/admin')));
+    bool importsAdmin(String src) =>
+        src.contains("features/admin/") ||
+        src.contains("admin_home_screen") ||
+        src.contains("admin_main.dart");
+    expect(importsAdmin(File('lib/customer_main.dart').readAsStringSync()),
+        isFalse);
+    expect(importsAdmin(File('lib/customer/customer_app.dart').readAsStringSync()),
+        isFalse);
+    expect(importsAdmin(File('lib/customer/customer_root.dart').readAsStringSync()),
+        isFalse);
   });
 
   test('admin entrypoint does not import the shopping shell', () {

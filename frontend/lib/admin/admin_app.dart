@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/logging/app_log.dart';
 import '../core/notifications/admin_order_sound_providers.dart';
-import '../core/notifications/push_notification_providers.dart';
 import '../core/notifications/voice_announcement_providers.dart';
 import '../core/printing/printer_providers.dart';
 import '../core/router/app_router.dart';

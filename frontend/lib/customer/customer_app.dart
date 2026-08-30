@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/router/app_router.dart';
+import '../features/cart/presentation/cart_providers.dart';
 import '../features/orders/presentation/order_detail_screen.dart';
+import '../features/products/presentation/products_providers.dart';
 import '../shared/gpstore_app.dart';
 import 'customer_router.dart';
 
@@ -33,6 +35,10 @@ class CustomerApp extends StatelessWidget {
       title: 'GP-STORE',
       routerProvider: customerRouterProvider,
       onNotificationTap: _handleNotificationTap,
+      onStaleResume: (ref) {
+        ref.invalidate(cartControllerProvider);
+        ref.invalidate(activeOffersProvider);
+      },
     );
   }
 }

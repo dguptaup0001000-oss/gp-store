@@ -36,6 +36,7 @@ void main() {
         overrides: [productsRepositoryProvider.overrideWithValue(repository)],
         child: SessionRefresh(
           staleAfter: staleAfter,
+          onStaleResume: (ref) => ref.invalidate(activeOffersProvider),
           child: MaterialApp(
             home: Consumer(
               builder: (context, ref, _) {
