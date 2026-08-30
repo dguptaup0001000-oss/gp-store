@@ -60,8 +60,8 @@ public class UploadController {
     }
 
     /**
-     * Puts a tiny JPEG, heads it, lists that key, then deletes it.
-     * Admin-only. Never returns credentials.
+     * Direct PUT, presigned PUT (the path admin uploads use), HEAD, delete.
+     * Admin-only. Never returns credentials or presigned URLs.
      */
     @PostMapping("/r2-connection-test")
     public R2ConnectionTestResponse r2ConnectionTest() {

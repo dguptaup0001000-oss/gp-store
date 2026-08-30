@@ -1,13 +1,14 @@
 package com.gpstore.dto.response;
 
 /**
- * Admin-only probe: put a tiny object, head it, delete it. Credentials are
- * never included in this payload.
+ * Admin-only probe: direct PUT, presigned PUT, head, delete. Credentials
+ * and presigned URLs are never included in this payload.
  */
 public class R2ConnectionTestResponse {
 
     private final boolean configured;
     private final boolean uploaded;
+    private final boolean presignedUploaded;
     private final boolean verified;
     private final boolean deleted;
     private final boolean ok;
@@ -16,12 +17,14 @@ public class R2ConnectionTestResponse {
     public R2ConnectionTestResponse(
             boolean configured,
             boolean uploaded,
+            boolean presignedUploaded,
             boolean verified,
             boolean deleted,
             boolean ok,
             String message) {
         this.configured = configured;
         this.uploaded = uploaded;
+        this.presignedUploaded = presignedUploaded;
         this.verified = verified;
         this.deleted = deleted;
         this.ok = ok;
@@ -34,6 +37,10 @@ public class R2ConnectionTestResponse {
 
     public boolean isUploaded() {
         return uploaded;
+    }
+
+    public boolean isPresignedUploaded() {
+        return presignedUploaded;
     }
 
     public boolean isVerified() {
