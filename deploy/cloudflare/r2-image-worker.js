@@ -25,7 +25,7 @@ export default {
     ) {
       return new Response("Not found", { status: 404 });
     }
-    if (key.includes("..") || key.includes("staging")) {
+    if (key.includes("..") || key.startsWith("gpstore/staging/")) {
       return new Response("Not found", { status: 404 });
     }
     const object = await env.IMAGES.get(key);
@@ -35,6 +35,7 @@ export default {
     const headers = new Headers();
     headers.set("Cache-Control", "public, max-age=31536000, immutable");
     headers.set("Content-Type", object.httpMetadata?.contentType || "image/jpeg");
+    headers.set("X-Content-Type-Options", "nosniff");
     return new Response(object.body, { headers });
   },
 };

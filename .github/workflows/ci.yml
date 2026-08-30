@@ -107,28 +107,27 @@ jobs:
           chmod +x docker/backup/test_backup_health.sh
           ./docker/backup/test_backup_health.sh
 
-      # FLYWAY_ENABLED is false below (schema comes from DDL_AUTO=update
-      # instead, see that env var's own comment) - so none of the
-      # hand-written SQL migrations (db/migration/V*.sql) ever run here.
-      # The schema-migrate job below is what executes those files against a
-      # clean database. This job still stubs the three objects tests need
-      # when Flyway is off: pg_trgm (V5), order_number_seq (V6), shedlock (V3).
-      #
-        # Runs psql via the postgres:17 image (already pulled locally for the
-      # "postgres" service container above) instead of
-      # "apt-get install postgresql-client" - that step has repeatedly hung
-      # indefinitely on ubuntu-latest runners (apt mirror reachability, not
-      # anything about this repo) across multiple PRs. --network=host lets
-      # the container reach the service's published localhost:5432 port.
-      - name: Create schema objects Flyway would normally own
+      # Schema comes from Flyway, not Hibernate auto-DDL. Wipe, bootstrap
+      # (Hibernate creates domain tables V2+ assume exist, then Flyway),
+      # then verify with ddl-auto=validate so CI cannot accept a column
+      # Hibernate invented that production (validate) does not have.
+      - name: Wipe public schema so verify starts from Flyway
         run: |
-          run_psql() {
-            docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17 \
-              psql -h localhost -U gpstore -d gpstore_test -c "$1"
-          }
-          run_psql "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-          run_psql "CREATE SEQUENCE IF NOT EXISTS order_number_seq START WITH 1 INCREMENT BY 1;"
-          run_psql "CREATE TABLE IF NOT EXISTS shedlock (name VARCHAR(64) NOT NULL, lock_until TIMESTAMP NOT NULL, locked_at TIMESTAMP NOT NULL, locked_by VARCHAR(255) NOT NULL, PRIMARY KEY (name));"
+          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17 \
+            psql -h localhost -U gpstore -d gpstore_test -c \
+            "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO gpstore;"
+
+      - name: Bootstrap schema with Flyway
+        env:
+          DB_URL: jdbc:postgresql://localhost:5432/gpstore_test
+          DB_USERNAME: gpstore
+          DB_PASSWORD: gpstore_test_password
+          JWT_SECRET: ci-test-secret-not-for-real-use-1234567890123456789012345
+          DDL_AUTO: update
+          FLYWAY_ENABLED: 'true'
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: ./mvnw -B test -Pschema-bootstrap -Dtest=EmptyDatabaseBootstrapTest -DexcludedGroups=
 
       - name: Build and run tests
         env:
@@ -136,8 +135,8 @@ jobs:
           DB_USERNAME: gpstore
           DB_PASSWORD: gpstore_test_password
           JWT_SECRET: ci-test-secret-not-for-real-use-1234567890123456789012345
-          DDL_AUTO: update
-          FLYWAY_ENABLED: 'false'
+          DDL_AUTO: validate
+          FLYWAY_ENABLED: 'true'
           REDIS_HOST: localhost
           REDIS_PORT: 6379
         run: ./mvnw -B clean verify

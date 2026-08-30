@@ -12,7 +12,7 @@ def allow_key(key: str) -> bool:
         "gpstore/categories/"
     ):
         return False
-    if ".." in key or "staging" in key:
+    if ".." in key or key.startswith("gpstore/staging/"):
         return False
     return True
 
@@ -25,16 +25,23 @@ class R2ImageWorkerTest(unittest.TestCase):
         self.assertNotIn("IMAGES.put", WORKER)
         self.assertIn("Do not grant ListBucket", WORKER)
 
-    def test_source_refuses_staging_and_traversal(self):
-        self.assertIn("staging", WORKER)
+    def test_source_refuses_staging_prefix_and_traversal(self):
+        self.assertIn('key.startsWith("gpstore/staging/")', WORKER)
+        self.assertNotIn('key.includes("staging")', WORKER)
         self.assertIn("..", WORKER)
         self.assertIn("gpstore/products/", WORKER)
         self.assertIn("gpstore/categories/", WORKER)
         self.assertIn("max-age=31536000", WORKER)
+        self.assertIn("X-Content-Type-Options", WORKER)
+        self.assertIn("nosniff", WORKER)
 
     def test_permanent_catalogue_keys_are_allowed(self):
         self.assertTrue(allow_key("gpstore/products/1/original/a.jpg"))
         self.assertTrue(allow_key("gpstore/categories/9/original/b.webp"))
+        self.assertTrue(
+            allow_key("gpstore/products/1/original/staging-sale.jpg"),
+            "substring 'staging' in a product filename must not 404",
+        )
 
     def test_staging_and_other_prefixes_are_refused(self):
         self.assertFalse(allow_key("gpstore/staging/products/1/original/a.jpg"))

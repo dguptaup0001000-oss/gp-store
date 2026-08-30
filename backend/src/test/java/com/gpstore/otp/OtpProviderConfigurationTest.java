@@ -69,6 +69,23 @@ class OtpProviderConfigurationTest {
     }
 
     @Test
+    void emailChannelPassesRedisThroughToTheProvider() {
+        org.springframework.data.redis.core.StringRedisTemplate redis =
+                org.mockito.Mockito.mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.ValueOperations<String, String> ops =
+                org.mockito.Mockito.mock(org.springframework.data.redis.core.ValueOperations.class);
+        org.mockito.Mockito.when(redis.opsForValue()).thenReturn(ops);
+        OtpProvider provider = OtpProviderConfiguration.createEmail(
+                false, "", "", null, redis);
+        provider.send("shop@example.com", com.gpstore.auth.OtpPurpose.LOGIN, Duration.ofMinutes(5), "654321");
+        org.mockito.Mockito.verify(ops).set(
+                org.mockito.ArgumentMatchers.startsWith(EmailOtpProvider.REDIS_KEY_PREFIX),
+                org.mockito.ArgumentMatchers.eq(OtpCodeHashes.sha256Hex("654321")),
+                org.mockito.ArgumentMatchers.eq(Duration.ofMinutes(5)));
+    }
+
+    @Test
     void emailChannelProductionWithoutSmtpIsUnconfigured() {
         OtpProvider provider = OtpProviderConfiguration.createEmail(
                 true, "", "", null);
