@@ -26,7 +26,10 @@ backend and the try/catch around `Firebase.initializeApp()` in
    Both must match `android/app/build.gradle` productFlavors exactly.
    Download one `google-services.json` that lists **both** clients (Firebase
    Console → Project settings → Your apps → the JSON includes every Android
-   app in the project).
+   app in the project). Until that secret is updated, CI clones the existing
+   `com.gpstore.app` client so Gradle can match the new applicationIds;
+   push/Crashlytics for those IDs are not fully registered until you add
+   the apps in Firebase.
 3. Download the `google-services.json` file it offers you.
 4. Put that file at `android/app/google-services.json` in this project
    (same folder as `android/app/build.gradle`). This file is
