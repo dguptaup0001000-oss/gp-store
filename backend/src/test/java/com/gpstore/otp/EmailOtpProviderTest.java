@@ -5,16 +5,23 @@ import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.mail.javamail.JavaMailSender;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -82,6 +89,59 @@ class EmailOtpProviderTest {
         assertEquals(1, provider.issuedCacheSize());
         assertTrue(provider.peekIssuedOtpForTests("one@example.com", OtpPurpose.LOGIN).isEmpty()
                 || provider.peekIssuedOtpForTests("two@example.com", OtpPurpose.LOGIN).isEmpty());
+    }
+
+    @Test
+    @DisplayName("Redis stores a hash, never the plaintext code")
+    void redisStoresHashNotPlaintext() {
+        Map<String, String> store = new ConcurrentHashMap<>();
+        Map<String, Duration> ttls = new ConcurrentHashMap<>();
+        StringRedisTemplate redis = fakeRedis(store, ttls);
+        EmailOtpProvider provider = new EmailOtpProvider(null, "noreply@gpstore.co.in", redis);
+
+        provider.send("shop@example.com", OtpPurpose.LOGIN, Duration.ofMinutes(5), "654321");
+
+        assertEquals(1, store.size());
+        String stored = store.values().iterator().next();
+        assertNotEquals("654321", stored);
+        assertEquals(OtpCodeHashes.sha256Hex("654321"), stored);
+        assertFalse(store.values().stream().anyMatch(v -> v.contains("654321")));
+        assertEquals(Duration.ofMinutes(5), ttls.values().iterator().next());
+        assertTrue(store.keySet().iterator().next().startsWith(EmailOtpProvider.REDIS_KEY_PREFIX));
+    }
+
+    @Test
+    @DisplayName("an OTP issued on one instance verifies on another via Redis")
+    void otherInstanceVerifiesAgainstRedisHash() {
+        Map<String, String> store = new ConcurrentHashMap<>();
+        StringRedisTemplate redis = fakeRedis(store, new ConcurrentHashMap<>());
+        EmailOtpProvider issuer = new EmailOtpProvider(null, "noreply@gpstore.co.in", redis);
+        EmailOtpProvider other = new EmailOtpProvider(null, "noreply@gpstore.co.in", redis);
+
+        issuer.send("shop@example.com", OtpPurpose.LOGIN, Duration.ofMinutes(5), "654321");
+        assertTrue(other.peekIssuedOtpForTests("shop@example.com", OtpPurpose.LOGIN).isEmpty(),
+                "other JVM must not see plaintext");
+        assertTrue(other.verify("shop@example.com", "654321", OtpPurpose.LOGIN));
+        assertTrue(store.isEmpty(), "successful verify must delete the Redis hash");
+
+        EmailOtpProvider third = new EmailOtpProvider(null, "noreply@gpstore.co.in", redis);
+        assertFalse(third.verify("shop@example.com", "654321", OtpPurpose.LOGIN),
+                "a third instance has no Redis hash and no local entry");
+    }
+
+    private static StringRedisTemplate fakeRedis(Map<String, String> store, Map<String, Duration> ttls) {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        ValueOperations<String, String> ops = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(ops);
+        org.mockito.Mockito.doAnswer(inv -> {
+            store.put(inv.getArgument(0), inv.getArgument(1));
+            ttls.put(inv.getArgument(0), inv.getArgument(2));
+            return null;
+        }).when(ops).set(anyString(), anyString(), any(Duration.class));
+        when(ops.get(anyString())).thenAnswer(inv -> store.get(inv.getArgument(0)));
+        when(redis.delete(anyString())).thenAnswer(inv -> store.remove(inv.getArgument(0)) != null);
+        return redis;
     }
 
     private static EmailOtpProvider providerThatRecords(List<MimeMessage> sent) throws Exception {

@@ -5,6 +5,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.mail.javamail.JavaMailSender;
 
 import java.time.Duration;
@@ -19,6 +20,7 @@ public class OtpProviderConfiguration {
             @Value("${spring.mail.host:}") String smtpHost,
             @Value("${otp.email.from:}") String emailFrom,
             ObjectProvider<JavaMailSender> mailSender,
+            ObjectProvider<StringRedisTemplate> redis,
             @Value("${msg91.enabled:false}") boolean msg91Enabled,
             @Value("${msg91.base-url:https://control.msg91.com}") String baseUrl,
             @Value("${msg91.auth-key:}") String authKey,
@@ -28,7 +30,8 @@ public class OtpProviderConfiguration {
             @Value("${otp.sms-request-timeout-seconds:5}") int requestTimeoutSeconds,
             ObjectMapper objectMapper) {
         if (OtpChannel.from(channel) == OtpChannel.EMAIL) {
-            return createEmail(production, smtpHost, emailFrom, mailSender.getIfAvailable());
+            return createEmail(production, smtpHost, emailFrom, mailSender.getIfAvailable(),
+                    redis.getIfAvailable());
         }
         return create(
                 production,
@@ -47,14 +50,23 @@ public class OtpProviderConfiguration {
             String smtpHost,
             String from,
             JavaMailSender mailSender) {
+        return createEmail(production, smtpHost, from, mailSender, null);
+    }
+
+    static OtpProvider createEmail(
+            boolean production,
+            String smtpHost,
+            String from,
+            JavaMailSender mailSender,
+            StringRedisTemplate redis) {
         boolean smtpReady = present(smtpHost) && present(from) && mailSender != null;
         if (smtpReady) {
-            return new EmailOtpProvider(mailSender, from);
+            return new EmailOtpProvider(mailSender, from, redis);
         }
         if (production) {
             return new UnconfiguredOtpProvider();
         }
-        return new EmailOtpProvider(null, from);
+        return new EmailOtpProvider(null, from, redis);
     }
 
     /**
