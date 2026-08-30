@@ -111,6 +111,8 @@ class WorkerPackScanTest {
                 + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("UPDATE orders SET packed_by_partner_id = NULL, assigned_worker_partner_id = NULL "
                 + "WHERE order_number LIKE ?", PREFIX + "%");
+        jdbc.update("DELETE FROM deliveries WHERE order_id IN "
+                + "(SELECT id FROM orders WHERE order_number LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM orders WHERE order_number LIKE ?", PREFIX + "%");
         jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE full_name LIKE ?", MARKER + "%");
         jdbc.update("DELETE FROM addresses WHERE full_name LIKE ?", MARKER + "%");
@@ -133,20 +135,28 @@ class WorkerPackScanTest {
         // instead of racing it; the deletes then have a stable target, and
         // anything that still slipped in leaves them retired rather than
         // failing the test.
-        jdbc.update("UPDATE delivery_partners SET available = false, active = false WHERE name LIKE ?",
-                PREFIX + "%");
+        jdbc.update("UPDATE delivery_partners SET available = false, active = false "
+                + "WHERE name LIKE ? OR account_customer_id IN "
+                + "(SELECT id FROM customers WHERE full_name LIKE ?)",
+                PREFIX + "%", MARKER + "%");
         try {
             jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
                     + "(SELECT id FROM delivery_batches WHERE delivery_partner_id IN "
-                    + " (SELECT id FROM delivery_partners WHERE name LIKE ?))", PREFIX + "%");
+                    + " (SELECT id FROM delivery_partners WHERE name LIKE ? "
+                    + "  OR account_customer_id IN (SELECT id FROM customers WHERE full_name LIKE ?)))",
+                    PREFIX + "%", MARKER + "%");
             jdbc.update("DELETE FROM delivery_batches WHERE delivery_partner_id IN "
-                    + "(SELECT id FROM delivery_partners WHERE name LIKE ?)", PREFIX + "%");
+                    + "(SELECT id FROM delivery_partners WHERE name LIKE ? "
+                    + " OR account_customer_id IN (SELECT id FROM customers WHERE full_name LIKE ?))",
+                    PREFIX + "%", MARKER + "%");
             jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", PREFIX + "%");
         } catch (org.springframework.dao.DataIntegrityViolationException retiredButReferenced) {
             // Already unavailable and inactive, so inert. A handful of leftover
             // rows is a far smaller problem than a red suite that says nothing
             // about the code.
         }
+        jdbc.update("DELETE FROM delivery_partners WHERE account_customer_id IN "
+                + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM notifications WHERE customer_id IN "
                 + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM customers WHERE full_name LIKE ?", MARKER + "%");
