@@ -25,6 +25,7 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.MetadataDirective;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -35,12 +36,17 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Cloudflare R2 via the S3 API. All secrets stay on Hostinger. The bucket
@@ -50,7 +56,13 @@ import java.util.Map;
 public class R2ObjectStorageService {
 
     private static final Logger log = LoggerFactory.getLogger(R2ObjectStorageService.class);
-    private static final String CACHE_CONTROL = "private, max-age=31536000, immutable";
+    static final String CACHE_CONTROL = "private, max-age=31536000, immutable";
+    /**
+     * Java's HttpClient sets these from the URL / body. They still belong in
+     * the advertised map so Flutter (and any other client) sends them.
+     */
+    private static final Set<String> HTTP_CLIENT_MANAGED_HEADERS = Set.of(
+            "host", "content-length", "connection", "expect", "upgrade", "transfer-encoding");
     /** Must outlive CACHE_TTL_MS (default 10 minutes). Signed URLs are cached on catalogue DTOs. */
     static final int GET_TTL_SECONDS = 3600;
 
@@ -126,6 +138,18 @@ public class R2ObjectStorageService {
         this.stagingObjects = stagingObjects;
     }
 
+    /**
+     * Test-only. Clients already point at an S3-compatible stub so
+     * {@link #start()} / endpoint-host checks are skipped.
+     */
+    static R2ObjectStorageService againstStub(S3Client s3, S3Presigner presigner, String bucket) {
+        R2ObjectStorageService service = new R2ObjectStorageService(
+                "acct", "https://acct.r2.cloudflarestorage.com", "AKID", "secret", bucket, "");
+        service.s3 = s3;
+        service.presigner = presigner;
+        return service;
+    }
+
     @PostConstruct
     void start() {
         if (!isConfigured()) {
@@ -188,12 +212,15 @@ public class R2ObjectStorageService {
         String contentType = UploadPolicy.normalizedContentType(request.getContentType());
         String objectKey = UploadPolicy.objectKey(
                 request.getImageType(), request.getOwnerId(), contentType);
+        // Do not set cacheControl here. SigV4 signs every header on this
+        // request. A signed Cache-Control that is missing from the advertised
+        // map is a 403 — that is how admin upload stayed broken. Cache-Control
+        // is applied on confirm()'s server-side copy instead.
         PutObjectRequest put = PutObjectRequest.builder()
                 .bucket(bucket)
                 .key(objectKey)
                 .contentType(contentType)
                 .contentLength(request.getContentLength())
-                .cacheControl(CACHE_CONTROL)
                 .build();
         PresignedPutObjectRequest presigned = presigner.presignPutObject(
                 PutObjectPresignRequest.builder()
@@ -207,8 +234,24 @@ public class R2ObjectStorageService {
                 objectKey,
                 CatalogImageRefs.storedRef(objectKey),
                 "PUT",
-                Map.of("Content-Type", contentType),
+                advertisedHeaders(presigned),
                 expiresAt);
+    }
+
+    /**
+     * The advertised map is the only list of headers a client must send.
+     * ANY header the presigner signed MUST appear here. Flutter's
+     * {@code _putBytes} sends this map and nothing else.
+     */
+    static Map<String, String> advertisedHeaders(PresignedPutObjectRequest presigned) {
+        Map<String, String> headers = new LinkedHashMap<>();
+        presigned.signedHeaders().forEach((name, values) -> {
+            if (values == null || values.isEmpty()) {
+                return;
+            }
+            headers.put(name, values.getFirst());
+        });
+        return Map.copyOf(headers);
     }
 
     public List<SignedUploadResponse> signBatch(List<SignUploadRequest> items) {
@@ -274,12 +317,7 @@ public class R2ObjectStorageService {
         if (UploadPolicy.isStagingKey(key)) {
             String permanent = UploadPolicy.permanentKeyFromStaging(key);
             try {
-                s3.copyObject(CopyObjectRequest.builder()
-                        .sourceBucket(bucket)
-                        .sourceKey(key)
-                        .destinationBucket(bucket)
-                        .destinationKey(permanent)
-                        .build());
+                s3.copyObject(promoteCopy(bucket, key, permanent, head.contentType()));
             } catch (RuntimeException ex) {
                 log.warn("R2 staging promote failed (key not logged).");
                 throw new BadRequestException("That upload could not be verified. Try again.");
@@ -383,31 +421,113 @@ public class R2ObjectStorageService {
 
     public R2ConnectionTestResponse connectionTest() {
         requireConfigured();
-        String key = UploadPolicy.objectKey(ImageKind.PRODUCT, null, "image/jpeg");
         boolean uploaded = false;
+        boolean presignedUploaded = false;
         boolean verified = false;
         boolean deleted = false;
+
+        String directKey = UploadPolicy.objectKey(ImageKind.PRODUCT, null, "image/jpeg");
         try {
-            putBytes(key, "image/jpeg", TINY_JPEG);
+            putBytes(directKey, "image/jpeg", TINY_JPEG);
             uploaded = true;
             HeadObjectResponse head = s3.headObject(
-                    HeadObjectRequest.builder().bucket(bucket).key(key).build());
+                    HeadObjectRequest.builder().bucket(bucket).key(directKey).build());
             long size = head.contentLength() == null ? 0L : head.contentLength();
             // Head is enough. Many R2 API tokens omit ListBucket (403).
             verified = size == TINY_JPEG.length;
-            tryDelete(key);
-            deleted = !objectExists(key);
-            boolean ok = uploaded && verified && deleted;
-            return new R2ConnectionTestResponse(
-                    true, uploaded, verified, deleted, ok,
-                    ok ? "R2 connection test passed." : "R2 connection test did not fully complete.");
+            tryDelete(directKey);
+            deleted = !objectExists(directKey);
         } catch (RuntimeException ex) {
-            tryDelete(key);
-            log.warn("R2 connection test failed (credentials not logged).");
-            return new R2ConnectionTestResponse(
-                    true, uploaded, verified, deleted, false,
-                    "R2 connection test failed. Check bucket name, endpoint, and API token on the VPS.");
+            tryDelete(directKey);
+            log.warn("R2 connection test direct PUT failed (credentials not logged).");
         }
+
+        String presignedKey = null;
+        try {
+            SignUploadRequest signRequest = new SignUploadRequest();
+            signRequest.setImageType(ImageKind.PRODUCT);
+            signRequest.setContentType("image/jpeg");
+            signRequest.setContentLength((long) TINY_JPEG.length);
+            SignedUploadResponse signed = sign(signRequest);
+            presignedKey = signed.getObjectKey();
+            int presignedStatus = putUsingAdvertisedHeaders(signed, TINY_JPEG);
+            presignedUploaded = presignedStatus >= 200 && presignedStatus < 300;
+            if (!presignedUploaded) {
+                log.warn("R2 presigned PUT connection test failed status={} (URL not logged).",
+                        presignedStatus);
+            }
+        } catch (RuntimeException ex) {
+            log.warn("R2 connection test presigned PUT failed (credentials not logged).");
+        } finally {
+            if (presignedKey != null) {
+                tryDelete(presignedKey);
+                forgetStaging(presignedKey);
+            }
+        }
+
+        boolean ok = uploaded && presignedUploaded && verified && deleted;
+        return new R2ConnectionTestResponse(
+                true, uploaded, presignedUploaded, verified, deleted, ok,
+                connectionTestMessage(uploaded, presignedUploaded, verified, deleted));
+    }
+
+    static String connectionTestMessage(
+            boolean uploaded, boolean presignedUploaded, boolean verified, boolean deleted) {
+        if (uploaded && presignedUploaded && verified && deleted) {
+            return "R2 connection test passed (direct PUT and presigned PUT).";
+        }
+        if (uploaded && !presignedUploaded) {
+            return "R2 direct PUT succeeded but the presigned PUT failed. Admin uploads use the presigned path.";
+        }
+        if (!uploaded && presignedUploaded) {
+            return "R2 presigned PUT succeeded but the direct PUT failed.";
+        }
+        if (uploaded && presignedUploaded && !verified) {
+            return "R2 uploads succeeded but HEAD verification failed.";
+        }
+        if (uploaded && presignedUploaded && !deleted) {
+            return "R2 uploads succeeded but the probe object could not be deleted.";
+        }
+        return "R2 connection test failed. Check bucket name, endpoint, and API token on the VPS.";
+    }
+
+    /**
+     * PUT using only the advertised header map. Does not add Cache-Control
+     * or any other header the client was not told to send. The URL is never
+     * logged — it contains the account id and access key id.
+     */
+    static int putUsingAdvertisedHeaders(SignedUploadResponse signed, byte[] bytes) {
+        try {
+            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(signed.getUploadUrl()))
+                    .timeout(Duration.ofSeconds(20))
+                    .PUT(HttpRequest.BodyPublishers.ofByteArray(bytes));
+            for (Map.Entry<String, String> header : signed.getHeaders().entrySet()) {
+                if (HTTP_CLIENT_MANAGED_HEADERS.contains(header.getKey().toLowerCase(Locale.ROOT))) {
+                    continue;
+                }
+                builder.header(header.getKey(), header.getValue());
+            }
+            HttpResponse<Void> response = HttpClient.newHttpClient().send(
+                    builder.build(), HttpResponse.BodyHandlers.discarding());
+            return response.statusCode();
+        } catch (Exception ex) {
+            throw new IllegalStateException("Presigned PUT failed (URL not logged).", ex);
+        }
+    }
+
+    static CopyObjectRequest promoteCopy(
+            String bucket, String stagingKey, String permanentKey, String contentType) {
+        CopyObjectRequest.Builder copy = CopyObjectRequest.builder()
+                .sourceBucket(bucket)
+                .sourceKey(stagingKey)
+                .destinationBucket(bucket)
+                .destinationKey(permanentKey)
+                .metadataDirective(MetadataDirective.REPLACE)
+                .cacheControl(CACHE_CONTROL);
+        if (contentType != null && !contentType.isBlank()) {
+            copy.contentType(contentType);
+        }
+        return copy.build();
     }
 
     private boolean hasAllowedImageMagic(String key) {

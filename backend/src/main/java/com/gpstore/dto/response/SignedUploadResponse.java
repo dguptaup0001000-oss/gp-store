@@ -46,6 +46,11 @@ public class SignedUploadResponse {
         return method;
     }
 
+    /**
+     * Headers the client must send on the presigned PUT. This map is the
+     * only contract: any header signed into the URL that is missing here
+     * is a 403. Do not add extra headers the client was not told to send.
+     */
     public Map<String, String> getHeaders() {
         return headers;
     }

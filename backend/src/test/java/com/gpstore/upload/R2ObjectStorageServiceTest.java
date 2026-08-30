@@ -5,6 +5,8 @@ import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
+import software.amazon.awssdk.services.s3.model.MetadataDirective;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -128,5 +130,42 @@ class R2ObjectStorageServiceTest {
             items.add(request);
         }
         assertThrows(ConflictException.class, () -> r2.signBatch(items));
+    }
+
+    @Test
+    void promoteCopySetsImmutableCacheControlOnPermanentObject() {
+        CopyObjectRequest copy = R2ObjectStorageService.promoteCopy(
+                "gp-store",
+                "gpstore/staging/products/new/original/a.jpg",
+                "gpstore/products/new/original/a.jpg",
+                "image/jpeg");
+
+        assertEquals(MetadataDirective.REPLACE, copy.metadataDirective());
+        assertEquals(R2ObjectStorageService.CACHE_CONTROL, copy.cacheControl());
+        assertEquals("image/jpeg", copy.contentType());
+        assertEquals("gpstore/staging/products/new/original/a.jpg", copy.sourceKey());
+        assertEquals("gpstore/products/new/original/a.jpg", copy.destinationKey());
+    }
+
+    @Test
+    void connectionTestMessageNamesTheFailedPath() {
+        assertEquals(
+                "R2 connection test passed (direct PUT and presigned PUT).",
+                R2ObjectStorageService.connectionTestMessage(true, true, true, true));
+        assertEquals(
+                "R2 direct PUT succeeded but the presigned PUT failed. Admin uploads use the presigned path.",
+                R2ObjectStorageService.connectionTestMessage(true, false, false, false));
+        assertEquals(
+                "R2 presigned PUT succeeded but the direct PUT failed.",
+                R2ObjectStorageService.connectionTestMessage(false, true, false, false));
+        assertEquals(
+                "R2 uploads succeeded but HEAD verification failed.",
+                R2ObjectStorageService.connectionTestMessage(true, true, false, false));
+        assertEquals(
+                "R2 uploads succeeded but the probe object could not be deleted.",
+                R2ObjectStorageService.connectionTestMessage(true, true, true, false));
+        assertEquals(
+                "R2 connection test failed. Check bucket name, endpoint, and API token on the VPS.",
+                R2ObjectStorageService.connectionTestMessage(false, false, false, false));
     }
 }
