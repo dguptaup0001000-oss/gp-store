@@ -5,6 +5,7 @@ import com.gpstore.entity.CartItem;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Explicit response shape instead of returning the raw Cart entity directly.
@@ -29,26 +30,30 @@ public class CartResponse {
     }
 
     public static CartResponse from(Cart cart) {
+        return from(cart, Map.of());
+    }
+
+    /**
+     * @param stockByVariantId live inventory for the customer's cart. A
+     *                         missing key means "do not apply a stock gate"
+     *                         (admin listings). A present value is compared
+     *                         to the line quantity.
+     */
+    public static CartResponse from(Cart cart, Map<Long, Integer> stockByVariantId) {
         if (cart == null) {
             return new CartResponse(null, List.of(), BigDecimal.ZERO, 0);
         }
 
+        Map<Long, Integer> stock = stockByVariantId == null ? Map.of() : stockByVariantId;
         List<CartItemResponse> items = cart.getItems().stream()
-                .map(CartItemResponse::from)
+                .map(item -> CartItemResponse.from(item, stock))
                 .toList();
 
-        // Derived live from the actual items list rather than trusting
-        // cart.getTotalItems()/getTotalAmount() - those denormalized columns
-        // are only as correct as whatever write path last touched them, and
-        // any cart row left over from before a write-path bug was fixed
-        // (e.g. the old clearCart() that deleted items without zeroing these
-        // columns) would otherwise keep showing stale totals forever, since
-        // nothing re-derives them until the next add/update/remove. Computing
-        // straight from `items` here makes the response self-correcting on
-        // every read, independent of how the row got out of sync.
-        int totalItems = cart.getItems().stream().mapToInt(CartItem::getQuantity).sum();
-        BigDecimal totalAmount = cart.getItems().stream()
-                .map(CartItem::getTotalPrice)
+        // Derived live from the mapped lines so a catalog price change
+        // shows on the next cart GET without waiting for a mutation.
+        int totalItems = items.stream().mapToInt(CartItemResponse::getQuantity).sum();
+        BigDecimal totalAmount = items.stream()
+                .map(CartItemResponse::getTotalPrice)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         return new CartResponse(cart.getId(), items, totalAmount, totalItems);
@@ -93,6 +98,10 @@ public class CartResponse {
         }
 
         static CartItemResponse from(CartItem item) {
+            return from(item, Map.of());
+        }
+
+        static CartItemResponse from(CartItem item, Map<Long, Integer> stockByVariantId) {
             var variant = item.getProductVariant();
             var product = variant != null ? variant.getProduct() : null;
 
@@ -108,6 +117,15 @@ public class CartResponse {
                     && Boolean.TRUE.equals(variant.getAvailable())
                     && product != null
                     && Boolean.TRUE.equals(product.getActive());
+            if (isAvailable && variant.getId() != null && stockByVariantId.containsKey(variant.getId())) {
+                Integer stock = stockByVariantId.get(variant.getId());
+                isAvailable = stock != null && stock >= item.getQuantity();
+            }
+
+            BigDecimal unitPrice = variant != null && variant.getSellingPrice() != null
+                    ? variant.getSellingPrice()
+                    : item.getPrice();
+            BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(item.getQuantity()));
 
             return new CartItemResponse(
                     item.getId(),
@@ -126,8 +144,8 @@ public class CartResponse {
                     variant != null && variant.getImageUrl() != null
                             ? com.gpstore.upload.CatalogImageDelivery.forClient(variant.getImageUrl())
                             : null,
-                    item.getPrice(),
-                    item.getTotalPrice(),
+                    unitPrice,
+                    lineTotal,
                     variant != null ? variant.getMrp() : null,
                     isAvailable
             );

@@ -35,10 +35,8 @@ something is done when it isn't.
    though the in-app launcher uses a GP bag mark).
 4. **Paste the public Privacy Policy URL into Play Console:**
    `https://dguptaup0001000-oss.github.io/gp-store/privacy-policy.html`
-   (file is `web/privacy-policy.html`). **Live check 2026-08-29: this URL
-   returned HTTP 404.** Account deletion at the same host returned 200.
-   Run **Deploy GitHub Pages** on `main` before pasting the privacy URL
-   into Play Console.
+   (file is `web/privacy-policy.html`). **Live check 2026-08-30: this URL
+   returned HTTP 200.** Account deletion at the same host also returned 200.
 5. **Store listing assets**: a 512x512 app icon, a 1024x500 feature
    graphic, and at least 2 phone screenshots. I can't generate real
    screenshots of a running app I've never run - these need to come from

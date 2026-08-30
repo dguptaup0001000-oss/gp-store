@@ -268,9 +268,18 @@ class _CartSummary extends ConsumerWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
               ],
             ),
+            if (cart.items.any((item) => item.available == false)) ...[
+              const Text(
+                'Remove unavailable items before checkout.',
+                style: TextStyle(color: AppColors.error, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+            ],
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: hapticize(() {
+              onPressed: cart.items.any((item) => item.available == false)
+                  ? null
+                  : hapticize(() {
                 HapticFeedback.mediumImpact();
 
                 // Start loading the address list BEFORE navigating. Checkout

@@ -9,11 +9,14 @@ import com.gpstore.entity.IdempotencyRecord;
 import com.gpstore.entity.Inventory;
 import com.gpstore.entity.Order;
 import com.gpstore.entity.OrderItem;
+import com.gpstore.entity.Payment;
 import com.gpstore.entity.Product;
 import com.gpstore.entity.ProductVariant;
 import com.gpstore.dto.request.InitiatePaymentRequest;
 import com.gpstore.enums.DiscountType;
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.enums.PaymentMethod;
+import com.gpstore.enums.PaymentStatus;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.repository.CartItemRepository;
 import com.gpstore.repository.CartRepository;
@@ -89,10 +92,7 @@ class ConcurrencyIntegrationTest {
     @Test
     void concurrentPurchasesNeverOversellInventory() throws InterruptedException {
         Long productVariantId = createProductVariant("Overselling Test Item");
-        Inventory inventory = new Inventory();
-        inventory.setProductVariant(productVariantRepository.findById(productVariantId).orElseThrow());
-        inventory.setStock(10);
-        inventory = inventoryRepository.save(inventory);
+        Inventory inventory = setStock(productVariantId, 10);
 
         int attackers = 20;
         ExecutorService pool = Executors.newFixedThreadPool(attackers);
@@ -366,7 +366,7 @@ class ConcurrencyIntegrationTest {
         assertTrue(done.await(30, TimeUnit.SECONDS), "All add-to-cart attempts should finish within 30s");
         pool.shutdown();
 
-        assertEquals(attackers, successCount.get(), "Every concurrent add-1 call should succeed - there's no stock/limit check here");
+        assertEquals(attackers, successCount.get(), "Every concurrent add-1 call should succeed when stock covers the total");
         assertEquals(0, failureCount.get(), "None of these should fail");
 
         Cart cart = cartRepository.findByCustomerId(customerId).orElseThrow();
@@ -393,10 +393,7 @@ class ConcurrencyIntegrationTest {
         int stockAfterOrderPlaced = 6;
 
         Long variantId = createProductVariant("Cancellation Race Test Item");
-        Inventory inventory = new Inventory();
-        inventory.setProductVariant(productVariantRepository.findById(variantId).orElseThrow());
-        inventory.setStock(stockAfterOrderPlaced);
-        inventory = inventoryRepository.save(inventory);
+        setStock(variantId, stockAfterOrderPlaced);
 
         Long orderId = createOrder();
         Order order = orderRepository.findById(orderId).orElseThrow();
@@ -464,9 +461,10 @@ class ConcurrencyIntegrationTest {
      */
     @Test
     void concurrentOrderStatusUpdatesApplyExactlyOnce() throws InterruptedException {
-        Long orderId = createOrder();
-        // createOrder() starts the order at PENDING_CONFIRMATION - the only
-        // valid transition from there is to CONFIRMED.
+        Long orderId = createPaidOnlineOrder();
+        // Paid ONLINE order at PENDING_CONFIRMATION - the only valid
+        // transition from there is to CONFIRMED. Without a SUCCESS payment
+        // the new confirm gate refuses the advance.
 
         int attackers = 10;
         ExecutorService pool = Executors.newFixedThreadPool(attackers);
@@ -526,9 +524,26 @@ class ConcurrencyIntegrationTest {
         order.setOrderStatus(OrderStatus.PENDING_CONFIRMATION);
         order.setOrderDate(LocalDateTime.now());
         order.setActive(true);
-        order = orderRepository.save(order);
+        return orderRepository.save(order).getId();
+    }
 
-        return order.getId();
+    private Long createPaidOnlineOrder() {
+        Long orderId = createOrder();
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        Payment payment = new Payment();
+        payment.setOrder(order);
+        payment.setAmount(order.getTotalAmount());
+        payment.setPaymentMethod(PaymentMethod.ONLINE);
+        payment.setPaymentStatus(PaymentStatus.SUCCESS);
+        payment.setActive(true);
+        paymentRepository.save(payment);
+        return orderId;
+    }
+
+    private Inventory setStock(Long variantId, int stock) {
+        Inventory inventory = inventoryRepository.findByProductVariantId(variantId).orElseThrow();
+        inventory.setStock(stock);
+        return inventoryRepository.save(inventory);
     }
 
     private Long createProductVariant(String namePrefix) {
@@ -554,6 +569,11 @@ class ConcurrencyIntegrationTest {
         variant.setAvailable(true);
         variant.setActive(true);
         variant = productVariantRepository.save(variant);
+
+        Inventory inventory = new Inventory();
+        inventory.setProductVariant(variant);
+        inventory.setStock(100);
+        inventoryRepository.save(inventory);
 
         return variant.getId();
     }

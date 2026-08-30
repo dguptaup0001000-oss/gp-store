@@ -8,10 +8,12 @@ import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
 
 import com.gpstore.repository.CustomerRepository;
+import com.gpstore.repository.InventoryRepository;
 import com.gpstore.repository.ProductVariantRepository;
 import com.gpstore.repository.CartItemRepository;
 
 import com.gpstore.entity.Cart;
+import com.gpstore.entity.Inventory;
 import com.gpstore.repository.CartRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,17 +28,20 @@ public class CartService {
     private final CustomerRepository customerRepository;
     private final ProductVariantRepository productVariantRepository;
     private final CartItemRepository cartItemRepository;
+    private final InventoryRepository inventoryRepository;
 
     public CartService(
             CartRepository cartRepository,
             CustomerRepository customerRepository,
             ProductVariantRepository productVariantRepository,
-            CartItemRepository cartItemRepository) {
+            CartItemRepository cartItemRepository,
+            InventoryRepository inventoryRepository) {
 
         this.cartRepository = cartRepository;
         this.customerRepository = customerRepository;
         this.productVariantRepository = productVariantRepository;
         this.cartItemRepository = cartItemRepository;
+        this.inventoryRepository = inventoryRepository;
     }
 
     public Cart saveCart(Cart cart) {
@@ -97,7 +102,7 @@ public class CartService {
      */
     @Transactional(readOnly = true)
     public com.gpstore.dto.response.CartResponse getCustomerCartResponse(Long customerId) {
-        return com.gpstore.dto.response.CartResponse.from(getCustomerCart(customerId));
+        return toCustomerResponse(getCustomerCart(customerId));
     }
 
     /**
@@ -115,19 +120,18 @@ public class CartService {
     @Transactional
     public com.gpstore.dto.response.CartResponse addToCartResponse(
             Long customerId, Long variantId, Integer quantity) {
-        return com.gpstore.dto.response.CartResponse.from(addToCart(customerId, variantId, quantity));
+        return toCustomerResponse(addToCart(customerId, variantId, quantity));
     }
 
     @Transactional
     public com.gpstore.dto.response.CartResponse updateItemQuantityResponse(
             Long customerId, Long cartItemId, int newQuantity) {
-        return com.gpstore.dto.response.CartResponse.from(
-                updateItemQuantity(customerId, cartItemId, newQuantity));
+        return toCustomerResponse(updateItemQuantity(customerId, cartItemId, newQuantity));
     }
 
     @Transactional
     public com.gpstore.dto.response.CartResponse removeItemResponse(Long customerId, Long cartItemId) {
-        return com.gpstore.dto.response.CartResponse.from(removeItem(customerId, cartItemId));
+        return toCustomerResponse(removeItem(customerId, cartItemId));
     }
 
     @Transactional
@@ -203,9 +207,14 @@ public class CartService {
                 .findByCartIdAndProductVariantId(cart.getId(), variant.getId())
                 .orElse(null);
 
+        int nextQuantity = (existingItem != null ? existingItem.getQuantity() : 0) + quantity;
+        requireStockFor(variant.getId(), nextQuantity, variant.getProduct() != null
+                ? variant.getProduct().getName() : "This item");
+
         if (existingItem != null) {
-            existingItem.setQuantity(existingItem.getQuantity() + quantity);
-            existingItem.setTotalPrice(existingItem.getPrice().multiply(BigDecimal.valueOf(existingItem.getQuantity())));
+            existingItem.setQuantity(nextQuantity);
+            existingItem.setPrice(variant.getSellingPrice());
+            existingItem.setTotalPrice(variant.getSellingPrice().multiply(BigDecimal.valueOf(nextQuantity)));
             cartItemRepository.save(existingItem);
         } else {
             CartItem cartItem = new CartItem();
@@ -246,6 +255,12 @@ public class CartService {
             cart.getItems().remove(item);
             cartItemRepository.delete(item);
         } else {
+            var variant = item.getProductVariant();
+            requireStockFor(variant.getId(), newQuantity, variant.getProduct() != null
+                    ? variant.getProduct().getName() : "This item");
+            if (variant.getSellingPrice() != null) {
+                item.setPrice(variant.getSellingPrice());
+            }
             item.setQuantity(newQuantity);
             item.setTotalPrice(item.getPrice().multiply(BigDecimal.valueOf(newQuantity)));
             cartItemRepository.save(item);
@@ -288,6 +303,43 @@ public class CartService {
         }
 
         return item;
+    }
+
+    private com.gpstore.dto.response.CartResponse toCustomerResponse(Cart cart) {
+        if (cart == null) {
+            return com.gpstore.dto.response.CartResponse.from(null);
+        }
+        java.util.LinkedHashSet<Long> variantIds = new java.util.LinkedHashSet<>();
+        for (CartItem item : cart.getItems()) {
+            if (item.getProductVariant() == null || item.getProductVariant().getId() == null) {
+                continue;
+            }
+            variantIds.add(item.getProductVariant().getId());
+        }
+        java.util.Map<Long, Integer> stock = new java.util.HashMap<>();
+        if (!variantIds.isEmpty()) {
+            for (Object[] row : inventoryRepository.findStockByProductVariantIds(variantIds)) {
+                Long variantId = (Long) row[0];
+                Integer qty = row[1] instanceof Number n ? n.intValue() : 0;
+                stock.put(variantId, qty);
+            }
+            for (Long variantId : variantIds) {
+                stock.putIfAbsent(variantId, 0);
+            }
+        }
+        return com.gpstore.dto.response.CartResponse.from(cart, stock);
+    }
+
+    private void requireStockFor(Long variantId, int quantity, String productName) {
+        int stock = inventoryRepository.findByProductVariantId(variantId)
+                .map(row -> row.getStock() == null ? 0 : row.getStock())
+                .orElse(0);
+        if (stock < quantity) {
+            throw new ConflictException(
+                    stock <= 0
+                            ? productName + " is out of stock."
+                            : "Only " + stock + " left of " + productName + ".");
+        }
     }
 
     private Cart recalculateAndSave(Cart cart) {

@@ -8,7 +8,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 
 /**
- * Production stand-in when no SMS OTP provider is configured.
+ * Production stand-in when email SMTP or an SMS OTP provider is missing.
  *
  * The process is allowed to start (catalog, password login, health). Send and
  * resend fail closed so a customer is never told an OTP was delivered. Never
@@ -22,10 +22,14 @@ public class UnconfiguredOtpProvider implements OtpProvider {
     static final String GENERIC_SEND_FAILURE = "Unable to send OTP right now. Please try again.";
 
     public UnconfiguredOtpProvider() {
-        log.warn("OTP SMS provider is unconfigured. Password login still works. "
-                + "LOGIN and password-reset OTP will not be delivered until a real "
-                + "provider (MSG91_AUTH_KEY and MSG91_OTP_TEMPLATE_ID) is set. "
+        this("OTP provider is unconfigured. Password login still works. "
+                + "Email OTP needs SMTP_HOST and OTP_EMAIL_FROM. "
+                + "SMS OTP needs MSG91_AUTH_KEY and MSG91_OTP_TEMPLATE_ID. "
                 + "The mock provider is not used in production.");
+    }
+
+    public UnconfiguredOtpProvider(String reason) {
+        log.warn(reason);
     }
 
     @Override

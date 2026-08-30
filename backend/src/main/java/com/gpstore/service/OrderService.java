@@ -234,7 +234,7 @@ public class OrderService {
                 if (deliverable && deliveryFee.signum() == 0) {
                     freeDeliveryApplied = true;
                 }
-            } catch (Exception ex) {
+            } catch (BadRequestException ex) {
                 couponError = ex.getMessage();
             }
         }
@@ -689,7 +689,9 @@ public class OrderService {
             // customer. generateForOrder has no such internal guard, so it
             // gets one here, same pattern as the other three.
             notificationService.notifyOrderStatusChange(placedOrder, placedOrder.getOrderStatus());
-            notificationService.notifyAdminsOfNewOrder(placedOrder);
+            if (placedOrder.getOrderStatus() == OrderStatus.CONFIRMED) {
+                notificationService.notifyAdminsOfNewOrder(placedOrder);
+            }
             auditLogService.log("ORDER_PLACED", "Order", placedOrderId,
                     "total=" + placedOrder.getTotalAmount() + ", paymentMethod=" + request.getPaymentMethod());
             // Invoice generation and delivery assignment deliberately do
@@ -804,14 +806,43 @@ public class OrderService {
             return new AdminNewOrdersSinceResponse(requestedAfterId, List.of());
         }
         List<AdminNewOrdersSinceResponse.AdminNewOrderAlert> alerts = new ArrayList<>();
+        Long unpaidHold = null;
+        Long lastAdvanced = null;
         for (Order order : found) {
-            alerts.add(new AdminNewOrdersSinceResponse.AdminNewOrderAlert(
-                    order.getId(),
-                    displayNameOf(order),
-                    plainAmountOf(order)));
+            if (order.getOrderStatus() == OrderStatus.PENDING_CONFIRMATION) {
+                unpaidHold = order.getId();
+                break;
+            }
+            if (shouldAnnounceAsNewShopOrder(order)) {
+                alerts.add(new AdminNewOrdersSinceResponse.AdminNewOrderAlert(
+                        order.getId(),
+                        displayNameOf(order),
+                        plainAmountOf(order)));
+            }
+            lastAdvanced = order.getId();
         }
-        long lastReturned = found.get(found.size() - 1).getId();
-        return new AdminNewOrdersSinceResponse(lastReturned, alerts);
+        if (unpaidHold != null) {
+            // Do not skip past an unpaid ONLINE/UPI order. When it confirms,
+            // the next poll must still see it.
+            return new AdminNewOrdersSinceResponse(unpaidHold - 1, alerts);
+        }
+        long after = lastAdvanced != null ? lastAdvanced : requestedAfterId;
+        return new AdminNewOrdersSinceResponse(after, alerts);
+    }
+
+    static boolean shouldAnnounceAsNewShopOrder(Order order) {
+        OrderStatus status = order.getOrderStatus();
+        return status == null || status == OrderStatus.CONFIRMED;
+    }
+
+    static boolean paymentAllowsConfirm(Payment payment) {
+        if (payment == null || payment.getPaymentStatus() == null) {
+            return false;
+        }
+        PaymentStatus status = payment.getPaymentStatus();
+        return status == PaymentStatus.SUCCESS
+                || status == PaymentStatus.COD_PENDING
+                || status == PaymentStatus.COD_RECEIVED;
     }
 
     private static String displayNameOf(Order order) {
@@ -942,6 +973,11 @@ public class OrderService {
             throw new ConflictException(
                     "Invalid order status transition from " + currentStatus + " to " + status);
         }
+        if (currentStatus == OrderStatus.PENDING_CONFIRMATION && status == OrderStatus.CONFIRMED
+                && !paymentAllowsConfirm(paymentRepository.findByOrderId(orderId).orElse(null))) {
+            throw new ConflictException(
+                    "Payment is not confirmed yet. The shop cannot confirm this order until it is paid.");
+        }
         order.setOrderStatus(status);
 
         if (status == OrderStatus.DELIVERED) {
@@ -981,8 +1017,13 @@ public class OrderService {
             notifyOrder.getCustomer().getFcmToken();
         }
         notifyOrder.getOrderNumber();
-        afterCommitExecutor.runAfterCommit("Order status notification", savedOrder.getId(),
-                () -> notificationService.notifyOrderStatusChange(notifyOrder, notifyStatus));
+        afterCommitExecutor.runAfterCommit("Order status notification", savedOrder.getId(), () -> {
+            notificationService.notifyOrderStatusChange(notifyOrder, notifyStatus);
+            if (currentStatus == OrderStatus.PENDING_CONFIRMATION && notifyStatus == OrderStatus.CONFIRMED) {
+                notificationService.notifyAdminsOfNewOrder(notifyOrder);
+                deliveryService.autoAssignBestEffort(notifyOrder.getId());
+            }
+        });
 
         var delivery = deliveryRepository.findByOrderId(savedOrder.getId()).orElse(null);
         // Re-read fetch-joined purely to BUILD THE RESPONSE. savedOrder is
