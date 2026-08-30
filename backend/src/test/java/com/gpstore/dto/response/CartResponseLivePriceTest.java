@@ -53,14 +53,12 @@ class CartResponseLivePriceTest {
         variant.setSellingPrice(livePrice);
 
         CartItem item = new CartItem();
-        item.setId(1L);
         item.setProductVariant(variant);
         item.setQuantity(quantity);
         item.setPrice(storedPrice);
         item.setTotalPrice(storedPrice.multiply(BigDecimal.valueOf(quantity)));
 
         Cart cart = new Cart();
-        cart.setId(1L);
         cart.setItems(new ArrayList<>());
         cart.getItems().add(item);
         return cart;
