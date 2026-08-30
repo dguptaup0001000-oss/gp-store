@@ -36,6 +36,9 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * So: a real port, a real JWT, a real HTTP client. Nothing here can be
  * satisfied by a mock.
+ *
+ * Splitting the customer and admin Android apps does not replace this.
+ * A customer JWT against /api/admin/** must still be 403.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "outbox.initial-delay-ms=3600000",

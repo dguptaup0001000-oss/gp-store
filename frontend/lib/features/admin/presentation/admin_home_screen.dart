@@ -20,15 +20,26 @@ import 'admin_reviews_screen.dart';
 import 'admin_voice_settings_screen.dart';
 import '../../../core/util/haptic_widgets.dart';
 
-/// Only reachable from ProfileScreen when the logged-in customer's role is
-/// ADMIN - see profile_screen.dart's role check.
+/// Admin APK dashboard. The customer APK must not import this file.
 class AdminHomeScreen extends StatelessWidget {
-  const AdminHomeScreen({super.key});
+  const AdminHomeScreen({super.key, this.onSignOut});
+
+  final VoidCallback? onSignOut;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Store Management')),
+      appBar: AppBar(
+        title: const Text('Dashboard'),
+        actions: [
+          if (onSignOut != null)
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'Sign out',
+              onPressed: hapticize(onSignOut!),
+            ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

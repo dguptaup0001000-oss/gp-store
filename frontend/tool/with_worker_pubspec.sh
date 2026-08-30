@@ -40,4 +40,21 @@ printf 'gpstore.applicationId=com.gpstore.worker\n' >> "$GRADLE_PROPS"
 export GPSTORE_WORKER_SLIM=1
 echo "GPSTORE_WORKER_SLIM=1 (applicationId=com.gpstore.worker)"
 flutter pub get
-"$@"
+
+# productFlavors require --flavor. A worker command that omits it would
+# compile worker Dart with the customer applicationId.
+cmd=("$@")
+if [[ "${cmd[0]:-}" == "flutter" ]]; then
+  has_flavor=0
+  for arg in "${cmd[@]}"; do
+    if [[ "$arg" == "--flavor" ]]; then
+      has_flavor=1
+      break
+    fi
+  done
+  if [[ "$has_flavor" -eq 0 ]]; then
+    cmd+=(--flavor worker)
+    echo "added --flavor worker"
+  fi
+fi
+"${cmd[@]}"

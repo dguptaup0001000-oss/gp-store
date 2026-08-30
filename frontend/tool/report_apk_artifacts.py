@@ -9,8 +9,10 @@ import pathlib
 import sys
 
 ROWS = (
-    ("Customer + Admin", "gpstore-customer-admin-arm64.apk", "ARM64 / arm64-v8a"),
-    ("Customer + Admin", "gpstore-customer-admin-armv7.apk", "ARMv7 / armeabi-v7a"),
+    ("Customer", "gpstore-customer-release.apk", "ARM64 / arm64-v8a"),
+    ("Customer", "gpstore-customer-armv7.apk", "ARMv7 / armeabi-v7a"),
+    ("Admin", "gpstore-admin-release.apk", "ARM64 / arm64-v8a"),
+    ("Admin", "gpstore-admin-armv7.apk", "ARMv7 / armeabi-v7a"),
     ("Worker", "gpstore-worker-arm64.apk", "ARM64 / arm64-v8a"),
     ("Worker", "gpstore-worker-armv7.apk", "ARMv7 / armeabi-v7a"),
 )
@@ -32,7 +34,7 @@ def main() -> int:
             finally:
                 sys.argv = ["report_apk_artifacts.py", "--self-test"]
             sha_files = list(d.glob("*.apk.sha256"))
-            if rc != 0 or len(sha_files) != 4:
+            if rc != 0 or len(sha_files) != 6:
                 print("self-test failed", rc, len(sha_files), file=sys.stderr)
                 return 1
             print("report_apk_artifacts.py self-test ok")
@@ -67,7 +69,7 @@ def main() -> int:
     lines.extend(
         [
             "",
-            "Do not upload the same customer/admin APK under two artifact names.",
+            "Do not produce a combined customer+admin production APK.",
         ]
     )
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

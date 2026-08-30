@@ -7,10 +7,11 @@ something is done when it isn't.
 ## Already technically ready
 
 - **Android manifest permissions** match each APK: the customer app
-  (`com.gpstore.app`) strips CAMERA from the merged manifest (worker QR
-  scan lives in a separate APK). The worker app (`com.gpstore.worker`)
-  uses camera + foreground location only. Neither app requests
-  `ACCESS_BACKGROUND_LOCATION`.
+  (`in.gpstore.customer`) strips CAMERA and Bluetooth (worker QR scan
+  and admin receipt printing live in other APKs). The admin app
+  (`in.gpstore.admin`) keeps Bluetooth for the counter printer and
+  strips CAMERA. The worker app (`com.gpstore.worker`) uses camera +
+  foreground location only. None request `ACCESS_BACKGROUND_LOCATION`.
 - **Release signing** fails the Gradle build unless `android/key.properties`
   exists. Sideload CI may set `ALLOW_DEBUG_RELEASE_SIGNING=1`; those APKs
   must not be uploaded to Play.

@@ -6,54 +6,58 @@ import '../../features/auth/presentation/auth_providers.dart';
 import '../../features/auth/presentation/forgot_password_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/otp_login_screen.dart';
-import '../../features/auth/presentation/register_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
-import '../../features/root_screen.dart';
 
-/// Lets code without a local BuildContext (the FCM notification-tap handler
-/// in main.dart) still push a screen on top of whatever the user is
-/// currently looking at. Must be wired into GoRouter itself below - setting
-/// this on MaterialApp.router directly has no effect once a routerConfig
-/// is supplied.
+/// Lets code without a local BuildContext (the FCM notification-tap handler)
+/// still push a screen on top of whatever the user is currently looking at.
+/// Must be wired into GoRouter itself - setting this on MaterialApp.router
+/// directly has no effect once a routerConfig is supplied.
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
-/// Auth-gated routing: unauthenticated users are redirected to /login no
-/// matter what path they try to hit; authenticated users are redirected
-/// away from /login, /login/otp, and /register (no reason to see those once
-/// logged in). This is what makes logout/session-expiry (see api_client.dart)
-/// actually navigate somewhere, instead of just quietly clearing state.
-final appRouterProvider = Provider<GoRouter>((ref) {
+/// Auth-gated router shared by the customer and admin APKs.
+///
+/// [home] is the signed-in landing widget for that APK. The admin build
+/// omits `/register` so the staff app cannot open customer signup.
+GoRouter createGoRouter({
+  required Ref ref,
+  required Widget home,
+  bool allowRegister = true,
+  List<RouteBase> extraRoutes = const [],
+}) {
   return GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: '/',
-    refreshListenable: _AuthStateNotifier(ref),
+    refreshListenable: AuthRefreshNotifier(ref),
     redirect: (context, state) {
-      // ref.read, not watch - this Provider body only runs ONCE (see below
-      // for why), so reading here means "give me the current value right
-      // now", which is exactly what a redirect check needs.
       final authState = ref.read(authControllerProvider);
       return resolveStartupRedirect(
         status: authState.status,
         location: state.matchedLocation,
+        allowRegister: allowRegister,
       );
     },
     routes: [
-      GoRoute(path: '/', builder: (context, state) => const RootScreen()),
+      GoRoute(path: '/', builder: (context, state) => home),
       GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
-      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(
+        path: '/login',
+        builder: (context, state) => LoginScreen(allowRegister: allowRegister),
+      ),
       GoRoute(path: '/login/otp', builder: (context, state) => const OtpLoginScreen()),
-      GoRoute(path: '/login/forgot', builder: (context, state) => const ForgotPasswordScreen()),
-      GoRoute(path: '/register', builder: (context, state) => const RegisterScreen()),
+      GoRoute(
+          path: '/login/forgot',
+          builder: (context, state) => const ForgotPasswordScreen()),
+      ...extraRoutes,
     ],
   );
-});
+}
 
 /// Bridges Riverpod's state changes into something go_router's
 /// refreshListenable can listen to, so the router re-evaluates redirects
 /// the instant auth state changes (login, logout, or a forced session
 /// expiry) - without this, the router wouldn't know to react.
-class _AuthStateNotifier extends ChangeNotifier {
-  _AuthStateNotifier(Ref ref) {
+class AuthRefreshNotifier extends ChangeNotifier {
+  AuthRefreshNotifier(Ref ref) {
     ref.listen(authControllerProvider, (_, __) => notifyListeners());
   }
 }
@@ -70,21 +74,22 @@ class _AuthStateNotifier extends ChangeNotifier {
 String? resolveStartupRedirect({
   required AuthStatus status,
   required String location,
+  bool allowRegister = true,
 }) {
   final isAuthRoute =
       location == '/login' ||
       location == '/login/otp' ||
       location == '/login/forgot' ||
-      location == '/register';
+      (allowRegister && location == '/register');
   final isSplashRoute = location == '/splash';
 
   // STILL CHECKING THE STORED SESSION - go to the splash, and note that
   // returning null here does NOT do that.
   //
   // null means "no redirect", so go_router renders the route that was asked
-  // for. On a cold start that is '/', which is RootScreen, which watches
-  // myProfileProvider, which issues GET /api/customers/me before restoration
-  // has produced a token. The backend answers correctly:
+  // for. On a cold start that is '/', which watches myProfileProvider, which
+  // issues GET /api/customers/me before restoration has produced a token.
+  // The backend answers correctly:
   //
   //     401 {"message":"Authentication required"}
   //

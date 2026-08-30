@@ -2,10 +2,12 @@
 # GitHub Pages lives in deploy-github-pages.yml (push to main only) so this
 # workflow has no job that skips on PRs while build-apk is still queued.
 #
-# Download: Actions run → Artifacts → gpstore-customer-admin-arm64.apk
-# (arm64-v8a customer+admin, APP_ENV=production, API
-# https://api.gpstore.co.in/v1). Worker is a separate app:
+# Download: Actions run → Artifacts → gpstore-customer-release.apk
+# (arm64-v8a customer, APP_ENV=production, API
+# https://api.gpstore.co.in/v1). Admin is a separate app:
+# gpstore-admin-release.apk. Worker is a third app:
 # gpstore-worker-arm64.apk and gpstore-worker-armv7.apk.
+# Do not produce a combined customer+admin production APK.
 # GitHub UI zip size is not the APK size; the job summary prints
 # actual bytes, MiB, ABI, and SHA-256.
 #
@@ -31,7 +33,8 @@
 #   rebuilt automatically on every push to main.
 #
 # Production builds always pass --dart-define=APP_ENV=production.
-# Customer applicationId: com.gpstore.app
+# Customer applicationId: in.gpstore.customer
+# Admin applicationId:    in.gpstore.admin
 # Worker applicationId:   com.gpstore.worker
 #
 # Release keystore: CI never invents a keystore and never commits one.
@@ -43,7 +46,7 @@
 # AAB artifacts are uploaded to GitHub Actions only (no Play Console
 # account is required). Firebase GOOGLE_SERVICES_JSON_BASE64 is optional
 # until push/Crashlytics is configured; missing it uses the placeholder.
-# Customer/admin and worker APKs always use explicit per-ABI names.
+# Customer, admin, and worker APKs always use explicit per-ABI names.
 #
 # One-time setup after you push this to GitHub:
 # 1. Go to your repo's Settings -> Pages -> Source -> select "GitHub Actions".
@@ -190,6 +193,9 @@ jobs:
       - name: Verify APK permission policy (no device)
         run: |
           python3 tool/verify_apk_release.py --self-test
+          python3 tool/rename_flavor_apks.py --self-test
+          python3 tool/assert_app_separation.py --self-test
+          python3 tool/assert_app_separation.py
           python3 tool/install_release_keystore.py --self-test
           python3 tool/decode_google_services.py --self-test
           python3 tool/report_apk_artifacts.py --self-test
@@ -314,18 +320,13 @@ jobs:
           fi
           ./tool/with_worker_pubspec.sh flutter build apk --release --split-per-abi \
             --target-platform android-arm,android-arm64 \
+            --flavor worker \
             -t lib/worker_main.dart \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
-          cd build/app/outputs/flutter-apk
-          if [ ! -f app-arm64-v8a-release.apk ] || [ ! -f app-armeabi-v7a-release.apk ]; then
-            echo "::error::Worker --split-per-abi did not emit both ARM APKs."
-            ls -la . || true
-            exit 1
-          fi
-          mv -f app-arm64-v8a-release.apk gpstore-worker-arm64.apk
-          mv -f app-armeabi-v7a-release.apk gpstore-worker-armv7.apk
+          python3 tool/rename_flavor_apks.py build/app/outputs/flutter-apk \
+            worker gpstore-worker-arm64.apk gpstore-worker-armv7.apk
 
       - name: Build Delivery Worker App Bundle
         # GitHub artifact only. Skipped when the release keystore is missing
@@ -333,9 +334,8 @@ jobs:
         # Play Console is not required and nothing is uploaded to Play.
         if: steps.play_signing.outputs.enabled == 'true'
         # Play serves one ABI from an AAB. Worker applicationId is
-        # com.gpstore.worker (see android/app/build.gradle when
-        # GPSTORE_WORKER_SLIM=1). It must not share com.gpstore.app with the
-        # customer APK or installing one replaces the other.
+        # com.gpstore.worker. It must not share in.gpstore.customer or
+        # in.gpstore.admin or installing one replaces the other.
         run: |
           chmod +x tool/with_worker_pubspec.sh
           if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
@@ -344,12 +344,13 @@ jobs:
           fi
           ./tool/with_worker_pubspec.sh flutter build appbundle --release \
             --target-platform android-arm,android-arm64 \
+            --flavor worker \
             -t lib/worker_main.dart \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
           mkdir -p build/app/outputs/bundle/worker
-          mv build/app/outputs/bundle/release/app-release.aab \
+          mv build/app/outputs/bundle/workerRelease/app-worker-release.aab \
             build/app/outputs/bundle/worker/gpstore-worker-release.aab
           echo "### Delivery Worker AAB" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -363,39 +364,48 @@ jobs:
           name: gpstore-worker-aab
           path: frontend/build/app/outputs/bundle/worker/gpstore-worker-release.aab
 
-      - name: Build APK
+      - name: Build Customer APK
         env:
           ALLOW_DEBUG_RELEASE_SIGNING: ${{ steps.play_signing.outputs.enabled == 'true' && '0' || '1' }}
-        # Same reasoning as the web build's API_BASE_URL handling below -
-        # the app's coded default (10.0.2.2, the Android EMULATOR's
-        # localhost alias) is just as unreachable from a real physical
-        # phone as it is from a public website. Set the same repo variable
-        # (Settings -> Secrets and variables -> Actions -> Variables,
-        # name: API_BASE_URL) to your deployed backend's URL once it
-        # exists, or this APK will install and open fine but fail on
-        # every login/browse attempt.
+        # Shop APK only (in.gpstore.customer). Admin screens are a different
+        # flavor and must not be in this artifact.
         #
         # BUILD_SHA (the commit this APK was built from, shown on the
         # Profile screen) exists because "did you actually install the
         # latest APK, or an old one" has repeatedly been the real cause
         # behind reported bugs that were already fixed - this makes it
         # checkable at a glance instead of guessed at from screenshots.
-        # --split-per-abi AND --target-platform without android-x64:
-        # phones install one ABI. The previous fat APK packed arm64-v8a,
-        # armeabi-v7a and x86_64 (the ~73 MB extracted-size audit). x86_64
-        # is emulators; Play's AAB (next step) still contains every ABI and
-        # serves one per device. Sideload artifacts are arm only.
         run: |
           if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
             echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
             exit 1
           fi
           flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
+            --flavor customer \
+            -t lib/customer_main.dart \
+            --dart-define=GPSTORE_APP=customer \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
 
-      - name: Name customer APKs and report actual sizes
+      - name: Build Admin APK
+        env:
+          ALLOW_DEBUG_RELEASE_SIGNING: ${{ steps.play_signing.outputs.enabled == 'true' && '0' || '1' }}
+        # Staff APK only (in.gpstore.admin). Must not ship shopping UI.
+        run: |
+          if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
+            echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
+            exit 1
+          fi
+          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
+            --flavor admin \
+            -t lib/admin_main.dart \
+            --dart-define=GPSTORE_APP=admin \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+
+      - name: Name customer and admin APKs and report actual sizes
         # arm64-v8a is the production phone APK. armeabi-v7a is legacy 32-bit
         # only, uploaded under its own name so it is not mistaken for a bundle.
         # Do not copy the same file to a second name for upload.
@@ -405,13 +415,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           OUT=build/app/outputs/flutter-apk
-          if [ ! -f "$OUT/app-arm64-v8a-release.apk" ] || [ ! -f "$OUT/app-armeabi-v7a-release.apk" ]; then
-            echo "::error::Customer --split-per-abi did not emit both ARM APKs."
-            ls -la "$OUT" || true
-            exit 1
-          fi
-          mv -f "$OUT/app-arm64-v8a-release.apk" "$OUT/gpstore-customer-admin-arm64.apk"
-          mv -f "$OUT/app-armeabi-v7a-release.apk" "$OUT/gpstore-customer-admin-armv7.apk"
+          python3 tool/rename_flavor_apks.py "$OUT" \
+            customer gpstore-customer-release.apk gpstore-customer-armv7.apk \
+            admin gpstore-admin-release.apk gpstore-admin-armv7.apk
           VERSION="$(python3 -c "import pathlib,re; t=pathlib.Path('pubspec.yaml').read_text(); m=re.search(r'^version:\\s*(\\S+)', t, re.M); print(m.group(1) if m else 'unknown')")"
           python3 tool/report_apk_artifacts.py "$OUT" "$PACKAGE_SHA" "$PACKAGE_SHORT" "$VERSION"
 
@@ -428,53 +434,84 @@ jobs:
           python3 tool/verify_apk_release.py \
             build/app/outputs/flutter-apk/gpstore-worker-arm64.apk \
             build/app/outputs/flutter-apk/gpstore-worker-armv7.apk \
-            build/app/outputs/flutter-apk/gpstore-customer-admin-arm64.apk \
-            build/app/outputs/flutter-apk/gpstore-customer-admin-armv7.apk
+            build/app/outputs/flutter-apk/gpstore-customer-release.apk \
+            build/app/outputs/flutter-apk/gpstore-customer-armv7.apk \
+            build/app/outputs/flutter-apk/gpstore-admin-release.apk \
+            build/app/outputs/flutter-apk/gpstore-admin-armv7.apk
 
-      - name: Build App Bundle
+      - name: Build Customer App Bundle
         if: steps.play_signing.outputs.enabled == 'true'
-        # What Google Play actually wants. Play splits an .aab per device, so
-        # a phone downloads one ABI instead of all three - the APK above
-        # carries arm64, armv7 and x86_64 together because a raw APK cannot
-        # be split.
-        #
-        # Built alongside the APK rather than instead of it: the APK is what
-        # gets sideloaded for testing. The AAB is stored as a GitHub Actions
-        # artifact for a later Play Console upload; this job does not need a
-        # Play account and does not upload to Play.
-        #
-        # This step is also what verifies the R8 configuration. minifyEnabled
-        # only runs in release, so a missing ProGuard keep rule cannot fail
-        # any debug build - it fails here, or it fails on a customer's phone.
-        # Skipped when the release keystore is missing so CI cannot upload a
-        # debug-signed AAB as gpstore-release-aab.
         run: |
           if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
             echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
             exit 1
           fi
           flutter build appbundle --release \
+            --flavor customer \
+            -t lib/customer_main.dart \
+            --dart-define=GPSTORE_APP=customer \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+          mkdir -p build/app/outputs/bundle/customer
+          mv build/app/outputs/bundle/customerRelease/app-customer-release.aab \
+            build/app/outputs/bundle/customer/gpstore-customer-release.aab
 
-      - name: Upload customer+admin ARM64 APK
+      - name: Build Admin App Bundle
+        if: steps.play_signing.outputs.enabled == 'true'
+        run: |
+          if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
+            echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
+            exit 1
+          fi
+          flutter build appbundle --release \
+            --flavor admin \
+            -t lib/admin_main.dart \
+            --dart-define=GPSTORE_APP=admin \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+          mkdir -p build/app/outputs/bundle/admin
+          mv build/app/outputs/bundle/adminRelease/app-admin-release.aab \
+            build/app/outputs/bundle/admin/gpstore-admin-release.aab
+
+      - name: Upload customer ARM64 APK
         uses: actions/upload-artifact@v4
         with:
-          name: gpstore-customer-admin-arm64.apk
+          name: gpstore-customer-release.apk
           path: |
-            frontend/build/app/outputs/flutter-apk/gpstore-customer-admin-arm64.apk
-            frontend/build/app/outputs/flutter-apk/gpstore-customer-admin-arm64.apk.sha256
+            frontend/build/app/outputs/flutter-apk/gpstore-customer-release.apk
+            frontend/build/app/outputs/flutter-apk/gpstore-customer-release.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload customer+admin ARMv7 APK
+      - name: Upload customer ARMv7 APK
         uses: actions/upload-artifact@v4
         with:
-          name: gpstore-customer-admin-armv7.apk
+          name: gpstore-customer-armv7.apk
           path: |
-            frontend/build/app/outputs/flutter-apk/gpstore-customer-admin-armv7.apk
-            frontend/build/app/outputs/flutter-apk/gpstore-customer-admin-armv7.apk.sha256
+            frontend/build/app/outputs/flutter-apk/gpstore-customer-armv7.apk
+            frontend/build/app/outputs/flutter-apk/gpstore-customer-armv7.apk.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload admin ARM64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-admin-release.apk
+          path: |
+            frontend/build/app/outputs/flutter-apk/gpstore-admin-release.apk
+            frontend/build/app/outputs/flutter-apk/gpstore-admin-release.apk.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload admin ARMv7 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-admin-armv7.apk
+          path: |
+            frontend/build/app/outputs/flutter-apk/gpstore-admin-armv7.apk
+            frontend/build/app/outputs/flutter-apk/gpstore-admin-armv7.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
@@ -498,10 +535,17 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload App Bundle
+      - name: Upload Customer App Bundle
         if: steps.play_signing.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: gpstore-release-aab
-          path: frontend/build/app/outputs/bundle/release/app-release.aab
+          name: gpstore-customer-release.aab
+          path: frontend/build/app/outputs/bundle/customer/gpstore-customer-release.aab
+
+      - name: Upload Admin App Bundle
+        if: steps.play_signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-admin-release.aab
+          path: frontend/build/app/outputs/bundle/admin/gpstore-admin-release.aab
 

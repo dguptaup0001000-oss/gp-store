@@ -150,13 +150,13 @@ class WorkerPackScanTest {
                     + " OR account_customer_id IN (SELECT id FROM customers WHERE full_name LIKE ?))",
                     PREFIX + "%", MARKER + "%");
             jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", PREFIX + "%");
+            jdbc.update("DELETE FROM delivery_partners WHERE account_customer_id IN "
+                    + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         } catch (org.springframework.dao.DataIntegrityViolationException retiredButReferenced) {
             // Already unavailable and inactive, so inert. A handful of leftover
             // rows is a far smaller problem than a red suite that says nothing
             // about the code.
         }
-        jdbc.update("DELETE FROM delivery_partners WHERE account_customer_id IN "
-                + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM notifications WHERE customer_id IN "
                 + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM customers WHERE full_name LIKE ?", MARKER + "%");

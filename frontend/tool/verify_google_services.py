@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Fail if google-services.json is missing, invalid, or the local placeholder.
 
-Does not print API keys. Production APKs must ship a real Firebase Android
-app for com.gpstore.app. The committed placeholder is only for PR builds.
+Does not print API keys. Production APKs must ship Firebase Android apps
+for in.gpstore.customer and in.gpstore.admin. The committed placeholder
+is only for PR builds.
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import sys
 
 PLACEHOLDER_PROJECT = "gp-store-local"
 PLACEHOLDER_KEY = "local-placeholder-not-a-secret"
-REQUIRED_PACKAGE = "com.gpstore.app"
+REQUIRED_PACKAGES = ("in.gpstore.customer", "in.gpstore.admin")
 
 
 def main() -> None:
@@ -45,12 +46,18 @@ def main() -> None:
             if key.get("current_key") == PLACEHOLDER_KEY:
                 sys.exit("GOOGLE_SERVICES_JSON_BASE64 contains the placeholder API key")
 
-    if REQUIRED_PACKAGE not in pkgs:
+    missing = [pkg for pkg in REQUIRED_PACKAGES if pkg not in pkgs]
+    if missing:
         shown = ",".join(pkgs) if pkgs else "(none)"
         sys.exit(
-            f"google-services.json must include package_name {REQUIRED_PACKAGE}, got: {shown}"
+            "google-services.json must include package_name "
+            f"{', '.join(REQUIRED_PACKAGES)} (missing {', '.join(missing)}), "
+            f"got: {shown}"
         )
-    print(f"Decoded real google-services.json for {REQUIRED_PACKAGE}")
+    print(
+        "Decoded real google-services.json for "
+        + ", ".join(REQUIRED_PACKAGES)
+    )
 
 
 if __name__ == "__main__":

@@ -36,8 +36,9 @@
 
 <h2>Who we are</h2>
 <p>
-  GP-Store is a grocery shop app. The customer app is <code>com.gpstore.app</code>.
-  Delivery workers use a separate app, <code>com.gpstore.worker</code>.
+  GP-Store is a grocery shop. The customer app is <code>in.gpstore.customer</code>.
+  Store staff use a separate admin app, <code>in.gpstore.admin</code>.
+  Delivery workers use a third app, <code>com.gpstore.worker</code>.
   The production API is <code>https://api.gpstore.co.in/v1</code>.
 </p>
 
@@ -61,17 +62,17 @@
   order label.
 </p>
 <p>
-  Delivery partners who sign in to the customer app (<code>com.gpstore.app</code>)
-  share GPS only while the delivery dashboard is open and in the foreground.
-  Tracking stops when that screen is left, the app is backgrounded, or they
-  sign out. The customer app does not use the camera.
+  The customer app (<code>in.gpstore.customer</code>) does not include a
+  delivery dashboard and does not use the camera. Packing staff use the
+  worker app above.
 </p>
 
 <h2>Store administration</h2>
 <p>
-  Shop administrators using the customer app may connect a paired Bluetooth
-  thermal printer to print receipts. Bluetooth is not used to scan for people
-  or for advertising.
+  Shop administrators use the admin app (<code>in.gpstore.admin</code>) and
+  may connect a paired Bluetooth thermal printer to print receipts.
+  Bluetooth is not used to scan for people or for advertising. The customer
+  app does not include store-management screens.
 </p>
 
 <h2>How we use information</h2>
