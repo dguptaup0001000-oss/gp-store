@@ -145,9 +145,8 @@ public class EmailOtpProvider implements OtpProvider {
 
     @Override
     public SendResult resend(String destination) {
-        log.info("OTP_SEND_SUCCESS dest={} purpose=resend provider=email",
-                EmailIdentities.mask(destination));
-        return SendResult.ok("email-resend");
+        throw new UnsupportedOperationException(
+                "EmailOtpProvider.resend is not implemented. Request a new code through OtpService.requestOtp.");
     }
 
     @Override

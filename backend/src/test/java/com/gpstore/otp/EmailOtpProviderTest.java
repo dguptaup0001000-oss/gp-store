@@ -19,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -89,6 +90,15 @@ class EmailOtpProviderTest {
         assertEquals(1, provider.issuedCacheSize());
         assertTrue(provider.peekIssuedOtpForTests("one@example.com", OtpPurpose.LOGIN).isEmpty()
                 || provider.peekIssuedOtpForTests("two@example.com", OtpPurpose.LOGIN).isEmpty());
+    }
+
+    @Test
+    @DisplayName("resend refuses instead of logging success and sending nothing")
+    void resendIsNotASilentSuccess() {
+        EmailOtpProvider provider = new EmailOtpProvider(null, "noreply@gpstore.co.in");
+        UnsupportedOperationException ex = assertThrows(UnsupportedOperationException.class,
+                () -> provider.resend("shop@example.com"));
+        assertTrue(ex.getMessage().contains("requestOtp"));
     }
 
     @Test
