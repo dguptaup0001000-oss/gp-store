@@ -254,7 +254,7 @@ class _AcceptanceCardState extends ConsumerState<_AcceptanceCard> {
             next,
             closureMessage: _message.text.trim(),
           );
-      ref.invalidate(storeOperationsProvider);
+      if (mounted) ref.invalidate(storeOperationsProvider);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -339,11 +339,18 @@ class _ClosuresCard extends ConsumerWidget {
     );
     if (date == null || !context.mounted) return;
 
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        final controller = TextEditingController();
-        return AlertDialog(
+    // Owned here rather than created inside the builder: a builder runs on
+    // every rebuild of the dialog, and a controller made there is both leaked
+    // and silently replaced mid-typing.
+    final controller = TextEditingController();
+    // Nullable and non-final: a `final` local assigned inside a try is
+    // "potentially unassigned" to Dart's flow analysis at the read below,
+    // which is a compile error rather than a lint.
+    String? reason;
+    try {
+      reason = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
           title: Text('Close ${AdminFormat.relativeDay(date)}?'),
           content: TextField(
             controller: controller,
@@ -365,16 +372,20 @@ class _ClosuresCard extends ConsumerWidget {
               child: const Text('Close this day'),
             ),
           ],
-        );
-      },
-    );
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
     if (reason == null || !context.mounted) return;
 
     try {
       await ref
           .read(storeOperationsRepositoryProvider)
           .addClosure(date, reason.isEmpty ? null : reason);
-      ref.invalidate(storeOperationsProvider);
+      // Guarded: the screen can be popped while the request is in flight, and
+      // invalidating through a disposed ref throws.
+      if (context.mounted) ref.invalidate(storeOperationsProvider);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context)
@@ -388,7 +399,7 @@ class _ClosuresCard extends ConsumerWidget {
       await ref
           .read(storeOperationsRepositoryProvider)
           .removeClosure(closure.date);
-      ref.invalidate(storeOperationsProvider);
+      if (context.mounted) ref.invalidate(storeOperationsProvider);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context)
