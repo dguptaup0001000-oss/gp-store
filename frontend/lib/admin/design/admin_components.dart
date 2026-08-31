@@ -48,6 +48,30 @@ class AdminStatusBadge extends StatelessWidget {
     }
   }
 
+  /// Maps GP-STORE's PaymentStatus values onto a tone.
+  ///
+  /// SEPARATE FROM THE ORDER MAPPING because the two enums disagree about
+  /// what a word means. PENDING on an order is a normal early stage; PENDING
+  /// on a payment is money the shop has not received. Folding them together
+  /// is how a refund still owed to a customer ends up the same reassuring
+  /// green as one already paid.
+  static AdminStatusTone toneForPaymentStatus(String? status) {
+    switch (status?.toUpperCase()) {
+      case 'SUCCESS':
+      case 'COD_RECEIVED':
+      case 'REFUND_COMPLETED':
+        return AdminStatusTone.success;
+      case 'PENDING':
+      case 'REFUND_PENDING':
+        return AdminStatusTone.warning;
+      case 'FAILED':
+      case 'CANCELLED':
+        return AdminStatusTone.danger;
+      default:
+        return AdminStatusTone.neutral;
+    }
+  }
+
   /// PENDING_CONFIRMATION -> "Pending Confirmation". Backend enum names must
   /// never reach an operator's screen verbatim.
   static String humanizeStatus(String? status) {
