@@ -35,16 +35,24 @@ public class StoreStatusController {
     /**
      * The shop's current state.
      *
-     * <p>CACHED FOR TEN SECONDS, and no longer. This is polled by every open
-     * app, so an uncached response makes the home screen a query per customer
-     * per refresh; but the countdown ticks every second near close, and a
+     * <p>CACHED FOR TEN SECONDS, and no longer. Ten seconds is short enough
+     * that the countdown is never wrong by more than a rounding - a
      * minute-long cache would tell someone at 20:59 that they still have two
-     * minutes. Ten seconds is short enough that the countdown is never wrong
-     * by more than a rounding, and long enough to collapse a crowd.
+     * minutes - and long enough to absorb a burst from one app moving between
+     * screens.
      *
-     * <p>PRIVATE, not public: the response embeds the server's clock, and a
-     * shared proxy cache serving a stale timestamp to a later customer would
-     * reintroduce exactly the clock-skew problem this endpoint solves.
+     * <p>PRIVATE, not public, and that is a real limit rather than a detail:
+     * the response embeds the server's clock, so a shared proxy cache would
+     * hand a later customer a stale timestamp and reintroduce exactly the
+     * clock-skew problem this endpoint exists to solve. The cost of that
+     * choice is that the cache is PER CLIENT and does NOT deduplicate across
+     * customers: a hundred open apps are a hundred polls, each costing one
+     * settings read and one closures query.
+     *
+     * <p>That is affordable at this shop's scale and deliberately not
+     * optimised further. If it ever stops being affordable, the fix is a
+     * short server-side cache of the closure set - which changes rarely -
+     * NOT a longer HTTP cache, which would blunt the countdown.
      */
     @GetMapping("/status")
     public ResponseEntity<StoreStatusResponse> status() {

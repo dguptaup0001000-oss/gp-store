@@ -18,11 +18,18 @@ final storeStatusRepositoryProvider = Provider<StoreStatusRepository>((ref) {
 ///
 /// POLLED, NOT PUSHED. A websocket for one small fact would be a connection to
 /// keep alive, reconnect and authenticate, for something a periodic GET answers
-/// in a few hundred bytes — and the endpoint is cached ten seconds server side,
-/// so a crowd of apps polling collapses into few queries. The interval is
-/// deliberately shorter near closing time: for most of the day the answer
-/// changes twice, but in the last quarter-hour it changes by the minute, and
-/// that is the one moment a customer is actually reading it.
+/// in a few hundred bytes. The interval is deliberately shorter near closing
+/// time: for most of the day the answer changes twice, but in the last
+/// quarter-hour it changes by the minute, and that is the one moment a
+/// customer is actually reading it.
+///
+/// WHAT THIS COSTS THE SERVER, stated plainly because the earlier version of
+/// this comment got it wrong: the endpoint sends a ten-second cache header,
+/// but it is Cache-Control PRIVATE, so it does NOT collapse many customers
+/// into few queries — it only stops one app re-asking within ten seconds.
+/// Every polling app is its own pair of queries. See StoreStatusController
+/// for why private is nonetheless the right choice, and what to do first if
+/// the load ever matters.
 ///
 /// FAILS OPEN. A dropped request yields [StoreStatus.unknown], which says the
 /// shop is open and makes no delivery promise — see that constructor for why
