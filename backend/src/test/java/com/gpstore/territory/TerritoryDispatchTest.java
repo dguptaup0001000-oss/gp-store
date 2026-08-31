@@ -414,7 +414,20 @@ class TerritoryDispatchTest {
     void amongSuitableCandidatesTheScoreDecides() {
         DeliveryPartner local = newPartner("local", false, DEST_LAT, DEST_LNG);
         DeliveryPartner near = newPartner("near", true, DEST_LAT, DEST_LNG);
-        DeliveryPartner slightlyFurther = newPartner("further", true, 28.6145, 77.2145);
+        // 2.0 km from the drop, and that number is load-bearing. score() is
+        // `distance + load * territory.load-weight-km-per-order`, and that
+        // weight is 0.8 km PER ORDER. The original coordinate put this rider
+        // 0.666 km away - a gap NARROWER THAN ONE ORDER - so a single live
+        // delivery against the nearer rider made its score 0.8 against this
+        // one's 0.666 and inverted the very claim being asserted. The test
+        // could be flipped by one order arriving from anywhere, which is
+        // exactly what kept happening.
+        //
+        // 2.0 km keeps the rider comfortably inside the 4.0 km backup detour
+        // gate, so both are still suitable and the test still asks "of two
+        // suitable riders, does the closer one win" - but it now takes three
+        // stray orders to invert instead of one. Do not move this closer.
+        DeliveryPartner slightlyFurther = newPartner("further", true, 28.6235, 77.2235);
         setPrimary(west, local);
         addNamedBackup(west, slightlyFurther, 1);
         addNamedBackup(west, near, 2);
