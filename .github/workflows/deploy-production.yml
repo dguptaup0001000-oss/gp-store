@@ -89,24 +89,6 @@ jobs:
           bash -n deploy/production/backup-offbox-sync.sh
           bash -n deploy/production/offbox-pull-from-vps.sh
           bash -n deploy/production/offbox-decrypt-restore.sh
-
-      # The script that actually runs on production lives inline in this
-      # workflow (jobs.deploy.env.REMOTE_DEPLOY), so `bash -n` over
-      # deploy/production/*.sh does not see it. It was unchecked before too;
-      # now that it is one named value it can be checked, so it is.
-      - name: bash -n the inline remote deploy script
-        run: |
-          set -Eeuo pipefail
-          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet pyyaml
-          python3 - > /tmp/remote_deploy.sh <<'EXTRACT'
-          import yaml
-          wf = yaml.safe_load(open('.github/workflows/deploy-production.yml'))
-          print(wf['jobs']['deploy']['env']['REMOTE_DEPLOY'])
-          EXTRACT
-          bash -n /tmp/remote_deploy.sh
-          # It must still be the script that deploys, not an empty string that
-          # would connect, do nothing, and report success.
-          grep -q 'deploy/production/deploy.sh' /tmp/remote_deploy.sh
           bash -n deploy/production/offbox-gpg-roundtrip.sh
           bash -n deploy/production/evaluate-backup-status.sh
           bash -n deploy/production/evaluate-offbox-result.sh
@@ -145,6 +127,25 @@ jobs:
             echo "deploy.sh must never destroy Compose volumes" >&2
             exit 1
           fi
+
+      # The script that actually runs on production lives inline in this
+      # workflow (top-level env.REMOTE_DEPLOY - workflow scope, because BOTH
+      # the deploy job and the fresh-runner fallback use it), so `bash -n`
+      # over deploy/production/*.sh does not see it. It was unchecked before
+      # too; now that it is one named value it can be checked, so it is.
+      - name: bash -n the inline remote deploy script
+        run: |
+          set -Eeuo pipefail
+          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet pyyaml
+          python3 - > /tmp/remote_deploy.sh <<'EXTRACT'
+          import yaml
+          wf = yaml.safe_load(open('.github/workflows/deploy-production.yml'))
+          print(wf['env']['REMOTE_DEPLOY'])
+          EXTRACT
+          bash -n /tmp/remote_deploy.sh
+          # It must still be the script that deploys, not an empty string that
+          # would connect, do nothing, and report success.
+          grep -q 'deploy/production/deploy.sh' /tmp/remote_deploy.sh
 
   wait-for-ci:
     name: Wait for backend CI
