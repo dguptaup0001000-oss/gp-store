@@ -27,11 +27,12 @@ void main() {
         fail('cannot find AdminPermission.java at ${permissionJava.path}');
       }
       final source = permissionJava.readAsStringSync();
-      // Enum constants: a line that is an ALL_CAPS identifier ending in , or ;
-      final backend = RegExp(r'^\s{4}([A-Z][A-Z_]+)\s*[,;]', multiLine: true)
-          .allMatches(source)
-          .map((m) => m.group(1)!)
-          .toSet();
+      // An enum constant is an ALL_CAPS identifier alone on its own
+      // four-space-indented line. The trailing comma or semicolon is
+      // OPTIONAL on purpose: the last constant in a Java enum has neither,
+      // and requiring one silently drops it - which would have made this
+      // test pass while missing a whole role.
+      final backend = _enumConstants(source);
 
       expect(backend, isNotEmpty,
           reason: 'parsed no constants from AdminPermission.java');
@@ -43,11 +44,7 @@ void main() {
 
     test('every backend staff role exists here', () {
       final source = roleJava.readAsStringSync();
-      final backendRoles =
-          RegExp(r'^\s{4}([A-Z][A-Z_]+)\s*[,;]', multiLine: true)
-              .allMatches(source)
-              .map((m) => m.group(1)!)
-              .toSet();
+      final backendRoles = _enumConstants(source);
 
       // CUSTOMER and DELIVERY_BOY are deliberately not staff.
       final expectedStaff = backendRoles
@@ -193,4 +190,17 @@ void main() {
       expect(AdminRoles.humanize(''), 'Staff');
     });
   });
+}
+
+/// Enum constant names from a Java source file.
+///
+/// Matches an ALL_CAPS identifier alone on a four-space-indented line, with
+/// the trailing comma or semicolon optional - the final constant in a Java
+/// enum has neither. Javadoc lines start with an asterisk and field
+/// declarations carry more on the line, so neither is matched.
+Set<String> _enumConstants(String javaSource) {
+  return RegExp(r'^ {4}([A-Z][A-Z_]{2,})\s*[,;]?\s*$', multiLine: true)
+      .allMatches(javaSource)
+      .map((m) => m.group(1)!)
+      .toSet();
 }
