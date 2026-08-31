@@ -82,4 +82,25 @@ public interface ProductVariantRepository
            order by v.id
            """)
     List<ProductVariant> findVariantsWithoutRealImages();
+
+    /**
+     * One listing thumbnail per product, for the admin's top-products list.
+     *
+     * <p>Returns every candidate rather than one row per product on purpose.
+     * Picking "the" thumbnail in SQL needs a window function or a correlated
+     * subquery, and neither is worth it for a list capped at 50 products; the
+     * caller keeps the FIRST row it sees per product, and the ordering below
+     * makes that deterministic (lowest variant id wins, which is the same
+     * variant the catalogue itself shows first).
+     *
+     * <p>Blank strings are excluded alongside nulls because the seeder wrote
+     * empty imageUrl on some rows, and an empty string would beat a real
+     * photograph on a later variant.
+     */
+    @Query("select v.product.id, v.imageUrl "
+            + "from ProductVariant v "
+            + "where v.product.id in :productIds "
+            + "and v.imageUrl is not null and v.imageUrl <> '' "
+            + "order by v.product.id, v.id")
+    List<Object[]> findThumbnailCandidates(@Param("productIds") List<Long> productIds);
 }

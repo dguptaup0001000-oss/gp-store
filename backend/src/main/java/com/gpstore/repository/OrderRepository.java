@@ -119,6 +119,32 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("select count(o) from Order o where o.orderDate >= :from and o.orderDate <= :to and o.orderStatus = 'CANCELLED'")
     long countCancelledBetween(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
 
+    /**
+     * Revenue and order count per calendar day, for the dashboard sales chart.
+     *
+     * MATCHES sumRevenueBetween EXACTLY - same CANCELLED exclusion, same
+     * orderDate column, same inclusive bounds. If the chart summed to a
+     * different number than the KPI card sitting above it, the dashboard
+     * would be contradicting itself and an operator would be right to
+     * trust neither figure.
+     *
+     * Native because grouping on a truncated date is not portable JPQL and
+     * date_trunc is what Postgres actually runs. Days with no orders are
+     * absent here; the service fills them with zero so the chart has no
+     * holes.
+     */
+    @Query(value = "select date_trunc('day', o.order_date) as day, "
+            + "coalesce(sum(o.total_amount), 0) as revenue, "
+            + "count(*) as orders "
+            + "from orders o "
+            + "where o.order_date >= :from and o.order_date <= :to "
+            + "and o.order_status <> 'CANCELLED' "
+            + "group by date_trunc('day', o.order_date) "
+            + "order by 1",
+            nativeQuery = true)
+    List<Object[]> revenueByDayBetween(@Param("from") LocalDateTime from,
+                                       @Param("to") LocalDateTime to);
+
     /** Order count grouped by current status - the "what's in the pipeline right now" view. */
     @Query("select o.orderStatus as status, count(o) as cnt from Order o group by o.orderStatus")
     List<Object[]> countByStatus();

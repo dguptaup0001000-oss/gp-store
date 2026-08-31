@@ -22,6 +22,17 @@ public class AnalyticsController {
         return analyticsService.getSalesSummary(days);
     }
 
+    /**
+     * Daily revenue and order count for the dashboard chart. Every day in
+     * the window is present, including days with no orders - see
+     * AnalyticsService.getSalesSeries for why the gaps are filled here and
+     * not on the client.
+     */
+    @GetMapping("/sales-series")
+    public List<Map<String, Object>> getSalesSeries(@RequestParam(defaultValue = "30") int days) {
+        return analyticsService.getSalesSeries(days);
+    }
+
     @GetMapping("/order-status-breakdown")
     public Map<String, Long> getOrderStatusBreakdown() {
         return analyticsService.getOrderStatusBreakdown();
