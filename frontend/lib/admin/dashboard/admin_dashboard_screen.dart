@@ -9,6 +9,7 @@ import '../../features/admin/presentation/admin_providers.dart';
 import '../design/admin_components.dart';
 import '../design/admin_format.dart';
 import '../design/admin_tokens.dart';
+import '../operations/delivery_type_panel.dart';
 import 'admin_revenue_chart.dart';
 
 /// The console's home screen.
@@ -56,6 +57,11 @@ class AdminDashboardScreen extends ConsumerWidget {
               const _OrderStatusPanel(),
               const SizedBox(height: AdminSpacing.lg),
               const _TopProductsPanel(),
+              const SizedBox(height: AdminSpacing.lg),
+              // Whether the night shift earned anything. Reads the same period
+              // provider as everything above it, so the two can never be
+              // showing different windows.
+              const DeliveryTypePanel(),
               const SizedBox(height: AdminSpacing.xxl),
             ],
           );

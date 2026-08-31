@@ -20,6 +20,8 @@ import '../../features/admin/presentation/admin_reviews_screen.dart';
 import '../../features/admin/presentation/admin_territories_screen.dart';
 import '../../features/admin/presentation/admin_voice_settings_screen.dart';
 import '../dashboard/admin_dashboard_screen.dart';
+import '../operations/morning_preparation_screen.dart';
+import '../operations/store_operations_screen.dart';
 
 /// One place in the admin console you can navigate to.
 ///
@@ -90,6 +92,12 @@ class AdminNav {
 
   static Widget _dashboard(BuildContext context) => const AdminDashboardScreen();
 
+  static Widget _preparation(BuildContext context) =>
+      const MorningPreparationScreen();
+
+  static Widget _storeHours(BuildContext context) =>
+      const StoreOperationsScreen();
+
   static const List<AdminNavGroup> groups = [
     AdminNavGroup(
       title: 'Overview',
@@ -105,6 +113,27 @@ class AdminNav {
           icon: Icons.receipt_long_outlined,
           description: 'View and manage every order',
           builder: _orders,
+        ),
+        // Both sit in Operations because that is when they are used: the
+        // packing list first thing in the morning, the hours when something
+        // has gone wrong. They are separate destinations because the people
+        // differ - packing needs ORDERS_VIEW, and the switch that stops the
+        // shop trading needs DELIVERY_MANAGE.
+        AdminDestination(
+          id: 'preparation',
+          requires: AdminPermission.ordersView,
+          label: 'Packing List',
+          icon: Icons.checklist_outlined,
+          description: "What to pack for the next delivery run",
+          builder: _preparation,
+        ),
+        AdminDestination(
+          id: 'store-hours',
+          requires: AdminPermission.deliveryManage,
+          label: 'Store Hours',
+          icon: Icons.schedule_outlined,
+          description: 'Pause orders, close a day',
+          builder: _storeHours,
         ),
         AdminDestination(
           id: 'payments',
