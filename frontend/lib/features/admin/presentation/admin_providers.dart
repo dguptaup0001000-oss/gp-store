@@ -92,6 +92,14 @@ final adminSalesSummaryProvider = FutureProvider.autoDispose<SalesSummary>((ref)
   return ref.watch(adminProductsRepositoryProvider).getSalesSummary(days: days);
 });
 
+/// The dashboard chart. Shares analyticsPeriodDaysProvider with the summary
+/// and the leaderboard, so the period selector moves all three at once and
+/// they can never disagree about which window is on screen.
+final adminSalesSeriesProvider = FutureProvider.autoDispose<List<SalesPoint>>((ref) {
+  final days = ref.watch(analyticsPeriodDaysProvider);
+  return ref.watch(adminProductsRepositoryProvider).getSalesSeries(days: days);
+});
+
 final adminOrderStatusBreakdownProvider = FutureProvider.autoDispose<Map<String, int>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getOrderStatusBreakdown();
 });

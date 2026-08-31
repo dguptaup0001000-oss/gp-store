@@ -417,6 +417,20 @@ class AdminProductsRepository {
     return SalesSummary.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// Daily revenue for the dashboard chart.
+  ///
+  /// Every day in the window is present, gaps already filled server-side -
+  /// see AnalyticsService.getSalesSeries. Plot this positionally; do not
+  /// drop the zero days or the chart stops telling the truth about the
+  /// shape of the week.
+  Future<List<SalesPoint>> getSalesSeries({int days = 30}) async {
+    final response = await apiClient.dio
+        .get('/api/analytics/sales-series', queryParameters: {'days': days});
+    return (response.data as List)
+        .map((e) => SalesPoint.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   /// Map values come back as JSON numbers (Long serializes as a plain
   /// number, not a string) - cast explicitly rather than assume int.
   Future<Map<String, int>> getOrderStatusBreakdown() async {
