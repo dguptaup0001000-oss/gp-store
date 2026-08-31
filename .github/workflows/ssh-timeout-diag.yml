@@ -1,0 +1,152 @@
+# Read-only SSH diagnostics for intermittent GitHub Actions dial-tcp timeouts.
+# Does not deploy, restore, or change sshd/fail2ban/firewall on the VPS.
+name: SSH timeout diag
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/ssh-timeout-diag.yml"
+
+concurrency:
+  group: gpstore-prod-ssh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    name: Read-only VPS SSH diagnostics
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Print runner egress IP (no SSH yet)
+        run: |
+          set -Eeuo pipefail
+          echo "runner_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "azure_region=${RUNNER_TRACKING_ID:-unknown}"
+          echo -n "runner_egress_ipv4="
+          curl -4 -fsS --max-time 10 https://api.ipify.org || curl -4 -fsS --max-time 10 https://ifconfig.me || echo "unavailable"
+          echo
+
+      - name: Require VPS SSH secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for v in PROD_HOST PROD_USER PROD_SSH_PRIVATE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Run read-only diagnostics over SSH
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          KEY="$(mktemp)"
+          trap 'rm -f "$KEY"' EXIT
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$KEY"
+          chmod 600 "$KEY"
+          echo "ssh_client_start_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ssh -i "$KEY" \
+            -p "${PROD_PORT:-22}" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 \
+            "${PROD_USER}@${PROD_HOST}" \
+            'bash -s' <<'REMOTE'
+          set +e
+          echo "===== remote_utc ====="
+          date -u +%Y-%m-%dT%H:%M:%SZ
+          echo "===== whoami / host ====="
+          id
+          hostname
+          echo "===== fail2ban-client status sshd ====="
+          command -v fail2ban-client >/dev/null && fail2ban-client status sshd || echo "fail2ban-client missing"
+          echo "===== fail2ban sshd tunables ====="
+          if command -v fail2ban-client >/dev/null; then
+            fail2ban-client get sshd bantime
+            fail2ban-client get sshd findtime
+            fail2ban-client get sshd maxretry
+            fail2ban-client get sshd actions
+            fail2ban-client get sshd banip
+          fi
+          echo "===== jail file ====="
+          sed -n '1,80p' /etc/fail2ban/jail.d/gpstore-sshd.conf 2>/dev/null || echo "no gpstore-sshd.conf"
+          echo "===== fail2ban Ban/Unban last 100 ====="
+          if ls /var/log/fail2ban.log* >/dev/null 2>&1; then
+            zgrep -h -E "Ban |Unban " /var/log/fail2ban.log* 2>/dev/null | sort | tail -n 100
+          else
+            echo "no /var/log/fail2ban.log*"
+          fi
+          echo "===== fail2ban.log 2026-08-31 06-07 UTC ====="
+          if [ -f /var/log/fail2ban.log ]; then
+            grep -E "2026-08-31 0[67]:" /var/log/fail2ban.log || echo "no matches in current fail2ban.log"
+          else
+            echo "no current fail2ban.log"
+          fi
+          zgrep -h -E "2026-08-31 0[67]:" /var/log/fail2ban.log* 2>/dev/null | sort | tail -n 200
+          echo "===== journalctl fail2ban 06:30-08:00 UTC ====="
+          journalctl -u fail2ban --since "2026-08-31 06:30" --until "2026-08-31 08:00" --utc --no-pager
+          echo "===== ufw status verbose ====="
+          ufw status verbose 2>/dev/null || echo "ufw not present or not permitted"
+          echo "===== iptables -S ====="
+          iptables -S 2>/dev/null | head -n 120
+          echo "===== iptables -L -n -v (first 120) ====="
+          iptables -L -n -v 2>/dev/null | head -n 120
+          echo "===== nft list ruleset (first 80) ====="
+          nft list ruleset 2>/dev/null | head -n 80 || echo "nft not present"
+          echo "===== sshd -T selected ====="
+          sshd -T 2>/dev/null | grep -Ei "maxstartups|maxsessions|logingracetime|maxauthtries|passwordauthentication|permitrootlogin|port "
+          echo "===== uptime / reboot ====="
+          uptime
+          who -b 2>/dev/null
+          last -x reboot 2>/dev/null | head -n 8
+          echo "===== journalctl warning 06:30-08:00 UTC ====="
+          journalctl --since "2026-08-31 06:30" --until "2026-08-31 08:00" --utc -p warning --no-pager | tail -n 80
+          echo "===== dmesg oom/network ====="
+          dmesg -T 2>/dev/null | grep -Ei "oom|killed process|network|link is down" | tail -n 40
+          echo "===== systemctl ssh ====="
+          systemctl status ssh sshd --no-pager -l 2>/dev/null | head -n 60
+          echo "===== journalctl ssh 06:30-08:00 UTC ====="
+          journalctl -u ssh -u sshd --since "2026-08-31 06:30" --until "2026-08-31 08:00" --utc --no-pager | tail -n 120
+          echo "===== df ====="
+          df -h
+          df -i
+          echo "===== auth.log failed 06:00-08:00 UTC (counts, not passwords) ====="
+          for f in /var/log/auth.log /var/log/auth.log.1; do
+            [ -f "$f" ] || continue
+            echo "-- $f --"
+            grep -E "2026-08-31T0[67]:" "$f" 2>/dev/null | grep -E "Failed|Invalid user|Disconnected|Ban|MaxStartups|refused" | awk '{print $1}' | cut -c1-16 | uniq -c | tail -n 40
+          done
+          echo "===== sshd_config.d/99-gpstore.conf ====="
+          sed -n '1,40p' /etc/ssh/sshd_config.d/99-gpstore.conf 2>/dev/null || echo "no drop-in"
+          echo "===== listening ssh ====="
+          ss -tlnp 2>/dev/null | grep -E 'ssh|:22|:2[0-9]{3}' || netstat -tlnp 2>/dev/null | grep -E 'ssh|:22'
+          echo "===== DIAG_DONE ====="
+          date -u +%Y-%m-%dT%H:%M:%SZ
+REMOTE
+          echo "ssh_client_end_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "SSH diagnostics finished. This workflow did not change the VPS."
