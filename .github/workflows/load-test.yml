@@ -55,6 +55,62 @@ jobs:
         with:
           node-version: '20'
 
+      # ANSWERS "CAN THIS MACHINE REACH THE TARGET?" BEFORE ANYTHING MEASURES
+      # ANYTHING. On 31 Aug 2026 a run reported 3/3 requests failed, 0 B
+      # transferred and every latency 0 ms, then died inside k6 on a null
+      # body. Read quickly that looks like a backend collapse; it was a run
+      # pointed somewhere it could not reach, measuring nothing. This step
+      # makes that distinction the first thing in the log instead of a
+      # forensic exercise afterwards.
+      #
+      # NO SECRETS ARE PRINTED. base_url is a dispatch input and must never
+      # carry credentials - it is echoed precisely so a failed run says where
+      # it was aimed. Response bodies are not printed; only status and timing.
+      - name: Preflight - can this runner reach the target?
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -uo pipefail
+          echo "base_url : ${BASE_URL}"
+          case "${BASE_URL}" in
+            *[Tt][Oo][Kk][Ee][Nn]=*|*[Pp][Aa][Ss][Ss]*=*|*[Kk][Ee][Yy]=*)
+              echo "::error::base_url appears to contain a credential. Pass secrets as secrets, never in the URL."
+              exit 1 ;;
+          esac
+
+          scheme="$(printf '%s' "${BASE_URL}" | sed -E 's#^([a-z]+)://.*#\1#')"
+          host="$(printf '%s' "${BASE_URL}" | sed -E 's#^[a-z]+://##; s#[:/].*$##')"
+          echo "scheme   : ${scheme}"
+          echo "host     : ${host}"
+
+          echo
+          echo "--- DNS ---"
+          getent hosts "${host}" || echo "no A/AAAA record resolved for ${host}"
+
+          echo
+          echo "--- HTTP / TLS: GET <base_url>/api/health ---"
+          # -o /dev/null: the body is not printed. Only the numbers.
+          if curl -sS -o /dev/null --max-time 20 \
+               -w 'http_status=%{http_code}\ndns=%{time_namelookup}s connect=%{time_connect}s tls=%{time_appconnect}s ttfb=%{time_starttransfer}s total=%{time_total}s\nremote=%{remote_ip}:%{remote_port}\n' \
+               "${BASE_URL}/api/health"; then
+            :
+          else
+            rc=$?
+            echo "::error::curl could not complete the request (exit ${rc}). Nothing can be measured from this runner."
+            echo "curl exit 6 = DNS, 7 = connection refused/unreachable, 28 = timeout, 35/60 = TLS."
+            echo "If base_url is the default http://127.0.0.1:8081/v1, that is localhost ON THE RUNNER,"
+            echo "where no backend is listening - dispatch again with the real base_url."
+            exit 1
+          fi
+
+          status="$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "${BASE_URL}/api/health" || echo 000)"
+          if [ "${status}" != "200" ]; then
+            echo "::error::${BASE_URL}/api/health answered ${status}, not 200. The address is reachable but is not this API."
+            exit 1
+          fi
+          echo
+          echo "preflight OK - the API answered 200 from this runner."
+
       - name: Seed test accounts
         working-directory: load-tests
         run: BASE_URL="${{ inputs.base_url }}" COUNT="${{ inputs.accounts }}" node seed-accounts.js
