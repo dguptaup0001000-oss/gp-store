@@ -34,7 +34,23 @@ import static org.junit.jupiter.api.Assertions.*;
  * failed, or threw. This codebase has already been bitten once by a test that
  * quietly wrote settings other tests read.
  */
-@SpringBootTest
+@SpringBootTest(properties = {
+        // NO LIVE OUTBOX WORKER. This class places real orders, and a running
+        // drain turns each one into an auto-assigned delivery against whichever
+        // rider is available - including another test class's fixture riders,
+        // because the least-loaded fallback picks globally. Spring caches this
+        // context and never closes it, so the worker outlives the class and can
+        // still be assigning while a later class asserts on rider workload.
+        //
+        // That is exactly how TerritoryDispatchTest started failing with
+        // "expected: <22> but was: <23>": a stray assignment gave one of two
+        // deliberately-tied riders a live order, its score rose, and the tie
+        // it was asserting broke the other way.
+        //
+        // Nothing here tests the outbox or any async side effect, so the drain
+        // has no purpose in this class beyond causing that.
+        "outbox.drain-interval-ms=3600000"
+})
 class StoreHoursCheckoutTest {
 
     @Autowired private OrderService orderService;
