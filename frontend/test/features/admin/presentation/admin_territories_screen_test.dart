@@ -93,7 +93,10 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(find.textContaining("Couldn't load territory status"), findsOneWidget);
-      expect(find.text('Retry'), findsWidgets);
+      // The shared AdminErrorState labels its retry "Try again". This
+      // asserts the same property as before - a retry is offered - against
+      // the console's one error state rather than a per-screen button.
+      expect(find.text('Try again'), findsWidgets);
     });
 
     testWidgets('empty configuration is a real state, not a crash', (tester) async {

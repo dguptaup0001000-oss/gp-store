@@ -21,25 +21,14 @@ class AdminDeliveryPricingScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Delivery Pricing')),
       body: settingsAsync.when(
-        loading: () => const AdminListSkeleton(rows: 4),
-        error: (error, stackTrace) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  "Couldn't load delivery pricing: ${extractErrorMessage(error)}",
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: hapticize(() => ref.invalidate(deliveryPricingSettingsProvider)),
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          ),
+        // A SPINNER, NOT A SKELETON. Every list in the console gets a
+        // skeleton, but this screen is a settings form: four placeholder
+        // list rows would promise a shape the screen does not have.
+        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        error: (error, stackTrace) => AdminErrorState(
+          message: "Couldn't load delivery pricing: ${extractErrorMessage(error)}",
+          onRetry:
+              hapticize(() => ref.invalidate(deliveryPricingSettingsProvider)),
         ),
         data: (settings) => _DeliveryPricingForm(
           key: ValueKey('${settings.updatedAt}-${settings.updatedBy}'),

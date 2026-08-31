@@ -103,7 +103,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining("Couldn't load delivery pricing"), findsOneWidget);
-      expect(find.text('Retry'), findsOneWidget);
+      // The shared AdminErrorState labels its retry "Try again". This
+      // asserts the same property as before - a retry is offered - against
+      // the console's one error state rather than a per-screen button.
+      expect(find.text('Try again'), findsOneWidget);
     });
 
     testWidgets('fills the form from the GET payload and saves those field names', (tester) async {
@@ -187,7 +190,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining("Couldn't load the stored delivery breakdown"), findsOneWidget);
-      expect(find.text('Retry'), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
     });
   });
 }

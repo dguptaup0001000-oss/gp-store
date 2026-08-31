@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../admin/design/admin_components.dart';
 import '../../../admin/design/admin_tokens.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -398,12 +399,13 @@ Widget _statRow(String label, String value) {
   );
 }
 
+/// Kept as a helper because three sections on this screen fail
+/// independently; it now delegates to the shared state so a failure here
+/// looks like a failure anywhere else in the console.
 Widget _errorBlock({required String message, required VoidCallback onRetry}) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(message),
-      TextButton(onPressed: hapticize(onRetry), child: const Text('Retry')),
-    ],
+  return AdminErrorState(
+    message: message,
+    compact: true,
+    onRetry: hapticize(onRetry),
   );
 }
