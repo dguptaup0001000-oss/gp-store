@@ -39,6 +39,22 @@ class StaffRoleAuthorizationTest {
     private static final String CATALOG_SEED = "/api/admin/catalog/seed";
     private static final String REFUND = "/api/payments/order/1/refund/start";
     private static final String BROADCAST = "/api/notifications/broadcast";
+    private static final String DELIVERY_PARTNERS = "/api/delivery-partners";
+
+    /**
+     * ONLY EVER ASSERTED AS FORBIDDEN, never as allowed.
+     *
+     * Reading the pricing settings LAZILY CREATES AND SAVES the row when one
+     * does not exist (DeliveryPricingService line ~86), so a successful GET
+     * here writes to the database every other test in the suite shares - and
+     * the dispatch scorer reads that same row to weight a rider's load. A
+     * test asserting an authorization rule has no business changing what a
+     * later test computes. A 403 stops in the filter chain and never reaches
+     * the controller, so the forbidden cases are safe.
+     *
+     * DELIVERY_PARTNERS proves the same permission (both are DELIVERY_MANAGE)
+     * and is a plain read.
+     */
     private static final String DELIVERY_PRICING = "/api/admin/delivery-pricing/settings";
 
     @Autowired private MockMvc mockMvc;
@@ -81,7 +97,7 @@ class StaffRoleAuthorizationTest {
         allowed(INVENTORY);
         allowed(ADMIN_PRODUCTS);
         allowed(ACTUATOR);
-        allowed(DELIVERY_PRICING);
+        allowed(DELIVERY_PARTNERS);
     }
 
     @Test
@@ -153,7 +169,7 @@ class StaffRoleAuthorizationTest {
     @WithStaff(com.gpstore.entity.Role.DELIVERY_MANAGER)
     @DisplayName("DELIVERY_MANAGER runs dispatch and touches neither stock nor refunds")
     void deliveryManagerIsScopedToDispatch() throws Exception {
-        allowed(DELIVERY_PRICING);
+        allowed(DELIVERY_PARTNERS);
         allowed(CUSTOMERS);
 
         forbidden(INVENTORY);
@@ -177,6 +193,8 @@ class StaffRoleAuthorizationTest {
         forbidden(ANALYTICS);
         forbidden(AUDIT_LOG);
         forbidden(ACTUATOR);
+        forbidden(DELIVERY_PRICING);
+        forbidden(DELIVERY_PARTNERS);
         forbiddenPost(REFUND);
         forbiddenPost(BROADCAST);
         forbiddenPost(CATALOG_SEED);
