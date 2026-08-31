@@ -151,18 +151,105 @@ function recordOutcome(res) {
   }
 }
 
+/**
+ * Stops the run with a diagnosis when a request did not actually complete.
+ *
+ * WHY THIS EXISTS. On 31 Aug 2026 a run reported 3/3 requests failed, 0 B
+ * sent, 0 B received and every duration 0 ms - and then died inside k6 with
+ * "the body is null so we can't transform it to JSON" and a stack trace into
+ * reflect.methodValueCall. That message describes the crash, not the problem.
+ * The problem was that BASE_URL was not reachable from the machine running
+ * the test, and the report looked like a backend result when nothing had
+ * reached the backend at all.
+ *
+ * A status of 0 in k6 means no HTTP response: DNS failure, refused
+ * connection, TLS failure or timeout. There is nothing to parse and nothing
+ * to measure, so the run stops here and says which of those it was.
+ *
+ * PRINTS NO CREDENTIALS. The URL is the dispatch input plus a public path;
+ * bodies are never echoed, because this helper also guards authenticated
+ * calls whose responses carry tokens.
+ */
+function requireReachable(res, name, url) {
+  if (res.status === 0) {
+    throw new Error(
+      `\n\nCANNOT REACH THE BACKEND - this run measured nothing.\n` +
+      `  request  : ${name}\n` +
+      `  url      : ${url}\n` +
+      `  result   : no HTTP response (k6 error "${res.error || 'unknown'}", ` +
+      `error_code ${res.error_code || 0})\n` +
+      `  duration : ${Math.round(res.timings ? res.timings.duration : 0)} ms\n\n` +
+      `Nothing was sent or received, so no number below says anything about\n` +
+      `the backend. The usual cause is BASE_URL pointing somewhere this\n` +
+      `machine cannot reach. Note the workflow's default is\n` +
+      `http://127.0.0.1:8081/v1 - that is localhost ON THE RUNNER, where no\n` +
+      `backend is listening - so a dispatch that accepts the defaults always\n` +
+      `produces exactly this. Pass the real base_url, and read the preflight\n` +
+      `step for DNS, TLS, HTTP status and timing.\n`
+    );
+  }
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(
+      `\n\nBACKEND REACHED BUT REFUSED THE REQUEST.\n` +
+      `  request  : ${name}\n` +
+      `  url      : ${url}\n` +
+      `  status   : ${res.status}\n` +
+      `  duration : ${Math.round(res.timings ? res.timings.duration : 0)} ms\n\n` +
+      `The connection works, so this is the API disagreeing rather than a\n` +
+      `network problem: wrong base path (does it include /v1?), an endpoint\n` +
+      `that does not exist, or the shop rejecting the caller.\n`
+    );
+  }
+}
+
+/**
+ * res.json(), but only once there is something that can be JSON.
+ *
+ * Checks reachability and status first, then the content type, so a proxy
+ * error page or an empty body produces a sentence naming the endpoint rather
+ * than a parser stack trace. The body is never printed - these responses are
+ * public here, but this helper is meant to be safe on authenticated ones too.
+ */
+function safeJson(res, name, url) {
+  requireReachable(res, name, url);
+  const contentType =
+    res.headers['Content-Type'] || res.headers['content-type'] || '';
+  if (!res.body || res.body.length === 0) {
+    throw new Error(`${name} (${url}) returned ${res.status} with an empty body; expected JSON.`);
+  }
+  if (contentType.indexOf('json') === -1) {
+    throw new Error(
+      `${name} (${url}) returned ${res.status} with content-type "${contentType}", not JSON. ` +
+      `A proxy or error page is answering instead of the API.`
+    );
+  }
+  try {
+    return res.json();
+  } catch (e) {
+    throw new Error(`${name} (${url}) returned ${res.status} but the body did not parse as JSON.`);
+  }
+}
+
 export function setup() {
-  const health = http.get(`${BASE_URL}/api/health`, { tags: { name: 'liveness' } });
+  // CONNECTIVITY BEFORE LOAD, and in this order on purpose: liveness proves
+  // the address answers at all, so a wrong or unreachable BASE_URL is named
+  // here rather than surfacing later as a wall of zeroes.
+  console.log(`load test target: ${BASE_URL}`);
+
+  const healthUrl = `${BASE_URL}/api/health`;
+  const health = http.get(healthUrl, { tags: { name: 'liveness' } });
   recordOutcome(health);
+  requireReachable(health, 'liveness', healthUrl);
   check(health, { 'setup: liveness 200': (r) => r.status === 200 });
 
   const store = http.get(`${BASE_URL}/api/store-info`, { tags: { name: 'store_info' } });
   recordOutcome(store);
 
-  const res = http.get(`${BASE_URL}/api/categories`, { tags: { name: 'categories' } });
+  const categoriesUrl = `${BASE_URL}/api/categories`;
+  const res = http.get(categoriesUrl, { tags: { name: 'categories' } });
   recordOutcome(res);
   check(res, { 'setup: categories loaded': (r) => r.status === 200 });
-  const categories = res.json();
+  const categories = safeJson(res, 'categories', categoriesUrl);
   if (!categories || categories.length === 0) {
     throw new Error('No categories returned from /api/categories - is BASE_URL correct and the catalog seeded?');
   }
