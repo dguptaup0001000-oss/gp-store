@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/api/error_messages.dart';
 import '../data/worker_repository.dart';
 import '../domain/worker_models.dart';
 
@@ -47,10 +48,51 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
     _order = widget.order;
   }
 
+  /// Moves that end the delivery, and cannot be walked back from the phone.
+  ///
+  /// DELIVERED and CANCELLED are terminal: nothing in [WorkerOrder.allowedNext]
+  /// leads out of them, so a mis-tap is a trip back to the shop and an
+  /// administrator. Every button on this screen is 56 logical pixels tall and
+  /// sits under a thumb holding a carton, which is the right size for the
+  /// common case and exactly the wrong size for this one.
+  static const _irreversible = {'DELIVERED', 'CANCELLED'};
+
+  Future<bool> _confirm(String status) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Mark ${humanizeStatus(status).toLowerCase()}?'),
+        content: Text(
+          status == 'CANCELLED'
+              ? 'This cancels the delivery of ${_order.orderNumber}. It cannot '
+                  'be undone from this app.'
+              : 'This records ${_order.orderNumber} as handed to the customer. '
+                  'It cannot be undone from this app.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Go back'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(humanizeStatus(status)),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
   Future<void> _move(String status) async {
     final deliveryId = _order.deliveryId;
     if (deliveryId == null || _sending != null) {
       return;
+    }
+
+    if (_irreversible.contains(status)) {
+      if (!await _confirm(status)) return;
+      if (!mounted) return;
     }
 
     setState(() {
@@ -72,25 +114,21 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
       setState(() => _order = refreshed);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = _readable(e));
+      // THE SERVER'S OWN SENTENCE, read from the parsed error rather than
+      // scraped out of it. This used to run a regex for `"message":"..."`
+      // over error.toString(), which depended on Dio choosing to include the
+      // response body in its string form - it does not reliably - and could
+      // not survive an escaped quote or a nested "message" key. When it
+      // missed, a refused transition became a connection message, sending a
+      // worker to check a network that had just answered them.
+      //
+      // A refusal here says what IS allowed: "This delivery is PACKED, so it
+      // cannot go straight to DELIVERED. Allowed next: PICKED_UP, CANCELLED."
+      // That is the only part a worker can act on.
+      setState(() => _error = extractErrorMessage(e));
     } finally {
       if (mounted) setState(() => _sending = null);
     }
-  }
-
-  /// The server's own sentence where there is one.
-  ///
-  /// A refused transition comes back with a message naming what IS allowed -
-  /// "This delivery is PACKED, so it cannot go straight to DELIVERED. Allowed
-  /// next: PICKED_UP, CANCELLED." Replacing that with "Something went wrong"
-  /// would throw away the only part a worker can act on.
-  String _readable(Object error) {
-    final text = error.toString();
-    final match = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(text);
-    if (match != null) {
-      return match.group(1)!;
-    }
-    return 'Could not reach the server. Check your connection and try again.';
   }
 
   @override
@@ -128,7 +166,8 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
                       style: theme.textTheme.labelLarge
                           ?.copyWith(letterSpacing: 1.2)),
                   const SizedBox(height: 4),
-                  Text('₹$collect', style: theme.textTheme.headlineLarge),
+                  Text(formatRupees(collect),
+                      style: theme.textTheme.headlineLarge),
                 ],
               ),
             ),
@@ -180,7 +219,7 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
                           height: 22,
                           width: 22,
                           child: CircularProgressIndicator(strokeWidth: 2))
-                      : Text(_label(next)),
+                      : Text(humanizeStatus(next)),
                 ),
               ),
               const SizedBox(height: 10),
@@ -190,13 +229,6 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
     );
   }
 
-  /// PICKED_UP reads as "Picked up". Workers are not reading an enum.
-  static String _label(String status) {
-    final words = status.split('_');
-    return words
-        .map((w) => w.isEmpty ? w : w[0] + w.substring(1).toLowerCase())
-        .join(' ');
-  }
 }
 
 class _StatusLine extends StatelessWidget {
@@ -207,11 +239,17 @@ class _StatusLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final shown = deliveryStatus ?? orderStatus ?? 'UNKNOWN';
+    // Humanised, like the buttons below it. This printed the raw constant
+    // while _label() sat in the same file turning PICKED_UP into "Picked up"
+    // for the buttons - so one screen showed a worker "OUT_FOR_DELIVERY" as
+    // the current status and "Out for delivery" on the button, and left them
+    // to work out that those are the same thing.
+    final shown = deliveryStatus ?? orderStatus;
     return Row(
       children: [
         Text('Status: ', style: Theme.of(context).textTheme.bodyLarge),
-        Text(shown, style: Theme.of(context).textTheme.titleLarge),
+        Text(shown == null ? 'Unknown' : humanizeStatus(shown),
+            style: Theme.of(context).textTheme.titleLarge),
       ],
     );
   }

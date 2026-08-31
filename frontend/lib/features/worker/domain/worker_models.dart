@@ -107,9 +107,16 @@ class ScanOutcome {
         orderNumber: json['orderNumber'] as String?,
         subzoneCode: json['subzoneCode'] as String?,
         replayed: json['replayed'] == true,
+        // Map<String, dynamic>.from, not a cast. A decoded JSON object is
+        // usually already Map<String, dynamic>, but not always - and when the
+        // cast missed, an ACCEPTED scan threw a TypeError instead of opening
+        // the packing list, telling the worker their scan had failed when the
+        // server had recorded it. WorkerProfile.activeTasks was already
+        // defensive here; these two were not.
         order: json['order'] == null
             ? null
-            : WorkerOrder.fromJson(json['order'] as Map<String, dynamic>),
+            : WorkerOrder.fromJson(
+                Map<String, dynamic>.from(json['order'] as Map)),
       );
 
   static const ScanOutcome offline = ScanOutcome(
@@ -198,8 +205,8 @@ class WorkerOrder {
         longitude: (json['longitude'] as num?)?.toDouble(),
         totalItems: (json['totalItems'] as num?)?.toInt() ?? 0,
         items: (json['items'] as List?)
-                ?.map(
-                    (e) => WorkerOrderLine.fromJson(e as Map<String, dynamic>))
+                ?.map((e) => WorkerOrderLine.fromJson(
+                    Map<String, dynamic>.from(e as Map)))
                 .toList(growable: false) ??
             const [],
         amountToCollect: json['amountToCollect'] as num?,
@@ -267,4 +274,34 @@ class WorkerTask {
         customerName: json['customerName'] as String?,
         deliveryAddress: json['deliveryAddress'] as String?,
       );
+}
+
+/// "OUT_FOR_DELIVERY" -> "Out for delivery".
+///
+/// Workers are not reading an enum. This lived as a private helper on the
+/// order screen's button labels while the status LINE on the same screen, and
+/// the task tiles on the home screen, printed the raw constant - so one screen
+/// showed a worker both spellings of the same word at once.
+String humanizeStatus(String status) {
+  if (status.isEmpty) return status;
+  final words = status.split('_').where((w) => w.isNotEmpty);
+  if (words.isEmpty) return status;
+  return words
+      .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
+      .join(' ');
+}
+
+/// Rupees, as money rather than as a Dart number.
+///
+/// [WorkerOrder.amountToCollect] is a `num`, so string interpolation renders a
+/// whole-rupee JSON value of 450.0 as "450.0" - and this is the cash-collection
+/// figure, the single number in this app that a worker counts into their hand
+/// at a customer's door. Whole amounts print whole; paise print with two
+/// digits.
+String formatRupees(num amount) {
+  final rounded = (amount * 100).round() / 100;
+  if (rounded == rounded.roundToDouble()) {
+    return '\u20B9${rounded.toInt()}';
+  }
+  return '\u20B9${rounded.toStringAsFixed(2)}';
 }

@@ -123,3 +123,47 @@ String _describeStatus(int? status) {
   }
   return _unknown;
 }
+
+/// The HTTP status behind a thrown error, or null when it never reached one.
+///
+/// Callers need this to tell "the server refused you" from "the server was
+/// never reached", which are the same sentence to a user and completely
+/// different decisions to the app: one means sign out, the other means wait.
+///
+/// Unwraps the DioException that ApiClient's interceptor throws. It carries
+/// an ApiException in its `error` field rather than being one, which is the
+/// trap that made two worker screens' `on ApiException` clauses dead code.
+int? apiStatusOf(Object error) {
+  if (error is ApiException) return error.statusCode;
+  if (error is DioException) {
+    final inner = error.error;
+    if (inner is ApiException && inner.statusCode != null) {
+      return inner.statusCode;
+    }
+    return error.response?.statusCode;
+  }
+  return null;
+}
+
+/// True when a later attempt could plausibly succeed because nothing was
+/// actually decided - the request never got an answer.
+///
+/// Deliberately narrow, and the narrowness is the point: any response at all,
+/// including a 4xx, means the server heard us and ruled. Treating a refusal as
+/// "try later" would retry a decision that will never change, and - in the
+/// worker app - queue a scan the server has already rejected.
+bool isConnectivityFailure(Object error) {
+  if (error is! DioException) return false;
+  switch (error.type) {
+    case DioExceptionType.connectionTimeout:
+    case DioExceptionType.sendTimeout:
+    case DioExceptionType.receiveTimeout:
+    case DioExceptionType.connectionError:
+      return true;
+    case DioExceptionType.unknown:
+      // Dio reports a dead radio as `unknown` wrapping a SocketException.
+      return error.error is Exception && error.response == null;
+    default:
+      return false;
+  }
+}

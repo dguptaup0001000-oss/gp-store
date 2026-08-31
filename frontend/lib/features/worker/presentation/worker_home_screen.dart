@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/api/error_messages.dart';
 import '../data/worker_location_service.dart';
 import '../data/worker_repository.dart';
 import '../domain/worker_models.dart';
@@ -106,15 +107,52 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
         _pending = pending.length;
       });
       await _syncLocationTracking();
-    } catch (_) {
+    } catch (e) {
       // Offline. The screen keeps showing what it last knew rather than
       // blanking - stale numbers beat an error page when the next action is
       // to scan, which works offline anyway.
       final pending = await widget.repository.pendingScans();
       if (mounted) setState(() => _pending = pending.length);
+
+      // BUT A REFUSAL IS NOT OFFLINE. This caught everything and said nothing,
+      // so a worker whose account had been deactivated, or whose worker link
+      // an administrator removed, kept looking at a home screen of stale
+      // numbers with a scan button that would fail on every press - and no
+      // hint that the app had stopped being signed in. Anything the server
+      // actually answered gets said out loud.
+      if (mounted && !isConnectivityFailure(e)) {
+        _tell(extractErrorMessage(e));
+      }
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
+  }
+
+  Future<void> _confirmSignOut() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: Text(
+          _pending > 0
+              ? 'You have $_pending scan${_pending == 1 ? '' : 's'} still '
+                  'waiting to be sent. Signing out keeps them on this phone, '
+                  'but they cannot be sent until you sign in again.'
+              : 'You will need your email and password to sign back in.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Stay signed in'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await widget.onSignOut();
   }
 
   void _tell(String message) {
@@ -161,8 +199,11 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
         ),
       );
       await _refresh();
-    } catch (_) {
-      if (mounted) _tell('Could not open that order. Check your connection.');
+    } catch (e) {
+      // Named rather than guessed. "Check your connection" was wrong whenever
+      // the server had answered - an order reassigned to somebody else while
+      // the worker was riding to it says so, and that is worth reading.
+      if (mounted) _tell(extractErrorMessage(e));
     }
   }
 
@@ -177,7 +218,10 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
         actions: [
           IconButton(
             tooltip: 'Sign out',
-            onPressed: () async => widget.onSignOut(),
+            // ASKED FIRST. This is a small target in the corner of the screen
+            // a worker taps all day, and signing out mid-round means typing a
+            // password back in on shop wifi they may not be standing in.
+            onPressed: _confirmSignOut,
             icon: const Icon(Icons.logout),
           ),
         ],
@@ -298,16 +342,11 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
     );
   }
 
-  static String _statusLabel(String status) {
-    switch (status) {
-      case 'AVAILABLE':
-        return 'Available';
-      case 'ON_DELIVERY':
-        return 'On delivery';
-      default:
-        return 'Off duty';
-    }
-  }
+  /// OFFLINE reads as "Off duty" rather than "Offline", which on a phone
+  /// would be read as a connection problem. Every other value goes through
+  /// the shared humaniser.
+  static String _statusLabel(String status) =>
+      status == 'OFFLINE' ? 'Off duty' : humanizeStatus(status);
 }
 
 class _Facts extends StatelessWidget {
@@ -421,7 +460,11 @@ class _TaskTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(task.orderNumber, style: theme.textTheme.titleLarge),
-                Text(task.deliveryStatus,
+                // humanizeStatus, not the raw constant. This tile printed
+                // "OUT_FOR_DELIVERY" under the order number while the order
+                // screen it opens showed "Out for delivery" for the same
+                // value.
+                Text(humanizeStatus(task.deliveryStatus),
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(color: theme.colorScheme.outline)),
               ],
