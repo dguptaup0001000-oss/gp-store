@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../orders/domain/order_models.dart';
 import '../../orders/presentation/orders_providers.dart';
@@ -90,7 +90,7 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
 
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -125,7 +125,7 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -149,7 +149,7 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -212,16 +212,16 @@ class _DeliveryAssignmentCardState extends ConsumerState<_DeliveryAssignmentCard
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.error.withValues(alpha: 0.06),
+        color: AdminColors.danger.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+        border: Border.all(color: AdminColors.danger.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'No delivery partner assigned',
-            style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.error),
+            style: TextStyle(fontWeight: FontWeight.w700, color: AdminColors.danger),
           ),
           const SizedBox(height: 4),
           const Text(

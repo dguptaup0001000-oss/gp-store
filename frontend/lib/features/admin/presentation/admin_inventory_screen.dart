@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/inventory_models.dart';
 import 'admin_providers.dart';
@@ -55,7 +55,7 @@ class _LowStockList extends ConsumerWidget {
       data: (items) {
         if (items.isEmpty) {
           return const Center(
-            child: Text('Nothing is low on stock right now', style: TextStyle(color: AppColors.textSecondary)),
+            child: Text('Nothing is low on stock right now', style: TextStyle(color: AdminColors.textSecondary)),
           );
         }
 
@@ -99,7 +99,7 @@ class _AllInventoryList extends ConsumerWidget {
         final items = result.items;
         if (items.isEmpty) {
           return const Center(
-            child: Text('No inventory records yet', style: TextStyle(color: AppColors.textSecondary)),
+            child: Text('No inventory records yet', style: TextStyle(color: AdminColors.textSecondary)),
           );
         }
 
@@ -134,7 +134,7 @@ class _InventoryTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
           Expanded(
@@ -151,7 +151,7 @@ class _InventoryTile extends ConsumerWidget {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: item.isLowStock ? AppColors.error : AppColors.textSecondary,
+                    color: item.isLowStock ? AdminColors.danger : AdminColors.textSecondary,
                   ),
                 ),
                 if (item.minimumStock != null)
@@ -163,7 +163,7 @@ class _InventoryTile extends ConsumerWidget {
           Column(
             children: [
               IconButton(
-                icon: const Icon(Icons.add_box_outlined, color: AppColors.primary),
+                icon: const Icon(Icons.add_box_outlined, color: AdminColors.primary),
                 tooltip: 'Restock',
                 onPressed: hapticize(() => _showRestockDialog(context, ref)),
               ),
@@ -236,7 +236,7 @@ class _InventoryTile extends ConsumerWidget {
           children: [
             const Text(
               'For stock-take corrections, not routine restocking.',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              style: TextStyle(fontSize: 12, color: AdminColors.textSecondary),
             ),
             const SizedBox(height: 12),
             TextField(

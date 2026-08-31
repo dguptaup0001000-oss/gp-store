@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
 import 'admin_product_form_screen.dart';
@@ -74,7 +74,7 @@ class _AdminProductListScreenState extends ConsumerState<AdminProductListScreen>
                   return Center(
                     child: Text(
                       allProducts.isEmpty ? 'No products yet - tap + to add one' : 'No matches',
-                      style: const TextStyle(color: AppColors.textSecondary),
+                      style: const TextStyle(color: AdminColors.textSecondary),
                     ),
                   );
                 }
@@ -123,7 +123,7 @@ class _ProductTile extends ConsumerWidget {
       }),
       child: Container(
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
         child: Row(
           children: [
             Expanded(
@@ -136,20 +136,20 @@ class _ProductTile extends ConsumerWidget {
                   if (!product.active)
                     const Padding(
                       padding: EdgeInsets.only(top: 2),
-                      child: Text('Inactive', style: TextStyle(color: AppColors.error, fontSize: 11, fontWeight: FontWeight.w600)),
+                      child: Text('Inactive', style: TextStyle(color: AdminColors.danger, fontSize: 11, fontWeight: FontWeight.w600)),
                     ),
                   const SizedBox(height: 4),
                   Text(
                     variantCount == 0 ? 'No variants yet - add one to make this sellable' : '$variantCount variant(s)',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontSize: 12,
-                          color: variantCount == 0 ? AppColors.error : AppColors.textSecondary,
+                          color: variantCount == 0 ? AdminColors.danger : AdminColors.textSecondary,
                         ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+            const Icon(Icons.chevron_right, color: AdminColors.textSecondary),
           ],
         ),
       ),

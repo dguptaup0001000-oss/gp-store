@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/notifications/push_notification_providers.dart';
 import '../../../core/notifications/voice_announcement_providers.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../../core/util/haptic_widgets.dart';
 
 /// On/off switch for spoken order announcements.
@@ -59,7 +59,7 @@ class _AdminVoiceSettingsScreenState extends ConsumerState<AdminVoiceSettingsScr
         padding: const EdgeInsets.all(16),
         children: [
           Container(
-            decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
             child: SwitchListTile(
               value: enabled.valueOrNull ?? true,
               // Disabled only while a save is genuinely in flight, and while
@@ -68,15 +68,15 @@ class _AdminVoiceSettingsScreenState extends ConsumerState<AdminVoiceSettingsScr
               title: const Text('Speak new orders aloud', style: TextStyle(fontWeight: FontWeight.w700)),
               subtitle: const Text(
                 'Announces the customer name and the order amount, like a payment soundbox.',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                style: TextStyle(color: AdminColors.textSecondary, fontSize: 13),
               ),
-              secondary: const Icon(Icons.campaign_outlined, color: AppColors.primary),
+              secondary: const Icon(Icons.campaign_outlined, color: AdminColors.primary),
             ),
           ),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: const [
@@ -84,32 +84,32 @@ class _AdminVoiceSettingsScreenState extends ConsumerState<AdminVoiceSettingsScr
                 SizedBox(height: 6),
                 Text(
                   '"New order received from Ramesh Kumar. Order amount 520 rupees."',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13, fontStyle: FontStyle.italic),
+                  style: TextStyle(color: AdminColors.textSecondary, fontSize: 13, fontStyle: FontStyle.italic),
                 ),
                 SizedBox(height: 10),
                 Text(
                   'Only the name and the amount are ever spoken - never a phone number, '
                   'address, email or payment detail.',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                  style: TextStyle(color: AdminColors.textSecondary, fontSize: 13),
                 ),
                 SizedBox(height: 10),
                 Text(
                   'Keep this app open and logged in as admin on the counter phone. '
                   'New orders ding and are spoken from the app itself, even when '
                   'Firebase push is not configured on this install.',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                  style: TextStyle(color: AdminColors.textSecondary, fontSize: 13),
                 ),
                 SizedBox(height: 10),
                 Text(
                   'Announcements use the phone\'s own volume, and follow silent mode. '
                   'Each order is announced once, even if the notification arrives twice.',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                  style: TextStyle(color: AdminColors.textSecondary, fontSize: 13),
                 ),
                 SizedBox(height: 10),
                 Text(
                   'Turning this off changes nothing else: notifications and receipt '
                   'printing carry on as normal.',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                  style: TextStyle(color: AdminColors.textSecondary, fontSize: 13),
                 ),
               ],
             ),
@@ -118,12 +118,12 @@ class _AdminVoiceSettingsScreenState extends ConsumerState<AdminVoiceSettingsScr
             const SizedBox(height: 12),
             const Text(
               'Could not read the saved setting, so announcements are treated as on.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+              style: TextStyle(color: AdminColors.textSecondary, fontSize: 13),
             ),
           ],
           if (_statusMessage != null) ...[
             const SizedBox(height: 12),
-            Text(_statusMessage!, style: const TextStyle(color: AppColors.textSecondary)),
+            Text(_statusMessage!, style: const TextStyle(color: AdminColors.textSecondary)),
           ],
           const SizedBox(height: 16),
           FilledButton.tonalIcon(

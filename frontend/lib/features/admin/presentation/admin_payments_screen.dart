@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/admin_payment_model.dart';
 import 'admin_providers.dart';
@@ -34,7 +34,7 @@ class AdminPaymentsScreen extends ConsumerWidget {
           final payments = page.payments;
           if (payments.isEmpty) {
             return const Center(
-              child: Text('No payments yet', style: TextStyle(color: AppColors.textSecondary)),
+              child: Text('No payments yet', style: TextStyle(color: AdminColors.textSecondary)),
             );
           }
 
@@ -92,7 +92,7 @@ class _PaymentTileState extends ConsumerState<_PaymentTile> {
 
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -110,17 +110,17 @@ class _PaymentTileState extends ConsumerState<_PaymentTile> {
           const SizedBox(height: 4),
           Row(
             children: [
-              Text(payment.paymentMethod ?? '', style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+              Text(payment.paymentMethod ?? '', style: const TextStyle(fontSize: 11, color: AdminColors.textSecondary)),
               const SizedBox(width: 8),
               Text(
                 payment.paymentStatus?.replaceAll('_', ' ') ?? '',
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.primary),
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AdminColors.primary),
               ),
             ],
           ),
           if (payment.transactionId != null) ...[
             const SizedBox(height: 4),
-            Text('Txn: ${payment.transactionId}', style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+            Text('Txn: ${payment.transactionId}', style: const TextStyle(fontSize: 11, color: AdminColors.textSecondary)),
           ],
           if (orderId != null && _actionsFor(payment.paymentStatus).isNotEmpty) ...[
             const SizedBox(height: 10),

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
 import '../domain/admin_coupon_models.dart';
@@ -73,7 +73,7 @@ class _AdminCouponListScreenState extends ConsumerState<AdminCouponListScreen> {
                   return Center(
                     child: Text(
                       allCoupons.isEmpty ? 'No coupons yet - tap + to add one' : 'No matches',
-                      style: const TextStyle(color: AppColors.textSecondary),
+                      style: const TextStyle(color: AdminColors.textSecondary),
                     ),
                   );
                 }
@@ -124,7 +124,7 @@ class _CouponTile extends ConsumerWidget {
       }),
       child: Container(
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
         child: Row(
           children: [
             Expanded(
@@ -136,7 +136,7 @@ class _CouponTile extends ConsumerWidget {
                       Text(coupon.couponCode, style: const TextStyle(fontWeight: FontWeight.w700)),
                       const SizedBox(width: 8),
                       if (!coupon.active)
-                        const Text('Inactive', style: TextStyle(color: AppColors.error, fontSize: 11, fontWeight: FontWeight.w600)),
+                        const Text('Inactive', style: TextStyle(color: AdminColors.danger, fontSize: 11, fontWeight: FontWeight.w600)),
                     ],
                   ),
                   Text(label, style: Theme.of(context).textTheme.bodyMedium),
@@ -149,7 +149,7 @@ class _CouponTile extends ConsumerWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+            const Icon(Icons.chevron_right, color: AdminColors.textSecondary),
           ],
         ),
       ),

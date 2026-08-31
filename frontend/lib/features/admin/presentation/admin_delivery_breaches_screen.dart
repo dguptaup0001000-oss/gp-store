@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -36,7 +36,7 @@ class AdminDeliveryBreachesScreen extends ConsumerWidget {
         data: (breaches) {
           if (breaches.isEmpty) {
             return const Center(
-              child: Text('No delivery guarantee breaches - great job!', style: TextStyle(color: AppColors.textSecondary)),
+              child: Text('No delivery guarantee breaches - great job!', style: TextStyle(color: AdminColors.textSecondary)),
             );
           }
 
@@ -51,7 +51,7 @@ class AdminDeliveryBreachesScreen extends ConsumerWidget {
                 return Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: AppColors.error.withValues(alpha: 0.08),
+                    color: AdminColors.danger.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(

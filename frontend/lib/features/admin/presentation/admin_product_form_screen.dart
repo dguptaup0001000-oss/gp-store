@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
 import 'admin_providers.dart';
@@ -205,7 +205,7 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
                   const SizedBox(height: 16),
                   const Text(
                     'Save the product first, then add its variants (pack sizes, prices, stock).',
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                    style: TextStyle(color: AdminColors.textSecondary, fontSize: 12),
                     textAlign: TextAlign.center,
                   ),
                 ],
@@ -254,14 +254,14 @@ class _VariantsSection extends ConsumerWidget {
             padding: EdgeInsets.symmetric(vertical: 12),
             child: Text(
               'No variants yet - this product cannot be sold until it has at least one.',
-              style: TextStyle(color: AppColors.error, fontSize: 12),
+              style: TextStyle(color: AdminColors.danger, fontSize: 12),
             ),
           )
         else
           ...product.variants.map((variant) => Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(10)),
                 child: Row(
                   children: [
                     Expanded(
@@ -276,7 +276,7 @@ class _VariantsSection extends ConsumerWidget {
                             variant.available ? 'In stock' : 'Out of stock',
                             style: TextStyle(
                               fontSize: 12,
-                              color: variant.available ? AppColors.success : AppColors.error,
+                              color: variant.available ? AdminColors.success : AdminColors.danger,
                             ),
                           ),
                         ],

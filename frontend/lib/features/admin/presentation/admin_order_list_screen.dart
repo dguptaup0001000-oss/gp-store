@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../orders/domain/order_models.dart';
 import 'admin_order_detail_screen.dart';
@@ -86,7 +86,7 @@ class _AdminOrderListScreenState extends ConsumerState<AdminOrderListScreen> {
                   return Center(
                     child: Text(
                       allOrders.isEmpty ? 'No orders yet' : 'No matches',
-                      style: const TextStyle(color: AppColors.textSecondary),
+                      style: const TextStyle(color: AdminColors.textSecondary),
                     ),
                   );
                 }
@@ -116,7 +116,7 @@ class _AdminOrderListScreenState extends ConsumerState<AdminOrderListScreen> {
                         }),
                         child: Container(
                           padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+                          decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
                           child: Row(
                             children: [
                               Expanded(
@@ -139,13 +139,13 @@ class _AdminOrderListScreenState extends ConsumerState<AdminOrderListScreen> {
                                       style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
-                                        color: order.orderStatus == 'CANCELLED' ? AppColors.error : AppColors.primary,
+                                        color: order.orderStatus == 'CANCELLED' ? AdminColors.danger : AdminColors.primary,
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                              const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                              const Icon(Icons.chevron_right, color: AdminColors.textSecondary),
                             ],
                           ),
                         ),

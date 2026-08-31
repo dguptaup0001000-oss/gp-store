@@ -27,9 +27,17 @@ class GpstoreApp extends ConsumerWidget {
     this.onForegroundExtras,
     this.onAdminSession,
     this.onStaleResume,
+    this.theme,
   });
 
   final String title;
+
+  /// The Material theme. Null means the customer shop's identity, which is
+  /// what every existing caller wants; the admin APK passes AdminTheme.light
+  /// instead. Stating the theme HERE rather than inside each screen is what
+  /// lets the admin console restyle twenty-five screens without editing any
+  /// of them - and keeps the shop's violet exactly as it was.
+  final ThemeData? theme;
   final Provider<GoRouter> routerProvider;
   final PushMessageHandler onNotificationTap;
 
@@ -95,7 +103,7 @@ class GpstoreApp extends ConsumerWidget {
       child: MaterialApp.router(
         title: title,
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.light,
+        theme: theme ?? AppTheme.light,
         routerConfig: router,
         scaffoldMessengerKey: scaffoldMessengerKey,
       ),

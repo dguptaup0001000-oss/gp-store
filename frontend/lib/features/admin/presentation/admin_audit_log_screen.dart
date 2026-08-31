@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -32,7 +32,7 @@ class AdminAuditLogScreen extends ConsumerWidget {
         data: (entries) {
           if (entries.isEmpty) {
             return const Center(
-              child: Text('No audit log entries yet', style: TextStyle(color: AppColors.textSecondary)),
+              child: Text('No audit log entries yet', style: TextStyle(color: AdminColors.textSecondary)),
             );
           }
 
@@ -46,7 +46,7 @@ class AdminAuditLogScreen extends ConsumerWidget {
                 final entry = entries[index];
                 return Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(10)),
+                  decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(10)),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -65,12 +65,12 @@ class AdminAuditLogScreen extends ConsumerWidget {
                       ),
                       if (entry.details != null) ...[
                         const SizedBox(height: 4),
-                        Text(entry.details!, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                        Text(entry.details!, style: const TextStyle(fontSize: 11, color: AdminColors.textSecondary)),
                       ],
                       if (entry.actorEmail != null) ...[
                         const SizedBox(height: 4),
                         Text('By: ${entry.actorEmail} (${entry.actorRole ?? "unknown"})',
-                            style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                            style: const TextStyle(fontSize: 11, color: AdminColors.textSecondary)),
                       ],
                     ],
                   ),

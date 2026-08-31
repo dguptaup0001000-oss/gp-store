@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/admin_customer_model.dart';
 import 'admin_customer_orders_screen.dart';
@@ -86,7 +86,7 @@ class _AdminCustomersScreenState extends ConsumerState<AdminCustomersScreen> {
                   return Center(
                     child: Text(
                       allCustomers.isEmpty ? 'No customers yet' : 'No matches',
-                      style: const TextStyle(color: AppColors.textSecondary),
+                      style: const TextStyle(color: AdminColors.textSecondary),
                     ),
                   );
                 }
@@ -276,7 +276,7 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
 
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
           Expanded(
@@ -296,8 +296,8 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
-                          child: Text(customer.role!, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                          decoration: BoxDecoration(color: AdminColors.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
+                          child: Text(customer.role!, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AdminColors.primary)),
                         ),
                       ],
                     ],
@@ -307,11 +307,11 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
                   if (!customer.active)
                     const Padding(
                       padding: EdgeInsets.only(top: 4),
-                      child: Text('Deactivated', style: TextStyle(color: AppColors.error, fontSize: 11, fontWeight: FontWeight.w600)),
+                      child: Text('Deactivated', style: TextStyle(color: AdminColors.danger, fontSize: 11, fontWeight: FontWeight.w600)),
                     ),
                   const Padding(
                     padding: EdgeInsets.only(top: 4),
-                    child: Text('Tap to view order history', style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                    child: Text('Tap to view order history', style: TextStyle(fontSize: 10, color: AdminColors.textSecondary)),
                   ),
                 ],
               ),

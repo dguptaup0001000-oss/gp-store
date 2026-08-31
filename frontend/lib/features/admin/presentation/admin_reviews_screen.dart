@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -33,7 +33,7 @@ class AdminReviewsScreen extends ConsumerWidget {
           final reviews = page.reviews;
           if (reviews.isEmpty) {
             return const Center(
-              child: Text('No reviews yet', style: TextStyle(color: AppColors.textSecondary)),
+              child: Text('No reviews yet', style: TextStyle(color: AdminColors.textSecondary)),
             );
           }
 
@@ -54,7 +54,7 @@ class AdminReviewsScreen extends ConsumerWidget {
               final review = reviews[index];
               return Container(
                 padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -68,7 +68,7 @@ class AdminReviewsScreen extends ConsumerWidget {
                               (i) => Icon(
                                 i < review.rating ? Icons.star : Icons.star_border,
                                 size: 14,
-                                color: AppColors.primary,
+                                color: AdminColors.primary,
                               ),
                             ),
                           ),
@@ -81,13 +81,13 @@ class AdminReviewsScreen extends ConsumerWidget {
                           const SizedBox(height: 6),
                           Text(
                             'By ${review.customerName ?? "unknown"}${review.customerEmail != null ? ' (${review.customerEmail})' : ''}',
-                            style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                            style: const TextStyle(fontSize: 11, color: AdminColors.textSecondary),
                           ),
                         ],
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.delete_outline, color: AppColors.error, size: 20),
+                      icon: const Icon(Icons.delete_outline, color: AdminColors.danger, size: 20),
                       tooltip: 'Remove review',
                       onPressed: hapticize(() async {
                         final confirmed = await showDialog<bool>(

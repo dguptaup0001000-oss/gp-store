@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/delivery_partner_models.dart';
 import 'admin_delivery_partner_form_dialog.dart';
@@ -34,7 +34,7 @@ class AdminDeliveryPartnersScreen extends ConsumerWidget {
         data: (partners) {
           if (partners.isEmpty) {
             return const Center(
-              child: Text('No delivery partners yet - tap + to add one', style: TextStyle(color: AppColors.textSecondary)),
+              child: Text('No delivery partners yet - tap + to add one', style: TextStyle(color: AdminColors.textSecondary)),
             );
           }
 
@@ -79,11 +79,11 @@ class _PartnerTile extends ConsumerWidget {
       }),
       child: Container(
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
         child: Row(
           children: [
             CircleAvatar(
-              backgroundColor: partner.available ? AppColors.success : AppColors.textSecondary,
+              backgroundColor: partner.available ? AdminColors.success : AdminColors.textSecondary,
               child: Icon(
                 partner.vehicleType.toUpperCase() == 'PICKUP' ? Icons.local_shipping_outlined : Icons.two_wheeler_outlined,
                 color: Colors.white,
@@ -103,13 +103,13 @@ class _PartnerTile extends ConsumerWidget {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: partner.available ? AppColors.success : AppColors.textSecondary,
+                      color: partner.available ? AdminColors.success : AdminColors.textSecondary,
                     ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+            const Icon(Icons.chevron_right, color: AdminColors.textSecondary),
           ],
         ),
       ),

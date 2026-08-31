@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_inventory_screen.dart';
 import 'admin_providers.dart';
@@ -96,10 +96,10 @@ class _SalesSummarySection extends ConsumerWidget {
         crossAxisSpacing: 12,
         childAspectRatio: 1.6,
         children: [
-          _statCard('Revenue', '₹${summary.revenue.toStringAsFixed(0)}', AppColors.primary),
-          _statCard('Orders', '${summary.orderCount}', AppColors.textPrimary),
-          _statCard('Avg Order Value', '₹${summary.averageOrderValue.toStringAsFixed(0)}', AppColors.textPrimary),
-          _statCard('Cancelled', '${summary.cancelledCount}', summary.cancelledCount > 0 ? AppColors.error : AppColors.textPrimary),
+          _statCard('Revenue', '₹${summary.revenue.toStringAsFixed(0)}', AdminColors.primary),
+          _statCard('Orders', '${summary.orderCount}', AdminColors.textPrimary),
+          _statCard('Avg Order Value', '₹${summary.averageOrderValue.toStringAsFixed(0)}', AdminColors.textPrimary),
+          _statCard('Cancelled', '${summary.cancelledCount}', summary.cancelledCount > 0 ? AdminColors.danger : AdminColors.textPrimary),
         ],
       ),
     );
@@ -108,14 +108,14 @@ class _SalesSummarySection extends ConsumerWidget {
   Widget _statCard(String label, String value, Color valueColor) {
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: valueColor)),
           const SizedBox(height: 4),
-          Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          Text(label, style: const TextStyle(fontSize: 12, color: AdminColors.textSecondary)),
         ],
       ),
     );
@@ -143,20 +143,20 @@ class _LowStockAlert extends ConsumerWidget {
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppColors.error.withValues(alpha: 0.1),
+              color: AdminColors.danger.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
-                const Icon(Icons.warning_amber_rounded, color: AppColors.error),
+                const Icon(Icons.warning_amber_rounded, color: AdminColors.danger),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     '$count item${count == 1 ? '' : 's'} running low on stock',
-                    style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.w600),
+                    style: const TextStyle(color: AdminColors.danger, fontWeight: FontWeight.w600),
                   ),
                 ),
-                const Icon(Icons.chevron_right, color: AppColors.error),
+                const Icon(Icons.chevron_right, color: AdminColors.danger),
               ],
             ),
           ),
@@ -186,14 +186,14 @@ class _OrderStatusBreakdown extends ConsumerWidget {
       ),
       data: (breakdown) {
         if (breakdown.isEmpty) {
-          return const Text('No orders yet', style: TextStyle(color: AppColors.textSecondary));
+          return const Text('No orders yet', style: TextStyle(color: AdminColors.textSecondary));
         }
 
         final maxCount = breakdown.values.reduce((a, b) => a > b ? a : b);
 
         return Container(
           padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+          decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
           child: Column(
             children: breakdown.entries.map((entry) {
               final fraction = maxCount == 0 ? 0.0 : entry.value / maxCount;
@@ -215,8 +215,8 @@ class _OrderStatusBreakdown extends ConsumerWidget {
                       child: LinearProgressIndicator(
                         value: fraction,
                         minHeight: 6,
-                        backgroundColor: AppColors.background,
-                        valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+                        backgroundColor: AdminColors.background,
+                        valueColor: const AlwaysStoppedAnimation(AdminColors.primary),
                       ),
                     ),
                   ],
@@ -250,12 +250,12 @@ class _TopProductsList extends ConsumerWidget {
       ),
       data: (products) {
         if (products.isEmpty) {
-          return const Text('No sales in this period yet', style: TextStyle(color: AppColors.textSecondary));
+          return const Text('No sales in this period yet', style: TextStyle(color: AdminColors.textSecondary));
         }
 
         return Container(
           padding: const EdgeInsets.symmetric(vertical: 4),
-          decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+          decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
           child: Column(
             children: products.asMap().entries.map((entry) {
               final rank = entry.key + 1;
@@ -263,8 +263,8 @@ class _TopProductsList extends ConsumerWidget {
               return ListTile(
                 leading: CircleAvatar(
                   radius: 14,
-                  backgroundColor: rank <= 3 ? AppColors.primary : AppColors.background,
-                  child: Text('$rank', style: TextStyle(fontSize: 12, color: rank <= 3 ? Colors.white : AppColors.textSecondary)),
+                  backgroundColor: rank <= 3 ? AdminColors.primary : AdminColors.background,
+                  child: Text('$rank', style: TextStyle(fontSize: 12, color: rank <= 3 ? Colors.white : AdminColors.textSecondary)),
                 ),
                 title: Text(product.productName, style: const TextStyle(fontSize: 14)),
                 trailing: Text('${product.unitsSold} sold', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
