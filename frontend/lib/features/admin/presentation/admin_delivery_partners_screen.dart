@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../admin/design/admin_components.dart';
 import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/delivery_partner_models.dart';
@@ -18,23 +19,19 @@ class AdminDeliveryPartnersScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Delivery Partners')),
       body: partnersAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (error, stackTrace) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // TEMPORARY, for active debugging - see RootScreen's identical
-              // comment for why this shows the real failure reason instead
-              // of one static string.
-              Text("Couldn't load delivery partners: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: hapticize(() => ref.invalidate(adminDeliveryPartnersProvider)), child: const Text('Retry')),
-            ],
-          ),
+        loading: () => const AdminListSkeleton(),
+        error: (error, stackTrace) => AdminErrorState(
+          // Shows the real failure reason rather than one static
+          // string - an admin who can read the cause can act on it.
+          message: "Couldn't load delivery partners: ${extractErrorMessage(error)}",
+          onRetry: hapticize(() => ref.invalidate(adminDeliveryPartnersProvider)),
         ),
         data: (partners) {
           if (partners.isEmpty) {
-            return const Center(
-              child: Text('No delivery partners yet - tap + to add one', style: TextStyle(color: AdminColors.textSecondary)),
+            return const AdminEmptyState(
+              icon: Icons.delivery_dining_outlined,
+              title: 'No delivery partners yet',
+              message: 'Tap the + button to add your first rider.',
             );
           }
 

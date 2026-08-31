@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../admin/design/admin_components.dart';
 import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_providers.dart';
@@ -16,23 +17,19 @@ class AdminAuditLogScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Audit Log')),
       body: logAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (error, stackTrace) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // TEMPORARY, for active debugging - see RootScreen's identical
-              // comment for why this shows the real failure reason instead
-              // of one static string.
-              Text("Couldn't load audit log: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: hapticize(() => ref.invalidate(adminAuditLogProvider)), child: const Text('Retry')),
-            ],
-          ),
+        loading: () => const AdminListSkeleton(),
+        error: (error, stackTrace) => AdminErrorState(
+          // Shows the real failure reason rather than one static
+          // string - an admin who can read the cause can act on it.
+          message: "Couldn't load audit log: ${extractErrorMessage(error)}",
+          onRetry: hapticize(() => ref.invalidate(adminAuditLogProvider)),
         ),
         data: (entries) {
           if (entries.isEmpty) {
-            return const Center(
-              child: Text('No audit log entries yet', style: TextStyle(color: AdminColors.textSecondary)),
+            return const AdminEmptyState(
+              icon: Icons.history_outlined,
+              title: 'No audit log entries yet',
+              message: 'Actions staff take in this console are recorded here.',
             );
           }
 

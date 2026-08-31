@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../admin/design/admin_components.dart';
 import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
@@ -53,28 +54,27 @@ class _AdminCouponListScreenState extends ConsumerState<AdminCouponListScreen> {
           ),
           Expanded(
             child: couponsAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              error: (error, stackTrace) => Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // TEMPORARY, for active debugging - see RootScreen's identical
-                    // comment for why this shows the real failure reason instead
-                    // of one static string.
-                    Text("Couldn't load coupons: ${extractErrorMessage(error)}"),
-                    TextButton(onPressed: hapticize(() => ref.invalidate(adminAllCouponsProvider)), child: const Text('Retry')),
-                  ],
-                ),
-              ),
+              loading: () => const AdminListSkeleton(),
+              error: (error, stackTrace) => AdminErrorState(
+          // Shows the real failure reason rather than one static
+          // string - an admin who can read the cause can act on it.
+          message: "Couldn't load coupons: ${extractErrorMessage(error)}",
+          onRetry: hapticize(() => ref.invalidate(adminAllCouponsProvider)),
+        ),
               data: (allCoupons) {
                 final coupons = _filter(allCoupons);
 
                 if (coupons.isEmpty) {
-                  return Center(
-                    child: Text(
-                      allCoupons.isEmpty ? 'No coupons yet - tap + to add one' : 'No matches',
-                      style: const TextStyle(color: AdminColors.textSecondary),
-                    ),
+                  return AdminEmptyState(
+                    icon: allCoupons.isEmpty
+                        ? Icons.local_offer_outlined
+                        : Icons.search_off_outlined,
+                    title: allCoupons.isEmpty
+                        ? 'No coupons yet'
+                        : 'No matching coupons',
+                    message: allCoupons.isEmpty
+                        ? 'Tap the + button to create your first offer.'
+                        : 'Try a different code or description.',
                   );
                 }
 
