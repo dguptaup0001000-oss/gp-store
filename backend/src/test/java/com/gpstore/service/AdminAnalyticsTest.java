@@ -238,8 +238,24 @@ class AdminAnalyticsTest {
 
     // ------------------------------------------------------------------
 
+    /**
+     * This product's row from the leaderboard, or null.
+     *
+     * <p>ASKS FOR A LARGE PAGE, AND THAT MATTERS. These tests are about the
+     * SHAPE of a row - its units, its revenue, its thumbnail - not about where
+     * the product ranks. Asking for the top 50 quietly made them ranking tests
+     * as well: every fixture here sells a handful of units, so once the shared
+     * test database had accumulated enough products with recent orders, a
+     * two-unit fixture fell off the end of the page and the assertion failed
+     * with "expecting actual not to be null" - which points at the analytics
+     * code rather than at the crowding that actually caused it.
+     *
+     * <p>The dashboard's own cap (50, in AnalyticsController) is deliberately
+     * NOT reused here: that is a display decision about how much an operator
+     * wants to read, and borrowing it for a lookup made the test depend on it.
+     */
     private Map<String, Object> findProduct(Long productId) {
-        for (Map<String, Object> entry : analytics.getTopProducts(30, 50)) {
+        for (Map<String, Object> entry : analytics.getTopProducts(30, 10_000)) {
             if (productId.equals(entry.get("productId"))) {
                 return entry;
             }
