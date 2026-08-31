@@ -60,6 +60,7 @@ class TerritoryDispatchTest {
     @Autowired private DeliveryPartnerRepository partnerRepository;
     @Autowired private TerritoryResolver resolver;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private com.gpstore.repository.DeliveryRepository deliveryRepository;
 
     /** Two touching squares, one degree apart in longitude, at Delhi latitudes. */
     private static final String WEST_BOUNDARY = "[[28.60,77.20],[28.60,77.22],[28.62,77.22],[28.62,77.20]]";
@@ -157,6 +158,52 @@ class TerritoryDispatchTest {
             // Already unavailable and inactive above, so harmless. Left in
             // place deliberately rather than retried in a loop, which would
             // just be racing the same worker again.
+        }
+    }
+
+
+    /**
+     * Zeroes the workload of this file's fixture riders, immediately before a
+     * decision that depends on their scores being equal.
+     *
+     * <p>WHY THIS EXISTS. score() is {@code distance + load * weight}, and
+     * load is {@code countActiveByPartnerId} - a live count over the whole
+     * database, not something this class controls. Two riders placed at the
+     * same coordinates are only tied while both carry nothing, and a single
+     * auto-assigned delivery against one of them breaks the tie the other way.
+     * That is not hypothetical: it is how backupPriorityIsRespected failed in
+     * CI with "expected: &lt;22&gt; but was: &lt;23&gt;" while passing 12/12 in
+     * isolation.
+     *
+     * <p>A delivery reaches its rider through batch_id -> delivery_batches,
+     * not a column of its own, so that join is what has to be cleared.
+     *
+     * <p>The source of those assignments is a cached Spring context from an
+     * earlier test class whose outbox worker is still draining - see
+     * retireFixturePartners() for the same problem seen from the cleanup side.
+     * The real fix is upstream: a class that places orders and does not test
+     * async behaviour should not run a live drain, and the ones that were
+     * doing so have been given outbox.drain-interval-ms. This call is the
+     * belt to that pair of braces. It does not make the race impossible - a
+     * worker could still fire in the microseconds after it - but it removes
+     * the seconds-wide window that was actually being lost, and it fails
+     * loudly rather than as a mysterious identifier mismatch.
+     */
+    private void settleFixtureLoad() {
+        jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
+                + "(SELECT id FROM delivery_batches WHERE delivery_partner_id IN "
+                + " (SELECT id FROM delivery_partners WHERE name LIKE ?))", PREFIX + "%");
+        for (Long partnerId : createdPartners) {
+            if (partnerId == null) {
+                continue;
+            }
+            long load = deliveryRepository.countActiveByPartnerId(partnerId);
+            assertEquals(0, load,
+                    "fixture rider " + partnerId + " still carries " + load
+                            + " live order(s) after cleanup, so the scores this test "
+                            + "assumes are tied are not tied. Something is assigning to "
+                            + "fixture riders mid-test - check that new @SpringBootTest "
+                            + "classes which place orders set outbox.drain-interval-ms.");
         }
     }
 
@@ -311,6 +358,7 @@ class TerritoryDispatchTest {
         setPrimary(west, local);
         addNamedBackup(west, second, 2);
         addNamedBackup(west, first, 1);
+        settleFixtureLoad();
 
         var decision = dispatch.chooseFor(reload(west), DEST_LAT, DEST_LNG);
 
@@ -370,6 +418,7 @@ class TerritoryDispatchTest {
         setPrimary(west, local);
         addNamedBackup(west, slightlyFurther, 1);
         addNamedBackup(west, near, 2);
+        settleFixtureLoad();
 
         var decision = dispatch.chooseFor(reload(west), DEST_LAT, DEST_LNG);
 
