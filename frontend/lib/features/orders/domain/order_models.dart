@@ -15,6 +15,13 @@ class OrderSummary with _$OrderSummary {
     required String orderStatus,
     required String paymentStatus,
     required String orderDate,
+    // SAME_DAY / NEXT_MORNING, decided by the server when the order was
+    // placed. NULL for every order placed before the shop had delivery
+    // windows - shown as nothing rather than guessed at, because a label
+    // invented for a delivery that already happened is simply untrue.
+    String? deliveryType,
+    // The day it was scheduled for, as YYYY-MM-DD. Null for the same reason.
+    String? scheduledDeliveryDate,
     // Only populated on the admin "all orders" list - null for a
     // customer's own list, where it would be redundant.
     String? customerName,

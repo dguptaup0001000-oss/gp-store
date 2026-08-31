@@ -18,6 +18,9 @@ import 'order_cancellation_countdown_screen.dart';
 import 'order_confirmation_screen.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../orders/presentation/order_detail_screen.dart';
+import '../../../core/store/store_status.dart';
+import '../../../core/store/store_status_provider.dart';
+import '../../../shared/widgets/store_status_banner.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
@@ -339,6 +342,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  // WHEN THIS ARRIVES, before anything else on the page. At
+                  // checkout the customer is about to commit, so unlike the
+                  // home banner this is always visible rather than only when
+                  // something has changed.
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: StoreDeliveryPromise(),
+                  ),
                   _sectionLabel('Delivery Address'),
                   InkWell(
                     onTap: hapticize(_selectAddress),
@@ -581,7 +592,14 @@ class _PreviewSummary extends StatelessWidget {
                 ? 'FREE'
                 : '₹${preview.deliveryFee.toStringAsFixed(0)}',
           ),
-          if (preview.estimatedDeliveryMinutes != null)
+          // "Estimated delivery: 30 minutes" is a RIDING TIME, and it is only
+          // true while the vans are out. Shown to someone ordering at 2am it
+          // promises a delivery within the half hour that nobody is going to
+          // make - so at night the arrival day replaces it rather than sitting
+          // beside it and contradicting it.
+          if (preview.estimatedDeliveryMinutes != null &&
+              ref.watch(storeStatusProvider).valueOrNull?.mode !=
+                  StoreMode.night)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
