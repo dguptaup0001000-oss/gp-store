@@ -8,7 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.test.context.support.WithMockUser;
+import com.gpstore.security.WithStaff;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -91,7 +91,7 @@ class CategoryInProductResponseTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("create returns the category's real name, so the client can parse it")
     void createReturnsAResolvedCategory() throws Exception {
         Long categoryId = anyCategoryId();
@@ -115,7 +115,7 @@ class CategoryInProductResponseTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("update returns a resolved category too - Save Changes hit the same bug")
     void updateReturnsAResolvedCategory() throws Exception {
         Long categoryId = anyCategoryId();
@@ -140,7 +140,7 @@ class CategoryInProductResponseTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("a category that does not exist is a plain 404, not a database error")
     void unknownCategoryIsNotFound() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/products")

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/util/haptic_widgets.dart';
 import '../dashboard/admin_dashboard_screen.dart';
+import '../auth/admin_permissions.dart';
 import '../design/admin_tokens.dart';
 import 'admin_destinations.dart';
 
@@ -21,9 +22,18 @@ import 'admin_destinations.dart';
 /// the sidebar stays put. Same destinations, same widgets, different
 /// presentation - no screen knows which layout it is in.
 class AdminShell extends StatefulWidget {
-  const AdminShell({super.key, this.onSignOut, this.operatorName});
+  const AdminShell({
+    super.key,
+    this.onSignOut,
+    this.operatorName,
+    this.role,
+  });
 
   final VoidCallback? onSignOut;
+
+  /// The signed-in account's backend role. Decides which destinations are
+  /// worth showing - the server decides what they can actually do.
+  final String? role;
 
   /// Shown in the account block. Null renders a generic label rather than an
   /// empty row - a profile can still be loading when the shell first paints.
@@ -35,6 +45,11 @@ class AdminShell extends StatefulWidget {
 
 class _AdminShellState extends State<AdminShell> {
   String _selectedId = AdminNav.dashboardId;
+
+  Set<AdminPermission> get _permissions =>
+      AdminRoles.permissionsFor(widget.role);
+
+  List<AdminNavGroup> get _groups => AdminNav.groupsFor(_permissions);
 
   void _select(AdminDestination destination, {required bool wide}) {
     if (wide) {
@@ -84,6 +99,7 @@ class _AdminShellState extends State<AdminShell> {
         backgroundColor: AdminColors.sidebar,
         child: SafeArea(
           child: _AdminNavList(
+            groups: _groups,
             selectedId: _selectedId,
             onSelect: (destination) {
               Navigator.of(context).pop();
@@ -101,13 +117,20 @@ class _AdminShellState extends State<AdminShell> {
   // ------------------------------------------------------------------
 
   Widget _buildWide(BuildContext context) {
-    final destination = AdminNav.byId(_selectedId);
+    var destination = AdminNav.byId(_selectedId);
+    // A selection can outlive the permission that allowed it - a role change
+    // takes effect on the next request, and the server would refuse the
+    // screen anyway. Fall back rather than render a pane that only 403s.
+    if (!AdminNav.isVisible(destination, _permissions)) {
+      destination = AdminNav.dashboard;
+    }
     return Scaffold(
       backgroundColor: AdminColors.background,
       body: Column(
         children: [
           _AdminTopBar(
             operatorName: widget.operatorName,
+            role: widget.role,
             actions: _headerActions(context),
           ),
           Expanded(
@@ -119,6 +142,7 @@ class _AdminShellState extends State<AdminShell> {
                   child: ColoredBox(
                     color: AdminColors.sidebar,
                     child: _AdminNavList(
+                      groups: _groups,
                       selectedId: _selectedId,
                       onSelect: (d) => _select(d, wide: true),
                       showBrand: false,
@@ -184,9 +208,14 @@ class _AdminShellState extends State<AdminShell> {
 /// gets the app bar instead, because stacking a brand bar on top of an app
 /// bar on a 360px screen spends vertical space the content needs.
 class _AdminTopBar extends StatelessWidget {
-  const _AdminTopBar({required this.operatorName, required this.actions});
+  const _AdminTopBar({
+    required this.operatorName,
+    required this.role,
+    required this.actions,
+  });
 
   final String? operatorName;
+  final String? role;
   final List<Widget> actions;
 
   @override
@@ -202,11 +231,21 @@ class _AdminTopBar extends StatelessWidget {
         children: [
           const _AdminBrand(onDarkGround: false),
           const Spacer(),
-          Text(
-            operatorName?.trim().isNotEmpty == true
-                ? operatorName!.trim()
-                : 'Store staff',
-            style: AdminText.bodyMuted,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                operatorName?.trim().isNotEmpty == true
+                    ? operatorName!.trim()
+                    : 'Store staff',
+                style: AdminText.bodyMuted,
+              ),
+              // Which hat they are wearing. Worth stating: two roles see
+              // different menus, and "why can I not see Inventory" is
+              // answered by this line.
+              Text(AdminRoles.humanize(role), style: AdminText.caption),
+            ],
           ),
           const SizedBox(width: AdminSpacing.md),
           ...actions,
@@ -264,11 +303,13 @@ class _AdminBrand extends StatelessWidget {
 /// the two can never drift out of sync.
 class _AdminNavList extends StatelessWidget {
   const _AdminNavList({
+    required this.groups,
     required this.selectedId,
     required this.onSelect,
     this.showBrand = true,
   });
 
+  final List<AdminNavGroup> groups;
   final String selectedId;
   final ValueChanged<AdminDestination> onSelect;
   final bool showBrand;
@@ -290,7 +331,7 @@ class _AdminNavList extends StatelessWidget {
       children.add(const SizedBox(height: AdminSpacing.lg));
     }
 
-    for (final group in AdminNav.groups) {
+    for (final group in groups) {
       children.add(Padding(
         padding: const EdgeInsets.fromLTRB(
           AdminSpacing.lg,

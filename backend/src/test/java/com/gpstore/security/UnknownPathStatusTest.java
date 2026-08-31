@@ -43,7 +43,7 @@ class UnknownPathStatusTest {
     @Autowired private MockMvc mockMvc;
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("an authenticated request to a path that does not exist is 404, never 500")
     void unknownPathIsNotFoundForAnAdmin() throws Exception {
         mockMvc.perform(get("/api/catalog/products"))
@@ -51,7 +51,7 @@ class UnknownPathStatusTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("a near-miss of a real path is also 404")
     void nearMissIsNotFound() throws Exception {
         // /api/admin/catalog/audit exists; /api/admin/catalog/auditz does not.

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../auth/admin_permissions.dart';
+
 import '../../features/admin/presentation/admin_analytics_screen.dart';
 import '../../features/admin/presentation/admin_audit_log_screen.dart';
 import '../../features/admin/presentation/admin_broadcast_screen.dart';
@@ -35,7 +37,15 @@ class AdminDestination {
     required this.icon,
     required this.builder,
     this.description,
+    this.requires,
   });
+
+  /// The permission this screen needs, or null for one everybody has.
+  ///
+  /// USED ONLY TO HIDE DEAD ENDS. The server refuses the underlying routes
+  /// regardless; showing a SUPPORT account an Inventory link that can only
+  /// ever return 403 is a worse experience than not showing it.
+  final AdminPermission? requires;
 
   /// Stable identifier. Used as the selection key, so it must not change
   /// when a label is reworded.
@@ -90,6 +100,7 @@ class AdminNav {
       destinations: [
         AdminDestination(
           id: 'orders',
+          requires: AdminPermission.ordersView,
           label: 'Orders',
           icon: Icons.receipt_long_outlined,
           description: 'View and manage every order',
@@ -97,6 +108,7 @@ class AdminNav {
         ),
         AdminDestination(
           id: 'payments',
+          requires: AdminPermission.paymentsView,
           label: 'Payments',
           icon: Icons.payments_outlined,
           description: 'Confirm UPI, process refunds',
@@ -104,6 +116,7 @@ class AdminNav {
         ),
         AdminDestination(
           id: 'breaches',
+          requires: AdminPermission.deliveryView,
           label: 'Delivery Breaches',
           icon: Icons.report_problem_outlined,
           description: 'Orders that missed their promised time',
@@ -116,6 +129,7 @@ class AdminNav {
       destinations: [
         AdminDestination(
           id: 'products',
+          requires: AdminPermission.catalogView,
           label: 'Products',
           icon: Icons.inventory_2_outlined,
           description: 'Add, edit, and manage stock',
@@ -123,6 +137,7 @@ class AdminNav {
         ),
         AdminDestination(
           id: 'categories',
+          requires: AdminPermission.catalogManage,
           label: 'Categories',
           icon: Icons.category_outlined,
           description: 'Organise your product catalogue',
@@ -130,6 +145,7 @@ class AdminNav {
         ),
         AdminDestination(
           id: 'inventory',
+          requires: AdminPermission.inventoryManage,
           label: 'Inventory',
           icon: Icons.warehouse_outlined,
           description: 'Stock levels, restock, low-stock alerts',
@@ -137,6 +153,7 @@ class AdminNav {
         ),
         AdminDestination(
           id: 'coupons',
+          requires: AdminPermission.couponsManage,
           label: 'Coupons',
           icon: Icons.local_offer_outlined,
           description: 'Create and manage discount offers',
@@ -149,6 +166,7 @@ class AdminNav {
       destinations: [
         AdminDestination(
           id: 'partners',
+          requires: AdminPermission.deliveryManage,
           label: 'Delivery Partners',
           icon: Icons.delivery_dining_outlined,
           description: 'Your delivery team and availability',
@@ -156,6 +174,7 @@ class AdminNav {
         ),
         AdminDestination(
           id: 'territories',
+          requires: AdminPermission.deliveryManage,
           label: 'Territories',
           icon: Icons.map_outlined,
           description: 'Zones, riders, and map outlines',
@@ -163,6 +182,7 @@ class AdminNav {
         ),
         AdminDestination(
           id: 'delivery-pricing',
+          requires: AdminPermission.deliveryManage,
           label: 'Delivery Pricing',
           icon: Icons.local_shipping_outlined,
           description: 'Distance, weight, and free-delivery rules',
@@ -175,6 +195,7 @@ class AdminNav {
       destinations: [
         AdminDestination(
           id: 'customers',
+          requires: AdminPermission.customersView,
           label: 'Customers',
           icon: Icons.people_outline,
           description: 'View and manage customer accounts',
@@ -182,6 +203,7 @@ class AdminNav {
         ),
         AdminDestination(
           id: 'reviews',
+          requires: AdminPermission.reviewsModerate,
           label: 'Reviews',
           icon: Icons.rate_review_outlined,
           description: 'Remove inappropriate reviews',
@@ -189,6 +211,7 @@ class AdminNav {
         ),
         AdminDestination(
           id: 'broadcast',
+          requires: AdminPermission.broadcastSend,
           label: 'Broadcast',
           icon: Icons.campaign_outlined,
           description: 'Send an announcement to every customer',
@@ -201,6 +224,7 @@ class AdminNav {
       destinations: [
         AdminDestination(
           id: 'analytics',
+          requires: AdminPermission.analyticsView,
           label: 'Analytics',
           icon: Icons.analytics_outlined,
           description: 'Sales, top products, order status',
@@ -208,6 +232,7 @@ class AdminNav {
         ),
         AdminDestination(
           id: 'audit',
+          requires: AdminPermission.auditView,
           label: 'Audit Log',
           icon: Icons.history_outlined,
           description: 'Full history of important actions',
@@ -239,6 +264,33 @@ class AdminNav {
   /// Flat list, in sidebar order. Used by the drawer and by lookups.
   static List<AdminDestination> get all =>
       [for (final group in groups) ...group.destinations];
+
+  /// The groups this role may actually use, with empty groups dropped.
+  ///
+  /// A group whose every destination is hidden would otherwise render as a
+  /// heading with nothing under it - which reads as a screen that failed to
+  /// load rather than one that does not apply.
+  static List<AdminNavGroup> groupsFor(Set<AdminPermission> permissions) {
+    final visible = <AdminNavGroup>[];
+    for (final group in groups) {
+      final allowed = group.destinations
+          .where((d) => d.requires == null || permissions.contains(d.requires))
+          .toList();
+      if (allowed.isNotEmpty) {
+        visible.add(AdminNavGroup(title: group.title, destinations: allowed));
+      }
+    }
+    return visible;
+  }
+
+  /// Whether this role may open that destination. The shell checks this
+  /// before restoring a selection, so an id saved under a wider role cannot
+  /// put a screen on screen that the account can no longer use.
+  static bool isVisible(AdminDestination destination,
+      Set<AdminPermission> permissions) {
+    return destination.requires == null ||
+        permissions.contains(destination.requires);
+  }
 
   /// Falls back to the dashboard rather than throwing. A selection id can
   /// outlive the destination that produced it (a saved id, a deep link from
