@@ -131,6 +131,11 @@ class CrossCustomerAccessTest {
         hostile.setState("Elsewhere");
         hostile.setPincode("999999");
         hostile.setCountry("India");
+        // A saved address must carry a confirmed location since V34 - see
+        // AddressValidator. This test is about who owns the row, not about
+        // where it is, so any valid pin will do.
+        hostile.setLatitude(28.6139);
+        hostile.setLongitude(77.2090);
 
         addressService.updateAddress(aliceAddress.getId(), hostile);
 
@@ -180,6 +185,8 @@ class CrossCustomerAccessTest {
         incoming.setState("S");
         incoming.setPincode("110001");
         incoming.setCountry("India");
+        incoming.setLatitude(28.6139);
+        incoming.setLongitude(77.2090);
         incoming.setSubzoneLocked(true);
 
         Address saved = addressService.createOwned(alice, incoming);
@@ -201,6 +208,8 @@ class CrossCustomerAccessTest {
         incoming.setState("Elsewhere");
         incoming.setPincode("999999");
         incoming.setCountry("India");
+        incoming.setLatitude(28.6139);
+        incoming.setLongitude(77.2090);
 
         Address saved = addressService.createOwned(mallory, incoming);
 

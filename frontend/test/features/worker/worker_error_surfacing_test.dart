@@ -180,9 +180,14 @@ void main() {
 
   group('what the worker reads', () {
     test('statuses are words, not constants', () {
+      // Sentence case, not title case: "Out For Delivery" is a heading, and
+      // this is a fragment a worker reads. The helper this replaced produced
+      // the title-cased form while its doc comment claimed the sentence one.
       expect(humanizeStatus('OUT_FOR_DELIVERY'), 'Out for delivery');
       expect(humanizeStatus('PICKED_UP'), 'Picked up');
+      expect(humanizeStatus('ON_DELIVERY'), 'On delivery');
       expect(humanizeStatus('DELIVERED'), 'Delivered');
+      expect(humanizeStatus('CANCELLED'), 'Cancelled');
       expect(humanizeStatus(''), '');
       expect(humanizeStatus('_'), '_', reason: 'no crash on a degenerate value');
     });

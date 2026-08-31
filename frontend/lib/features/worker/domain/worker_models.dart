@@ -305,11 +305,16 @@ class WorkerTask {
 /// showed a worker both spellings of the same word at once.
 String humanizeStatus(String status) {
   if (status.isEmpty) return status;
-  final words = status.split('_').where((w) => w.isNotEmpty);
+  final words = status.split('_').where((w) => w.isNotEmpty).toList();
   if (words.isEmpty) return status;
-  return words
-      .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
-      .join(' ');
+
+  // SENTENCE CASE, NOT TITLE CASE. The helper this replaced capitalised every
+  // word - "Out For Delivery", "Picked Up" - while its own doc comment said it
+  // produced "Picked up". The comment described the right thing and the code
+  // never did it. A status is a sentence fragment a worker reads at arm's
+  // length, not a heading, so only the first letter is raised.
+  final joined = words.map((w) => w.toLowerCase()).join(' ');
+  return joined[0].toUpperCase() + joined.substring(1);
 }
 
 /// Rupees, as money rather than as a Dart number.
