@@ -81,7 +81,7 @@ class _LiveStatusCard extends StatelessWidget {
           // Browsing is always open, and the console says so out loud. It is
           // the one guarantee the whole feature rests on, and an operator
           // pausing orders needs to know the catalogue stays up.
-          _Fact(
+          const _Fact(
             icon: Icons.storefront_outlined,
             label: 'Browsing',
             value: 'Open 24 hours',
@@ -111,7 +111,7 @@ class _LiveStatusCard extends StatelessWidget {
               tone: AdminStatusTone.warning,
             ),
           if (status.closedToday)
-            _Fact(
+            const _Fact(
               icon: Icons.event_busy_outlined,
               label: 'Today',
               value: 'Marked closed - no deliveries',

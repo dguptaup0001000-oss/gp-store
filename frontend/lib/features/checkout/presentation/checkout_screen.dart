@@ -550,13 +550,20 @@ class CheckoutCouponRow extends StatelessWidget {
   }
 }
 
-class _PreviewSummary extends StatelessWidget {
+/// The money, and — at night — the day it arrives.
+///
+/// A ConsumerWidget rather than a StatelessWidget because the estimated
+/// riding time below is only shown while the vans are out, which only the
+/// store status knows. Watching it here rather than threading the mode down
+/// as a constructor argument keeps the rebuild scoped to this box when the
+/// window closes mid-checkout.
+class _PreviewSummary extends ConsumerWidget {
   const _PreviewSummary({required this.preview});
 
   final CheckoutPreview preview;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (!preview.deliverable) {
       return Container(
         padding: const EdgeInsets.all(14),
