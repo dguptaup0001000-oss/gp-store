@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/admin/dashboard/admin_dashboard_screen.dart';
 import 'package:gpstore/features/admin/domain/analytics_models.dart';
+import 'package:gpstore/admin/operations/store_operations_models.dart';
+import 'package:gpstore/admin/operations/store_operations_providers.dart';
 import 'package:gpstore/features/admin/presentation/admin_providers.dart';
 
 /// The dashboard's contract with the operator.
@@ -24,7 +26,7 @@ void main() {
     orderCountChangePercent: 11.4,
   );
 
-  // A tall viewport. The dashboard is a scrolling list of five panels and
+  // A tall viewport. The dashboard is a scrolling list of six panels and
   // the default 800x600 test window builds only the first two, so an
   // assertion about the bottom panel would fail for a reason that has
   // nothing to do with the screen being wrong.
@@ -41,6 +43,7 @@ void main() {
     List<SalesPoint>? series,
     List<TopProduct>? topProducts,
     Map<String, int>? breakdown,
+    List<DeliveryTypeShare>? deliveryShares,
     int lowStock = 4,
   }) {
     final failure = summaryError;
@@ -56,6 +59,13 @@ void main() {
         adminOrderStatusBreakdownProvider
             .overrideWith((ref) async => breakdown ?? const {}),
         adminLowStockCountProvider.overrideWith((ref) async => lowStock),
+        // The night-shift panel. Overridden like every other leaf, and NOT
+        // optional: left to the real provider it reaches for the network,
+        // never resolves, and holds a spinner whose animation means
+        // pumpAndSettle times out - a failure that names the dashboard while
+        // meaning "a panel was added and the fixture did not hear about it".
+        deliveryTypeSharesProvider
+            .overrideWith((ref) async => deliveryShares ?? const []),
       ],
       child: const MaterialApp(
         home: Scaffold(body: AdminDashboardScreen()),
