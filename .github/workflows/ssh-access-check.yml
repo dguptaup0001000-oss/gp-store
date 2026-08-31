@@ -51,6 +51,11 @@ jobs:
           chmod +x .github/scripts/identify_deploy_pubkey.sh
           .github/scripts/identify_deploy_pubkey.sh
 
+      - name: Log this runner's egress address
+        run: |
+          chmod +x .github/scripts/log_runner_egress.sh
+          ./.github/scripts/log_runner_egress.sh
+
       - name: Probe SSH without deploying
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}

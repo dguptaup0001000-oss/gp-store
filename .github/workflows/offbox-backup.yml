@@ -103,6 +103,11 @@ jobs:
           PY
           exit "$missing"
 
+      - name: Log this runner's egress address
+        run: |
+          chmod +x .github/scripts/log_runner_egress.sh
+          ./.github/scripts/log_runner_egress.sh
+
       - name: Pull, verify, encrypt
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
@@ -250,6 +255,11 @@ jobs:
           print('pull / pull-fallback steps identical: ok')
           PY
           exit "$missing"
+
+      - name: Log this runner's egress address
+        run: |
+          chmod +x .github/scripts/log_runner_egress.sh
+          ./.github/scripts/log_runner_egress.sh
 
       - name: Pull, verify, encrypt
         env:

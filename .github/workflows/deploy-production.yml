@@ -275,6 +275,12 @@ jobs:
       # Both jobs run env.REMOTE_DEPLOY, and it is idempotent - it resets to
       # origin/main and re-runs deploy.sh - so a partially-connected earlier
       # attempt costs the next one nothing.
+      - name: Log this runner's egress address
+        if: github.event_name != 'pull_request'
+        run: |
+          chmod +x .github/scripts/log_runner_egress.sh
+          ./.github/scripts/log_runner_egress.sh
+
       - name: SSH deploy (attempt 1)
         id: ssh1
         if: github.event_name != 'pull_request'
@@ -355,6 +361,12 @@ jobs:
       - name: Note why this job is running
         run: |
           echo "::warning::The first deploy runner could not reach the VPS. Retrying from a different runner; see PR #143 for the source-address correlation."
+
+      - name: Log this runner's egress address
+        if: github.event_name != 'pull_request'
+        run: |
+          chmod +x .github/scripts/log_runner_egress.sh
+          ./.github/scripts/log_runner_egress.sh
 
       - name: SSH deploy (fallback attempt 1)
         id: ssh1
