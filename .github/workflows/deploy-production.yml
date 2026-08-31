@@ -38,6 +38,37 @@ permissions:
   contents: read
   actions: write
 
+# WORKFLOW-LEVEL so both deploy attempts - which run as SEPARATE JOBS on
+# separate runners - execute the identical script. See the deploy job for why
+# the retry needs a different machine rather than a longer wait.
+env:
+  REMOTE_DEPLOY: |
+    set -Eeuo pipefail
+    DEPLOY_ROOT="${DEPLOY_ROOT:-/opt/gp-store}"
+    if [ -z "${TARGET_SHA:-}" ]; then
+      echo "TARGET_SHA is empty"
+      exit 1
+    fi
+    if [ ! -d "$DEPLOY_ROOT/.git" ]; then
+      echo "No checkout at $DEPLOY_ROOT. Run deploy/production/prepare-vps.sh once."
+      exit 1
+    fi
+    cd "$DEPLOY_ROOT"
+    git fetch origin --prune
+    if git show-ref --verify --quiet refs/heads/main; then
+      git checkout main
+    else
+      git checkout -b main origin/main
+    fi
+    git reset --hard origin/main
+    HEAD_SHA="$(git rev-parse HEAD)"
+    if [ "$HEAD_SHA" != "$TARGET_SHA" ]; then
+      echo "VPS HEAD $HEAD_SHA != GITHUB_SHA $TARGET_SHA. Refusing to deploy."
+      exit 1
+    fi
+    chmod +x deploy/production/deploy.sh deploy/production/prepare-vps.sh
+    exec ./deploy/production/deploy.sh "$TARGET_SHA"
+
 jobs:
   syntax:
     name: Check deploy scripts
@@ -97,6 +128,25 @@ jobs:
             exit 1
           fi
 
+      # The script that actually runs on production lives inline in this
+      # workflow (top-level env.REMOTE_DEPLOY - workflow scope, because BOTH
+      # the deploy job and the fresh-runner fallback use it), so `bash -n`
+      # over deploy/production/*.sh does not see it. It was unchecked before
+      # too; now that it is one named value it can be checked, so it is.
+      - name: bash -n the inline remote deploy script
+        run: |
+          set -Eeuo pipefail
+          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet pyyaml
+          python3 - > /tmp/remote_deploy.sh <<'EXTRACT'
+          import yaml
+          wf = yaml.safe_load(open('.github/workflows/deploy-production.yml'))
+          print(wf['env']['REMOTE_DEPLOY'])
+          EXTRACT
+          bash -n /tmp/remote_deploy.sh
+          # It must still be the script that deploys, not an empty string that
+          # would connect, do nothing, and report success.
+          grep -q 'deploy/production/deploy.sh' /tmp/remote_deploy.sh
+
   wait-for-ci:
     name: Wait for backend CI
     needs: [syntax]
@@ -133,6 +183,22 @@ jobs:
     timeout-minutes: 45
     # PRs only syntax-check; they must not sit in the production environment.
     environment: ${{ github.event_name == 'pull_request' && 'pr-syntax' || 'production' }}
+    # THE VPS TAKES ONE SSH CALLER AT A TIME. Backup alert, off-box backup and
+    # the SSH access check already share this group; the deploy - by far the
+    # heaviest and the one that restarts the backend - was the only VPS SSH
+    # workflow outside it. A scheduled backup (cron 20 1,7,13,19) landing on
+    # top of a deploy is a collision nobody would enjoy debugging.
+    #
+    # JOB-LEVEL, not workflow-level, on purpose: the workflow's own group also
+    # covers PR syntax runs, which touch no server and must not queue behind a
+    # production backup. Only this job takes the lock.
+    #
+    # No deadlock with the backup this workflow dispatches afterwards: the
+    # dispatch is fire-and-forget in a later job, so the backup simply waits
+    # for this lock to clear instead of blocking on us.
+    concurrency:
+      group: gpstore-prod-ssh
+      cancel-in-progress: false
     steps:
       - name: Skip deploy on pull requests
         if: github.event_name == 'pull_request'
@@ -172,8 +238,45 @@ jobs:
       # Do not run it here: deploy does not use that output, and a missing
       # runner checkout aborted SSH (run 33237217036).
 
-      - name: SSH deploy
-        id: ssh_deploy
+      # WHY THE RETRY IS A SEPARATE JOB AND NOT MORE STEPS.
+      #
+      # On 31 Aug 2026 this deploy lost the release for #141: both attempts hit
+      # `dial tcp: i/o timeout`. An inspection of the VPS (PR #143) established
+      # where the packets went, and it is not this machine's doing:
+      #
+      #   - `journalctl -u ssh` has NO sshd line for 07:12-07:16. The SYNs
+      #     never arrived. sshd sat at "0 of 10-100 startups".
+      #   - ufw ACCEPTs SSH (it is not a `limit` rule), and fail2ban is not
+      #     installed at all - harden-ssh.sh has never been run on that box.
+      #   - No reboot, no OOM, disk 35% and inodes 2%.
+      #
+      # So the drop is OFF-BOX - the provider edge or the path - and it tracks
+      # the SOURCE, not the clock. The runner regions line up exactly:
+      #
+      #   06:06  westus ........... timed out
+      #   07:03  westcentralus .... success
+      #   07:07  westcentralus .... success
+      #   07:12  centralus ........ timed out  <- deploy #141, twice
+      #   11:58  westcentralus .... success in 82s
+      #
+      # EVERY STEP IN A JOB SHARES ONE RUNNER, AND SO ONE SOURCE IP. Waiting
+      # longer between steps therefore re-dials from the address that is being
+      # dropped: #141's two attempts both failed from centralus, and a longer
+      # ladder in the same job would only have failed more times, more slowly.
+      # An earlier version of this change did exactly that; the VPS evidence
+      # is what corrected it.
+      #
+      # So: two quick attempts here for a genuinely transient blip, then the
+      # `deploy-fallback` job below, which GitHub schedules on a NEW runner -
+      # a different VM and usually a different address and region. That is a
+      # better draw in the lottery, not a guarantee, and it is the only lever
+      # this repository has over the source address.
+      #
+      # Both jobs run env.REMOTE_DEPLOY, and it is idempotent - it resets to
+      # origin/main and re-runs deploy.sh - so a partially-connected earlier
+      # attempt costs the next one nothing.
+      - name: SSH deploy (attempt 1)
+        id: ssh1
         if: github.event_name != 'pull_request'
         continue-on-error: true
         uses: appleboy/ssh-action@v1.2.0
@@ -185,45 +288,21 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PROD_PORT != '' && secrets.PROD_PORT || 22 }}
-          # Default 30s missed this VPS twice (PR #107 and #108). Dial timeout
-          # is not the 40m command window; it is only the TCP connect.
+          # Dial timeout only - NOT the command window. Default 30s missed
+          # this VPS twice (PR #107, #108).
           timeout: 2m
           script_stop: true
           command_timeout: 40m
           envs: TARGET_SHA,DEPLOY_ROOT
-          script: |
-            set -Eeuo pipefail
-            DEPLOY_ROOT="${DEPLOY_ROOT:-/opt/gp-store}"
-            if [ -z "${TARGET_SHA:-}" ]; then
-              echo "TARGET_SHA is empty"
-              exit 1
-            fi
-            if [ ! -d "$DEPLOY_ROOT/.git" ]; then
-              echo "No checkout at $DEPLOY_ROOT. Run deploy/production/prepare-vps.sh once."
-              exit 1
-            fi
-            cd "$DEPLOY_ROOT"
-            git fetch origin --prune
-            if git show-ref --verify --quiet refs/heads/main; then
-              git checkout main
-            else
-              git checkout -b main origin/main
-            fi
-            git reset --hard origin/main
-            HEAD_SHA="$(git rev-parse HEAD)"
-            if [ "$HEAD_SHA" != "$TARGET_SHA" ]; then
-              echo "VPS HEAD $HEAD_SHA != GITHUB_SHA $TARGET_SHA. Refusing to deploy."
-              exit 1
-            fi
-            chmod +x deploy/production/deploy.sh deploy/production/prepare-vps.sh
-            exec ./deploy/production/deploy.sh "$TARGET_SHA"
+          script: ${{ env.REMOTE_DEPLOY }}
 
-      - name: Pause before SSH retry
-        if: github.event_name != 'pull_request' && steps.ssh_deploy.outcome == 'failure'
-        run: sleep 20
+      - name: Wait 60s before attempt 2
+        if: github.event_name != 'pull_request' && steps.ssh1.outcome == 'failure'
+        run: sleep 60
 
-      - name: SSH deploy retry
-        if: github.event_name != 'pull_request' && steps.ssh_deploy.outcome == 'failure'
+      - name: SSH deploy (attempt 2)
+        id: ssh2
+        if: github.event_name != 'pull_request' && steps.ssh1.outcome == 'failure'
         uses: appleboy/ssh-action@v1.2.0
         env:
           TARGET_SHA: ${{ steps.sha.outputs.sha }}
@@ -233,45 +312,107 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PROD_PORT != '' && secrets.PROD_PORT || 22 }}
+          # Dial timeout only - NOT the command window. Default 30s missed
+          # this VPS twice (PR #107, #108).
           timeout: 2m
           script_stop: true
           command_timeout: 40m
           envs: TARGET_SHA,DEPLOY_ROOT
-          script: |
-            set -Eeuo pipefail
-            DEPLOY_ROOT="${DEPLOY_ROOT:-/opt/gp-store}"
-            if [ -z "${TARGET_SHA:-}" ]; then
-              echo "TARGET_SHA is empty"
-              exit 1
-            fi
-            if [ ! -d "$DEPLOY_ROOT/.git" ]; then
-              echo "No checkout at $DEPLOY_ROOT. Run deploy/production/prepare-vps.sh once."
-              exit 1
-            fi
-            cd "$DEPLOY_ROOT"
-            git fetch origin --prune
-            if git show-ref --verify --quiet refs/heads/main; then
-              git checkout main
-            else
-              git checkout -b main origin/main
-            fi
-            git reset --hard origin/main
-            HEAD_SHA="$(git rev-parse HEAD)"
-            if [ "$HEAD_SHA" != "$TARGET_SHA" ]; then
-              echo "VPS HEAD $HEAD_SHA != GITHUB_SHA $TARGET_SHA. Refusing to deploy."
-              exit 1
-            fi
-            chmod +x deploy/production/deploy.sh deploy/production/prepare-vps.sh
-            exec ./deploy/production/deploy.sh "$TARGET_SHA"
+          script: ${{ env.REMOTE_DEPLOY }}
 
-  # GitHub does not start workflow_run from GITHUB_TOKEN activity except via
-  # workflow_dispatch / repository_dispatch. Merges and deploys in this repo
-  # use GITHUB_TOKEN, so Off-box backup must be dispatched explicitly after a
-  # successful production deploy. PRs must not dump production.
+  # A SECOND ROLL OF THE DICE, FROM A DIFFERENT MACHINE.
+  #
+  # Runs only when the deploy job actually failed. GitHub gives each job its
+  # own runner, so this one dials from a different source address - the single
+  # variable that correlated with success or failure in the #141 incident.
+  #
+  # It repeats the same two attempts. If both jobs fail, four connections from
+  # two distinct addresses could not reach the box, which is a real outage
+  # worth a red run rather than more retrying.
+  deploy-fallback:
+    name: Deploy backend to VPS (fresh runner)
+    needs: deploy
+    if: failure() && needs.deploy.result == 'failure' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    concurrency:
+      group: gpstore-prod-ssh
+      cancel-in-progress: false
+    steps:
+      - name: Resolve target SHA
+        id: sha
+        env:
+          DISPATCH_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+        run: |
+          set -Eeuo pipefail
+          if [ -n "${DISPATCH_SHA}" ]; then
+            echo "sha=${DISPATCH_SHA}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Note why this job is running
+        run: |
+          echo "::warning::The first deploy runner could not reach the VPS. Retrying from a different runner; see PR #143 for the source-address correlation."
+
+      - name: SSH deploy (fallback attempt 1)
+        id: ssh1
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          TARGET_SHA: ${{ steps.sha.outputs.sha }}
+          DEPLOY_ROOT: ${{ secrets.PROD_APP_DIR }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_PORT != '' && secrets.PROD_PORT || 22 }}
+          # Dial timeout only - NOT the command window. Default 30s missed
+          # this VPS twice (PR #107, #108).
+          timeout: 2m
+          script_stop: true
+          command_timeout: 40m
+          envs: TARGET_SHA,DEPLOY_ROOT
+          script: ${{ env.REMOTE_DEPLOY }}
+
+      - name: Wait 60s before fallback attempt 2
+        if: github.event_name != 'pull_request' && steps.ssh1.outcome == 'failure'
+        run: sleep 60
+
+      - name: SSH deploy (fallback attempt 2)
+        id: ssh2
+        if: github.event_name != 'pull_request' && steps.ssh1.outcome == 'failure'
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          TARGET_SHA: ${{ steps.sha.outputs.sha }}
+          DEPLOY_ROOT: ${{ secrets.PROD_APP_DIR }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_PORT != '' && secrets.PROD_PORT || 22 }}
+          # Dial timeout only - NOT the command window. Default 30s missed
+          # this VPS twice (PR #107, #108).
+          timeout: 2m
+          script_stop: true
+          command_timeout: 40m
+          envs: TARGET_SHA,DEPLOY_ROOT
+          script: ${{ env.REMOTE_DEPLOY }}
+
+
   start-offbox:
     name: Start off-box backup
-    needs: [deploy]
-    if: github.event_name != 'pull_request' && needs.deploy.result == 'success'
+    needs: [deploy, deploy-fallback]
+    # EITHER deploy path counts, and `always()` is required because the
+    # fallback is SKIPPED on the happy path - without it, a skipped dependency
+    # would silently take the backup with it and production would quietly stop
+    # being backed up after every successful deploy.
+    if: >-
+      always()
+      && github.event_name != 'pull_request'
+      && (needs.deploy.result == 'success' || needs['deploy-fallback'].result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
