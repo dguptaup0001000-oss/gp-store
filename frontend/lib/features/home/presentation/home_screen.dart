@@ -18,6 +18,7 @@ import 'home_load_stage.dart';
 import '../../products/presentation/search_screen.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../../shared/widgets/categories_row.dart';
+import '../../../shared/widgets/store_status_banner.dart';
 import '../../../shared/widgets/offers_banner.dart';
 import '../../../shared/widgets/brands_row.dart';
 import '../../../shared/widgets/category_tabs_bar.dart';
@@ -186,6 +187,10 @@ class HomeScreen extends ConsumerWidget {
               slivers: [
                 SliverList(
                   delegate: SliverChildListDelegate([
+                    // Above the search box, because at 20:50 "closes in 10
+                    // min" is the most useful thing on this screen. It renders
+                    // nothing at all during normal hours - see the widget.
+                    const StoreStatusBanner(),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                       child: GestureDetector(

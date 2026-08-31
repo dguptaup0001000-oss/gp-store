@@ -6,33 +6,53 @@ import 'package:gpstore/admin/shell/admin_destinations.dart';
 /// a feature that has silently disappeared from the app - no compile error,
 /// no crash, just a screen nobody can reach any more.
 void main() {
+  // These are exactly the tiles the old AdminHomeScreen showed. If a rename
+  // drops one, the first test fails rather than shipping an app that quietly
+  // lost a feature. Hoisted out of that test so the second one can measure
+  // what has been added since.
+  const expected = {
+    'Dashboard',
+    'Orders',
+    'Payments',
+    'Delivery Breaches',
+    'Products',
+    'Categories',
+    'Inventory',
+    'Coupons',
+    'Delivery Partners',
+    'Territories',
+    'Delivery Pricing',
+    'Customers',
+    'Reviews',
+    'Broadcast',
+    'Analytics',
+    'Audit Log',
+    'Order Announcements',
+    'Receipt Printer',
+  };
+
   test('every screen the console used to list is still reachable', () {
-    // These are exactly the tiles the old AdminHomeScreen showed. If a
-    // rename drops one, this fails rather than shipping an app that quietly
-    // lost a feature.
-    const expected = {
-      'Dashboard',
-      'Orders',
-      'Payments',
-      'Delivery Breaches',
-      'Products',
-      'Categories',
-      'Inventory',
-      'Coupons',
-      'Delivery Partners',
-      'Territories',
-      'Delivery Pricing',
-      'Customers',
-      'Reviews',
-      'Broadcast',
-      'Analytics',
-      'Audit Log',
-      'Order Announcements',
-      'Receipt Printer',
+    final labels = AdminNav.all.map((d) => d.label).toSet();
+    // containsAll, not equality. This set is the OLD home screen's tiles, and
+    // its job is that none of them vanished - so a destination added since
+    // then is not a failure of this test. Equality only happened to work
+    // while the two sets coincided, and turned the first new screen into a
+    // failure that said "Store Hours" where it meant "nothing is missing".
+    expect(labels, containsAll(expected));
+  });
+
+  test('a destination added since that list is declared here on purpose', () {
+    // The other half of the guarantee above. containsAll would let a screen
+    // be added with nobody noticing, so every destination beyond the original
+    // tiles is named here - adding one to the sidebar without adding it to
+    // this list fails, which is the point.
+    const addedSince = {
+      'Packing List',
+      'Store Hours',
     };
 
     final labels = AdminNav.all.map((d) => d.label).toSet();
-    expect(labels, expected);
+    expect(labels.difference(expected), addedSince);
   });
 
   test('ids are unique - they are the selection key', () {

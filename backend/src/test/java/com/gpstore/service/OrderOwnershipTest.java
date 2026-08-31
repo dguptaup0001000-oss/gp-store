@@ -58,6 +58,7 @@ class OrderOwnershipTest {
     @Mock private PaymentService paymentServiceUnused;
     @Mock private com.gpstore.config.AfterCommitExecutor afterCommitExecutorUnused;
     @Mock private org.springframework.transaction.PlatformTransactionManager transactionManagerUnused;
+    @Mock private com.gpstore.store.DeliveryScheduleService deliveryScheduleServiceUnused;
 
     private OrderService orderService;
 
@@ -81,6 +82,10 @@ class OrderOwnershipTest {
                 transactionManagerUnused,
                 outboxEventRepositoryUnused,
                 paymentServiceUnused,
+                // Unused for the same reason: the scheduling service is read
+                // on the checkout path only, and these tests never place an
+                // order.
+                deliveryScheduleServiceUnused,
                 // requireIdempotencyKey: these tests cover cancellation and
                 // ownership, never the checkout entry point that reads it.
                 false);

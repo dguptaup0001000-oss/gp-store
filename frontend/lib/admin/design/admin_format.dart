@@ -83,6 +83,28 @@ class AdminFormat {
     return '$day ${_months[month - 1]}';
   }
 
+  /// "Today" / "Tomorrow" / "14 Mar", from a DateTime.
+  ///
+  /// Named relative to today where that is what an operator actually thinks
+  /// in: on the store hours screen every date is within a few days, and
+  /// "Tomorrow" is read correctly at a glance where "1 Sep" needs a moment.
+  /// Falls back to the absolute day beyond that, because "in 6 days" does not.
+  ///
+  /// Reuses [_months] rather than repeating the names at the call site - two
+  /// lists of month names is one list that eventually disagrees.
+  static String relativeDay(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final days = target.difference(today).inDays;
+    if (days == 0) return 'Today';
+    if (days == 1) return 'Tomorrow';
+    if (days == -1) return 'Yesterday';
+    final month = target.month;
+    if (month < 1 || month > 12) return target.toString();
+    return '${target.day} ${_months[month - 1]}';
+  }
+
   static const _months = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',

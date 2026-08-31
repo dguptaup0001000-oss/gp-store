@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gpstore/core/store/store_status.dart';
+import 'package:gpstore/core/store/store_status_provider.dart';
 import 'package:gpstore/features/home/presentation/home_screen.dart';
 import 'package:gpstore/features/products/data/products_repository.dart';
 import 'package:gpstore/features/products/domain/brand_models.dart';
@@ -85,7 +87,17 @@ void main() {
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [productsRepositoryProvider.overrideWithValue(repository)],
+        overrides: [
+          productsRepositoryProvider.overrideWithValue(repository),
+          // The store banner is not what this test measures, but it is on the
+          // home screen and it polls. Left real it opens a Dio request that
+          // never resolves under the test binding, and the pending timer
+          // fails the test - while also putting a call on the wire that this
+          // test exists to say does not happen. A single-value stream, so
+          // there is nothing outstanding when the tree goes away.
+          storeStatusProvider
+              .overrideWith((ref) => Stream.value(StoreStatus.unknown())),
+        ],
         child: const MaterialApp(home: HomeScreen()),
       ),
     );

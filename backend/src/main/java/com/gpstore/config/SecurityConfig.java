@@ -182,6 +182,15 @@ public class SecurityConfig {
                 // Public - a customer needs this even before logging in
                 // (e.g. locked out and needing to contact support).
                 .requestMatchers("/api/store-info").permitAll()
+                // OPENING HOURS AND WHETHER ORDERS ARE BEING TAKEN. Public for
+                // the same reason: a customer browsing at 3am before signing in
+                // is exactly who needs to be told the shop is open and their
+                // order arrives at 9am. It exposes what a sign on the door
+                // would - no customer, order or staff data - and it is
+                // advisory: the order path re-checks acceptance itself, so a
+                // client that ignores this response gets a 409 at checkout
+                // rather than an order the shop cannot deliver.
+                .requestMatchers(HttpMethod.GET, "/api/store/status").permitAll()
                 .requestMatchers("/api/health", "/api/health/**").permitAll()
                 .requestMatchers("/api/version").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
@@ -251,6 +260,20 @@ public class SecurityConfig {
                 // future customer pays, and the per-order breakdown exposes
                 // cost prices and margins - neither is customer-readable.
                 .requestMatchers("/api/admin/delivery-pricing/**").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
+                // THE MORNING PACKING LIST. Read-only, and the people who pack
+                // the boxes need it - so ORDERS_VIEW, not the switch below.
+                // Placed BEFORE the broader /api/admin/store/** rule because
+                // Spring applies the first matching rule, so the narrower path
+                // has to come first or it is never reached.
+                .requestMatchers(HttpMethod.GET, "/api/admin/store/preparation")
+                    .hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                // PAUSING ORDERS AND CLOSING DAYS. Turning this off stops the
+                // shop earning and closing a day cancels deliveries customers
+                // are expecting; both belong with whoever decides when the vans
+                // run, which is DELIVERY_MANAGE - held by ADMIN, SUPER_ADMIN,
+                // MANAGER and DELIVERY_MANAGER, and deliberately not by a
+                // counter clerk or by support.
+                .requestMatchers("/api/admin/store/**").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
                 // ApplicationId / Flutter UI is not authorization. A customer
                 // JWT must 403 here whether it arrived from the shop APK,
                 // a leftover combined APK, or a script.

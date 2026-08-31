@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/store/store_status_copy.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/order_models.dart';
@@ -107,6 +108,37 @@ class OrderHistoryScreen extends ConsumerWidget {
                               .bodyMedium
                               ?.copyWith(fontSize: 12),
                         ),
+                        // Which window this order went out in. Read from what
+                        // was STORED on the order, never re-derived from the
+                        // hour it was placed - a rule that changes later would
+                        // otherwise silently relabel a customer's history.
+                        // Renders nothing for orders placed before the shop
+                        // had delivery windows.
+                        if (StoreStatusCopy.historyLabel(order.deliveryType)
+                            case final label?) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                order.deliveryType == 'NEXT_MORNING'
+                                    ? Icons.wb_twilight
+                                    : Icons.local_shipping_outlined,
+                                size: 14,
+                                color: AppColors.secondary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                label,
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.secondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         Text('₹${order.totalAmount.toStringAsFixed(0)}',
                             style:

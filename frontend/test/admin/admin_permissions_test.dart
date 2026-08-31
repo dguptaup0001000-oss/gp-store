@@ -166,6 +166,29 @@ void main() {
       }
     });
 
+    test('packing is wider than the switch that stops the shop trading', () {
+      // Deliberately different permissions. Whoever packs the boxes reads the
+      // list all morning; pausing orders stops the shop earning and belongs
+      // with whoever decides when the vans run.
+      final support = AdminRoles.permissionsFor(AdminRoles.support);
+      final packing = AdminNav.all.firstWhere((d) => d.label == 'Packing List');
+      final hours = AdminNav.all.firstWhere((d) => d.label == 'Store Hours');
+
+      expect(AdminNav.isVisible(packing, support), isTrue);
+      expect(AdminNav.isVisible(hours, support), isFalse);
+
+      final deliveryManager =
+          AdminRoles.permissionsFor(AdminRoles.deliveryManager);
+      expect(AdminNav.isVisible(hours, deliveryManager), isTrue);
+
+      // A counter clerk takes orders; they do not close the shop.
+      expect(
+        AdminNav.isVisible(
+            hours, AdminRoles.permissionsFor(AdminRoles.orderManager)),
+        isFalse,
+      );
+    });
+
     test('a destination a role cannot use is not visible to it', () {
       final inventory =
           AdminNav.all.firstWhere((d) => d.label == 'Inventory');
