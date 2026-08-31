@@ -45,6 +45,19 @@ public class AnalyticsController {
         return analyticsService.getTopProducts(days, Math.min(limit, 50));
     }
 
+    /**
+     * How the period's orders split between same-day and next-morning.
+     *
+     * <p>Real rows from orders.delivery_type - see
+     * AnalyticsService.getDeliveryTypeBreakdown for why orders placed before
+     * the feature are reported as UNRECORDED rather than guessed at.
+     */
+    @GetMapping("/delivery-types")
+    public List<Map<String, Object>> getDeliveryTypeBreakdown(
+            @RequestParam(defaultValue = "30") int days) {
+        return analyticsService.getDeliveryTypeBreakdown(days);
+    }
+
     @GetMapping("/low-stock-count")
     public Map<String, Long> getLowStockCount() {
         return Map.of("lowStockCount", analyticsService.getLowStockCount());

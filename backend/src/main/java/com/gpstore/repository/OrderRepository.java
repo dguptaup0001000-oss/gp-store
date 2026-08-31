@@ -104,6 +104,55 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     Page<Order> findAllByOrderByOrderDateDesc(Pageable pageable);
 
     /**
+     * The morning preparation list: orders due on one day that still need work.
+     *
+     * <p>PAGED, AND FILTERED IN SQL. The obvious implementation - load every
+     * order and filter in Java - is a full table scan that grows with the
+     * shop's whole history to answer a question about one day, and it is the
+     * exact failure the brief names. This narrows on an indexed column
+     * (idx_orders_scheduled_delivery_date, V33) and returns a page.
+     *
+     * <p>DELIVERED and CANCELLED are excluded because they need no packing;
+     * PENDING_CONFIRMATION is excluded because an unpaid UPI order must not be
+     * packed - see OrderService, which is where that rule already lives.
+     */
+    @Query("select o from Order o "
+            + "where o.scheduledDeliveryDate = :date "
+            + "and o.orderStatus in (com.gpstore.enums.OrderStatus.CONFIRMED, "
+            + "                      com.gpstore.enums.OrderStatus.PACKING) "
+            + "order by o.orderDate asc")
+    Page<Order> findForPreparation(@Param("date") java.time.LocalDate date, Pageable pageable);
+
+    /**
+     * How many orders are due that day and still unpacked - the badge number.
+     *
+     * <p>A COUNT, not {@code findForPreparation(...).size()}. The count runs in
+     * the database and returns one long; materialising the orders to count
+     * them is the same "load everything into memory" mistake wearing a hat.
+     */
+    @Query("select count(o) from Order o "
+            + "where o.scheduledDeliveryDate = :date "
+            + "and o.orderStatus in (com.gpstore.enums.OrderStatus.CONFIRMED, "
+            + "                      com.gpstore.enums.OrderStatus.PACKING)")
+    long countForPreparation(@Param("date") java.time.LocalDate date);
+
+    /**
+     * Orders per delivery type over a period, aggregated in SQL.
+     *
+     * <p>Returns [deliveryType, orderCount, revenue]. CANCELLED is excluded to
+     * match sumRevenueBetween and the dashboard KPI - a split that counts
+     * cancellations while the headline revenue does not is a split whose
+     * columns never add up to the total shown above them.
+     */
+    @Query("select o.deliveryType, count(o), coalesce(sum(o.totalAmount), 0) from Order o "
+            + "where o.orderDate >= :from and o.orderDate <= :to "
+            + "and o.orderStatus <> com.gpstore.enums.OrderStatus.CANCELLED "
+            + "group by o.deliveryType")
+    java.util.List<Object[]> countByDeliveryTypeBetween(
+            @Param("from") java.time.LocalDateTime from,
+            @Param("to") java.time.LocalDateTime to);
+
+    /**
      * Real revenue only - excludes CANCELLED orders so a cancelled order
      * doesn't inflate reported sales. Returns null (not zero) via COALESCE
      * guard in the service if there are no matching orders.

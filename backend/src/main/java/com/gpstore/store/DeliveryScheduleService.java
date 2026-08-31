@@ -135,8 +135,25 @@ public class DeliveryScheduleService {
 
     /** Everything at once, for the status endpoint - one settings read, one query. */
     public StoreStatus getStoreStatus() {
+        return getStoreStatusAt(now());
+    }
+
+    /**
+     * The same snapshot, at a caller-supplied instant.
+     *
+     * <p>WHY A CALLER WOULD PASS ITS OWN INSTANT rather than let this read the
+     * clock: checkout stamps the order's date and decides its delivery window
+     * from one moment, and an order placed at 20:59:59.999 must not be
+     * timestamped inside the window and scheduled outside it. Passing the
+     * instant makes that impossible rather than unlikely.
+     *
+     * <p>This is NOT a way to let a client choose a time. The instant comes
+     * from {@link #now()} a few lines earlier in the same server method; there
+     * is no path from a request body to this parameter.
+     */
+    public StoreStatus getStoreStatusAt(Instant at) {
         StoreOperationsSettings settings = settings();
-        return schedule().status(now(), settings.acceptanceOrDefault(), settings.getClosureMessage());
+        return schedule().status(at, settings.acceptanceOrDefault(), settings.getClosureMessage());
     }
 
     /** The window a given order's delivery date belongs to, for display. */

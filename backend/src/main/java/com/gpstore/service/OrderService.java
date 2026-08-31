@@ -70,6 +70,8 @@ public class OrderService {
     private final PaymentService paymentService;
     private final boolean requireIdempotencyKey;
 
+    private final com.gpstore.store.DeliveryScheduleService deliveryScheduleService;
+
     public OrderService(
             OrderRepository repository,
             OrderItemRepository orderItemRepository,
@@ -98,10 +100,12 @@ public class OrderService {
             org.springframework.transaction.PlatformTransactionManager transactionManager,
             com.gpstore.repository.OutboxEventRepository outboxEventRepository,
             @org.springframework.context.annotation.Lazy PaymentService paymentService,
+            com.gpstore.store.DeliveryScheduleService deliveryScheduleService,
             @org.springframework.beans.factory.annotation.Value("${orders.require-idempotency-key:true}")
             boolean requireIdempotencyKey) {
 
         this.repository = repository;
+        this.deliveryScheduleService = deliveryScheduleService;
         this.orderItemRepository = orderItemRepository;
         this.customerService = customerService;
         this.addressService = addressService;
@@ -401,6 +405,40 @@ public class OrderService {
             throw new ResourceNotFoundException("Customer not found");
         }
 
+        // THE SERVER'S CLOCK, READ ONCE, and used for both the order's
+        // timestamp and its delivery window below.
+        //
+        // Read once rather than twice because an order placed at 20:59:59.999
+        // would otherwise be stamped inside the window and scheduled outside
+        // it - a real, if narrow, disagreement between what the receipt says
+        // and what the van does. One instant cannot contradict itself.
+        final java.time.Instant placedAt = deliveryScheduleService.now();
+
+        // THE BACKEND'S ORDER GATE. Disabling the button in Flutter stops an
+        // honest customer; it does not stop an app left open across the switch
+        // being flipped, a replayed request, or a script. This is the check
+        // that counts, and it sits here - after the idempotency replay above,
+        // so a retry of an order placed while the shop was open still
+        // completes, and before any inventory row is locked, so a refused
+        // order costs nothing.
+        //
+        // Computed once into a snapshot rather than asked three separate
+        // questions: acceptance, delivery type and delivery date all come from
+        // the same instant and the same settings read, so they cannot describe
+        // three slightly different moments, and checkout costs one closures
+        // query rather than three.
+        final com.gpstore.store.StoreStatus storeStatus =
+                deliveryScheduleService.getStoreStatusAt(placedAt);
+
+        if (!storeStatus.acceptingOrders()) {
+            String message = storeStatus.closureReason();
+            throw new ConflictException(
+                    message != null && !message.isBlank()
+                            ? message
+                            : "The shop has paused new orders for the moment. "
+                                    + "You can keep browsing, and your cart will be waiting.");
+        }
+
         // Throws if the address doesn't belong to this customer.
         Address address = addressService.getOwnedAddress(request.getAddressId(), customerId);
 
@@ -489,7 +527,22 @@ public class OrderService {
         order.setOrderNumber(OrderNumberGenerator.generate(repository.nextOrderNumberSequenceValue()));
         order.setCustomer(customer);
         order.setAddress(address);
-        order.setOrderDate(LocalDateTime.now());
+        order.setOrderDate(LocalDateTime.ofInstant(placedAt, java.time.ZoneOffset.UTC));
+
+        // WHEN THIS ARRIVES, DECIDED HERE AND ONLY HERE.
+        //
+        // Nothing from the request contributes. A delivery date in a request
+        // body is a value the customer's phone chose, and a phone whose clock
+        // is a day slow - or whose owner edited the JSON - would otherwise
+        // book a van for a day of its choosing. The request DTO deliberately
+        // has no field for it, so there is nothing to accidentally read.
+        //
+        // Both may be null when the shop is closed past the lookahead and the
+        // owner forced ordering ON anyway: the order is real and will be
+        // delivered when the shop reopens, and recording a date nobody can
+        // honour would be worse than recording none.
+        order.setDeliveryType(storeStatus.deliveryType());
+        order.setScheduledDeliveryDate(storeStatus.deliveryDate());
 
         // Validated up front, through the same parser PaymentService uses, so
         // an unsupported method fails before any inventory is touched rather
@@ -915,6 +968,10 @@ public class OrderService {
         response.setOrderNumber(order.getOrderNumber());
         response.setTotalAmount(order.getTotalAmount());
         response.setOrderStatus(nameOf(order.getOrderStatus()));
+        // Both nullable for orders that predate the scheduling feature - see
+        // OrderResponse, and nameOf, which exists for exactly this.
+        response.setDeliveryType(nameOf(order.getDeliveryType()));
+        response.setScheduledDeliveryDate(order.getScheduledDeliveryDate());
         // NULLABLE, and 500ing on it took out three endpoints at once.
         //
         // orders.payment_status has no NOT NULL constraint and no default,

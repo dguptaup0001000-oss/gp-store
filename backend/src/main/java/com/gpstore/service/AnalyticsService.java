@@ -15,6 +15,7 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -263,6 +264,44 @@ public class AnalyticsService {
         return current.subtract(previous)
                 .multiply(BigDecimal.valueOf(100))
                 .divide(previous, 1, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Orders and revenue split by how they were scheduled.
+     *
+     * <p>REAL ROWS, AGGREGATED IN SQL. Every number here comes from
+     * orders.delivery_type; nothing is estimated from the hour an order was
+     * placed, which would recompute a rule that may have changed and
+     * disagree with what the customer was actually told.
+     *
+     * <p>ORDERS PLACED BEFORE THIS FEATURE have no delivery type, and they are
+     * reported under "UNRECORDED" rather than folded into SAME_DAY. A split
+     * that silently attributes a year of history to whichever bucket is
+     * convenient makes the night-trade look either enormous or non-existent,
+     * and there is no way to tell from the chart which. The counts still sum
+     * to the period's order count, so the two screens agree.
+     *
+     * <p>CANCELLED is excluded, matching sumRevenueBetween and the revenue KPI
+     * - a split whose columns do not add up to the total above them is worse
+     * than no split.
+     */
+    public List<Map<String, Object>> getDeliveryTypeBreakdown(int days) {
+        int window = clampDays(days);
+        LocalDateTime to = LocalDateTime.now();
+        LocalDateTime from = to.minusDays(window);
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Object[] row : orderRepository.countByDeliveryTypeBetween(from, to)) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("deliveryType", row[0] == null ? "UNRECORDED" : row[0].toString());
+            entry.put("orderCount", row[1] == null ? 0L : ((Number) row[1]).longValue());
+            entry.put("revenue", row[2] == null ? BigDecimal.ZERO : (BigDecimal) row[2]);
+            rows.add(entry);
+        }
+        // Stable order, so the chart's colours do not swap between refreshes
+        // when one bucket happens to be empty.
+        rows.sort(Comparator.comparing(r -> String.valueOf(r.get("deliveryType"))));
+        return rows;
     }
 
     private static int clampDays(int days) {
