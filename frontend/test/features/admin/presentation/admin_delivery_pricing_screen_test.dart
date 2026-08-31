@@ -8,7 +8,7 @@ import 'package:gpstore/core/util/app_haptics.dart';
 import 'package:gpstore/features/admin/data/delivery_pricing_repository.dart';
 import 'package:gpstore/features/admin/domain/delivery_pricing_models.dart';
 import 'package:gpstore/features/admin/presentation/admin_delivery_pricing_screen.dart';
-import 'package:gpstore/features/admin/presentation/admin_home_screen.dart';
+import 'package:gpstore/admin/shell/admin_destinations.dart';
 import 'package:gpstore/features/admin/presentation/admin_order_delivery_breakdown.dart';
 import 'package:gpstore/features/admin/presentation/admin_providers.dart';
 
@@ -73,12 +73,14 @@ void main() {
     AppHaptics.enabled = false;
   });
 
-  testWidgets('admin home lists Delivery Pricing among store tools', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: AdminHomeScreen()));
-    await tester.scrollUntilVisible(find.text('Delivery Pricing'), 400);
-
-    expect(find.text('Delivery Pricing'), findsOneWidget);
-    expect(find.text('Distance, weight, and free-delivery rules'), findsOneWidget);
+  // Same substitution as the Territories test: the card-list home screen is
+  // gone, so reachability is asserted against the navigation both the
+  // sidebar and the drawer are built from.
+  test('the admin console can navigate to Delivery Pricing', () {
+    final destination =
+        AdminNav.all.firstWhere((d) => d.label == 'Delivery Pricing');
+    expect(destination.description, 'Distance, weight, and free-delivery rules');
+    expect(destination.builder, isNotNull);
   });
 
   group('AdminDeliveryPricingScreen', () {

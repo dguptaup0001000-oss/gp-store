@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../features/admin/presentation/admin_home_screen.dart';
 import '../features/auth/presentation/auth_providers.dart';
 import '../features/profile/domain/profile_models.dart';
 import '../shared/widgets/signed_in_home.dart';
 import '../shared/widgets/wrong_app_screen.dart';
+import 'shell/admin_shell.dart';
 
 /// Admin APK home. Staff tools only - no shopping shell.
 class AdminRootScreen extends ConsumerWidget {
@@ -27,7 +27,8 @@ class AdminRootScreen extends ConsumerWidget {
             'Install GP-STORE to shop.',
       );
     }
-    return AdminHomeScreen(
+    return AdminShell(
+      operatorName: profile.fullName,
       onSignOut: () => ref.read(authControllerProvider.notifier).logout(),
     );
   }

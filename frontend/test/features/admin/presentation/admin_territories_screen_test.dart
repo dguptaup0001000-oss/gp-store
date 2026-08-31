@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/core/util/app_haptics.dart';
 import 'package:gpstore/features/admin/data/territory_repository.dart';
 import 'package:gpstore/features/admin/domain/territory_models.dart';
-import 'package:gpstore/features/admin/presentation/admin_home_screen.dart';
+import 'package:gpstore/admin/shell/admin_destinations.dart';
 import 'package:gpstore/features/admin/presentation/admin_providers.dart';
 import 'package:gpstore/features/admin/presentation/admin_territories_screen.dart';
 
@@ -62,11 +62,15 @@ void main() {
     AppHaptics.enabled = false;
   });
 
-  testWidgets('admin home lists Territories among store tools', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: AdminHomeScreen()));
-    await tester.scrollUntilVisible(find.text('Territories'), 400);
-    expect(find.text('Territories'), findsOneWidget);
-    expect(find.text('Zones, riders, and pasteable map outlines'), findsOneWidget);
+  // Was a pump of the old card-list home screen. That screen is gone; the
+  // console now navigates from AdminNav, so this asserts the same property
+  // - Territories is reachable from the admin console, and still explains
+  // itself - against the list the sidebar and drawer are both built from.
+  test('the admin console can navigate to Territories', () {
+    final destination =
+        AdminNav.all.firstWhere((d) => d.label == 'Territories');
+    expect(destination.description, 'Zones, riders, and map outlines');
+    expect(destination.builder, isNotNull);
   });
 
   group('AdminTerritoriesScreen', () {
