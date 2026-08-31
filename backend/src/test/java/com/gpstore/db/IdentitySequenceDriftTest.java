@@ -8,7 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.test.context.support.WithMockUser;
+import com.gpstore.security.WithStaff;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -110,7 +110,7 @@ class IdentitySequenceDriftTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("a sequence behind its table makes every Add Product fail - and it is not the admin's fault")
     void driftBreaksProductCreation() throws Exception {
         ensureAProductExists();
@@ -138,7 +138,7 @@ class IdentitySequenceDriftTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("the guard repairs the drift, and the same request then succeeds")
     void guardRepairsDriftAndCreationWorks() throws Exception {
         ensureAProductExists();

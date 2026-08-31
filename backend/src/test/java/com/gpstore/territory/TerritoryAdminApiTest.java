@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import com.gpstore.security.WithStaff;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -42,7 +43,7 @@ class TerritoryAdminApiTest {
     @Autowired private MockMvc mockMvc;
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("the health endpoint is actually mapped, and reports the 8/26 target")
     void healthIsMappedForAnAdmin() throws Exception {
         MvcResult result = mockMvc.perform(get("/api/admin/territory/health")).andReturn();
@@ -57,7 +58,7 @@ class TerritoryAdminApiTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("resolving a point is answerable without drawing anything first")
     void resolveIsMapped() throws Exception {
         MvcResult result = mockMvc.perform(
@@ -83,7 +84,7 @@ class TerritoryAdminApiTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("validate-boundary accepts a triangle and rejects garbage")
     void validateBoundaryParsesWithoutSaving() throws Exception {
         mockMvc.perform(post("/api/admin/territory/validate-boundary")

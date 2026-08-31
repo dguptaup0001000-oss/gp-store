@@ -51,7 +51,7 @@ class AdminAuthorizationIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     void adminNewOrdersSinceAllowsAdminRole() throws Exception {
         mockMvc.perform(get("/api/orders/admin/since"))
                 .andExpect(status().isOk())
@@ -67,7 +67,7 @@ class AdminAuthorizationIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     void adminOnlyInventoryEndpointAllowsAdminRole() throws Exception {
         mockMvc.perform(get("/api/inventory"))
                 .andExpect(status().isOk());

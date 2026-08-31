@@ -116,7 +116,7 @@ class CatalogAdminAuthorizationTest {
     // ---------------- D. admin ----------------
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("an admin reaches the audit endpoint - read-only, nothing is mutated")
     void adminCanReadAudit() throws Exception {
         mockMvc.perform(get(AUDIT)).andExpect(status().isOk());
@@ -131,7 +131,7 @@ class CatalogAdminAuthorizationTest {
      * is not a thing a test suite should do to a shared database.
      */
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("even an admin must pass confirm=true before anything is deleted")
     void adminDeletionRequiresExplicitConfirmation() throws Exception {
         mockMvc.perform(delete(TEST_DATA)).andExpect(status().isBadRequest());

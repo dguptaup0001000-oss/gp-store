@@ -4,6 +4,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.http.HttpMethod;
+import com.gpstore.security.AdminPermission;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -184,25 +185,25 @@ public class SecurityConfig {
                 .requestMatchers("/api/health", "/api/health/**").permitAll()
                 .requestMatchers("/api/version").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
-                .requestMatchers("/actuator/**").hasRole("ADMIN")
+                .requestMatchers("/actuator/**").hasAuthority(AdminPermission.SYSTEM_ADMIN.authority())
                 // Springdoc auto-generates these from your existing @RestController
                 // annotations - no extra code needed. Admin-only for now since
                 // you're pre-launch; open these up once you want partners/devs
                 // to browse the API docs themselves.
-                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").hasRole("ADMIN")
+                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").hasAuthority(AdminPermission.SYSTEM_ADMIN.authority())
                 // The exact list-everything endpoint is admin-only - must come BEFORE
                 // the broader "/api/reviews/**" public browsing rule below, since Spring
                 // Security matches rules in declared order and "/**" would otherwise
                 // also match this exact path first.
-                .requestMatchers(HttpMethod.GET, "/api/reviews").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/reviews").hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
                 // Same reasoning - moderation (deleting someone else's review)
                 // must be admin-only, and there's no other rule that would
                 // cover this DELETE path otherwise.
-                .requestMatchers(HttpMethod.DELETE, "/api/reviews/*/moderate").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.DELETE, "/api/reviews/*/moderate").hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
                 // Same ordering reason as /api/reviews above - the admin
                 // "everything including inactive" product list must come
                 // before the broad public GET /api/products/** rule below.
-                .requestMatchers(HttpMethod.GET, "/api/products/admin/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/products/admin/**").hasAuthority(AdminPermission.CATALOG_VIEW.authority())
                 .requestMatchers(HttpMethod.GET,
                         "/api/products/**",
                         "/api/categories/**",
@@ -221,18 +222,18 @@ public class SecurityConfig {
 
                 // Admin-only: catalog and inventory management, cross-customer views,
                 // payment/order status mutation, delivery operations
-                .requestMatchers(HttpMethod.POST, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.PUT, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.DELETE, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasRole("ADMIN")
-                .requestMatchers("/api/inventory/**").hasRole("ADMIN")
-                .requestMatchers("/api/uploads/**").hasRole("ADMIN")
-                .requestMatchers("/api/orders").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers(HttpMethod.PUT, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers(HttpMethod.DELETE, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers("/api/inventory/**").hasAuthority(AdminPermission.INVENTORY_MANAGE.authority())
+                .requestMatchers("/api/uploads/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers("/api/orders").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
                 // CATALOG ADMINISTRATION. Every route under here can insert a
                 // thousand products, make a thousand outbound requests, or
                 // delete every test product in the shop - so it is the
                 // narrowest possible grant, and it sits ABOVE the broader
                 // rules so nothing below can widen it by accident.
-                .requestMatchers("/api/admin/catalog/**").hasRole("ADMIN")
+                .requestMatchers("/api/admin/catalog/**").hasAuthority(AdminPermission.SYSTEM_ADMIN.authority())
                 // TERRITORY ADMINISTRATION. Every route under here edits the
                 // permanent delivery map - a boundary, a rider's territory,
                 // which territories may lend to each other. Redrawing one
@@ -240,29 +241,29 @@ public class SecurityConfig {
                 // is admin-only for the same reason catalog administration
                 // above is, and sits beside it so neither can be widened by a
                 // broader rule further down.
-                .requestMatchers("/api/admin/territory/**").hasRole("ADMIN")
+                .requestMatchers("/api/admin/territory/**").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
                 // WORKER ACCOUNTABILITY. Issuing a QR token prints a label that
                 // makes an order scannable, and reassigning one overrides the
                 // permanent territory rules - both belong to whoever runs the
                 // shop, not to the people on the floor.
-                .requestMatchers("/api/admin/worker/**").hasRole("ADMIN")
+                .requestMatchers("/api/admin/worker/**").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
                 // DELIVERY PRICING. Editing these numbers changes what every
                 // future customer pays, and the per-order breakdown exposes
                 // cost prices and margins - neither is customer-readable.
-                .requestMatchers("/api/admin/delivery-pricing/**").hasRole("ADMIN")
+                .requestMatchers("/api/admin/delivery-pricing/**").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
                 // ApplicationId / Flutter UI is not authorization. A customer
                 // JWT must 403 here whether it arrived from the shop APK,
                 // a leftover combined APK, or a script.
-                .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/admin/**").hasAuthority(AdminPermission.SYSTEM_ADMIN.authority())
                 // THE WORKER APP. Every route here resolves the worker from the
                 // JWT and never from the request, so ADMIN is included only so
                 // an administrator can exercise the same flow while setting a
                 // phone up - it grants no ability a worker does not already
                 // have over their own record.
-                .requestMatchers("/api/worker/**").hasAnyRole("ADMIN", "DELIVERY_BOY")
-                .requestMatchers("/api/orders/admin/**").hasRole("ADMIN")
-                .requestMatchers("/api/orders/customer/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.PUT, "/api/orders/*/status").hasRole("ADMIN")
+                .requestMatchers("/api/worker/**").hasAnyAuthority(AdminPermission.DELIVERY_MANAGE.authority(), "ROLE_DELIVERY_BOY")
+                .requestMatchers("/api/orders/admin/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                .requestMatchers("/api/orders/customer/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                .requestMatchers(HttpMethod.PUT, "/api/orders/*/status").hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
                 // PUBLIC BY NECESSITY. Cashfree cannot present a JWT, so
                 // this path cannot require one - the HMAC signature check in
                 // PaymentWebhookController is what authenticates it instead.
@@ -273,13 +274,13 @@ public class SecurityConfig {
                 // Ownership is enforced inside GatewayPaymentService, which
                 // returns not-found for someone else's order rather than
                 // forbidden - so order ids cannot be probed.
-                .requestMatchers(HttpMethod.POST, "/api/payments/order/*/checkout-session").hasAnyRole("ADMIN", "CUSTOMER")
-                .requestMatchers(HttpMethod.POST, "/api/payments/order/*/verify").hasAnyRole("ADMIN", "CUSTOMER")
-                .requestMatchers(HttpMethod.POST, "/api/payments").hasAnyRole("ADMIN", "CUSTOMER")
-                .requestMatchers(HttpMethod.GET, "/api/payments/**").hasRole("ADMIN")
-                .requestMatchers("/api/payments/order/*/refund/**").hasRole("ADMIN")
-                .requestMatchers("/api/payments/order/*/cod/**").hasAnyRole("ADMIN", "DELIVERY_BOY")
-                .requestMatchers("/api/payments/order/*/upi/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/payments/order/*/checkout-session").hasAnyAuthority(AdminPermission.PAYMENTS_VIEW.authority(), "ROLE_CUSTOMER")
+                .requestMatchers(HttpMethod.POST, "/api/payments/order/*/verify").hasAnyAuthority(AdminPermission.PAYMENTS_VIEW.authority(), "ROLE_CUSTOMER")
+                .requestMatchers(HttpMethod.POST, "/api/payments").hasAnyAuthority(AdminPermission.PAYMENTS_VIEW.authority(), "ROLE_CUSTOMER")
+                .requestMatchers(HttpMethod.GET, "/api/payments/**").hasAuthority(AdminPermission.PAYMENTS_VIEW.authority())
+                .requestMatchers("/api/payments/order/*/refund/**").hasAuthority(AdminPermission.PAYMENTS_REFUND.authority())
+                .requestMatchers("/api/payments/order/*/cod/**").hasAnyAuthority(AdminPermission.PAYMENTS_MANAGE.authority(), "ROLE_DELIVERY_BOY")
+                .requestMatchers("/api/payments/order/*/upi/**").hasAuthority(AdminPermission.PAYMENTS_MANAGE.authority())
                 // Any logged-in customer can check their own order's delivery ETA -
                 // must come before the broader /api/deliveries/** staff-only rule below.
                 .requestMatchers(HttpMethod.GET, "/api/deliveries/my-order/**").authenticated()
@@ -289,28 +290,28 @@ public class SecurityConfig {
                 // A delivery partner setting their own availability - must
                 // come before the broader delivery-partners admin-only rule
                 // below, same ordering reason used throughout this file.
-                .requestMatchers(HttpMethod.PUT, "/api/delivery-partners/me/availability").hasAnyRole("ADMIN", "DELIVERY_BOY")
-                .requestMatchers(HttpMethod.GET, "/api/delivery-partners/me").hasAnyRole("ADMIN", "DELIVERY_BOY")
-                .requestMatchers(HttpMethod.PUT, "/api/delivery-partners/me/location").hasAnyRole("ADMIN", "DELIVERY_BOY")
+                .requestMatchers(HttpMethod.PUT, "/api/delivery-partners/me/availability").hasAnyAuthority(AdminPermission.DELIVERY_VIEW.authority(), "ROLE_DELIVERY_BOY")
+                .requestMatchers(HttpMethod.GET, "/api/delivery-partners/me").hasAnyAuthority(AdminPermission.DELIVERY_VIEW.authority(), "ROLE_DELIVERY_BOY")
+                .requestMatchers(HttpMethod.PUT, "/api/delivery-partners/me/location").hasAnyAuthority(AdminPermission.DELIVERY_VIEW.authority(), "ROLE_DELIVERY_BOY")
                 // Roster management (create, view everyone, bulk-edit ANY
                 // partner's record) is admin-only - a delivery partner has
                 // no legitimate need to see or edit the whole roster, only
                 // their own assignments (covered by /api/deliveries/** below)
                 // and their own availability (covered just above).
-                .requestMatchers("/api/delivery-partners/**").hasRole("ADMIN")
+                .requestMatchers("/api/delivery-partners/**").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
                 // Batch management is a dispatch/admin concern - a delivery
                 // partner interacts with their OWN deliveries, never batches directly.
-                .requestMatchers("/api/delivery-batches/**").hasRole("ADMIN")
+                .requestMatchers("/api/delivery-batches/**").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
                 // Fleet-wide delivery lists, breach review, and assignment are
                 // dispatch/admin work. A partner may only see and update their
                 // own rows (status, my-assignments, and a scoped GET by id).
-                .requestMatchers(HttpMethod.GET, "/api/deliveries/breached").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.GET, "/api/deliveries").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.POST, "/api/deliveries/assign").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.POST, "/api/deliveries/auto-assign").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.POST, "/api/deliveries/assign-vehicle").hasRole("ADMIN")
-                .requestMatchers("/api/deliveries/**").hasAnyRole("ADMIN", "DELIVERY_BOY")
-                .requestMatchers("/api/coupons/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/deliveries/breached").hasAuthority(AdminPermission.DELIVERY_VIEW.authority())
+                .requestMatchers(HttpMethod.GET, "/api/deliveries").hasAuthority(AdminPermission.DELIVERY_VIEW.authority())
+                .requestMatchers(HttpMethod.POST, "/api/deliveries/assign").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
+                .requestMatchers(HttpMethod.POST, "/api/deliveries/auto-assign").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
+                .requestMatchers(HttpMethod.POST, "/api/deliveries/assign-vehicle").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
+                .requestMatchers("/api/deliveries/**").hasAnyAuthority(AdminPermission.DELIVERY_VIEW.authority(), "ROLE_DELIVERY_BOY")
+                .requestMatchers("/api/coupons/**").hasAuthority(AdminPermission.COUPONS_MANAGE.authority())
                 .requestMatchers(HttpMethod.GET, "/api/notifications/mine").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/notifications/unread-count").authenticated()
                 // Same ordering reason as /mine above - these must come
@@ -318,7 +319,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.PUT, "/api/notifications/*/read").authenticated()
                 .requestMatchers(HttpMethod.PUT, "/api/notifications/read-all").authenticated()
                 .requestMatchers(HttpMethod.DELETE, "/api/notifications/*").authenticated()
-                .requestMatchers("/api/notifications/**").hasRole("ADMIN")
+                .requestMatchers("/api/notifications/**").hasAuthority(AdminPermission.BROADCAST_SEND.authority())
                 // These were missing entirely and fell through to plain "authenticated",
                 // which let any logged-in customer read/cancel ANY invoice, or read/write
                 // ANY customer's cart items / order items / wishlist directly.
@@ -326,18 +327,18 @@ public class SecurityConfig {
                 // /api/invoices/** admin-only rule below, same ordering
                 // reason used throughout this file.
                 .requestMatchers(HttpMethod.GET, "/api/invoices/my-order/**").authenticated()
-                .requestMatchers("/api/invoices/**").hasRole("ADMIN")
-                .requestMatchers("/api/audit-logs/**").hasRole("ADMIN")
-                .requestMatchers("/api/analytics/**").hasRole("ADMIN")
-                .requestMatchers("/api/cart-items/**").hasRole("ADMIN")
-                .requestMatchers("/api/order-items/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.GET, "/api/wishlists").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.POST, "/api/customers").hasRole("ADMIN")
-                .requestMatchers("/api/customers/email/**", "/api/customers/mobile/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.GET, "/api/customers").hasRole("ADMIN")
+                .requestMatchers("/api/invoices/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                .requestMatchers("/api/audit-logs/**").hasAuthority(AdminPermission.AUDIT_VIEW.authority())
+                .requestMatchers("/api/analytics/**").hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
+                .requestMatchers("/api/cart-items/**").hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
+                .requestMatchers("/api/order-items/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                .requestMatchers(HttpMethod.GET, "/api/wishlists").hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
+                .requestMatchers(HttpMethod.POST, "/api/customers").hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
+                .requestMatchers("/api/customers/email/**", "/api/customers/mobile/**").hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
+                .requestMatchers(HttpMethod.GET, "/api/customers").hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
                 // Without this, any authenticated customer could deactivate
                 // (or reactivate) ANY other customer's account.
-                .requestMatchers(HttpMethod.PUT, "/api/customers/*/active").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PUT, "/api/customers/*/active").hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
 
                 // Everything else requires a valid, authenticated customer
                 .anyRequest().authenticated()

@@ -7,7 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.test.context.support.WithMockUser;
+import com.gpstore.security.WithStaff;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -94,7 +94,7 @@ class LegacyOrderNullStatusTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("the admin order list survives an order with no payment status")
     void adminOrderListDoesNotBlowUp() throws Exception {
         insertLegacyOrder();
@@ -107,7 +107,7 @@ class LegacyOrderNullStatusTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("the per-customer order list survives it too")
     void customerOrderListDoesNotBlowUp() throws Exception {
         insertLegacyOrder();
@@ -120,7 +120,7 @@ class LegacyOrderNullStatusTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("the missing status is reported as null, not invented")
     void nullStatusIsReportedHonestly() throws Exception {
         insertLegacyOrder();

@@ -5,7 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.test.context.support.WithMockUser;
+import com.gpstore.security.WithStaff;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -108,7 +108,7 @@ class ProductFlagColumnsTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("Add Product works when the flag columns are NOT NULL, as they are in production")
     void addProductSucceedsAgainstNotNullFlagColumns() throws Exception {
         MvcResult result = createProduct();
@@ -120,7 +120,7 @@ class ProductFlagColumnsTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("the flags are stored as false, not left to the column default")
     void flagsArePersistedAsFalse() throws Exception {
         assertEquals(200, createProduct().getResponse().getStatus());

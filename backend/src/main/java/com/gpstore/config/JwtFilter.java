@@ -12,11 +12,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import com.gpstore.security.AdminPermission;
+import com.gpstore.security.RolePermissions;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 @Component
@@ -85,10 +88,23 @@ public class JwtFilter extends OncePerRequestFilter {
                 AuthenticatedUser principal =
                         new AuthenticatedUser(customerId, email, role);
 
-                List<GrantedAuthority> authorities =
-                        role != null
-                                ? List.of(new SimpleGrantedAuthority("ROLE_" + role))
-                                : List.of();
+                // ROLE_<name> as before, plus one PERM_<name> per permission
+                // the role carries.
+                //
+                // DERIVED FROM THE ROLE, NEVER CARRIED IN THE TOKEN. If the
+                // JWT listed its own permissions, a promotion would not take
+                // effect until the token expired and - far worse - a
+                // demotion would not either. The role recheck a few lines
+                // above already proves this role still matches the live
+                // database row, so recomputing the set here means a change
+                // of role applies on the very next request.
+                List<GrantedAuthority> authorities = new ArrayList<>();
+                if (role != null) {
+                    authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
+                    for (AdminPermission permission : RolePermissions.forRoleName(role)) {
+                        authorities.add(new SimpleGrantedAuthority(permission.authority()));
+                    }
+                }
 
                 UsernamePasswordAuthenticationToken auth =
                         new UsernamePasswordAuthenticationToken(

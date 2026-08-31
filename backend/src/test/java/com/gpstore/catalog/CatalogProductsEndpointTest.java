@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import com.gpstore.security.WithStaff;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -111,7 +112,7 @@ class CatalogProductsEndpointTest {
 
     @Test
     @DisplayName("the admin bare-array listing is capped too")
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     void adminLegacyListingIsCapped() throws Exception {
         MvcResult result = mockMvc.perform(get("/api/products/admin/all"))
                 .andExpect(status().isOk())
@@ -161,7 +162,7 @@ class CatalogProductsEndpointTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     @DisplayName("the ADMIN catalogue audit reports the seeded products")
     void adminAuditSeesTheCatalogue() throws Exception {
         // This is the endpoint that DOES live under /api/admin/catalog, and

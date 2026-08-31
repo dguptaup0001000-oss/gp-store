@@ -58,7 +58,7 @@ class UploadAuthorizationIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     void adminWrongMimeIsDeniedBeforeStorage() throws Exception {
         mockMvc.perform(post("/api/uploads/sign")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -69,7 +69,7 @@ class UploadAuthorizationIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     void adminOversizedUploadIsDenied() throws Exception {
         mockMvc.perform(post("/api/uploads/sign")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -80,7 +80,7 @@ class UploadAuthorizationIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     void adminInvalidObjectPathOnConfirmIsDenied() throws Exception {
         mockMvc.perform(post("/api/uploads/confirm")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -89,7 +89,7 @@ class UploadAuthorizationIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     void adminBatchLargerThanTwentyIsDenied() throws Exception {
         StringBuilder items = new StringBuilder();
         for (int i = 0; i < 21; i++) {
@@ -118,14 +118,14 @@ class UploadAuthorizationIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     void adminCloudinarySignatureIsOffByDefault() throws Exception {
         mockMvc.perform(get("/api/uploads/cloudinary-signature"))
                 .andExpect(status().isConflict());
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN")
+    @WithStaff
     void adminR2ConnectionTestFailsClosedWhenR2IsUnset() throws Exception {
         mockMvc.perform(post("/api/uploads/r2-connection-test"))
                 .andExpect(status().isConflict());
