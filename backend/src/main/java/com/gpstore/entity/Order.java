@@ -66,6 +66,34 @@ private PaymentStatus paymentStatus;
 
     private LocalDateTime orderDate;
 
+    /**
+     * SAME_DAY or NEXT_MORNING, decided by the server from orderDate.
+     *
+     * <p>NEVER READ FROM THE REQUEST. A delivery type in a request body is a
+     * value the customer's phone chose, and choosing SAME_DAY at 2am books a
+     * van that is not running. DeliveryScheduleService derives this from the
+     * server clock at order creation; the client is told the answer, it does
+     * not supply it.
+     *
+     * <p>Nullable, and that is not laziness: every order placed before this
+     * feature shipped has no type, and backfilling one would invent a fact
+     * about a delivery that already happened. Read it as "not recorded",
+     * which is what OrderResponse shows.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "delivery_type", length = 24)
+    private com.gpstore.store.DeliveryType deliveryType;
+
+    /**
+     * The shop-local day this order is to be delivered.
+     *
+     * <p>A DATE, NOT A TIMESTAMP, for the same reason StoreClosure is: it is a
+     * day in the shop's calendar, and the morning preparation list groups by
+     * it. Also nullable for orders placed before this feature.
+     */
+    @Column(name = "scheduled_delivery_date")
+    private java.time.LocalDate scheduledDeliveryDate;
+
     private Boolean active;
 
     /**
@@ -414,6 +442,22 @@ public void setTotalAmount(BigDecimal totalAmount) {
 
     public void setOrderDate(LocalDateTime orderDate) {
         this.orderDate = orderDate;
+    }
+
+    public com.gpstore.store.DeliveryType getDeliveryType() {
+        return deliveryType;
+    }
+
+    public void setDeliveryType(com.gpstore.store.DeliveryType deliveryType) {
+        this.deliveryType = deliveryType;
+    }
+
+    public java.time.LocalDate getScheduledDeliveryDate() {
+        return scheduledDeliveryDate;
+    }
+
+    public void setScheduledDeliveryDate(java.time.LocalDate scheduledDeliveryDate) {
+        this.scheduledDeliveryDate = scheduledDeliveryDate;
     }
 
     public Boolean getActive() {
