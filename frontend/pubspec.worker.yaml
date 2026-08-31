@@ -21,6 +21,16 @@ dependencies:
   mobile_scanner: ^5.2.3
   geolocator: ^13.0.1
 
+  # Navigate. The rider taps one button and their maps app opens on the
+  # order's confirmed coordinates - which is the entire point of capturing a
+  # pin, and cannot be done from inside a slim APK without a way to hand a URL
+  # to another application.
+  #
+  # A DELIBERATE ADDITION TO A LIST THAT EXISTS TO STAY SHORT. Same version as
+  # the customer pubspec so one lockfile resolves both. It ships a small
+  # platform channel, not a map SDK - no tiles, no key, no rendering.
+  url_launcher: ^6.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

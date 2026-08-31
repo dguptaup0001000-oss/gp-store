@@ -145,6 +145,8 @@ class WorkerOrder {
     this.customerName,
     this.customerPhone,
     this.deliveryAddress,
+    this.landmark,
+    this.deliveryInstructions,
     this.latitude,
     this.longitude,
     this.totalItems = 0,
@@ -175,8 +177,25 @@ class WorkerOrder {
   final String? customerName;
   final String? customerPhone;
   final String? deliveryAddress;
+
+  /// "Near Gupta Medical Store", as its own line.
+  ///
+  /// The server used to glue this into [deliveryAddress]. It is the line that
+  /// actually finds a house in a colony where the numbering restarts twice,
+  /// and a rider reading one run-on string at arm's length loses it.
+  final String? landmark;
+
+  /// "Enter from the lane beside the medical store."
+  final String? deliveryInstructions;
+
+  /// THE DESTINATION, and it is a snapshot taken when the order was placed -
+  /// not wherever the customer's saved address points today. See
+  /// Order.captureDeliverySnapshot on the server for why those differ.
   final double? latitude;
   final double? longitude;
+
+  /// True when there is somewhere for Navigate to open.
+  bool get hasDestination => latitude != null && longitude != null;
 
   final int totalItems;
   final List<WorkerOrderLine> items;
@@ -201,6 +220,8 @@ class WorkerOrder {
         customerName: json['customerName'] as String?,
         customerPhone: json['customerPhone'] as String?,
         deliveryAddress: json['deliveryAddress'] as String?,
+        landmark: json['landmark'] as String?,
+        deliveryInstructions: json['deliveryInstructions'] as String?,
         latitude: (json['latitude'] as num?)?.toDouble(),
         longitude: (json['longitude'] as num?)?.toDouble(),
         totalItems: (json['totalItems'] as num?)?.toInt() ?? 0,

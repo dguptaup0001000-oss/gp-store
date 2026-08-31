@@ -82,6 +82,24 @@ public class AddressController {
         return addressService.updateAddress(id, address);
     }
 
+    /**
+     * Makes this address the customer's default.
+     *
+     * A POST rather than a PUT of the whole address, because "make this one
+     * the default" is one intent and PUT /{id} rewrites every field from the
+     * body - a client sending a partial address to flip one flag would wipe
+     * the rest, which is the trap address_repository.dart already warns about
+     * for coordinates.
+     *
+     * Ownership first, as everywhere else here: a customer may only default
+     * an address that is theirs.
+     */
+    @PostMapping("/{id}/default")
+    public Address setDefaultAddress(@PathVariable Long id) {
+        addressService.setDefault(id, currentUser.customerId());
+        return addressService.getOwnedAddress(id, currentUser.customerId());
+    }
+
     @DeleteMapping("/{id}")
     public String deleteAddress(@PathVariable Long id) {
         addressService.getOwnedAddress(id, currentUser.customerId()); // throws if not the caller's address

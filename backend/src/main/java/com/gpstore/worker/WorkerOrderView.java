@@ -49,6 +49,26 @@ public record WorkerOrderView(
         String customerName,
         String customerPhone,
         String deliveryAddress,
+
+        /**
+         * Its own field, not glued into deliveryAddress.
+         *
+         * "Near Gupta Medical Store" is the line that actually finds a house
+         * in a colony where the numbering restarts twice, and a rider reading
+         * one run-on string at arm's length loses it. The app renders it
+         * under its own heading.
+         */
+        String landmark,
+
+        /** "Enter from the lane beside the medical store." */
+        String deliveryInstructions,
+
+        /**
+         * THE DESTINATION. Snapshot first - see Order.navigationLatitude.
+         *
+         * Not derived from the text above: the written address is for a human
+         * to read at the door, and these are what Navigate opens.
+         */
         Double latitude,
         Double longitude,
 
@@ -108,10 +128,70 @@ public record WorkerOrderView(
                 ? order.getTotalAmount()
                 : BigDecimal.ZERO;
 
-        String fullAddress = address == null ? null
-                : address.getHouseNo() + ", " + address.getArea()
-                        + (address.getLandmark() != null ? ", " + address.getLandmark() : "")
-                        + ", " + address.getCity() + " - " + address.getPincode();
+        // READ THE SNAPSHOT, FALL BACK TO THE LIVE ADDRESS.
+        //
+        // order.delivery_* is where this order was going when it was placed.
+        // The live address row is where the customer lives NOW, and those stop
+        // being the same thing the moment they edit it - which is exactly the
+        // silent redirect the snapshot exists to prevent. Pre-V34 orders the
+        // backfill could not reconstruct have no snapshot, and for those the
+        // linked address is still the best answer available; showing a rider a
+        // blank destination would be worse than showing a stale one.
+        String snapshotHouse = order.getDeliveryHouseNo();
+        boolean haveSnapshot = snapshotHouse != null || order.getDeliveryLatitude() != null;
+
+        String house = haveSnapshot ? snapshotHouse
+                : (address == null ? null : address.getHouseNo());
+        String building = haveSnapshot ? order.getDeliveryBuildingName()
+                : (address == null ? null : address.getBuildingName());
+        String floor = haveSnapshot ? order.getDeliveryFloor()
+                : (address == null ? null : address.getFloor());
+        String street = haveSnapshot ? order.getDeliveryStreet()
+                : (address == null ? null : address.getStreet());
+        String area = haveSnapshot ? order.getDeliveryArea()
+                : (address == null ? null : address.getArea());
+        String city = haveSnapshot ? order.getDeliveryCity()
+                : (address == null ? null : address.getCity());
+        String pincode = haveSnapshot ? order.getDeliveryPincode()
+                : (address == null ? null : address.getPincode());
+        String landmark = haveSnapshot ? order.getDeliveryLandmark()
+                : (address == null ? null : address.getLandmark());
+        String instructions = haveSnapshot ? order.getDeliveryInstructions()
+                : (address == null ? null : address.getDeliveryInstructions());
+        String recipientName = haveSnapshot ? order.getDeliveryRecipientName()
+                : (address == null ? null : address.getFullName());
+        String recipientPhone = haveSnapshot ? order.getDeliveryRecipientPhone()
+                : (address == null ? null : address.getMobileNumber());
+
+        // The provider's own formatted line where the customer confirmed one,
+        // because that is the string they actually agreed to. Otherwise the
+        // parts, joined - and only the parts that exist, so an address with no
+        // building name does not arrive as ", , ".
+        String stored = haveSnapshot ? order.getDeliveryFormattedAddress()
+                : (address == null ? null : address.getFormattedAddress());
+
+        String fullAddress;
+        if (stored != null && !stored.isBlank()) {
+            fullAddress = stored;
+        } else {
+            java.util.List<String> parts = new ArrayList<>();
+            for (String part : java.util.List.of(
+                    house == null ? "" : house,
+                    building == null ? "" : building,
+                    floor == null ? "" : floor,
+                    street == null ? "" : street,
+                    area == null ? "" : area,
+                    city == null ? "" : city)) {
+                if (!part.isBlank()) {
+                    parts.add(part.trim());
+                }
+            }
+            String joined = String.join(", ", parts);
+            if (pincode != null && !pincode.isBlank()) {
+                joined = joined.isEmpty() ? pincode : joined + " - " + pincode;
+            }
+            fullAddress = joined.isEmpty() ? null : joined;
+        }
 
         return new WorkerOrderView(
                 order.getId(),
@@ -121,11 +201,13 @@ public record WorkerOrderView(
                 delivery == null ? null : delivery.getId(),
                 allowedNext == null ? List.of() : List.copyOf(allowedNext),
 
-                address == null ? null : address.getFullName(),
-                address == null ? null : address.getMobileNumber(),
+                recipientName,
+                recipientPhone,
                 fullAddress,
-                address == null ? null : address.getLatitude(),
-                address == null ? null : address.getLongitude(),
+                landmark,
+                instructions,
+                order.navigationLatitude(),
+                order.navigationLongitude(),
 
                 count,
                 List.copyOf(lines),
