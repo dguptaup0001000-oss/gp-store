@@ -527,6 +527,23 @@ public class OrderService {
         order.setOrderNumber(OrderNumberGenerator.generate(repository.nextOrderNumberSequenceValue()));
         order.setCustomer(customer);
         order.setAddress(address);
+
+        // WHERE THIS ORDER GOES, COPIED NOW AND NEVER RE-READ.
+        //
+        // order.address is a foreign key to the customer's live saved address,
+        // and editing that address rewrites the row in place - coordinates
+        // included. Before this snapshot existed, a customer who moved house
+        // and corrected their saved address silently redirected every order
+        // still pointing at it, including one already packed and on a bike.
+        //
+        // Taken from the same `address` the ownership and serviceability
+        // checks above ran against, and stamped with the same placedAt instant
+        // the order date and delivery window come from - so the destination,
+        // the timestamp and the delivery promise cannot disagree with each
+        // other about which moment this order was placed at.
+        order.captureDeliverySnapshot(
+                address, LocalDateTime.ofInstant(placedAt, java.time.ZoneOffset.UTC));
+
         order.setOrderDate(LocalDateTime.ofInstant(placedAt, java.time.ZoneOffset.UTC));
 
         // WHEN THIS ARRIVES, DECIDED HERE AND ONLY HERE.

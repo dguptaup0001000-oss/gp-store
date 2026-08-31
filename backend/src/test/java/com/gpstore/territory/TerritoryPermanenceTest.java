@@ -112,6 +112,10 @@ class TerritoryPermanenceTest {
         address.setHouseNo("12");
         address.setArea("Test Colony");
         address.setCity("Testville");
+        // State became a required field when AddressValidator started guarding
+        // the save path (V34). This fixture is about territory stamping, not
+        // about what a complete address is - it just has to be one now.
+        address.setState("Delhi");
         address.setPincode("110001");
         address.setLatitude(lat);
         address.setLongitude(lng);

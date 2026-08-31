@@ -233,4 +233,56 @@ void main() {
       expect(profile.activeTasks, isEmpty);
     });
   });
+
+  group('what the rider is given to find the door', () {
+    // The server used to glue the landmark into deliveryAddress and send no
+    // instructions at all. Both are their own fields now, and the coordinates
+    // are a snapshot taken when the order was placed rather than wherever the
+    // customer's saved address points today.
+    test('landmark and instructions parse as their own fields', () {
+      final order = WorkerOrder.fromJson({
+        'orderId': 7,
+        'orderNumber': 'GP10254',
+        'deliveryAddress': 'House 42, Gupta Nagar, Gorakhpur - 273001',
+        'landmark': 'Near Gupta Medical Store',
+        'deliveryInstructions': 'Enter from the side lane.',
+        'latitude': 26.7606,
+        'longitude': 83.3732,
+      });
+
+      expect(order.landmark, 'Near Gupta Medical Store');
+      expect(order.deliveryInstructions, 'Enter from the side lane.');
+      expect(order.deliveryAddress, isNot(contains('Near Gupta Medical Store')),
+          reason: 'the landmark is its own line, not glued into the address');
+      expect(order.hasDestination, isTrue);
+      expect(order.latitude, 26.7606);
+      expect(order.longitude, 83.3732);
+    });
+
+    test('an order with no confirmed pin reports no destination', () {
+      // Pre-map-confirmation orders exist and must not render a Navigate
+      // button that opens nowhere.
+      final order = WorkerOrder.fromJson({
+        'orderId': 8,
+        'orderNumber': 'GP00001',
+        'deliveryAddress': 'House 9, Civil Lines, Gorakhpur - 273001',
+      });
+
+      expect(order.hasDestination, isFalse);
+      expect(order.latitude, isNull);
+      expect(order.landmark, isNull);
+      expect(order.deliveryInstructions, isNull);
+    });
+
+    test('a partial coordinate pair is not a destination', () {
+      final order = WorkerOrder.fromJson({
+        'orderId': 9,
+        'orderNumber': 'GP00002',
+        'latitude': 26.7606,
+      });
+
+      expect(order.hasDestination, isFalse,
+          reason: 'half a coordinate navigates nowhere');
+    });
+  });
 }

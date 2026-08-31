@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/api/error_messages.dart';
 import '../data/worker_repository.dart';
@@ -82,6 +83,40 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
       ),
     );
     return confirmed ?? false;
+  }
+
+  /// Opens the rider's maps app on the order's confirmed coordinates.
+  ///
+  /// THE DESTINATION IS THE PIN, NOT THE TEXT. "House 42, Gupta Nagar" is for
+  /// a human to read at a door; a maps app given that string guesses, and in a
+  /// colony where the numbering restarts it guesses wrong. These two numbers
+  /// are what the customer dragged onto their doorstep, snapshotted when the
+  /// order was placed.
+  ///
+  /// A universal maps URL rather than the Android-only `geo:` scheme, matching
+  /// what delivery_dashboard_screen.dart already does - it opens the installed
+  /// app where there is one and the website where there is not, which is the
+  /// fallback rather than a separate code path.
+  Future<void> _navigate() async {
+    final lat = _order.latitude;
+    final lng = _order.longitude;
+    if (lat == null || lng == null) return;
+
+    final uri = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+    var opened = false;
+    try {
+      opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      opened = false;
+    }
+    if (opened || !mounted) return;
+
+    // Nothing on this phone could take the URL. Show the coordinates rather
+    // than a dead end - a rider can read them into another device, and it is
+    // the only thing left that still gets the carton to the right house.
+    setState(() => _error =
+        'No maps app could be opened. Delivery location: $lat, $lng');
   }
 
   Future<void> _move(String status) async {
@@ -190,6 +225,46 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
                 child: SelectableText(_order.customerPhone!,
                     style: theme.textTheme.bodyLarge),
               ),
+          ],
+
+          // UNDER THEIR OWN HEADINGS, not glued onto the address line. These
+          // are the two lines that actually find the door once the rider is on
+          // the right street, and a run-on string read one-handed loses them.
+          if ((_order.landmark ?? '').isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text('Landmark', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(_order.landmark!, style: theme.textTheme.bodyLarge),
+          ],
+
+          if ((_order.deliveryInstructions ?? '').isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text('Instructions', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(_order.deliveryInstructions!, style: theme.textTheme.bodyLarge),
+          ],
+
+          if (_order.hasDestination) ...[
+            const SizedBox(height: 20),
+            SizedBox(
+              height: 56,
+              child: OutlinedButton.icon(
+                onPressed: _navigate,
+                icon: const Icon(Icons.navigation),
+                label: const Text('NAVIGATE', style: TextStyle(fontSize: 17)),
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 20),
+            // Said out loud rather than shown as a dead button. An order whose
+            // address predates map confirmation has no pin, and a rider needs
+            // to know that before they set off, not after.
+            Text(
+              'No confirmed map location for this order. Use the address and '
+              'landmark above.',
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.outline),
+            ),
           ],
           if (_error != null) ...[
             const SizedBox(height: 20),

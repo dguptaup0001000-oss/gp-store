@@ -196,6 +196,158 @@ private PaymentStatus paymentStatus;
     @Column(name = "delivery_weight_kg", precision = 10, scale = 3)
     private BigDecimal deliveryWeightKg;
 
+    // ------------------------------------- where this order is actually going
+    //
+    // THE SNAPSHOT, AND WHY IT IS NOT JUST address_id.
+    //
+    // `address` above is a foreign key to the customer's LIVE saved address,
+    // and AddressService.updateAddress rewrites that row in place - latitude
+    // and longitude included. So before V34, a customer who moved house and
+    // corrected their saved address silently changed the destination of every
+    // order still pointing at it, including one already packed and on a bike:
+    // WorkerOrderView reads order.getAddress(), so the rider's screen and
+    // their Navigate button both followed the edit to the new house.
+    //
+    // These columns are the destination as it stood when the order was
+    // placed. Editing the saved address cannot move them. The FK stays,
+    // because "which of my addresses did I use" is still worth knowing - it
+    // is simply no longer what decides where the rider goes.
+    //
+    // Null on a pre-V34 order that the migration could not reconstruct; the
+    // read path falls back to the linked address for those rather than
+    // showing a rider nothing.
+
+    @Column(name = "delivery_recipient_name", length = 200)
+    private String deliveryRecipientName;
+
+    @Column(name = "delivery_recipient_phone", length = 20)
+    private String deliveryRecipientPhone;
+
+    @Column(name = "delivery_house_no", length = 120)
+    private String deliveryHouseNo;
+
+    @Column(name = "delivery_building_name", length = 200)
+    private String deliveryBuildingName;
+
+    @Column(name = "delivery_floor", length = 50)
+    private String deliveryFloor;
+
+    @Column(name = "delivery_street", length = 200)
+    private String deliveryStreet;
+
+    @Column(name = "delivery_area", length = 200)
+    private String deliveryArea;
+
+    @Column(name = "delivery_city", length = 120)
+    private String deliveryCity;
+
+    @Column(name = "delivery_district", length = 120)
+    private String deliveryDistrict;
+
+    @Column(name = "delivery_state", length = 120)
+    private String deliveryState;
+
+    @Column(name = "delivery_pincode", length = 12)
+    private String deliveryPincode;
+
+    @Column(name = "delivery_country", length = 80)
+    private String deliveryCountry;
+
+    @Column(name = "delivery_landmark", length = 300)
+    private String deliveryLandmark;
+
+    @Column(name = "delivery_instructions", length = 500)
+    private String deliveryInstructions;
+
+    @Column(name = "delivery_formatted_address", length = 500)
+    private String deliveryFormattedAddress;
+
+    /** THE navigation destination. Not the text above it. */
+    @Column(name = "delivery_latitude")
+    private Double deliveryLatitude;
+
+    @Column(name = "delivery_longitude")
+    private Double deliveryLongitude;
+
+    @Column(name = "delivery_location_accuracy")
+    private Double deliveryLocationAccuracy;
+
+    /**
+     * When this snapshot was taken.
+     *
+     * Null distinguishes a row the V34 backfill reconstructed from the
+     * then-current address from one genuinely captured at placement. The
+     * difference matters to anybody later auditing where an order was meant
+     * to go, so it is recorded rather than smoothed over.
+     */
+    @Column(name = "delivery_snapshot_at")
+    private LocalDateTime deliverySnapshotAt;
+
+    /**
+     * Copies the destination off an address, once, at placement.
+     *
+     * Deliberately a copy and not a reference - see the block comment above.
+     * Called from OrderService while placing the order; nothing else should
+     * call it, because re-running it later is exactly the silent-redirect
+     * this whole mechanism exists to prevent.
+     */
+    public void captureDeliverySnapshot(Address source, LocalDateTime at) {
+        if (source == null) {
+            return;
+        }
+        this.deliveryRecipientName = source.getFullName();
+        this.deliveryRecipientPhone = source.getMobileNumber();
+        this.deliveryHouseNo = source.getHouseNo();
+        this.deliveryBuildingName = source.getBuildingName();
+        this.deliveryFloor = source.getFloor();
+        this.deliveryStreet = source.getStreet();
+        this.deliveryArea = source.getArea();
+        this.deliveryCity = source.getCity();
+        this.deliveryDistrict = source.getDistrict();
+        this.deliveryState = source.getState();
+        this.deliveryPincode = source.getPincode();
+        this.deliveryCountry = source.getCountry();
+        this.deliveryLandmark = source.getLandmark();
+        this.deliveryInstructions = source.getDeliveryInstructions();
+        this.deliveryFormattedAddress = source.getFormattedAddress();
+        this.deliveryLatitude = source.getLatitude();
+        this.deliveryLongitude = source.getLongitude();
+        this.deliveryLocationAccuracy = source.getLocationAccuracy();
+        this.deliverySnapshotAt = at;
+    }
+
+    /** The latitude a rider should navigate to, snapshot first. */
+    public Double navigationLatitude() {
+        return deliveryLatitude != null ? deliveryLatitude
+                : (address == null ? null : address.getLatitude());
+    }
+
+    /** The longitude a rider should navigate to, snapshot first. */
+    public Double navigationLongitude() {
+        return deliveryLongitude != null ? deliveryLongitude
+                : (address == null ? null : address.getLongitude());
+    }
+
+    public String getDeliveryRecipientName() { return deliveryRecipientName; }
+    public String getDeliveryRecipientPhone() { return deliveryRecipientPhone; }
+    public String getDeliveryHouseNo() { return deliveryHouseNo; }
+    public String getDeliveryBuildingName() { return deliveryBuildingName; }
+    public String getDeliveryFloor() { return deliveryFloor; }
+    public String getDeliveryStreet() { return deliveryStreet; }
+    public String getDeliveryArea() { return deliveryArea; }
+    public String getDeliveryCity() { return deliveryCity; }
+    public String getDeliveryDistrict() { return deliveryDistrict; }
+    public String getDeliveryState() { return deliveryState; }
+    public String getDeliveryPincode() { return deliveryPincode; }
+    public String getDeliveryCountry() { return deliveryCountry; }
+    public String getDeliveryLandmark() { return deliveryLandmark; }
+    public String getDeliveryInstructions() { return deliveryInstructions; }
+    public String getDeliveryFormattedAddress() { return deliveryFormattedAddress; }
+    public Double getDeliveryLatitude() { return deliveryLatitude; }
+    public Double getDeliveryLongitude() { return deliveryLongitude; }
+    public Double getDeliveryLocationAccuracy() { return deliveryLocationAccuracy; }
+    public LocalDateTime getDeliverySnapshotAt() { return deliverySnapshotAt; }
+
     @Column(name = "delivery_distance_charge", precision = 10, scale = 2)
     private BigDecimal deliveryDistanceCharge;
 

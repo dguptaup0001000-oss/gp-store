@@ -1,6 +1,7 @@
 package com.gpstore.service;
 
 import com.gpstore.entity.Address;
+import com.gpstore.address.AddressValidator;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.DeliverySubzone;
 import com.gpstore.exception.ResourceNotFoundException;
@@ -35,8 +36,22 @@ public class AddressService {
         address.setCustomer(owner);
         address.setSubzoneLocked(false);
         address.setSubzone(null);
-        stampTerritory(address);
-        return repository.save(address);
+
+        // Checked here rather than in the controller so every path that
+        // creates a customer address goes through the same rule - a check
+        // that lives in one endpoint is a check the next endpoint forgets.
+        AddressValidator.validateForSave(address);
+        address.setPincode(AddressValidator.normalisePincode(address.getPincode()));
+
+        // Provenance is the server's to state. A client claiming its pin came
+        // from a provider it never called would make an unverified coordinate
+        // look geocoded.
+        address.setGeocodingProvider(null);
+
+        Address saved = repository.save(address);
+        applyDefaultExclusivity(saved);
+        stampTerritory(saved);
+        return repository.save(saved);
     }
 
     public Address save(Address address) {
@@ -133,6 +148,9 @@ public class AddressService {
     Address address = repository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("Address not found"));
 
+    AddressValidator.validateForSave(updatedAddress);
+    updatedAddress.setPincode(AddressValidator.normalisePincode(updatedAddress.getPincode()));
+
     address.setFullName(updatedAddress.getFullName());
     address.setMobileNumber(updatedAddress.getMobileNumber());
     address.setHouseNo(updatedAddress.getHouseNo());
@@ -151,6 +169,19 @@ public class AddressService {
     address.setLongitude(updatedAddress.getLongitude());
     address.setDefaultAddress(updatedAddress.getDefaultAddress());
 
+    // The V34 detail fields. Copied for the same reason the coordinates are:
+    // this method rewrites the row from the request body, so a field it does
+    // not copy is a field an edit silently wipes.
+    address.setLabel(updatedAddress.getLabel());
+    address.setBuildingName(updatedAddress.getBuildingName());
+    address.setFloor(updatedAddress.getFloor());
+    address.setStreet(updatedAddress.getStreet());
+    address.setFormattedAddress(updatedAddress.getFormattedAddress());
+    address.setDeliveryInstructions(updatedAddress.getDeliveryInstructions());
+    address.setLocationAccuracy(updatedAddress.getLocationAccuracy());
+    address.setPlaceId(updatedAddress.getPlaceId());
+    address.setConfirmedAt(updatedAddress.getConfirmedAt());
+
     // Re-stamped because the coordinates just changed. A customer correcting
     // a pin that was two streets out has genuinely moved territory, and the
     // stamp has to follow - permanence is about boundaries not moving under a
@@ -161,7 +192,45 @@ public class AddressService {
     // let a customer choose their own rider.
     stampTerritory(address);
 
-    return repository.save(address);
+    Address saved = repository.save(address);
+    applyDefaultExclusivity(saved);
+    return saved;
+}
+
+/**
+ * Makes one address the customer's default, and the others not.
+ *
+ * ONE DEFAULT, ENFORCED IN CODE. Nothing before this unset the flag on the
+ * other rows, so a customer who ticked "default" on a second address simply
+ * had two - and checkout's auto-select takes whichever the query returned
+ * first, which is to say whichever Postgres felt like. Two defaults is not a
+ * harmless inconsistency when the consequence is a basket quietly addressed
+ * to the wrong house.
+ *
+ * Not a database constraint, because a partial unique index on
+ * (customer_id) WHERE default_address would reject the intermediate state of
+ * any change that sets the new default before clearing the old one. The
+ * ordering is easier to get right here, inside the transaction.
+ */
+public void setDefault(Long addressId, Long customerId) {
+    Address target = getOwnedAddress(addressId, customerId);
+    target.setDefaultAddress(true);
+    repository.save(target);
+    applyDefaultExclusivity(target);
+}
+
+/** Clears the default flag on every OTHER address of the same customer. */
+private void applyDefaultExclusivity(Address chosen) {
+    if (!Boolean.TRUE.equals(chosen.getDefaultAddress()) || chosen.getCustomer() == null) {
+        return;
+    }
+    for (Address other : repository.findByCustomerId(chosen.getCustomer().getId())) {
+        if (!other.getId().equals(chosen.getId())
+                && Boolean.TRUE.equals(other.getDefaultAddress())) {
+            other.setDefaultAddress(false);
+            repository.save(other);
+        }
+    }
 }
 public void deleteAddress(Long id) {
     if (!repository.existsById(id)) {
