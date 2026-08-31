@@ -61,6 +61,33 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     List<Object[]> findTrendingProductIds(@Param("since") LocalDateTime since, Pageable pageable);
 
     /**
+     * Top products for the ADMIN dashboard: real units sold and real revenue.
+     *
+     * SEPARATE FROM findTrendingProductIds ABOVE, deliberately. That query
+     * powers customer recommendations and counts ORDER LINES - a fine
+     * popularity signal, but it is not units and it is not money. Reusing it
+     * here is what made the admin dashboard report "1,245 sold" when 1,245
+     * was the number of orders the product appeared in. Changing it in place
+     * would have silently altered what customers get recommended.
+     *
+     * sum(oi.quantity) is units. sum(oi.totalPrice) is revenue, and CANCELLED
+     * orders are excluded so this agrees with sumRevenueBetween instead of
+     * quietly counting sales that were called off.
+     *
+     * Private products stay excluded, same rule as the recommendation query.
+     */
+    @Query("select oi.productVariant.product.id as productId, "
+            + "coalesce(sum(oi.quantity), 0) as units, "
+            + "coalesce(sum(oi.totalPrice), 0) as revenue "
+            + "from OrderItem oi "
+            + "where oi.order.orderDate >= :since "
+            + "and oi.order.orderStatus <> 'CANCELLED' "
+            + "and oi.productVariant.product.isPrivateProduct = false "
+            + "group by oi.productVariant.product.id "
+            + "order by units desc")
+    List<Object[]> findTopProductsByUnits(@Param("since") LocalDateTime since, Pageable pageable);
+
+    /**
      * A customer's recent purchase history, most recent order first,
      * eager-fetching productVariant and its product in the same query -
      * RecommendationService needs every item's product id just to dedupe,
