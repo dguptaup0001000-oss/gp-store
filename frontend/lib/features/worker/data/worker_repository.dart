@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../../core/api/api_client.dart';
+import '../../../core/api/error_messages.dart';
 import '../domain/worker_models.dart';
 import '../../../core/logging/app_log.dart';
 
@@ -140,20 +141,12 @@ class WorkerRepository {
   /// Deliberately narrow. A 4xx means the server heard the scan and refused
   /// it, and queueing that would retry a decision that will never change while
   /// telling the worker to wait for a connection that is already there.
-  bool _isConnectivity(DioException e) {
-    switch (e.type) {
-      case DioExceptionType.connectionTimeout:
-      case DioExceptionType.sendTimeout:
-      case DioExceptionType.receiveTimeout:
-      case DioExceptionType.connectionError:
-        return true;
-      case DioExceptionType.unknown:
-        // Dio reports a dead radio as `unknown` wrapping a SocketException.
-        return e.error is Exception && e.response == null;
-      default:
-        return false;
-    }
-  }
+  ///
+  /// The rule now lives in core/api/error_messages.dart because the gate makes
+  /// the same distinction to decide whether a startup failure should destroy
+  /// the session. Two copies of "is this worth retrying" would eventually
+  /// disagree, and the two places it is asked are the two that must not.
+  bool _isConnectivity(DioException e) => isConnectivityFailure(e);
 
   // ------------------------------------------------------------ the queue
 

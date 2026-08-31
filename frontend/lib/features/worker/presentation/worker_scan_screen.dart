@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../../../core/api/api_client.dart';
+import '../../../core/api/error_messages.dart';
 import '../data/worker_repository.dart';
 import '../domain/worker_models.dart';
 
@@ -40,6 +40,7 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
   final Random _random = Random.secure();
 
   bool _submitting = false;
+  bool _torchOn = false;
   ScanOutcome? _result;
 
   @override
@@ -72,7 +73,14 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
     setState(() => _submitting = true);
     // Stop the camera the instant we have something. Leaving it running would
     // keep firing detections at a screen that is already committing one.
-    await _controller.stop();
+    //
+    // Guarded because this is not the important part: a stop() that throws
+    // (already stopped, camera yanked by the OS) must not abandon a scan the
+    // worker has already made. The _submitting latch above is what actually
+    // prevents duplicates; stopping is a battery and CPU courtesy.
+    try {
+      await _controller.stop();
+    } catch (_) {}
     HapticFeedback.mediumImpact();
 
     ScanOutcome outcome;
@@ -81,14 +89,19 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
         qrToken: raw.trim(),
         clientRequestId: _newRequestId(),
       );
-    } on ApiException catch (e) {
-      outcome =
-          ScanOutcome(accepted: false, outcome: 'ERROR', message: e.message);
-    } catch (_) {
-      outcome = const ScanOutcome(
+    } catch (e) {
+      // THE SERVER'S SENTENCE, WHICH IS THE WHOLE POINT OF THIS SCREEN.
+      //
+      // This was `on ApiException` with a generic fallback, and the first
+      // clause could never match - ApiClient throws a DioException CARRYING
+      // an ApiException, not the ApiException itself. So every refusal showed
+      // "Could not complete the scan. Try again.", and the one thing a worker
+      // holding a carton needs - "Order already assigned to Rahul" - was
+      // discarded by the screen whose documented purpose is to show it.
+      outcome = ScanOutcome(
         accepted: false,
         outcome: 'ERROR',
-        message: 'Could not complete the scan. Try again.',
+        message: extractErrorMessage(e),
       );
     }
 
@@ -99,9 +112,26 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
     });
   }
 
+  Future<void> _toggleTorch() async {
+    try {
+      await _controller.toggleTorch();
+      if (!mounted) return;
+      setState(() => _torchOn = !_torchOn);
+    } catch (_) {
+      // Some devices have no torch, and a few refuse it while the camera is
+      // warming up. Neither is worth an error in front of somebody trying to
+      // scan - the button simply does nothing and the state stays honest.
+    }
+  }
+
   Future<void> _scanAnother() async {
     setState(() => _result = null);
-    await _controller.start();
+    try {
+      await _controller.start();
+    } catch (_) {
+      // Restarting a camera that is already running throws on some devices.
+      // The preview is live either way, which is all this call was for.
+    }
   }
 
   @override
@@ -118,7 +148,18 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
     return Stack(
       alignment: Alignment.center,
       children: [
-        MobileScanner(controller: _controller, onDetect: _onDetect),
+        MobileScanner(
+          controller: _controller,
+          onDetect: _onDetect,
+          // A DENIED CAMERA LOOKS EXACTLY LIKE A BROKEN APP without this.
+          // The default is an empty black rectangle, so a worker who tapped
+          // "Deny" once is left staring at a dead screen with nothing telling
+          // them what happened or where to fix it.
+          // Three parameters, not two: mobile_scanner 5.2.3's
+          // MobileScannerErrorBuilder is (BuildContext, MobileScannerException,
+          // Widget?). The child is the placeholder we have no use for.
+          errorBuilder: (context, error, child) => _CameraProblem(error: error),
+        ),
 
         // A plain square, not an animated laser. On a cheap phone every
         // painted frame competes with the decoder for the same CPU, and a
@@ -144,10 +185,25 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
           bottom: 28,
           left: 24,
           right: 24,
-          child: Text(
-            'Hold the label inside the square',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white, fontSize: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Hold the label inside the square',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+              const SizedBox(height: 16),
+              // DELIVERIES HAPPEN AFTER DARK. A printed label in an unlit
+              // stairwell is the normal case for the evening run, not an edge
+              // one, and without this the worker's only option is to carry the
+              // carton back out to the street.
+              FilledButton.tonalIcon(
+                onPressed: _toggleTorch,
+                icon: Icon(_torchOn ? Icons.flashlight_off : Icons.flashlight_on),
+                label: Text(_torchOn ? 'LIGHT OFF' : 'LIGHT ON'),
+              ),
+            ],
           ),
         ),
       ],
@@ -246,6 +302,56 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+
+/// Shown in place of the camera preview when it cannot run.
+///
+/// Names the fault and where to fix it. "Permission denied" is actionable
+/// only if the worker is told it is a phone setting rather than a broken app.
+class _CameraProblem extends StatelessWidget {
+  const _CameraProblem({required this.error});
+
+  final MobileScannerException error;
+
+  String get _explanation {
+    switch (error.errorCode) {
+      case MobileScannerErrorCode.permissionDenied:
+        return 'Camera permission was refused. Enable Camera for this app in '
+            'Settings > Apps > GP-Store Worker, then come back and scan.';
+      case MobileScannerErrorCode.unsupported:
+        return 'This phone cannot open its camera for scanning. Ask an '
+            'administrator to record the order for you.';
+      default:
+        return 'The camera could not be started. Close the app fully and open '
+            'it again; if it keeps happening, tell an administrator.';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.no_photography_outlined,
+                  size: 72, color: Colors.white70),
+              const SizedBox(height: 20),
+              Text(
+                _explanation,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
