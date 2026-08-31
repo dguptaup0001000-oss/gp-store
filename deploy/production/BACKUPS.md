@@ -69,6 +69,25 @@ A failed pull, encrypt, upload, decrypt, checksum, or isolated restore fails
 the workflow (GitHub emails watchers) and writes `ALERT=UPLOAD_FAILED` /
 `ALERT=RESTORE_FAILED` / `ALERT=FAILED` via `evaluate-offbox-result.sh`.
 
+Steps 1-5 run in job **`pull`**; steps 6-10 run in job **`verify`**, on a
+different runner that never held the dump - which is what makes step 6 mean
+something.
+
+**A red run does not always mean there is no backup.** When `pull` cannot
+reach the VPS over SSH, job **`pull-fallback`** repeats it from a fresh
+runner, and `verify` proceeds if either produced the artifact. The run is
+still marked failed, deliberately: the primary attempt failing is a fact
+worth a notification even when the retry rescued it. To tell the two apart,
+open the run - if `verify` is green, `gpstore-offbox-backup` exists and has
+been restore-tested, and `pulled_by=` in the restore proof names the job that
+fetched it. If `pull-fallback` is also red, no backup was taken from this run.
+
+Why a *fresh runner* rather than a longer retry: every step in a job shares
+one source IP, and the failure being retried is the VPS not receiving the
+packets at all (see the `pull-fallback` comment in the workflow). A new job
+means a new runner and so a different source address, which is the only
+variable that has ever correlated with success.
+
 | Item | Value |
 |---|---|
 | Destination | GitHub Actions artifact store (not `/dev/sda1`) |

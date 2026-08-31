@@ -7,9 +7,26 @@
 # production. Never prints secrets.
 #
 # Schedule is a real off-box copy. Dispatch is the operator verification.
-# A successful Deploy Production on main also starts this job so merge→deploy
+# A successful Deploy Production on main also starts this job so merge-deploy
 # actually retains an encrypted artifact (CI schema-migrate is not production).
 # Pull-request Deploy Production syntax jobs must NOT start this workflow.
+#
+# THREE JOBS, ALONG THE SEAM THAT MATTERS. Everything up to and including
+# the artifact upload depends on reaching the VPS over SSH; everything after
+# it is local work on a file GitHub is already storing. Those halves used to
+# be one job, which meant a dropped SSH connection took the whole thing down
+# with no way to try again from anywhere else - see the `pull-fallback`
+# comment for why "anywhere else" is the only lever that has ever worked.
+#
+# Splitting also makes the download step honest. It exists to prove the
+# backup is retrievable from GitHub storage rather than from the runner's
+# own disk, and it now runs on a machine that never had the dump.
+#
+# A RESCUED RUN IS STILL RED, ON PURPOSE. When pull-fallback saves a backup
+# the run stays marked failed, because "we could not reach production on the
+# first try" is worth a notification even though the backup exists. Green
+# would hide an unresolved fault. BACKUPS.md tells the operator how to read
+# the difference: verify green means the artifact is there and restore-tested.
 name: Off-box backup
 
 on:
@@ -30,7 +47,7 @@ permissions:
   actions: write
 
 jobs:
-  offbox:
+  pull:
     name: Pull encrypted dump off the VPS
     if: >-
       github.event_name != 'workflow_run' ||
@@ -40,22 +57,8 @@ jobs:
         github.event.workflow_run.event != 'pull_request'
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     environment: production
-    services:
-      restore-db:
-        image: postgres:17
-        env:
-          POSTGRES_USER: gpstore
-          POSTGRES_PASSWORD: drill_not_production
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,6 +82,25 @@ jobs:
           bash -n deploy/production/offbox-decrypt-restore.sh
           bash -n deploy/production/evaluate-offbox-result.sh
           bash -n deploy/production/backup-restore-drill.sh
+          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet pyyaml
+          # THE FALLBACK MUST DO THE SAME THING, OR IT IS NOT A FALLBACK.
+          # `pull` and `pull-fallback` are two copies of one procedure, and a
+          # copy that drifts is worse than no copy: the rescue path would
+          # quietly do something the primary path does not. Assert they are
+          # byte-identical rather than trusting a comment to be read. This is
+          # the same guard, and for the same reason, as the REMOTE_DEPLOY
+          # equality check in deploy-production.yml.
+          python3 - <<'PY'
+          import sys, yaml
+          wf = yaml.safe_load(open('.github/workflows/offbox-backup.yml'))
+          a = yaml.safe_dump(wf['jobs']['pull']['steps'], sort_keys=True)
+          b = yaml.safe_dump(wf['jobs']['pull-fallback']['steps'], sort_keys=True)
+          if a != b:
+              print('::error::pull and pull-fallback steps have diverged. '
+                    'The fresh-runner retry would not repeat the primary attempt.')
+              sys.exit(1)
+          print('pull / pull-fallback steps identical: ok')
+          PY
           exit "$missing"
 
       - name: Pull, verify, encrypt
@@ -124,6 +146,12 @@ jobs:
             ${{ runner.temp }}/offbox-out/status.txt
           if-no-files-found: error
           retention-days: 90
+          # The name is fixed because DISASTER_RECOVERY.md tells an operator
+          # to download exactly this one, and a person restoring production
+          # should not have to work out which of two names carries the dump.
+          # So whichever job produces it claims the name - overwrite lets the
+          # fallback replace a partial upload the primary left behind.
+          overwrite: true
 
       - name: Mark upload failure
         if: failure() && steps.upload.outcome == 'failure'
@@ -134,15 +162,209 @@ jobs:
           bash deploy/production/evaluate-offbox-result.sh "$RESULT_FILE"
           exit 1
 
-      - name: Download encrypted artifact (proves GitHub storage, not the VPS)
+      - name: Alert on any off-box failure
+        if: failure()
+        env:
+          RESULT_FILE: ${{ runner.temp }}/offbox-result.txt
+        run: |
+          set -Eeuo pipefail
+          if [ ! -s "$RESULT_FILE" ]; then
+            printf 'status=FAILED\nstage=unknown\ndetail=off-box job failed before a result file was written\n' > "$RESULT_FILE"
+          elif grep -q '^status=SUCCESS' "$RESULT_FILE"; then
+            printf 'status=FAILED\nstage=unknown\ndetail=job failed after an earlier successful stage\n' > "$RESULT_FILE"
+          fi
+          bash deploy/production/evaluate-offbox-result.sh "$RESULT_FILE"
+          exit 1
+
+  # THE SAME PULL, FROM A DIFFERENT MACHINE.
+  #
+  # Scheduled backup #120 (run 33406539268) died on
+  #   ssh: connect to host *** port ***: Connection timed out
+  # after 2m31s of dialling, with no second chance of any kind. Off-box backup
+  # #121 did the identical pull four minutes later and succeeded.
+  #
+  # WHAT CHANGES BETWEEN THOSE TWO RUNS IS THE RUNNER. Cursor established from
+  # the VPS side that the box is not the problem: sshd is up, fail2ban is not
+  # installed, and nothing in the logs records a refusal - the packets do not
+  # arrive. An early theory was that the runner's Azure region predicted it,
+  # and this workflow is where that theory died: #120 failed from westus and
+  # #121 succeeded from westus. Region is not the discriminator. What still
+  # fits is the source address, which is per-runner.
+  #
+  # Every step in a job shares one runner and therefore one source IP, so
+  # retrying inside the `pull` job would re-dial from the address that is
+  # being dropped. A separate job gets a new runner, which is a better draw
+  # rather than a guarantee - and it is the only lever this repository has
+  # over the source address. Same reasoning, same shape, as deploy-fallback
+  # in deploy-production.yml.
+  #
+  # The steps below are asserted identical to `pull`'s by that job's secrets
+  # check. Edit one, edit both, or the run fails and tells you so.
+  pull-fallback:
+    name: Pull encrypted dump off the VPS (fresh runner)
+    needs: pull
+    if: failure() && needs.pull.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Require VPS SSH secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for v in PROD_HOST PROD_USER PROD_SSH_PRIVATE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set"
+              missing=1
+            fi
+          done
+          bash -n deploy/production/offbox-pull-from-vps.sh
+          bash -n deploy/production/offbox-decrypt-restore.sh
+          bash -n deploy/production/evaluate-offbox-result.sh
+          bash -n deploy/production/backup-restore-drill.sh
+          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet pyyaml
+          # THE FALLBACK MUST DO THE SAME THING, OR IT IS NOT A FALLBACK.
+          # `pull` and `pull-fallback` are two copies of one procedure, and a
+          # copy that drifts is worse than no copy: the rescue path would
+          # quietly do something the primary path does not. Assert they are
+          # byte-identical rather than trusting a comment to be read. This is
+          # the same guard, and for the same reason, as the REMOTE_DEPLOY
+          # equality check in deploy-production.yml.
+          python3 - <<'PY'
+          import sys, yaml
+          wf = yaml.safe_load(open('.github/workflows/offbox-backup.yml'))
+          a = yaml.safe_dump(wf['jobs']['pull']['steps'], sort_keys=True)
+          b = yaml.safe_dump(wf['jobs']['pull-fallback']['steps'], sort_keys=True)
+          if a != b:
+              print('::error::pull and pull-fallback steps have diverged. '
+                    'The fresh-runner retry would not repeat the primary attempt.')
+              sys.exit(1)
+          print('pull / pull-fallback steps identical: ok')
+          PY
+          exit "$missing"
+
+      - name: Pull, verify, encrypt
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+          BACKUP_GPG_PASSPHRASE: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
+          OUT_DIR: ${{ runner.temp }}/offbox-out
+          RESULT_FILE: ${{ runner.temp }}/offbox-result.txt
+        run: |
+          set -Eeuo pipefail
+          chmod +x deploy/production/offbox-pull-from-vps.sh
+          mkdir -p "$OUT_DIR"
+          ./deploy/production/offbox-pull-from-vps.sh
+          test -f "$OUT_DIR/metadata.json"
+          echo "metadata:"
+          cat "$OUT_DIR/metadata.json"
+          if [ -z "${BACKUP_GPG_PASSPHRASE:-}" ]; then
+            echo "::error::BACKUP_GPG_PASSPHRASE is not set. Dump was verified off-box on this runner but not retained. Add the secret on the production environment."
+            printf 'status=FAILED\nstage=encrypt\ndetail=BACKUP_GPG_PASSPHRASE missing\n' > "$RESULT_FILE"
+            rm -f "$OUT_DIR"/gpstore-*.dump
+            exit 1
+          fi
+          GPG="$(find "$OUT_DIR" -maxdepth 1 -name 'gpstore-*.dump.gpg' -type f | head -n 1)"
+          test -n "$GPG"
+          test -s "$GPG"
+          echo "Encrypted artifact $(basename "$GPG") ($(wc -c < "$GPG" | tr -d ' ') bytes)"
+          rm -f "$OUT_DIR"/gpstore-*.dump
+          printf 'status=SUCCESS\nstage=encrypt\ndetail=encrypted\n' > "$RESULT_FILE"
+
+      - name: Upload encrypted dump
+        id: upload
         if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-offbox-backup
+          path: |
+            ${{ runner.temp }}/offbox-out/*.gpg
+            ${{ runner.temp }}/offbox-out/*.sha256
+            ${{ runner.temp }}/offbox-out/metadata.json
+            ${{ runner.temp }}/offbox-out/status.txt
+          if-no-files-found: error
+          retention-days: 90
+          # The name is fixed because DISASTER_RECOVERY.md tells an operator
+          # to download exactly this one, and a person restoring production
+          # should not have to work out which of two names carries the dump.
+          # So whichever job produces it claims the name - overwrite lets the
+          # fallback replace a partial upload the primary left behind.
+          overwrite: true
+
+      - name: Mark upload failure
+        if: failure() && steps.upload.outcome == 'failure'
+        env:
+          RESULT_FILE: ${{ runner.temp }}/offbox-result.txt
+        run: |
+          printf 'status=UPLOAD_FAILED\nstage=upload\ndetail=artifact upload failed\n' > "$RESULT_FILE"
+          bash deploy/production/evaluate-offbox-result.sh "$RESULT_FILE"
+          exit 1
+
+      - name: Alert on any off-box failure
+        if: failure()
+        env:
+          RESULT_FILE: ${{ runner.temp }}/offbox-result.txt
+        run: |
+          set -Eeuo pipefail
+          if [ ! -s "$RESULT_FILE" ]; then
+            printf 'status=FAILED\nstage=unknown\ndetail=off-box job failed before a result file was written\n' > "$RESULT_FILE"
+          elif grep -q '^status=SUCCESS' "$RESULT_FILE"; then
+            printf 'status=FAILED\nstage=unknown\ndetail=job failed after an earlier successful stage\n' > "$RESULT_FILE"
+          fi
+          bash deploy/production/evaluate-offbox-result.sh "$RESULT_FILE"
+          exit 1
+
+  # A BACKUP NOBODY HAS RESTORED IS A FILE, NOT A BACKUP.
+  #
+  # Runs when EITHER pull job produced the artifact, on a machine that never
+  # held the dump: it downloads gpstore-offbox-backup from GitHub storage,
+  # decrypts it and restores it into a throwaway database, then drops that
+  # database. Production is never a restore target.
+  verify:
+    name: Decrypt and restore into a throwaway database
+    needs: [pull, pull-fallback]
+    if: >-
+      always()
+      && (needs.pull.result == 'success' || needs['pull-fallback'].result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    services:
+      restore-db:
+        image: postgres:17
+        env:
+          POSTGRES_USER: gpstore
+          POSTGRES_PASSWORD: drill_not_production
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download encrypted artifact (proves GitHub storage, not the VPS)
         uses: actions/download-artifact@v4
         with:
           name: gpstore-offbox-backup
           path: ${{ runner.temp }}/offbox-downloaded
 
       - name: Decrypt downloaded artifact and isolated restore
-        if: success()
         env:
           BACKUP_GPG_PASSPHRASE: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
           RESULT_FILE: ${{ runner.temp }}/offbox-result.txt
@@ -185,9 +407,10 @@ jobs:
             echo "restore_proof_artifact=gpstore-offbox-restore-proof"
             echo "isolated_db=gpstore_offbox_probe"
             echo "production_db_untouched=gpstore"
+            echo "pulled_by=${{ needs.pull.result == 'success' && 'pull' || 'pull-fallback' }}"
           } >> "${{ runner.temp }}/offbox-restore-proof.txt"
           echo "Production off-box evidence (no dump / no passphrase):"
-          tail -n 8 "${{ runner.temp }}/offbox-restore-proof.txt"
+          tail -n 9 "${{ runner.temp }}/offbox-restore-proof.txt"
 
       - name: Upload restore proof (no dump)
         if: success()
@@ -199,6 +422,7 @@ jobs:
             ${{ runner.temp }}/offbox-result.txt
           if-no-files-found: error
           retention-days: 90
+          overwrite: true
 
       - name: Alert on any off-box failure
         if: failure()
