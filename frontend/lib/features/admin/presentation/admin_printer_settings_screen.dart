@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 
 import '../../../core/printing/printer_providers.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../../core/util/haptic_widgets.dart';
 
 /// One-time setup for the receipt printer that auto-prints every new order
@@ -120,7 +120,12 @@ class _AdminPrinterSettingsScreenState extends ConsumerState<AdminPrinterSetting
         children: [
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -130,12 +135,12 @@ class _AdminPrinterSettingsScreenState extends ConsumerState<AdminPrinterSetting
                   savedName != null
                       ? 'Connected to: $savedName'
                       : 'No printer set up yet. Every new order will auto-print here once one is connected.',
-                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                  style: const TextStyle(color: AdminColors.textSecondary, fontSize: 13),
                 ),
                 const SizedBox(height: 4),
                 const Text(
                   'Only works while this app is open on this device - it cannot print while fully closed.',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontStyle: FontStyle.italic),
+                  style: TextStyle(color: AdminColors.textSecondary, fontSize: 12, fontStyle: FontStyle.italic),
                 ),
               ],
             ),
@@ -152,8 +157,8 @@ class _AdminPrinterSettingsScreenState extends ConsumerState<AdminPrinterSetting
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: hapticize(_forgetPrinter),
-              icon: const Icon(Icons.link_off, color: AppColors.error),
-              label: const Text('Forget This Printer', style: TextStyle(color: AppColors.error)),
+              icon: const Icon(Icons.link_off, color: AdminColors.danger),
+              label: const Text('Forget This Printer', style: TextStyle(color: AdminColors.danger)),
             ),
             const SizedBox(height: 20),
           ],
@@ -161,7 +166,7 @@ class _AdminPrinterSettingsScreenState extends ConsumerState<AdminPrinterSetting
           const SizedBox(height: 4),
           const Text(
             "Pair your Bluetooth printer in Android's Bluetooth settings first if you haven't already, then tap below.",
-            style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+            style: TextStyle(color: AdminColors.textSecondary, fontSize: 13),
           ),
           const SizedBox(height: 12),
           FilledButton.icon(
@@ -173,16 +178,21 @@ class _AdminPrinterSettingsScreenState extends ConsumerState<AdminPrinterSetting
           ),
           if (_statusMessage != null) ...[
             const SizedBox(height: 12),
-            Text(_statusMessage!, style: const TextStyle(color: AppColors.textSecondary)),
+            Text(_statusMessage!, style: const TextStyle(color: AdminColors.textSecondary)),
           ],
           if (_pairedDevices != null && _pairedDevices!.isNotEmpty) ...[
             const SizedBox(height: 12),
             ..._pairedDevices!.map(
               (device) => Container(
                 margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
                 child: ListTile(
-                  leading: const Icon(Icons.print_outlined, color: AppColors.primary),
+                  leading: const Icon(Icons.print_outlined, color: AdminColors.primary),
                   title: Text(device.name, style: const TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(device.macAdress),
                   trailing: const Icon(Icons.chevron_right),

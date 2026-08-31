@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_components.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/delivery_pricing_models.dart';
@@ -20,25 +21,14 @@ class AdminDeliveryPricingScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Delivery Pricing')),
       body: settingsAsync.when(
+        // A SPINNER, NOT A SKELETON. Every list in the console gets a
+        // skeleton, but this screen is a settings form: four placeholder
+        // list rows would promise a shape the screen does not have.
         loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (error, stackTrace) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  "Couldn't load delivery pricing: ${extractErrorMessage(error)}",
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: hapticize(() => ref.invalidate(deliveryPricingSettingsProvider)),
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          ),
+        error: (error, stackTrace) => AdminErrorState(
+          message: "Couldn't load delivery pricing: ${extractErrorMessage(error)}",
+          onRetry:
+              hapticize(() => ref.invalidate(deliveryPricingSettingsProvider)),
         ),
         data: (settings) => _DeliveryPricingForm(
           key: ValueKey('${settings.updatedAt}-${settings.updatedBy}'),
@@ -153,7 +143,7 @@ class _DeliveryPricingFormState extends ConsumerState<_DeliveryPricingForm> {
           Text(
             'These numbers are applied by the server when a customer checks out. '
             'This screen does not calculate a delivery quote.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AdminColors.textSecondary),
           ),
           if (widget.initial.updatedAt != null) ...[
             const SizedBox(height: 8),
@@ -161,7 +151,7 @@ class _DeliveryPricingFormState extends ConsumerState<_DeliveryPricingForm> {
               widget.initial.updatedBy == null
                   ? 'Last saved ${widget.initial.updatedAt}'
                   : 'Last saved ${widget.initial.updatedAt} by ${widget.initial.updatedBy}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AdminColors.textSecondary),
             ),
           ],
           const SizedBox(height: 16),
@@ -231,7 +221,12 @@ class _DeliveryPricingFormState extends ConsumerState<_DeliveryPricingForm> {
   Widget _section({required String title, required List<Widget> children}) {
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

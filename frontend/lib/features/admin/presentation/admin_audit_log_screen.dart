@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_components.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -16,23 +17,19 @@ class AdminAuditLogScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Audit Log')),
       body: logAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (error, stackTrace) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // TEMPORARY, for active debugging - see RootScreen's identical
-              // comment for why this shows the real failure reason instead
-              // of one static string.
-              Text("Couldn't load audit log: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: hapticize(() => ref.invalidate(adminAuditLogProvider)), child: const Text('Retry')),
-            ],
-          ),
+        loading: () => const AdminListSkeleton(),
+        error: (error, stackTrace) => AdminErrorState(
+          // Shows the real failure reason rather than one static
+          // string - an admin who can read the cause can act on it.
+          message: "Couldn't load audit log: ${extractErrorMessage(error)}",
+          onRetry: hapticize(() => ref.invalidate(adminAuditLogProvider)),
         ),
         data: (entries) {
           if (entries.isEmpty) {
-            return const Center(
-              child: Text('No audit log entries yet', style: TextStyle(color: AppColors.textSecondary)),
+            return const AdminEmptyState(
+              icon: Icons.history_outlined,
+              title: 'No audit log entries yet',
+              message: 'Actions staff take in this console are recorded here.',
             );
           }
 
@@ -46,7 +43,7 @@ class AdminAuditLogScreen extends ConsumerWidget {
                 final entry = entries[index];
                 return Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(10)),
+                  decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(10)),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -65,12 +62,12 @@ class AdminAuditLogScreen extends ConsumerWidget {
                       ),
                       if (entry.details != null) ...[
                         const SizedBox(height: 4),
-                        Text(entry.details!, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                        Text(entry.details!, style: const TextStyle(fontSize: 11, color: AdminColors.textSecondary)),
                       ],
                       if (entry.actorEmail != null) ...[
                         const SizedBox(height: 4),
                         Text('By: ${entry.actorEmail} (${entry.actorRole ?? "unknown"})',
-                            style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                            style: const TextStyle(fontSize: 11, color: AdminColors.textSecondary)),
                       ],
                     ],
                   ),

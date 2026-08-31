@@ -10,6 +10,7 @@ import '../core/router/app_router.dart';
 import '../features/admin/presentation/admin_order_detail_screen.dart';
 import '../features/orders/presentation/orders_providers.dart';
 import '../shared/gpstore_app.dart';
+import 'design/admin_theme.dart';
 import 'admin_router.dart';
 
 /// Staff APK UI. Does not import the customer shopping shell.
@@ -84,6 +85,7 @@ class AdminApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return GpstoreApp(
       title: 'GP-STORE Admin',
+      theme: AdminTheme.light,
       routerProvider: adminRouterProvider,
       onNotificationTap: _handleNotificationTap,
       onForegroundExtras: _onForegroundExtras,

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_components.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/admin_customer_model.dart';
 import 'admin_customer_orders_screen.dart';
@@ -56,19 +57,13 @@ class _AdminCustomersScreenState extends ConsumerState<AdminCustomersScreen> {
           ),
           Expanded(
             child: customersAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              error: (error, stackTrace) => Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // TEMPORARY, for active debugging - see RootScreen's identical
-                    // comment for why this shows the real failure reason instead
-                    // of one static string.
-                    Text("Couldn't load customers: ${extractErrorMessage(error)}"),
-                    TextButton(onPressed: hapticize(() => ref.invalidate(adminAllCustomersProvider)), child: const Text('Retry')),
-                  ],
-                ),
-              ),
+              loading: () => const AdminListSkeleton(),
+              error: (error, stackTrace) => AdminErrorState(
+          // Shows the real failure reason rather than one static
+          // string - an admin who can read the cause can act on it.
+          message: "Couldn't load customers: ${extractErrorMessage(error)}",
+          onRetry: hapticize(() => ref.invalidate(adminAllCustomersProvider)),
+        ),
               data: (page) {
                 final allCustomers = page.customers;
                 final customers = _filter(allCustomers);
@@ -83,11 +78,16 @@ class _AdminCustomersScreenState extends ConsumerState<AdminCustomersScreen> {
                 }
 
                 if (customers.isEmpty) {
-                  return Center(
-                    child: Text(
-                      allCustomers.isEmpty ? 'No customers yet' : 'No matches',
-                      style: const TextStyle(color: AppColors.textSecondary),
-                    ),
+                  return AdminEmptyState(
+                    icon: allCustomers.isEmpty
+                        ? Icons.people_outline
+                        : Icons.search_off_outlined,
+                    title: allCustomers.isEmpty
+                        ? 'No customers yet'
+                        : 'No matching customers',
+                    message: allCustomers.isEmpty
+                        ? 'Customers appear here after they sign up in the shop app.'
+                        : 'Try a different name, phone number or email.',
                   );
                 }
 
@@ -100,7 +100,16 @@ class _AdminCustomersScreenState extends ConsumerState<AdminCustomersScreen> {
                   itemBuilder: (context, index) {
                     if (index == customers.length) {
                       WidgetsBinding.instance.addPostFrameCallback((_) => controller.loadMore());
-                      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                      return const Padding(
+                  padding: EdgeInsets.all(AdminSpacing.lg),
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                );
                     }
                     return _CustomerTile(customer: customers[index]);
                   },
@@ -276,7 +285,12 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
 
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
       child: Row(
         children: [
           Expanded(
@@ -296,8 +310,8 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
-                          child: Text(customer.role!, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                          decoration: BoxDecoration(color: AdminColors.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
+                          child: Text(customer.role!, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AdminColors.primary)),
                         ),
                       ],
                     ],
@@ -307,11 +321,11 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
                   if (!customer.active)
                     const Padding(
                       padding: EdgeInsets.only(top: 4),
-                      child: Text('Deactivated', style: TextStyle(color: AppColors.error, fontSize: 11, fontWeight: FontWeight.w600)),
+                      child: Text('Deactivated', style: TextStyle(color: AdminColors.danger, fontSize: 11, fontWeight: FontWeight.w600)),
                     ),
                   const Padding(
                     padding: EdgeInsets.only(top: 4),
-                    child: Text('Tap to view order history', style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                    child: Text('Tap to view order history', style: TextStyle(fontSize: 10, color: AdminColors.textSecondary)),
                   ),
                 ],
               ),

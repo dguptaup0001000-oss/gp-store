@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_components.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_order_detail_screen.dart';
 import 'admin_providers.dart';
@@ -20,27 +21,19 @@ class AdminCustomerOrdersScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: Text("$customerName's Orders")),
       body: ordersAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (error, stackTrace) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // TEMPORARY, for active debugging - see RootScreen's identical
-              // comment for why this shows the real failure reason instead
-              // of one static string.
-              Text("Couldn't load orders: ${extractErrorMessage(error)}"),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: hapticize(() => ref.invalidate(adminCustomerOrdersProvider(customerId))),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
+        loading: () => const AdminListSkeleton(),
+        error: (error, stackTrace) => AdminErrorState(
+          // Shows the real failure reason rather than one static string.
+          message: "Couldn't load orders: ${extractErrorMessage(error)}",
+          onRetry: hapticize(
+              () => ref.invalidate(adminCustomerOrdersProvider(customerId))),
         ),
         data: (orders) {
           if (orders.isEmpty) {
-            return const Center(
-              child: Text("This customer hasn't placed any orders yet", style: TextStyle(color: AppColors.textSecondary)),
+            return const AdminEmptyState(
+              icon: Icons.receipt_long_outlined,
+              title: 'No orders yet',
+              message: "This customer hasn't placed an order.",
             );
           }
 
@@ -57,7 +50,12 @@ class AdminCustomerOrdersScreen extends ConsumerWidget {
                 )),
                 child: Container(
                   padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
                   child: Row(
                     children: [
                       Expanded(
@@ -70,14 +68,14 @@ class AdminCustomerOrdersScreen extends ConsumerWidget {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
-                                color: order.orderStatus == 'CANCELLED' ? AppColors.error : AppColors.primary,
+                                color: order.orderStatus == 'CANCELLED' ? AdminColors.danger : AdminColors.primary,
                               ),
                             ),
                           ],
                         ),
                       ),
                       Text('₹${order.totalAmount.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                      const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                      const Icon(Icons.chevron_right, color: AdminColors.textSecondary),
                     ],
                   ),
                 ),

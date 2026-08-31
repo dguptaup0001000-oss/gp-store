@@ -1,5 +1,3 @@
-import 'dart:ui' show FontFeature;
-
 import 'package:flutter/material.dart';
 
 /// GP-STORE Admin design tokens - the Emerald design language.
@@ -38,8 +36,11 @@ class AdminColors {
   static const textOnPrimary = Color(0xFFFFFFFF);
 
   // Semantic. Deliberately distinct from the brand green so "success" and
-  // "this is a button" never read as the same thing at a glance.
-  static const success = Color(0xFF16A34A);
+  // "this is a button" never read as the same thing at a glance - which
+  // means success is NOT #16A34A. A deeper, bluer green: on the pale
+  // successBg it also clears text contrast by a wide margin, which the
+  // brand green does not.
+  static const success = Color(0xFF047857);
   static const successBg = Color(0xFFDCFCE7);
   static const warning = Color(0xFFF59E0B);
   static const warningBg = Color(0xFFFEF3C7);

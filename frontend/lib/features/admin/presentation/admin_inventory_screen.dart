@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_components.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/inventory_models.dart';
 import 'admin_providers.dart';
@@ -42,24 +43,24 @@ class _LowStockList extends ConsumerWidget {
     final itemsAsync = ref.watch(adminLowStockProvider);
 
     return itemsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-      error: (error, stackTrace) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text("Couldn't load inventory: ${extractErrorMessage(error)}"),
-            TextButton(onPressed: hapticize(() => ref.invalidate(adminLowStockProvider)), child: const Text('Retry')),
-          ],
-        ),
+      loading: () => const _InventorySkeleton(),
+      error: (error, stackTrace) => AdminErrorState(
+        message: "Couldn't load inventory: ${extractErrorMessage(error)}",
+        onRetry: hapticize(() => ref.invalidate(adminLowStockProvider)),
       ),
       data: (items) {
         if (items.isEmpty) {
-          return const Center(
-            child: Text('Nothing is low on stock right now', style: TextStyle(color: AppColors.textSecondary)),
+          // An empty low-stock list is GOOD NEWS, so it gets the reassuring
+          // icon rather than the same shrug as a list that failed to fill.
+          return const AdminEmptyState(
+            icon: Icons.check_circle_outline,
+            title: 'Nothing is low on stock',
+            message: 'Every item is above its reorder point.',
           );
         }
 
         return RefreshIndicator(
+          color: AdminColors.primary,
           onRefresh: () async => ref.invalidate(adminLowStockProvider),
           child: ListView.separated(
             padding: const EdgeInsets.all(16),
@@ -85,27 +86,25 @@ class _AllInventoryList extends ConsumerWidget {
     final controller = ref.read(adminAllInventoryProvider.notifier);
 
     return pageAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-      error: (error, stackTrace) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text("Couldn't load inventory: ${extractErrorMessage(error)}"),
-            TextButton(onPressed: hapticize(() => ref.invalidate(adminAllInventoryProvider)), child: const Text('Retry')),
-          ],
-        ),
+      loading: () => const _InventorySkeleton(),
+      error: (error, stackTrace) => AdminErrorState(
+        message: "Couldn't load inventory: ${extractErrorMessage(error)}",
+        onRetry: hapticize(() => ref.invalidate(adminAllInventoryProvider)),
       ),
       data: (result) {
         final items = result.items;
         if (items.isEmpty) {
-          return const Center(
-            child: Text('No inventory records yet', style: TextStyle(color: AppColors.textSecondary)),
+          return const AdminEmptyState(
+            icon: Icons.warehouse_outlined,
+            title: 'No inventory records yet',
+            message: 'A record appears here once a product has a variant to stock.',
           );
         }
 
         final hasMore = controller.hasMore;
 
         return RefreshIndicator(
+          color: AdminColors.primary,
           onRefresh: () async => ref.invalidate(adminAllInventoryProvider),
           child: ListView.separated(
             padding: const EdgeInsets.all(16),
@@ -114,7 +113,16 @@ class _AllInventoryList extends ConsumerWidget {
             itemBuilder: (context, index) {
               if (index == items.length) {
                 WidgetsBinding.instance.addPostFrameCallback((_) => controller.loadMore());
-                return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                return const Padding(
+                  padding: EdgeInsets.all(AdminSpacing.lg),
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                );
               }
               return _InventoryTile(item: items[index]);
             },
@@ -132,43 +140,112 @@ class _InventoryTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final available = item.availableStock;
+    final reserved = item.reservedStock ?? 0;
+
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      padding: const EdgeInsets.all(AdminSpacing.md),
+      decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
       child: Row(
         children: [
+          // THE NUMBER FIRST, and big enough to read without stopping. This
+          // screen is used while counting shelves, so the stock figure is
+          // what the eye should land on - not the product name it is already
+          // holding in its hand.
+          Container(
+            width: 56,
+            padding: const EdgeInsets.symmetric(vertical: AdminSpacing.sm),
+            decoration: BoxDecoration(
+              color: item.isLowStock
+                  ? AdminColors.dangerBg
+                  : AdminColors.neutralBg,
+              borderRadius: AdminRadius.control,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '$available',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    height: 1.1,
+                    color: item.isLowStock
+                        ? AdminColors.danger
+                        : AdminColors.textPrimary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text('in stock', style: TextStyle(fontSize: 9, color: AdminColors.textSecondary)),
+              ],
+            ),
+          ),
+          const SizedBox(width: AdminSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(item.productName ?? 'Unknown product', style: const TextStyle(fontWeight: FontWeight.w700)),
-                if (item.productBrand != null)
-                  Text(item.productBrand!, style: Theme.of(context).textTheme.bodyMedium),
-                const SizedBox(height: 4),
                 Text(
-                  'Stock: ${item.availableStock} available'
-                  '${(item.reservedStock ?? 0) > 0 ? ' (${item.reservedStock} reserved)' : ''}',
-                  style: TextStyle(
-                    fontSize: 12,
+                  item.productName ?? 'Unknown product',
+                  style: const TextStyle(
                     fontWeight: FontWeight.w600,
-                    color: item.isLowStock ? AppColors.error : AppColors.textSecondary,
+                    color: AdminColors.textPrimary,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                if (item.minimumStock != null)
-                  Text('Reorder point: ${item.minimumStock}',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 11)),
+                if (item.productBrand != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    item.productBrand!,
+                    style: AdminText.caption,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                const SizedBox(height: AdminSpacing.sm),
+                Wrap(
+                  spacing: AdminSpacing.sm,
+                  runSpacing: AdminSpacing.xs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (item.isLowStock)
+                      const AdminStatusBadge(
+                        label: 'Reorder',
+                        tone: AdminStatusTone.danger,
+                        dense: true,
+                      ),
+                    // Reserved stock is spoken for by orders not yet packed.
+                    // Showing it only when it exists keeps a quiet row quiet.
+                    if (reserved > 0)
+                      Text('$reserved reserved', style: AdminText.caption),
+                    if (item.minimumStock != null)
+                      Text('reorder at ${item.minimumStock}',
+                          style: AdminText.caption),
+                  ],
+                ),
               ],
             ),
           ),
           Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: const Icon(Icons.add_box_outlined, color: AppColors.primary),
+                icon: const Icon(Icons.add_box_outlined,
+                    color: AdminColors.primary),
                 tooltip: 'Restock',
                 onPressed: hapticize(() => _showRestockDialog(context, ref)),
               ),
               IconButton(
-                icon: const Icon(Icons.edit_outlined),
+                icon: const Icon(Icons.edit_outlined,
+                    color: AdminColors.textSecondary),
                 tooltip: 'Manual correction',
                 onPressed: hapticize(() => _showEditDialog(context, ref)),
               ),
@@ -236,7 +313,7 @@ class _InventoryTile extends ConsumerWidget {
           children: [
             const Text(
               'For stock-take corrections, not routine restocking.',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              style: TextStyle(fontSize: 12, color: AdminColors.textSecondary),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -297,5 +374,42 @@ class _InventoryTile extends ConsumerWidget {
         SnackBar(content: Text(extractErrorMessage(e))),
       );
     }
+  }
+}
+
+class _InventorySkeleton extends StatelessWidget {
+  const _InventorySkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: const EdgeInsets.all(AdminSpacing.lg),
+      itemCount: 7,
+      separatorBuilder: (_, __) => const SizedBox(height: AdminSpacing.sm),
+      itemBuilder: (_, __) => Container(
+        padding: const EdgeInsets.all(AdminSpacing.md),
+        decoration: BoxDecoration(
+          color: AdminColors.surface,
+          borderRadius: AdminRadius.card,
+          border: Border.all(color: AdminColors.border),
+        ),
+        child: const Row(
+          children: [
+            AdminSkeleton(height: 46, width: 56, radius: AdminRadius.md),
+            SizedBox(width: AdminSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AdminSkeleton(height: 14, width: 150),
+                  SizedBox(height: AdminSpacing.sm),
+                  AdminSkeleton(height: 10, width: 100),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

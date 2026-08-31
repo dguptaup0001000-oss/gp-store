@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_components.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -16,24 +17,20 @@ class AdminReviewsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Review Moderation')),
       body: reviewsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (error, stackTrace) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // TEMPORARY, for active debugging - see RootScreen's identical
-              // comment for why this shows the real failure reason instead
-              // of one static string.
-              Text("Couldn't load reviews: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: hapticize(() => ref.invalidate(adminAllReviewsProvider)), child: const Text('Retry')),
-            ],
-          ),
+        loading: () => const AdminListSkeleton(),
+        error: (error, stackTrace) => AdminErrorState(
+          // Shows the real failure reason rather than one static
+          // string - an admin who can read the cause can act on it.
+          message: "Couldn't load reviews: ${extractErrorMessage(error)}",
+          onRetry: hapticize(() => ref.invalidate(adminAllReviewsProvider)),
         ),
         data: (page) {
           final reviews = page.reviews;
           if (reviews.isEmpty) {
-            return const Center(
-              child: Text('No reviews yet', style: TextStyle(color: AppColors.textSecondary)),
+            return const AdminEmptyState(
+              icon: Icons.rate_review_outlined,
+              title: 'No reviews yet',
+              message: 'Customer reviews appear here for moderation.',
             );
           }
 
@@ -48,13 +45,27 @@ class AdminReviewsScreen extends ConsumerWidget {
                 WidgetsBinding.instance.addPostFrameCallback(
                   (_) => ref.read(adminAllReviewsProvider.notifier).loadMore(),
                 );
-                return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                return const Padding(
+                  padding: EdgeInsets.all(AdminSpacing.lg),
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                );
               }
 
               final review = reviews[index];
               return Container(
                 padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -68,7 +79,7 @@ class AdminReviewsScreen extends ConsumerWidget {
                               (i) => Icon(
                                 i < review.rating ? Icons.star : Icons.star_border,
                                 size: 14,
-                                color: AppColors.primary,
+                                color: AdminColors.primary,
                               ),
                             ),
                           ),
@@ -81,13 +92,13 @@ class AdminReviewsScreen extends ConsumerWidget {
                           const SizedBox(height: 6),
                           Text(
                             'By ${review.customerName ?? "unknown"}${review.customerEmail != null ? ' (${review.customerEmail})' : ''}',
-                            style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                            style: const TextStyle(fontSize: 11, color: AdminColors.textSecondary),
                           ),
                         ],
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.delete_outline, color: AppColors.error, size: 20),
+                      icon: const Icon(Icons.delete_outline, color: AdminColors.danger, size: 20),
                       tooltip: 'Remove review',
                       onPressed: hapticize(() async {
                         final confirmed = await showDialog<bool>(

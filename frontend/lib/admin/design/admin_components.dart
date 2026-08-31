@@ -48,6 +48,30 @@ class AdminStatusBadge extends StatelessWidget {
     }
   }
 
+  /// Maps GP-STORE's PaymentStatus values onto a tone.
+  ///
+  /// SEPARATE FROM THE ORDER MAPPING because the two enums disagree about
+  /// what a word means. PENDING on an order is a normal early stage; PENDING
+  /// on a payment is money the shop has not received. Folding them together
+  /// is how a refund still owed to a customer ends up the same reassuring
+  /// green as one already paid.
+  static AdminStatusTone toneForPaymentStatus(String? status) {
+    switch (status?.toUpperCase()) {
+      case 'SUCCESS':
+      case 'COD_RECEIVED':
+      case 'REFUND_COMPLETED':
+        return AdminStatusTone.success;
+      case 'PENDING':
+      case 'REFUND_PENDING':
+        return AdminStatusTone.warning;
+      case 'FAILED':
+      case 'CANCELLED':
+        return AdminStatusTone.danger;
+      default:
+        return AdminStatusTone.neutral;
+    }
+  }
+
   /// PENDING_CONFIRMATION -> "Pending Confirmation". Backend enum names must
   /// never reach an operator's screen verbatim.
   static String humanizeStatus(String? status) {
@@ -478,6 +502,57 @@ class AdminPageHeader extends StatelessWidget {
         ),
         ...actions,
       ],
+    );
+  }
+}
+
+/// A list of placeholder rows.
+///
+/// USED INSTEAD OF A LONE CENTRED SPINNER on every admin list. A spinner in
+/// the middle of an empty screen tells the operator nothing about what is
+/// coming and makes the whole page jump when it arrives; a skeleton puts the
+/// list's shape on screen immediately and the real rows land in place.
+class AdminListSkeleton extends StatelessWidget {
+  const AdminListSkeleton({super.key, this.rows = 6, this.leading = false});
+
+  final int rows;
+
+  /// Draws a square block on the left, for lists whose rows carry a
+  /// thumbnail or a figure.
+  final bool leading;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: const EdgeInsets.all(AdminSpacing.lg),
+      itemCount: rows,
+      separatorBuilder: (_, __) => const SizedBox(height: AdminSpacing.sm),
+      itemBuilder: (_, __) => Container(
+        padding: const EdgeInsets.all(AdminSpacing.md),
+        decoration: BoxDecoration(
+          color: AdminColors.surface,
+          borderRadius: AdminRadius.card,
+          border: Border.all(color: AdminColors.border),
+        ),
+        child: Row(
+          children: [
+            if (leading) ...[
+              const AdminSkeleton(height: 46, width: 48, radius: AdminRadius.md),
+              const SizedBox(width: AdminSpacing.md),
+            ],
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AdminSkeleton(height: 14, width: 150),
+                  SizedBox(height: AdminSpacing.sm),
+                  AdminSkeleton(height: 10, width: 100),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_components.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
 import 'admin_providers.dart';
@@ -17,23 +18,19 @@ class AdminCategoryListScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Categories')),
       body: categoriesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (error, stackTrace) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // TEMPORARY, for active debugging - see RootScreen's identical
-              // comment for why this shows the real failure reason instead
-              // of one static string.
-              Text("Couldn't load categories: ${extractErrorMessage(error)}"),
-              TextButton(onPressed: hapticize(() => ref.invalidate(adminCategoriesProvider)), child: const Text('Retry')),
-            ],
-          ),
+        loading: () => const AdminListSkeleton(),
+        error: (error, stackTrace) => AdminErrorState(
+          // Shows the real failure reason rather than one static
+          // string - an admin who can read the cause can act on it.
+          message: "Couldn't load categories: ${extractErrorMessage(error)}",
+          onRetry: hapticize(() => ref.invalidate(adminCategoriesProvider)),
         ),
         data: (categories) {
           if (categories.isEmpty) {
-            return const Center(
-              child: Text('No categories yet - tap + to add one', style: TextStyle(color: AppColors.textSecondary)),
+            return const AdminEmptyState(
+              icon: Icons.category_outlined,
+              title: 'No categories yet',
+              message: 'Tap the + button to create your first category.',
             );
           }
 
@@ -78,7 +75,12 @@ class _CategoryTile extends ConsumerWidget {
       }),
       child: Container(
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
         child: Row(
           children: [
             Expanded(
@@ -90,7 +92,7 @@ class _CategoryTile extends ConsumerWidget {
                       Text(category.name, style: const TextStyle(fontWeight: FontWeight.w700)),
                       if (!category.active) ...[
                         const SizedBox(width: 8),
-                        const Text('Inactive', style: TextStyle(color: AppColors.error, fontSize: 11, fontWeight: FontWeight.w600)),
+                        const Text('Inactive', style: TextStyle(color: AdminColors.danger, fontSize: 11, fontWeight: FontWeight.w600)),
                       ],
                     ],
                   ),
@@ -101,7 +103,7 @@ class _CategoryTile extends ConsumerWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+            const Icon(Icons.chevron_right, color: AdminColors.textSecondary),
           ],
         ),
       ),

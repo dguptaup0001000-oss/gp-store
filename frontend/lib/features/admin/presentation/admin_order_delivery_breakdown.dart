@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_components.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/delivery_pricing_models.dart';
@@ -19,7 +20,12 @@ class AdminOrderDeliveryBreakdownCard extends ConsumerWidget {
 
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
       child: breakdownAsync.when(
         loading: () => const Padding(
           padding: EdgeInsets.symmetric(vertical: 8),
@@ -29,11 +35,12 @@ class AdminOrderDeliveryBreakdownCard extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Delivery charge', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text("Couldn't load the stored delivery breakdown: ${extractErrorMessage(error)}"),
-            TextButton(
-              onPressed: hapticize(() => ref.invalidate(adminOrderDeliveryBreakdownProvider(orderId))),
-              child: const Text('Retry'),
+            AdminErrorState(
+              message:
+                  "Couldn't load the stored delivery breakdown: ${extractErrorMessage(error)}",
+              compact: true,
+              onRetry: hapticize(() =>
+                  ref.invalidate(adminOrderDeliveryBreakdownProvider(orderId))),
             ),
           ],
         ),
@@ -57,7 +64,7 @@ class _BreakdownBody extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           'Figures stored when this order was placed. They are not recalculated if pricing rules have changed since.',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AdminColors.textSecondary),
         ),
         const SizedBox(height: 12),
         if (!breakdown.pricedByCurrentSystem)

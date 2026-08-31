@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_components.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/territory_models.dart';
@@ -23,7 +24,7 @@ class AdminTerritoriesScreen extends ConsumerWidget {
             'Delivery is organised as named territories, not a circle around the shop. '
             'The design target is 8 main zones and 26 territories. '
             'Paste a JSON outline on each territory so dispatch can assign riders.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AdminColors.textSecondary),
           ),
           const SizedBox(height: 16),
           const _HealthSection(),
@@ -66,7 +67,7 @@ class _HealthSection extends ConsumerWidget {
               health.hasProblems ? 'Needs attention' : 'Matches the design counts',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
-                color: health.hasProblems ? AppColors.error : AppColors.success,
+                color: health.hasProblems ? AdminColors.danger : AdminColors.success,
               ),
             ),
             const SizedBox(height: 12),
@@ -158,7 +159,7 @@ class _PointCheckSectionState extends ConsumerState<_PointCheckSection> {
           const SizedBox(height: 4),
           Text(
             'Asks the server which stored outline contains these coordinates. This is not a map.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AdminColors.textSecondary),
           ),
           const SizedBox(height: 12),
           Row(
@@ -189,7 +190,7 @@ class _PointCheckSectionState extends ConsumerState<_PointCheckSection> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: AppColors.error)),
+            Text(_error!, style: const TextStyle(color: AdminColors.danger)),
           ],
           if (_result != null) ...[
             const SizedBox(height: 8),
@@ -376,7 +377,12 @@ Widget _card({required Widget child}) {
   return Container(
     width: double.infinity,
     padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
+    decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
     child: child,
   );
 }
@@ -393,12 +399,13 @@ Widget _statRow(String label, String value) {
   );
 }
 
+/// Kept as a helper because three sections on this screen fail
+/// independently; it now delegates to the shared state so a failure here
+/// looks like a failure anywhere else in the console.
 Widget _errorBlock({required String message, required VoidCallback onRetry}) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(message),
-      TextButton(onPressed: hapticize(onRetry), child: const Text('Retry')),
-    ],
+  return AdminErrorState(
+    message: message,
+    compact: true,
+    onRetry: hapticize(onRetry),
   );
 }
