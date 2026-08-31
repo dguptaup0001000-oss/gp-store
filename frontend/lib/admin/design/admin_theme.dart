@@ -68,14 +68,14 @@ class AdminTheme {
 
       // A hairline border and almost no lift. A console of heavily shadowed
       // cards reads as a toy; the border is what separates panels here.
-      cardTheme: CardThemeData(
+      cardTheme: const CardThemeData(
         color: AdminColors.surface,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: AdminRadius.card,
-          side: const BorderSide(color: AdminColors.border),
+          side: BorderSide(color: AdminColors.border),
         ),
       ),
 
@@ -104,7 +104,7 @@ class AdminTheme {
           backgroundColor: AdminColors.primary,
           foregroundColor: AdminColors.textOnPrimary,
           minimumSize: const Size.fromHeight(46),
-          shape: RoundedRectangleBorder(borderRadius: AdminRadius.control),
+          shape: const RoundedRectangleBorder(borderRadius: AdminRadius.control),
           elevation: 0,
         ),
       ),
@@ -114,7 +114,7 @@ class AdminTheme {
           backgroundColor: AdminColors.primary,
           foregroundColor: AdminColors.textOnPrimary,
           minimumSize: const Size.fromHeight(46),
-          shape: RoundedRectangleBorder(borderRadius: AdminRadius.control),
+          shape: const RoundedRectangleBorder(borderRadius: AdminRadius.control),
           elevation: 0,
         ),
       ),
@@ -127,7 +127,7 @@ class AdminTheme {
           foregroundColor: AdminColors.primaryDark,
           side: const BorderSide(color: AdminColors.borderStrong),
           minimumSize: const Size.fromHeight(46),
-          shape: RoundedRectangleBorder(borderRadius: AdminRadius.control),
+          shape: const RoundedRectangleBorder(borderRadius: AdminRadius.control),
         ),
       ),
 
@@ -138,39 +138,39 @@ class AdminTheme {
       // VISIBLE BORDERS, unlike the shop's borderless filled fields. This is
       // a data-entry console - a shopkeeper typing a price into a form needs
       // to see where the field is, and a focused field must be unmistakable.
-      inputDecorationTheme: InputDecorationTheme(
+      inputDecorationTheme: const InputDecorationTheme(
         filled: true,
         fillColor: AdminColors.surface,
         border: OutlineInputBorder(
           borderRadius: AdminRadius.control,
-          borderSide: const BorderSide(color: AdminColors.border),
+          borderSide: BorderSide(color: AdminColors.border),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: AdminRadius.control,
-          borderSide: const BorderSide(color: AdminColors.border),
+          borderSide: BorderSide(color: AdminColors.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: AdminRadius.control,
-          borderSide: const BorderSide(color: AdminColors.primary, width: 1.5),
+          borderSide: BorderSide(color: AdminColors.primary, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: AdminRadius.control,
-          borderSide: const BorderSide(color: AdminColors.danger),
+          borderSide: BorderSide(color: AdminColors.danger),
         ),
         focusedErrorBorder: OutlineInputBorder(
           borderRadius: AdminRadius.control,
-          borderSide: const BorderSide(color: AdminColors.danger, width: 1.5),
+          borderSide: BorderSide(color: AdminColors.danger, width: 1.5),
         ),
-        labelStyle: const TextStyle(color: AdminColors.textSecondary),
-        hintStyle: const TextStyle(color: AdminColors.textMuted),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        labelStyle: TextStyle(color: AdminColors.textSecondary),
+        hintStyle: TextStyle(color: AdminColors.textMuted),
+        contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       ),
 
-      chipTheme: ChipThemeData(
+      chipTheme: const ChipThemeData(
         backgroundColor: AdminColors.neutralBg,
         selectedColor: AdminColors.primaryLight,
-        side: const BorderSide(color: AdminColors.border),
-        labelStyle: const TextStyle(
+        side: BorderSide(color: AdminColors.border),
+        labelStyle: TextStyle(
           fontSize: 13,
           color: AdminColors.textPrimary,
         ),
@@ -205,7 +205,7 @@ class AdminTheme {
         backgroundColor: AdminColors.textPrimary,
         contentTextStyle: const TextStyle(color: AdminColors.textOnPrimary),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: AdminRadius.control),
+        shape: const RoundedRectangleBorder(borderRadius: AdminRadius.control),
       ),
 
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
