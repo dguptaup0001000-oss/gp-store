@@ -376,7 +376,12 @@ Widget _card({required Widget child}) {
   return Container(
     width: double.infinity,
     padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
+    decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
     child: child,
   );
 }

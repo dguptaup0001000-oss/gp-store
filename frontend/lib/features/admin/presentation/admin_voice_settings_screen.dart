@@ -59,7 +59,12 @@ class _AdminVoiceSettingsScreenState extends ConsumerState<AdminVoiceSettingsScr
         padding: const EdgeInsets.all(16),
         children: [
           Container(
-            decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
             child: SwitchListTile(
               value: enabled.valueOrNull ?? true,
               // Disabled only while a save is genuinely in flight, and while
@@ -76,7 +81,12 @@ class _AdminVoiceSettingsScreenState extends ConsumerState<AdminVoiceSettingsScr
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: const [

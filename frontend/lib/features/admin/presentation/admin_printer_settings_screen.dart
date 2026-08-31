@@ -120,7 +120,12 @@ class _AdminPrinterSettingsScreenState extends ConsumerState<AdminPrinterSetting
         children: [
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -180,7 +185,12 @@ class _AdminPrinterSettingsScreenState extends ConsumerState<AdminPrinterSetting
             ..._pairedDevices!.map(
               (device) => Container(
                 margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
                 child: ListTile(
                   leading: const Icon(Icons.print_outlined, color: AdminColors.primary),
                   title: Text(device.name, style: const TextStyle(fontWeight: FontWeight.w600)),

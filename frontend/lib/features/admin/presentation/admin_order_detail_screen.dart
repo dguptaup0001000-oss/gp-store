@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../admin/design/admin_components.dart';
 import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../orders/domain/order_models.dart';
@@ -66,21 +67,12 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
     return Scaffold(
       appBar: AppBar(title: const Text('Order Detail')),
       body: orderAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (error, stackTrace) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // TEMPORARY, for active debugging - see RootScreen's identical
-              // comment for why this shows the real failure reason instead
-              // of one static string.
-              Text("Couldn't load this order: ${extractErrorMessage(error)}"),
-              TextButton(
-                onPressed: hapticize(() => ref.invalidate(orderDetailProvider(widget.orderId))),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
+        loading: () => const AdminListSkeleton(rows: 4),
+        error: (error, stackTrace) => AdminErrorState(
+          // Shows the real failure reason rather than one static string.
+          message: "Couldn't load this order: ${extractErrorMessage(error)}",
+          onRetry: hapticize(
+              () => ref.invalidate(orderDetailProvider(widget.orderId))),
         ),
         data: (order) => ListView(
           padding: const EdgeInsets.all(16),
@@ -90,7 +82,12 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
 
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -125,7 +122,12 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -149,7 +151,12 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [

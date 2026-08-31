@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../admin/design/admin_components.dart';
 import '../../../admin/design/admin_tokens.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -20,7 +21,7 @@ class AdminDeliveryPricingScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Delivery Pricing')),
       body: settingsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        loading: () => const AdminListSkeleton(rows: 4),
         error: (error, stackTrace) => Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -231,7 +232,12 @@ class _DeliveryPricingFormState extends ConsumerState<_DeliveryPricingForm> {
   Widget _section({required String title, required List<Widget> children}) {
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

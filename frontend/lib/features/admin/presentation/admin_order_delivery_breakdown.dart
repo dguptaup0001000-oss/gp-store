@@ -19,7 +19,12 @@ class AdminOrderDeliveryBreakdownCard extends ConsumerWidget {
 
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AdminColors.surface, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: AdminRadius.card,
+        border: Border.all(color: AdminColors.border),
+        boxShadow: AdminShadows.card,
+      ),
       child: breakdownAsync.when(
         loading: () => const Padding(
           padding: EdgeInsets.symmetric(vertical: 8),
