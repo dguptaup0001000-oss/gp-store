@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../domain/presence_model.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
@@ -107,6 +108,16 @@ final adminOrderStatusBreakdownProvider = FutureProvider.autoDispose<Map<String,
 final adminTopProductsProvider = FutureProvider.autoDispose<List<TopProduct>>((ref) {
   final days = ref.watch(analyticsPeriodDaysProvider);
   return ref.watch(adminProductsRepositoryProvider).getTopProducts(days: days);
+});
+
+/// Who is in the shop right now.
+///
+/// autoDispose so it stops being fetched the moment the dashboard is closed -
+/// this is the one provider here that a screen refreshes on a timer, and a
+/// kept-alive version would keep polling in the background for as long as the
+/// admin app stayed open.
+final adminPresenceProvider = FutureProvider.autoDispose<PresenceSnapshot>((ref) {
+  return ref.watch(adminProductsRepositoryProvider).getPresence();
 });
 
 final adminLowStockCountProvider = FutureProvider.autoDispose<int>((ref) {

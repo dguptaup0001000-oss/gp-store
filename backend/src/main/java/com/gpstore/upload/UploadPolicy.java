@@ -110,6 +110,43 @@ public final class UploadPolicy {
         return permanent;
     }
 
+    /**
+     * Refuses an object key that does not belong to {@code ownerId} under
+     * {@code kind}.
+     *
+     * THIS IS THE IDOR CHECK for customer-uploaded photos. A customer calls
+     * sign, uploads to the returned URL, then calls confirm with the object
+     * key. Confirm is a second, separate request, so nothing stops a customer
+     * from sending SOMEONE ELSE'S key — and without this check they would
+     * mount another customer's freshly-uploaded photo onto their own profile,
+     * or (with a guessed key) probe which ones exist.
+     *
+     * The keys carry the owner in a fixed position by construction:
+     *
+     *   gpstore/staging/profiles/{ownerId}/original/{uuid}.jpg
+     *
+     * so the check is exact rather than a prefix guess. It is deliberately
+     * strict about the whole shape - a key with the right owner but the wrong
+     * folder, or extra path segments, is rejected rather than parsed
+     * generously.
+     */
+    public static void requireOwnedBy(String objectKey, ImageKind kind, long ownerId) {
+        if (objectKey == null || objectKey.isBlank()) {
+            throw new BadRequestException("objectKey is required.");
+        }
+        String expectedPrefix =
+                STAGING_ROOT + kind.storageFolder() + "/" + ownerId + "/original/";
+        if (!objectKey.startsWith(expectedPrefix)) {
+            // Same message whichever way it failed: telling the caller that a
+            // key exists but belongs to someone else is itself a disclosure.
+            throw new BadRequestException("That upload does not belong to this account.");
+        }
+        String remainder = objectKey.substring(expectedPrefix.length());
+        if (remainder.isEmpty() || remainder.contains("/")) {
+            throw new BadRequestException("That upload does not belong to this account.");
+        }
+    }
+
     private static String relativeObjectKey(ImageKind kind, Long ownerId, String contentType) {
         requireAllowedUpload(kind, contentType, 1);
         String ext = EXTENSIONS.get(normalizedContentType(contentType));

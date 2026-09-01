@@ -36,6 +36,15 @@ class Profile with _$Profile {
     // only checks for a stored token, it doesn't refetch identity). This
     // field, by contrast, is freshly fetched every time this screen loads.
     @Default('CUSTOMER') String role,
+
+    /// A signed URL for the customer's avatar, or null when they have not set
+    /// one - which is most accounts.
+    ///
+    /// SHORT-LIVED, AND MUST NOT BE CACHED TO DISK. The bucket is private, so
+    /// the server mints a fresh signed URL on every /me response. Persisting
+    /// this string anywhere would produce a broken image within the hour;
+    /// re-fetching the profile is what refreshes it.
+    String? profileImageUrl,
   }) = _Profile;
 
   factory Profile.fromJson(Map<String, dynamic> json) => _$ProfileFromJson(json);

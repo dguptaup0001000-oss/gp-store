@@ -10,6 +10,7 @@ import '../design/admin_components.dart';
 import '../design/admin_format.dart';
 import '../design/admin_tokens.dart';
 import '../operations/delivery_type_panel.dart';
+import 'admin_live_clock_panel.dart';
 import 'admin_revenue_chart.dart';
 
 /// The console's home screen.
@@ -48,6 +49,11 @@ class AdminDashboardScreen extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.all(AdminSpacing.lg),
             children: [
+              // Above the period selector because it is the one panel that is
+              // not about a period at all - it answers "what is happening now",
+              // which is the first thing a shopkeeper opening this wants.
+              const AdminLiveClockPanel(),
+              const SizedBox(height: AdminSpacing.lg),
               const _PeriodSelector(),
               const SizedBox(height: AdminSpacing.lg),
               _KpiGrid(wide: wide),

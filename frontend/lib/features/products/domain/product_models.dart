@@ -171,6 +171,56 @@ extension DiscountTypeLabel on DiscountType {
   }
 }
 
+/// The human-readable conditions of an offer.
+///
+/// EVERY LINE IS DERIVED FROM A STORED FIELD. There is no marketing copy
+/// table behind this and none should be invented: a shopper who reads
+/// "Min. order ₹299" and then finds the code rejected at ₹250 has been lied
+/// to by the app, so the only safe source for these lines is the same data
+/// CouponService validates against.
+extension CouponTerms on Coupon {
+  /// The headline benefit, e.g. "₹100 OFF" or "10% OFF up to ₹200".
+  String get headline {
+    final base = discountType.offerLabel(discountValue);
+    if (discountType == DiscountType.percentage && maxDiscountAmount != null) {
+      return '$base up to ₹${maxDiscountAmount!.toStringAsFixed(0)}';
+    }
+    return base;
+  }
+
+  /// Conditions, one per bullet. Empty when a coupon genuinely has none -
+  /// rendering "No conditions apply" would be a claim this data cannot back.
+  List<String> get conditions {
+    final lines = <String>[];
+    if (minimumOrderAmount != null && minimumOrderAmount! > 0) {
+      lines.add(
+          'Minimum order value ₹${minimumOrderAmount!.toStringAsFixed(0)}');
+    }
+    if (maxDiscountAmount != null && discountType == DiscountType.percentage) {
+      lines.add(
+          'Maximum discount ₹${maxDiscountAmount!.toStringAsFixed(0)} per order');
+    }
+    if (discountType == DiscountType.deliveryFlat) {
+      lines.add('Applies to the delivery fee, not the items');
+    }
+    final expiry = expiryDate;
+    if (expiry != null) {
+      lines.add('Valid till ${_formatCouponDate(expiry)}');
+    }
+    return lines;
+  }
+}
+
+const _couponMonths = <String>[
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/// "31 Dec 2026". Deliberately not DateFormat: intl is not a dependency of
+/// this module and one date needs one line, not a package.
+String _formatCouponDate(DateTime date) =>
+    '${date.day} ${_couponMonths[date.month - 1]} ${date.year}';
+
 @freezed
 class Coupon with _$Coupon {
   const factory Coupon({
@@ -180,6 +230,16 @@ class Coupon with _$Coupon {
     required double discountValue,
     double? maxDiscountAmount,
     double? minimumOrderAmount,
+
+    /// Last day the code works, inclusive. Nullable because a coupon with no
+    /// expiry is a real thing the admin form allows - an evergreen offer.
+    ///
+    /// The server only ever lists coupons that are usable right now
+    /// (CouponService.getActiveCoupons filters expired and exhausted ones
+    /// out), so this is never in the past on the offers list. It is carried
+    /// anyway because "Valid till 31 Dec" is the single condition shoppers
+    /// most want to see before deciding whether to use a code today.
+    DateTime? expiryDate,
   }) = _Coupon;
 
   factory Coupon.fromJson(Map<String, dynamic> json) => _$CouponFromJson(json);

@@ -73,6 +73,56 @@ class _ProductCardState extends State<ProductCard> {
     final isInStock = variant?.available ?? false;
     final discount = product.discountPercent;
 
+    final packLabel = (variant?.quantity != null && variant?.unit != null)
+        ? '${_formatQuantity(variant!.quantity!)} ${variant.unit}'
+        : null;
+
+    // Built once, placed by whichever density branch below is active, so the
+    // two layouts can never drift into behaving differently on the one
+    // control that actually spends the customer's money.
+    //
+    // OUT OF STOCK IS A VISIBLE STATE, NOT JUST A DEAD TAP. A disabled
+    // OutlinedButton inherits the theme's disabled colours, which on this
+    // palette are close enough to the live teal to read as tappable - so a
+    // shopper presses it, nothing happens, and the app looks broken rather
+    // than the shelf looking empty. Explicit greys, an explicit grey border
+    // and 'Sold out' say what is true. The wishlist heart above stays live.
+    final Widget addControl = quantityInCart > 0 && isInStock
+        ? _QuantityStepper(
+            quantity: quantityInCart,
+            onIncrement: onIncrement,
+            onDecrement: onDecrement,
+          )
+        : OutlinedButton(
+            // Stronger than the card/wishlist taps - this is the primary
+            // "yes, add this" action, so it gets a more deliberate thud
+            // instead of a light click.
+            onPressed: !isInStock || onAddPressed == null
+                ? null
+                : () {
+                    HapticFeedback.mediumImpact();
+                    onAddPressed();
+                  },
+            style: OutlinedButton.styleFrom(
+              // Teal, not blue: this is a basket action, and the palette
+              // reserves teal for the cart so "add to basket" looks the same
+              // everywhere it appears.
+              foregroundColor: AppColors.cart,
+              side: BorderSide(
+                color: isInStock ? AppColors.cart : AppColors.textSecondary.withValues(alpha: 0.35),
+              ),
+              backgroundColor: Colors.white,
+              disabledForegroundColor: AppColors.textSecondary.withValues(alpha: 0.55),
+              padding: EdgeInsets.zero,
+            ),
+            child: Text(
+              isInStock ? 'ADD' : 'Sold out',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+            ),
+          );
+
     // RepaintBoundary so the press animation repaints THIS card only. Without
     // it, one finger-down marks the whole scrolling grid dirty and every
     // visible card re-rasterises for the length of the animation.
@@ -117,12 +167,27 @@ class _ProductCardState extends State<ProductCard> {
                       HapticFeedback.selectionClick();
                       onTap();
                     },
-              child: Padding(
-            padding: const EdgeInsets.all(8),
+              child: LayoutBuilder(builder: (context, constraints) {
+            // ONE CARD, THREE DENSITIES. The grid went from two columns to
+            // three, which takes a card on a 360dp phone from ~168dp wide to
+            // ~110dp. Fixed type sizes and a 72dp ADD button do not survive
+            // that, and forking the widget per grid would leave two cards to
+            // keep in sync. So the card measures itself and adapts.
+            //
+            // The threshold is the card width at which the price and a
+            // full-width ADD button stop fitting side by side.
+            final compact = constraints.maxWidth < 140;
+            final pad = compact ? 6.0 : 8.0;
+            final nameSize = compact ? 12.0 : 13.0;
+            final priceSize = compact ? 13.0 : 14.0;
+
+            return Padding(
+            padding: EdgeInsets.all(pad),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Stack(
+                  clipBehavior: Clip.none,
                   children: [
                     AspectRatio(
                       aspectRatio: 1,
@@ -137,13 +202,6 @@ class _ProductCardState extends State<ProductCard> {
                           // and blurred wider, the product reads as an object
                           // resting on the card rather than a picture printed
                           // on it.
-                          //
-                          // Applied to the image's container rather than the
-                          // image itself on purpose - a shadow that traced the
-                          // product's silhouette would need an alpha-mask blur
-                          // (saveLayer per card per frame). A rounded-rect
-                          // shadow is one Skia draw call and, at this blur
-                          // radius, indistinguishable in a 150px tile.
                           boxShadow: AppElevation.product,
                         ),
                         // The single most important picture in the shop. It
@@ -176,15 +234,38 @@ class _ProductCardState extends State<ProductCard> {
                           ),
                         ),
                       ),
+                    // Pack size sits ON the image at three-up, where there is
+                    // no room for it as its own text row below. Bottom-left,
+                    // opposite the ADD button, so the two never collide.
+                    if (compact && packLabel != null)
+                      Positioned(
+                        left: 2,
+                        bottom: 2,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            packLabel,
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                      ),
                     if (onWishlistToggle != null)
                       Positioned(
                         top: 2,
                         right: 2,
                         child: GestureDetector(
-                          // The enclosing `if (onWishlistToggle != null)`
-                          // already promotes this to non-null, so a second
-                          // null check here was dead code the analyzer
-                          // correctly flagged as always false.
+                          // The heart stays live even when the product is out
+                          // of stock: saving something for when it is back is
+                          // exactly what a shopper wants at that moment, and
+                          // it is the only action still open to them here.
                           onTap: hapticize(() {
                             HapticFeedback.lightImpact();
                             onWishlistToggle();
@@ -202,36 +283,57 @@ class _ProductCardState extends State<ProductCard> {
                       ),
                     if (!isInStock)
                       Positioned.fill(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.7),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Center(
-                            child: Text(
-                              'Out of stock',
-                              style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600, fontSize: 11),
+                        child: IgnorePointer(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.7),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Center(
+                              child: Text(
+                                'Out of stock',
+                                style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600, fontSize: 11),
+                              ),
                             ),
                           ),
                         ),
                       ),
+                    // AT THREE-UP THE ADD BUTTON OVERLAPS THE IMAGE. That is
+                    // not decoration: it reclaims the ~34dp row the button
+                    // used to occupy below the price, which is what lets a
+                    // three-column card stay short enough to show the name
+                    // and price without clipping. Blinkit does the same, for
+                    // the same reason.
+                    if (compact)
+                      Positioned(
+                        right: -2,
+                        bottom: -10,
+                        child: SizedBox(
+                          height: 28,
+                          width: 58,
+                          child: addControl,
+                        ),
+                      ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                SizedBox(height: compact ? 14 : 8),
                 Text(
                   product.name,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontSize: 13, fontWeight: FontWeight.w500),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyLarge
+                      ?.copyWith(fontSize: nameSize, fontWeight: FontWeight.w500),
                 ),
-                if (variant?.quantity != null && variant?.unit != null) ...[
+                if (!compact && packLabel != null) ...[
                   const SizedBox(height: 2),
                   Text(
-                    '${_formatQuantity(variant!.quantity!)} ${variant.unit}',
+                    packLabel,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 11),
                   ),
                 ],
-                const SizedBox(height: 6),
+                SizedBox(height: compact ? 4 : 6),
                 Row(
                   children: [
                     Expanded(
@@ -240,69 +342,47 @@ class _ProductCardState extends State<ProductCard> {
                           : Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(
-                                  '₹${variant.sellingPrice.toStringAsFixed(0)}',
-                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                                Flexible(
+                                  child: Text(
+                                    '\u20b9${variant.sellingPrice.toStringAsFixed(0)}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: priceSize),
+                                  ),
                                 ),
                                 if (variant.mrp != null && variant.mrp! > variant.sellingPrice) ...[
                                   const SizedBox(width: 4),
-                                  Text(
-                                    '₹${variant.mrp!.toStringAsFixed(0)}',
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AppColors.textSecondary,
-                                      decoration: TextDecoration.lineThrough,
+                                  Flexible(
+                                    child: Text(
+                                      '\u20b9${variant.mrp!.toStringAsFixed(0)}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textSecondary,
+                                        decoration: TextDecoration.lineThrough,
+                                      ),
                                     ),
                                   ),
                                 ],
                               ],
                             ),
                     ),
-                    // ADD sits on the SAME row as the price rather than on
-                    // its own full-width row below it. That removes a whole
-                    // ~38px band from every card, which is what actually
-                    // makes the card less tall - the image was already
-                    // square (AspectRatio(1) above), so the "tall
-                    // rectangle" look came from stacked info rows, not from
-                    // the image. Keeps the tap target at 32px high and
-                    // 64px wide, comfortably above the ~44px-diagonal
-                    // minimum for thumbs.
-                    SizedBox(
-                      height: 32,
-                      width: 72,
-                      child: quantityInCart > 0 && isInStock
-                          ? _QuantityStepper(
-                              quantity: quantityInCart,
-                              onIncrement: onIncrement,
-                              onDecrement: onDecrement,
-                            )
-                          : OutlinedButton(
-                              // Stronger than the card/wishlist taps - this is
-                              // the primary "yes, add this" action, so it gets
-                              // a more deliberate thud instead of a light click.
-                              onPressed: !isInStock || onAddPressed == null
-                                  ? null
-                                  : () {
-                                      HapticFeedback.mediumImpact();
-                                      onAddPressed();
-                                    },
-                              style: OutlinedButton.styleFrom(
-                                // Teal, not blue: this is a basket action, and
-                                // the palette reserves teal for the cart so
-                                // "add to basket" looks the same everywhere it
-                                // appears.
-                                foregroundColor: AppColors.cart,
-                                side: const BorderSide(color: AppColors.cart),
-                                padding: EdgeInsets.zero,
-                              ),
-                              child: Text(isInStock ? 'ADD' : 'N/A', style: const TextStyle(fontSize: 12)),
-                            ),
-                    ),
+                    // At two-up the button keeps its old place beside the
+                    // price; at three-up it has already been drawn over the
+                    // image above, so nothing goes here.
+                    if (!compact)
+                      SizedBox(
+                        height: 32,
+                        width: 72,
+                        child: addControl,
+                      ),
                   ],
                 ),
               ],
             ),
-              ), // Padding
+            );
+          }),   // LayoutBuilder
             ), // InkWell
           ), // Material
         ), // AnimatedContainer
@@ -406,20 +486,52 @@ class ProductGrid {
   /// name (2 lines) + quantity + price/ADD row + internal spacing + padding.
   static const double _infoBlockAt1x = 104.0;
 
+  /// The same block on a compact (three-up) card. Shorter for two concrete
+  /// reasons, not by taste: the ADD button is drawn over the image instead of
+  /// occupying its own ~34px row, and the pack size moves onto the image as a
+  /// chip instead of being its own text line. What remains below the image is
+  /// the overhang gap, a two-line name, and the price row.
+  static const double _compactInfoBlockAt1x = 78.0;
+
   /// Card padding, both sides - the image is inset by this within the card.
   static const double _cardPadding = 16.0;
 
-  static double aspectRatio(BuildContext context, {double columns = 2}) {
+  /// Compact cards use 6px padding per side rather than 8 (see ProductCard's
+  /// LayoutBuilder), so the image is inset by less.
+  static const double _compactCardPadding = 12.0;
+
+  /// Where ProductCard switches to the compact layout. Kept here as well as
+  /// there so the geometry and the widget cannot disagree about which layout
+  /// a given width produces - a disagreement shows up as clipped text.
+  static const double compactBelowWidth = 140.0;
+
+  /// [availableWidth] is the width the GRID actually gets, when that is not
+  /// the whole screen - the category browser puts a rail down the left, so its
+  /// grid is ~90dp narrower than the window. Passing it matters more than it
+  /// looks: the compact layout switches on measured card width, so a grid that
+  /// reports the wrong width gets a ratio computed for the roomy layout while
+  /// the card renders the compact one, and the difference comes out as clipped
+  /// text at the bottom of every tile.
+  static double aspectRatio(
+    BuildContext context, {
+    double columns = 2,
+    double? availableWidth,
+    double outerPadding = 24,
+    double gap = 12,
+  }) {
     final media = MediaQuery.of(context);
     final textScale = media.textScaler.scale(14) / 14;
 
-    // Usable width per card: screen minus outer padding and inter-column gaps.
-    final gridWidth = media.size.width - 24 - (12 * (columns - 1));
+    // Usable width per card: available width minus outer padding and gaps.
+    final width = availableWidth ?? media.size.width;
+    final gridWidth = width - outerPadding - (gap * (columns - 1));
     final cardWidth = gridWidth / columns;
 
-    final imageEdge = cardWidth - _cardPadding;
-    final infoBlock = _infoBlockAt1x * textScale;
-    final cardHeight = imageEdge + infoBlock + _cardPadding;
+    final compact = cardWidth < compactBelowWidth;
+    final padding = compact ? _compactCardPadding : _cardPadding;
+    final imageEdge = cardWidth - padding;
+    final infoBlock = (compact ? _compactInfoBlockAt1x : _infoBlockAt1x) * textScale;
+    final cardHeight = imageEdge + infoBlock + padding;
 
     return (cardWidth / cardHeight).clamp(0.52, 0.85);
   }

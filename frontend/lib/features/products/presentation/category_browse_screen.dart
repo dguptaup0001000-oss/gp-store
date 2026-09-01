@@ -302,6 +302,20 @@ class _SearchBarState extends State<_SearchBar> {
   }
 }
 
+/// Width of the left rail, in one place.
+///
+/// Proportional, not a fixed 88px: on a small phone a fixed rail eats the
+/// grid, and on a large one it leaves the grid stranded. Clamped so the labels
+/// stay readable at both extremes.
+///
+/// Shared with the product grids beside it rather than computed twice. They
+/// subtract it to work out how wide their cards really are, and a second copy
+/// of this expression would eventually drift from this one - which surfaces
+/// not as a slightly-off rail but as clipped text in every product tile, since
+/// card width is what selects ProductCard's compact layout.
+double _railWidth(BuildContext context) =>
+    (MediaQuery.of(context).size.width * 0.24).clamp(84.0, 120.0);
+
 /// The left rail. Scrolls independently of the grid.
 ///
 /// The highlight is driven by a ValueListenable rather than a plain field
@@ -384,10 +398,7 @@ class _CategoryRailState extends State<_CategoryRail> {
 
   @override
   Widget build(BuildContext context) {
-    // Proportional, not a fixed 88px: on a small phone a fixed rail eats the
-    // grid, and on a large one it leaves the grid stranded. Clamped so the
-    // labels stay readable at both extremes.
-    final railWidth = (MediaQuery.of(context).size.width * 0.24).clamp(84.0, 120.0);
+    final railWidth = _railWidth(context);
 
     return Container(
       width: railWidth,
@@ -653,8 +664,16 @@ class _ContinuousCategoryFeedState extends ConsumerState<_ContinuousCategoryFeed
               crossAxisSpacing: 10,
               // The rail takes horizontal space, so the cards here are narrower
               // than on a full-width grid - the ratio is told about that rather
-              // than assuming the whole screen.
-              childAspectRatio: ProductGrid.aspectRatio(context, columns: 2),
+              // than assuming the whole screen. Passing the real width is what
+              // keeps this grid's cards on the same side of the compact
+              // threshold that ProductCard will measure them to be on.
+              childAspectRatio: ProductGrid.aspectRatio(
+                context,
+                columns: 2,
+                availableWidth: MediaQuery.of(context).size.width - _railWidth(context),
+                outerPadding: 20,
+                gap: 10,
+              ),
             ),
             delegate: SliverChildBuilderDelegate(
               (context, index) {
@@ -934,10 +953,14 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
             crossAxisSpacing: 10,
             // The rail takes horizontal space, so the cards here are narrower
             // than on a full-width grid - the ratio is told about that rather
-            // than assuming the whole screen.
+            // than assuming the whole screen. See the sibling grid above for
+            // why passing the real width is load-bearing.
             childAspectRatio: ProductGrid.aspectRatio(
               context,
               columns: 2,
+              availableWidth: MediaQuery.of(context).size.width - _railWidth(context),
+              outerPadding: 20,
+              gap: 10,
             ),
           ),
           itemCount: _products.length + (_isLoading || _error != null ? 1 : 0),

@@ -12,6 +12,7 @@ import '../../cart/presentation/cart_providers.dart';
 import '../../support/domain/store_info_model.dart';
 import '../../support/presentation/support_providers.dart';
 import '../data/cashfree_checkout_service.dart';
+import 'checkout_coupon_list.dart';
 import '../domain/checkout_models.dart';
 import 'checkout_providers.dart';
 import 'order_cancellation_countdown_screen.dart';
@@ -396,6 +397,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     onApply: _fetchPreview,
                     applyEnabled: _selectedAddress != null,
                   ),
+                  // The shop's own offers, below the field rather than above
+                  // it: a shopper who arrived with a code in hand should meet
+                  // the field first, and everyone else scrolls one line.
+                  CheckoutCouponList(
+                    codeField: _couponController,
+                    onApply: _applyCouponCode,
+                    onRemove: _clearCouponCode,
+                  ),
                   const SizedBox(height: 20),
                   _sectionLabel('Payment Method'),
                   Builder(builder: (context) {
@@ -501,6 +510,19 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         ),
       ),
     );
+  }
+
+  /// Tapping Apply on a listed offer does exactly what typing the code and
+  /// pressing Apply does - it fills the field and asks the server to re-price
+  /// the order. The discount is never computed here.
+  void _applyCouponCode(String code) {
+    _couponController.text = code.toUpperCase();
+    _fetchPreview();
+  }
+
+  void _clearCouponCode() {
+    _couponController.clear();
+    _fetchPreview();
   }
 
   Widget _sectionLabel(String text) => Padding(

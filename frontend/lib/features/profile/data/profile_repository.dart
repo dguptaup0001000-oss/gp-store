@@ -1,10 +1,19 @@
+import 'package:image_picker/image_picker.dart';
+
 import '../../../core/api/api_client.dart';
+import '../../../core/images/image_upload_service.dart';
 import '../domain/profile_models.dart';
 
 class ProfileRepository {
-  ProfileRepository({required this.apiClient});
+  ProfileRepository({required this.apiClient})
+      // Constructed here rather than injected, matching
+      // AdminProductsRepository: the upload service is a thin wrapper over
+      // this same apiClient, so passing it in separately would only create a
+      // way for the two to end up pointing at different clients.
+      : _uploads = ImageUploadService(apiClient: apiClient);
 
   final ApiClient apiClient;
+  final ImageUploadService _uploads;
 
   Future<Profile> getMyProfile() async {
     final response = await apiClient.dio.get('/api/customers/me');
@@ -29,6 +38,51 @@ class ProfileRepository {
         if (currentPassword != null && currentPassword.isNotEmpty) 'currentPassword': currentPassword,
       },
     );
+    return Profile.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Longest edge of a stored avatar.
+  ///
+  /// It is displayed at about 96 logical pixels. 512 is four times that, so it
+  /// still looks sharp if it is ever opened larger, and it turns a 4 MB camera
+  /// original into something well under the 2 MB cap - which matters because
+  /// the customer is uploading on mobile data, not shop wifi.
+  static const double _maxAvatarEdge = 512;
+
+  /// Below about 75 JPEG artefacts show on faces; 85 is the usual "cannot see
+  /// the difference" point.
+  static const int _avatarQuality = 85;
+
+  /// Picks a photo, uploads it, and attaches it to the account.
+  ///
+  /// Returns null when the customer backs out of the picker - which must not
+  /// be reported as a failure, because they did not do anything wrong.
+  Future<Profile?> pickAndSetProfilePhoto({
+    ImageSource source = ImageSource.gallery,
+  }) async {
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: _avatarQuality,
+      maxWidth: _maxAvatarEdge,
+      maxHeight: _maxAvatarEdge,
+    );
+    if (picked == null) return null;
+
+    final bytes = await picked.readAsBytes();
+    final objectKey = await _uploads.uploadProfilePhoto(bytes: bytes);
+
+    // Two steps because the bytes go straight to storage, not through the
+    // API. This is the call that actually changes the account, and the server
+    // verifies the key belongs to this customer before honouring it.
+    final response = await apiClient.dio.put(
+      '/api/customers/me/photo',
+      data: {'objectKey': objectKey},
+    );
+    return Profile.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  Future<Profile> removeProfilePhoto() async {
+    final response = await apiClient.dio.delete('/api/customers/me/photo');
     return Profile.fromJson(response.data as Map<String, dynamic>);
   }
 
