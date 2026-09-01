@@ -213,12 +213,21 @@ jobs:
         run: |
           set -uo pipefail
           echo "shard ${{ matrix.shard }} -> ${BASE_URL}"
-          if ! curl -sS -o /dev/null --max-time 20 \
+
+          # rc must be captured from curl itself. `if ! curl ...; then rc=$?`
+          # reads the status of the NEGATED compound, which is always 0 when
+          # curl fails - so this step used to print "curl exit 0" next to a
+          # timeout and name the wrong cause in the legend below. Observed on
+          # a real production run: curl exited 28, the log said 0.
+          curl -sS -o /dev/null --max-time 20 \
                -w 'http_status=%{http_code} dns=%{time_namelookup}s connect=%{time_connect}s tls=%{time_appconnect}s total=%{time_total}s remote=%{remote_ip}\n' \
-               "${BASE_URL}/api/health"; then
-            rc=$?
+               "${BASE_URL}/api/health"
+          rc=$?
+          if [ "${rc}" -ne 0 ]; then
             echo "::error::shard ${{ matrix.shard }} cannot reach ${BASE_URL} (curl exit ${rc}). It would measure nothing and drag the combined result down."
             echo "curl exit 6 = DNS, 7 = connection refused/unreachable, 28 = timeout, 35/60 = TLS."
+            echo "A timeout with dns>0 but connect=0 and an empty remote= means the TCP handshake got no answer:"
+            echo "this runner's source address is being dropped (firewall, fail2ban, or edge rate limiting), not the host being down."
             exit 1
           fi
           status="$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "${BASE_URL}/api/health" || echo 000)"
