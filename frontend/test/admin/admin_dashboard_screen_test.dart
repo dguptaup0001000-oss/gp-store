@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/admin/dashboard/admin_dashboard_screen.dart';
 import 'package:gpstore/features/admin/domain/analytics_models.dart';
+import 'package:gpstore/admin/dashboard/admin_live_clock_panel.dart';
+import 'package:gpstore/features/admin/domain/presence_model.dart';
 import 'package:gpstore/admin/operations/store_operations_models.dart';
 import 'package:gpstore/admin/operations/store_operations_providers.dart';
 import 'package:gpstore/features/admin/presentation/admin_providers.dart';
@@ -45,6 +47,7 @@ void main() {
     Map<String, int>? breakdown,
     List<DeliveryTypeShare>? deliveryShares,
     int lowStock = 4,
+    PresenceSnapshot? presence,
   }) {
     final failure = summaryError;
     return ProviderScope(
@@ -66,6 +69,14 @@ void main() {
         // meaning "a panel was added and the fixture did not hear about it".
         deliveryTypeSharesProvider
             .overrideWith((ref) async => deliveryShares ?? const []),
+        // The live clock panel's shopper count. Overridden for exactly the
+        // reason given above the night-shift panel - and this one arrived by
+        // that route, breaking four tests here with "A Timer is still pending
+        // even after the widget tree was disposed" the day the panel landed.
+        adminPresenceProvider.overrideWith((ref) async =>
+            presence ??
+            const PresenceSnapshot(
+                onlineNow: 12, windowSeconds: 300, available: true)),
       ],
       child: const MaterialApp(
         home: Scaffold(body: AdminDashboardScreen()),
@@ -135,4 +146,60 @@ void main() {
     expect(find.text('30 days'), findsOneWidget);
     expect(find.text('90 days'), findsOneWidget);
   });
+  testWidgets('the clock panel shows the day, the date and the shopper count',
+      (tester) async {
+    tall(tester);
+    await tester.pumpWidget(host());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Right now'), findsOneWidget);
+    // Scoped to the panel: the dashboard is full of numbers, and a bare
+    // find.text('12') would pass or fail on whatever the KPI cards happen to
+    // show rather than on what this panel rendered.
+    expect(
+      find.descendant(
+        of: find.byType(AdminLiveClockPanel),
+        matching: find.text('12'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('shoppers active in the last 5 minutes'),
+        findsOneWidget);
+  });
+
+  testWidgets('an unavailable count is never rendered as zero', (tester) async {
+    // 0 tells a shopkeeper the shop is empty and they may go and do something
+    // else; "--" tells them the dashboard cannot answer. Collapsing the
+    // second into the first is the failure this pins.
+    tall(tester);
+    await tester.pumpWidget(host(
+      presence: const PresenceSnapshot(
+          onlineNow: null, windowSeconds: 300, available: false),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Count unavailable'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(AdminLiveClockPanel),
+        matching: find.text('0'),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('the clock cancels its timers when the dashboard goes away',
+      (tester) async {
+    // The panel starts three timers, one of them a sub-second alignment timer
+    // that was originally fired and forgotten. Flutter's binding fails any
+    // test torn down with a timer still pending, so this assertion IS the
+    // check - it passes only if dispose() cancelled all of them.
+    tall(tester);
+    await tester.pumpWidget(host());
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    await tester.pumpAndSettle();
+  });
+
 }
