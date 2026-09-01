@@ -7,8 +7,10 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -71,11 +73,40 @@ class StaffRoleAuthorizationTest {
      */
     private static final String DELIVERY_PRICING = "/api/admin/delivery-pricing/settings";
 
+    /**
+     * The endpoint that HANDS OUT the rider role.
+     *
+     * PUT here promotes a customer account to ROLE_DELIVERY_BOY, which is the
+     * only privilege-granting route outside the staff console - so a rider
+     * reaching it could promote an account they control, and a customer
+     * reaching it could promote their own. It sits under
+     * /api/delivery-partners/** and is gated on DELIVERY_MANAGE; the three
+     * /me rules above it are exact-path, exact-method matchers, and this is
+     * what proves a path like this one cannot slip through them.
+     */
+    private static final String WORKER_LOGIN_ACCOUNT = "/api/delivery-partners/1/login-account";
+
     @Autowired private MockMvc mockMvc;
 
     /** 403 is the assertion. 401 would mean the annotation did not apply. */
     private void forbidden(String path) throws Exception {
         mockMvc.perform(get(path)).andExpect(status().isForbidden());
+    }
+
+    private void forbiddenPut(String path) throws Exception {
+        mockMvc.perform(put(path).with(
+                        org.springframework.security.test.web.servlet.request
+                                .SecurityMockMvcRequestPostProcessors.csrf())
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"someone@example.com\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    private void forbiddenDelete(String path) throws Exception {
+        mockMvc.perform(delete(path).with(
+                        org.springframework.security.test.web.servlet.request
+                                .SecurityMockMvcRequestPostProcessors.csrf()))
+                .andExpect(status().isForbidden());
     }
 
     private void forbiddenPost(String path) throws Exception {
@@ -241,5 +272,27 @@ class StaffRoleAuthorizationTest {
         forbidden(AUDIT_LOG);
         forbidden(ACTUATOR);
         forbiddenPost(REFUND);
+    }
+
+    @Test
+    @WithStaff(com.gpstore.entity.Role.DELIVERY_BOY)
+    @DisplayName("a rider cannot hand the rider role to an account they control")
+    void riderCannotGrantTheRiderRole() throws Exception {
+        // The escalation this closes is a short one: link an account you own,
+        // get ROLE_DELIVERY_BOY on it, and now you are a second rider nobody
+        // hired - able to read the customer names, phones and addresses on
+        // whatever gets dispatched to you.
+        forbidden(WORKER_LOGIN_ACCOUNT);
+        forbiddenPut(WORKER_LOGIN_ACCOUNT);
+        forbiddenDelete(WORKER_LOGIN_ACCOUNT);
+    }
+
+    @Test
+    @WithStaff(com.gpstore.entity.Role.CUSTOMER)
+    @DisplayName("a shopper cannot promote themselves to a rider")
+    void customerCannotGrantTheRiderRole() throws Exception {
+        forbidden(WORKER_LOGIN_ACCOUNT);
+        forbiddenPut(WORKER_LOGIN_ACCOUNT);
+        forbiddenDelete(WORKER_LOGIN_ACCOUNT);
     }
 }

@@ -141,6 +141,49 @@ jobs:
           REDIS_PORT: 6379
         run: ./mvnw -B clean verify
 
+      # WHAT ACTUALLY FAILED, at the end of the log where it can be found.
+      #
+      # Postgres and Redis service-container logs are dumped at job teardown,
+      # and they are thousands of lines. They bury Maven's own summary so
+      # completely that reading the tail of a failed run shows only database
+      # chatter - which is how a red build ends up diagnosed by guesswork.
+      # Surefire has already written the answer to XML; this prints it last.
+      - name: Name the failing tests
+        if: failure()
+        working-directory: backend
+        run: |
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+
+          bad = []
+          for path in glob.glob("target/surefire-reports/*.xml"):
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  continue
+              for case in root.iter("testcase"):
+                  for kind in ("failure", "error"):
+                      node = case.find(kind)
+                      if node is None:
+                          continue
+                      message = (node.get("message") or "").strip().splitlines()
+                      bad.append(
+                          f"{kind.upper()}  {case.get('classname')}.{case.get('name')}\n"
+                          f"        {message[0] if message else node.get('type') or ''}"
+                      )
+          print("=" * 70)
+          if bad:
+              print(f"{len(bad)} failing test(s):")
+              for line in bad:
+                  print(line)
+          else:
+              print("No failing testcase in surefire XML - the failure is not a")
+              print("test body. Look at the Maven step itself (compile, enforcer,")
+              print("a plugin, or the JVM crashing).")
+          print("=" * 70)
+          PY
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
