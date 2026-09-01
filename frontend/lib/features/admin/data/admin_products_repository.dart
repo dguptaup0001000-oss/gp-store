@@ -1,5 +1,4 @@
 import 'package:image_picker/image_picker.dart';
-import '../domain/presence_model.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/images/image_upload_service.dart';
@@ -7,6 +6,7 @@ import '../../products/domain/product_models.dart';
 import '../domain/admin_coupon_models.dart';
 import '../domain/admin_customer_model.dart';
 import '../domain/admin_payment_model.dart';
+import '../domain/presence_model.dart';
 import '../domain/admin_review_model.dart';
 import '../domain/analytics_models.dart';
 import '../domain/audit_log_model.dart';

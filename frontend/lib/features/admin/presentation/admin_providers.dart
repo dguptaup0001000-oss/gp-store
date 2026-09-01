@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../domain/presence_model.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
@@ -8,6 +7,7 @@ import '../data/admin_products_repository.dart';
 import '../data/delivery_pricing_repository.dart';
 import '../data/territory_repository.dart';
 import '../domain/admin_coupon_models.dart';
+import '../domain/presence_model.dart';
 import '../domain/admin_customer_model.dart';
 import '../domain/admin_payment_model.dart';
 import '../domain/admin_review_model.dart';
