@@ -275,6 +275,30 @@ jobs:
       # Both jobs run env.REMOTE_DEPLOY, and it is idempotent - it resets to
       # origin/main and re-runs deploy.sh - so a partially-connected earlier
       # attempt costs the next one nothing.
+      # THIS CHECKOUT IS LOAD-BEARING, and its absence broke every deploy
+      # from #149 to #154 inclusive.
+      #
+      # These two jobs are otherwise pure SSH: the whole deploy is the
+      # env.REMOTE_DEPLOY script, which runs ON THE VPS, so nothing here ever
+      # needed the repository on the runner. #149 then added the egress-address
+      # step below, which reads a file OUT OF THE REPOSITORY - and the first
+      # line of that step is `chmod +x`, which fails, and the job is dead
+      # before it dials:
+      #
+      #   chmod: cannot access '.github/scripts/log_runner_egress.sh'
+      #
+      # Six consecutive releases failed on that line. The diagnostic added to
+      # investigate why deploys sometimes cannot reach the VPS became the
+      # reason they never reached it at all.
+      #
+      # persist-credentials: false because nothing here pushes, and the SSH
+      # payload is taken from env, not from this checkout.
+      - name: Check out (needed by the egress script below)
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Log this runner's egress address
         if: github.event_name != 'pull_request'
         run: |
@@ -361,6 +385,30 @@ jobs:
       - name: Note why this job is running
         run: |
           echo "::warning::The first deploy runner could not reach the VPS. Retrying from a different runner; see PR #143 for the source-address correlation."
+
+      # THIS CHECKOUT IS LOAD-BEARING, and its absence broke every deploy
+      # from #149 to #154 inclusive.
+      #
+      # These two jobs are otherwise pure SSH: the whole deploy is the
+      # env.REMOTE_DEPLOY script, which runs ON THE VPS, so nothing here ever
+      # needed the repository on the runner. #149 then added the egress-address
+      # step below, which reads a file OUT OF THE REPOSITORY - and the first
+      # line of that step is `chmod +x`, which fails, and the job is dead
+      # before it dials:
+      #
+      #   chmod: cannot access '.github/scripts/log_runner_egress.sh'
+      #
+      # Six consecutive releases failed on that line. The diagnostic added to
+      # investigate why deploys sometimes cannot reach the VPS became the
+      # reason they never reached it at all.
+      #
+      # persist-credentials: false because nothing here pushes, and the SSH
+      # payload is taken from env, not from this checkout.
+      - name: Check out (needed by the egress script below)
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Log this runner's egress address
         if: github.event_name != 'pull_request'
