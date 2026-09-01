@@ -2,6 +2,8 @@ package com.gpstore.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.gpstore.upload.CatalogImageUrlSerializer;
 import java.util.List;
 
 import jakarta.persistence.*;
@@ -84,6 +86,20 @@ private Boolean active;
 // detail, never something a client needs to read back.
 @JsonIgnore
 private String fcmToken;
+
+// The customer's own avatar, stored as a private-bucket reference rather
+// than a URL - same convention as Category.imageUrl and
+// ProductVariant.imageUrl, and for the same reason: a signed URL expires,
+// so persisting one would leave broken images behind within the hour.
+// CatalogImageUrlSerializer turns the stored ref into a fresh signed URL on
+// the way out.
+//
+// Null for every account that has not set one, which is most of them. The
+// app falls back to the initial-letter avatar it already draws, so nothing
+// depends on this being present.
+@JsonSerialize(using = CatalogImageUrlSerializer.class)
+@Column(name = "profile_image_url")
+private String profileImageUrl;
 
 public Cart getCart() {
     return cart;

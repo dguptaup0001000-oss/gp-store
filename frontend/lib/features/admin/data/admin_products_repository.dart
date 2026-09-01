@@ -6,6 +6,7 @@ import '../../products/domain/product_models.dart';
 import '../domain/admin_coupon_models.dart';
 import '../domain/admin_customer_model.dart';
 import '../domain/admin_payment_model.dart';
+import '../domain/presence_model.dart';
 import '../domain/admin_review_model.dart';
 import '../domain/analytics_models.dart';
 import '../domain/audit_log_model.dart';
@@ -22,6 +23,19 @@ class AdminProductsRepository {
   final ImageUploadService _uploads;
 
   /// Includes deactivated products too, unlike the customer-facing list.
+  /// Live concurrent-user count for the dashboard.
+  ///
+  /// Deliberately NOT wrapped in a try/catch that returns zero: the backend
+  /// already distinguishes "nobody is here" from "I could not count", and
+  /// swallowing a transport failure into 0 would throw that distinction away
+  /// at the last step. A thrown error surfaces as the panel's unavailable
+  /// state instead.
+  Future<PresenceSnapshot> getPresence() async {
+    final response = await apiClient.dio.get('/api/admin/presence');
+    return PresenceSnapshot.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
   Future<List<Product>> getAllForAdmin() async {
     final response = await apiClient.dio.get('/api/products/admin/all');
     return (response.data as List)

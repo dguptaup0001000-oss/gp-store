@@ -129,10 +129,10 @@ class _FeedGrid extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       sliver: SliverGrid(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
+          crossAxisCount: 3,
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
-          childAspectRatio: ProductGrid.aspectRatio(context),
+          childAspectRatio: ProductGrid.aspectRatio(context, columns: 3),
         ),
         delegate: SliverChildBuilderDelegate(
           (context, index) {

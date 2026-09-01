@@ -35,7 +35,7 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: 'Backend base URL (include /v1). No default: localhost cannot work across shards. Production is refused.'
+        description: 'Backend base URL (include /v1). No default: localhost cannot work across shards. Production requires confirm_production and is browse-only.'
         required: true
       total_browse_vus:
         description: 'TOTAL concurrent browse VUs across all shards'
@@ -61,6 +61,10 @@ on:
         description: 'Test accounts each shard seeds (0 to skip seeding and run browse-only)'
         required: true
         default: '0'
+      confirm_production:
+        description: 'To load test the LIVE shop, type its hostname exactly (e.g. api.gpstore.co.in). Leave empty otherwise. A confirmed production run is still browse-only: total_cart_vus and accounts_per_shard must both be 0.'
+        required: false
+        default: ''
 
 jobs:
   # REFUSES PRODUCTION BEFORE A SINGLE RUNNER STARTS.
@@ -80,13 +84,45 @@ jobs:
       - name: Refuse production and credential-bearing URLs
         env:
           BASE_URL: ${{ inputs.base_url }}
+          CONFIRM: ${{ inputs.confirm_production }}
+          CART_VUS: ${{ inputs.total_cart_vus }}
+          ACCOUNTS: ${{ inputs.accounts_per_shard }}
         run: |
           set -Eeuo pipefail
           echo "target : ${BASE_URL}"
+
+          # WHAT THE ORIGINAL REFUSAL WAS ACTUALLY ABOUT. It cited
+          # run-concurrent-orders.sh, which has refused the live shop since a
+          # 5,005-VU run produced 502s and a bill - and the harm in that run
+          # was REAL ORDERS AND REAL ACCOUNTS, not the GETs. So the refusal is
+          # kept, but it now separates the two:
+          #
+          #   - Writes against production stay refused outright. There is no
+          #     opt-in for them, because a load test that creates real orders
+          #     in a real shop is not a thing anyone should be one checkbox
+          #     away from.
+          #   - A browse-only run is heavy, not destructive. It is allowed,
+          #     but only when the dispatcher types the live hostname out in
+          #     full, which a fumbled paste into the base_url box cannot do
+          #     by accident. That was the whole point of the original guard.
+          #
+          # browse-cart-checkout.js honours this: CART_VUS=0 disables the cart
+          # scenario, and CHECKOUT_RATE defaults to 0 whenever CART_VUS is 0,
+          # so the two write scenarios are not constructed at all. With
+          # accounts_per_shard=0 the seeding step is skipped as well. What
+          # runs is catalogue GETs.
           case "${BASE_URL}" in
             *gpstore.co.in*)
-              echo "::error::Refusing to load test production. This script places real orders and seeds real accounts - see load-tests/run-concurrent-orders.sh, which has refused this since the 5,005-VU run that produced 502s and a bill."
-              exit 1 ;;
+              if [ -z "${CONFIRM}" ] || ! printf '%s' "${BASE_URL}" | grep -qF -- "${CONFIRM}"; then
+                echo "::error::Refusing to load test production. This is the live shop. To do it deliberately, set confirm_production to its hostname exactly as it appears in base_url - and note that a confirmed run is browse-only."
+                exit 1
+              fi
+              if [ "${CART_VUS}" != "0" ] || [ "${ACCOUNTS}" != "0" ]; then
+                echo "::error::Refusing: a production run must be browse-only. total_cart_vus=${CART_VUS} and accounts_per_shard=${ACCOUNTS} must both be 0. Cart and checkout place REAL ORDERS and seeding creates REAL ACCOUNTS in the live database - that is what the 5,005-VU run did, and there is no opt-in for it."
+                exit 1
+              fi
+              echo "PRODUCTION RUN CONFIRMED - browse-only (cart VUs 0, accounts 0)."
+              echo "Real customers share this backend for the duration of the run." ;;
           esac
           case "${BASE_URL}" in
             *127.0.0.1*|*localhost*)
@@ -177,12 +213,21 @@ jobs:
         run: |
           set -uo pipefail
           echo "shard ${{ matrix.shard }} -> ${BASE_URL}"
-          if ! curl -sS -o /dev/null --max-time 20 \
+
+          # rc must be captured from curl itself. `if ! curl ...; then rc=$?`
+          # reads the status of the NEGATED compound, which is always 0 when
+          # curl fails - so this step used to print "curl exit 0" next to a
+          # timeout and name the wrong cause in the legend below. Observed on
+          # a real production run: curl exited 28, the log said 0.
+          curl -sS -o /dev/null --max-time 20 \
                -w 'http_status=%{http_code} dns=%{time_namelookup}s connect=%{time_connect}s tls=%{time_appconnect}s total=%{time_total}s remote=%{remote_ip}\n' \
-               "${BASE_URL}/api/health"; then
-            rc=$?
+               "${BASE_URL}/api/health"
+          rc=$?
+          if [ "${rc}" -ne 0 ]; then
             echo "::error::shard ${{ matrix.shard }} cannot reach ${BASE_URL} (curl exit ${rc}). It would measure nothing and drag the combined result down."
             echo "curl exit 6 = DNS, 7 = connection refused/unreachable, 28 = timeout, 35/60 = TLS."
+            echo "A timeout with dns>0 but connect=0 and an empty remote= means the TCP handshake got no answer:"
+            echo "this runner's source address is being dropped (firewall, fail2ban, or edge rate limiting), not the host being down."
             exit 1
           fi
           status="$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "${BASE_URL}/api/health" || echo 000)"

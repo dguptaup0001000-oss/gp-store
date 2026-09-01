@@ -11,6 +11,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -336,6 +337,69 @@ public class GlobalExceptionHandler {
         }
         log.error("Cache loader failed on {} {}", req.getMethod(), req.getRequestURI(), ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", req);
+    }
+
+    /**
+     * A client that hangs up mid-response - the customer backgrounds the app while a
+     * category page is still streaming, the mobile network drops, a load generator
+     * abandons an in-flight iteration - surfaces here as an {@link IOException}:
+     * Tomcat's {@code ClientAbortException} on a synchronous write, or Spring's
+     * {@code AsyncRequestNotUsableException} on an async one. Both extend IOException,
+     * so this one handler covers both without compiling against Catalina internals.
+     *
+     * <p>Before this handler existed these landed in the catch-all below and were
+     * logged at ERROR with a full stack trace. That is actively harmful: a 5,000-user
+     * load run produced thousands of them, and on a live shop every customer who
+     * closes the app mid-scroll writes one. Real incidents get buried in noise from
+     * entirely normal client behaviour.
+     *
+     * <p>Returning {@code null} tells Spring the request is fully handled and nothing
+     * is written back - the socket is already gone, so building a JSON error body for
+     * it would only trigger a second write failure on the way out.
+     *
+     * <p>An IOException that is <em>not</em> a client disconnect is a genuine server
+     * fault (a failed file read, a broken outbound stream) and still gets the full
+     * ERROR treatment and a 500.
+     */
+    @ExceptionHandler(IOException.class)
+    public ResponseEntity<ApiError> handleIoException(IOException ex, HttpServletRequest req) {
+        if (isClientDisconnect(ex)) {
+            // DEBUG, not WARN: this is expected traffic, not a degradation signal.
+            log.debug("Client disconnected before the response completed on {} {}",
+                    req.getMethod(), req.getRequestURI());
+            return null;
+        }
+        log.error("I/O failure on {} {}", req.getMethod(), req.getRequestURI(), ex);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", req);
+    }
+
+    /**
+     * True when the throwable chain shows the peer went away rather than the server
+     * failing. Matched by type name and message text because the concrete types live
+     * in the servlet container (Catalina) and the JDK socket layer, neither of which
+     * this class should hard-depend on. The depth cap guards against a self-referential
+     * cause chain.
+     */
+    static boolean isClientDisconnect(Throwable ex) {
+        int depth = 0;
+        for (Throwable t = ex; t != null && depth < 12; t = t.getCause(), depth++) {
+            String type = t.getClass().getSimpleName();
+            if ("ClientAbortException".equals(type)
+                    || "AsyncRequestNotUsableException".equals(type)) {
+                return true;
+            }
+            String message = t.getMessage();
+            if (message != null) {
+                String lower = message.toLowerCase(java.util.Locale.ROOT);
+                if (lower.contains("broken pipe")
+                        || lower.contains("connection reset by peer")
+                        || lower.contains("connection was aborted")
+                        || lower.contains("an established connection was aborted")) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     // Catch-all: never leak internal exception messages/stack traces to the client,

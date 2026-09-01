@@ -401,10 +401,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       controller: scrollController,
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
+        crossAxisCount: 3,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        childAspectRatio: ProductGrid.aspectRatio(context),
+        childAspectRatio: ProductGrid.aspectRatio(context, columns: 3),
       ),
       itemCount: _results.length,
       itemBuilder: (context, index) {

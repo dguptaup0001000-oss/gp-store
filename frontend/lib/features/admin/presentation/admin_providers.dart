@@ -7,6 +7,7 @@ import '../data/admin_products_repository.dart';
 import '../data/delivery_pricing_repository.dart';
 import '../data/territory_repository.dart';
 import '../domain/admin_coupon_models.dart';
+import '../domain/presence_model.dart';
 import '../domain/admin_customer_model.dart';
 import '../domain/admin_payment_model.dart';
 import '../domain/admin_review_model.dart';
@@ -107,6 +108,16 @@ final adminOrderStatusBreakdownProvider = FutureProvider.autoDispose<Map<String,
 final adminTopProductsProvider = FutureProvider.autoDispose<List<TopProduct>>((ref) {
   final days = ref.watch(analyticsPeriodDaysProvider);
   return ref.watch(adminProductsRepositoryProvider).getTopProducts(days: days);
+});
+
+/// Who is in the shop right now.
+///
+/// autoDispose so it stops being fetched the moment the dashboard is closed -
+/// this is the one provider here that a screen refreshes on a timer, and a
+/// kept-alive version would keep polling in the background for as long as the
+/// admin app stayed open.
+final adminPresenceProvider = FutureProvider.autoDispose<PresenceSnapshot>((ref) {
+  return ref.watch(adminProductsRepositoryProvider).getPresence();
 });
 
 final adminLowStockCountProvider = FutureProvider.autoDispose<int>((ref) {

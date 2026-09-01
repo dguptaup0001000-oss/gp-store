@@ -258,3 +258,69 @@ accounts were seeded.
 Confirm you are allowed to saturate the target. Against a small instance, a
 very large run produces "everything timed out", which measures the instance,
 not the code - and on a shared platform it can look like abuse.
+
+## Measured production capacity (2026-09-01)
+
+Browse-only ladder against the live shop, `api.gpstore.co.in`, via
+`load-test-distributed.yml`. Read-only catalogue GETs throughout - cart VUs and
+account seeding were both zero, so no orders and no accounts were created.
+Rungs 1-5 each ran on a SINGLE runner so that source-IP count stayed fixed at
+one; the 3,000 row is the earlier three-shard run and is not directly
+comparable, for the reasons under the table.
+
+| VUs   | Shards | Requests | req/s | 2xx    | 429   | 5xx | No response | Errors  | p95     |
+| ----- | ------ | -------- | ----- | ------ | ----- | --- | ----------- | ------- | ------- |
+| 250   | 1      | 12,686   | 67    | 12,279 | 407   | 0   | 0           | 0.00%   | 422 ms  |
+| 1,000 | 1      | 50,846   | 268   | 48,601 | 2,245 | 0   | 0           | 0.00%   | 420 ms  |
+| 1,500 | 1      | 75,836   | 399   | 72,293 | 3,543 | 0   | 0           | 0.00%   | 481 ms  |
+| 2,000 | 1      | 91,299   | 480   | -      | 4,122 | 0   | 580         | 0.63%   | 492 ms  |
+| 3,500 | 1      | 100,991  | 490   | 87,244 | 4,155 | 0   | 9,592       | 9.50%   | 452 ms  |
+| 3,000 | 3      | 108,018  | 354   | 91,135 | 3,431 | 3   | 13,449      | 12.45%  | 3,913 ms|
+
+**The number to use is ~1,500 concurrent browsing users.** That is the last rung
+with a zero error rate and p95 under half a second. 2,000 is the knee: errors
+appear, but only 0.63%, and latency has still barely moved.
+
+**The ceiling is throughput, not users.** req/s climbs 67 -> 268 -> 399 -> 480
+and then stops at 490. Past that point more VUs do not buy more completed work;
+they buy errors. Any capacity claim should be stated as "about 490 req/s on this
+browse mix", because that number is a property of the box, while the VU count
+that reaches it depends entirely on think time.
+
+**The application never failed.** Three 5xx responses across roughly 450,000
+requests, and zero 502/503/504 at every single rung. Everything the backend
+accepted, it answered correctly and quickly - p95 stayed under 500 ms even at
+3,500 VUs where a tenth of requests were failing. There is no slow-degradation
+zone here: a request is served fast or it never connects at all. That is worth
+knowing, because it means "the app feels slow" will never be the symptom of this
+limit; "the app hangs" will be.
+
+**Do not compare the 3,000 row to the others.** It differs in two ways at once -
+three source IPs instead of one, and a 3m hold instead of 2m - so it cannot say
+which caused its much worse latency. It is kept here only because it is the run
+that prompted the ladder. Note though that 3,500 VUs from ONE address produced
+better latency (452 ms) than 3,000 from THREE (3,913 ms) at lower nominal load.
+One plausible reading is that per-IP rate limiting is doing real load-shedding:
+from a single address the limiter turns excess into 429s before it reaches
+Tomcat, while three addresses get three times as much past it. Untested.
+
+### The finding that matters more than the capacity number
+
+In two of six runs a shard could not open a TCP connection to the shop at all:
+
+    dns=0.056679s connect=0.000000s tls=0.000000s total=20.002605s remote=
+    curl: (28) Connection timed out after 20002 milliseconds
+
+DNS resolved, the handshake got no answer for 20s, and sibling runners reached
+the same host in 1-2s at the same moment. That is a per-source block - firewall,
+fail2ban, or edge rate limiting - not an outage. One of them happened before this
+session had sent any load at all, so bans were already in place, presumably from
+the earlier 5,005- and 10,000-VU runs this README's history refers to.
+
+This matters well beyond load testing. Indian mobile carriers put very large
+numbers of subscribers behind a single NAT address. A mechanism that bans a
+source IP for behaving like too many clients at once cannot distinguish a load
+generator from a busy Jio or Airtel gateway, and the customers behind it would
+see the app hang rather than show an error. Worth auditing `fail2ban-client
+status`, the UFW rules and any hosting-level protection for what gets banned,
+for how long, and whether bans expire.

@@ -4,13 +4,23 @@ import 'package:image_picker/image_picker.dart';
 import '../api/api_client.dart';
 import 'image_upload_guard.dart';
 
-/// Catalogue image kinds the backend will sign. Must match ImageKind.java.
+/// Image kinds the backend will sign. Must match ImageKind.java.
 enum CatalogImageKind {
   product,
-  category;
+  category,
+  /// A customer's own avatar. Signed through /api/customers/me/photo/sign
+  /// rather than the admin-only /api/uploads/sign.
+  profile;
 
   String get apiName => name.toUpperCase();
 }
+
+/// Matches ImageKind.PROFILE.maxBytes on the server.
+///
+/// Checked client-side as well so the customer is told before their mobile
+/// data is spent, not after the upload is refused. The server check is the
+/// one that actually enforces it.
+const int profilePhotoMaxBytes = 2 * 1024 * 1024;
 
 /// Provider-independent upload. The UI must not know whether storage is
 /// R2, S3, or anything else — only upload / replace / delete.
@@ -115,20 +125,70 @@ class ImageUploadService {
     return uploadImage(bytes: bytes, kind: kind, ownerId: ownerId);
   }
 
+  /// [path] and [body] differ between the admin catalogue path and the
+  /// customer profile path, but everything after signing - validating the
+  /// response, PUTting the bytes to storage without the shop JWT - is the
+  /// same, so it lives here once.
+  /// Uploads a customer's own avatar and returns the STAGING OBJECT KEY.
+  ///
+  /// Stops one step short of the catalogue flow on purpose. There, confirm
+  /// returns a URL and the caller stores it. Here the attach step is what
+  /// writes the customer's row, so it must be the profile repository's call -
+  /// and the backend re-checks that the key belongs to the caller before
+  /// accepting it (see ProfilePhotoService), which is why handing a raw key
+  /// back to Dart is safe.
+  ///
+  /// No ownerId is sent. The server takes it from the authenticated
+  /// principal; a client-supplied one would be the thing an attacker changed.
+  Future<String> uploadProfilePhoto({required List<int> bytes}) async {
+    if (bytes.length > profilePhotoMaxBytes) {
+      throw ApiException(
+        statusCode: 400,
+        message: 'That photo is too large. Choose an image under 2 MB.',
+      );
+    }
+    if (!ImageUploadGuard.isAllowedImageBytes(bytes)) {
+      throw ApiException(
+        statusCode: 400,
+        message: 'That file is not a JPEG, PNG, or WebP image.',
+      );
+    }
+
+    // Magic bytes, not the file extension - the same rule the catalogue
+    // upload uses, and the reason a renamed .exe cannot become an avatar.
+    final contentType = ImageUploadGuard.contentTypeForBytes(bytes);
+    final signed = await _sign(
+      kind: CatalogImageKind.profile,
+      contentType: contentType,
+      contentLength: bytes.length,
+      path: '/api/customers/me/photo/sign',
+      body: {
+        'contentType': contentType,
+        'contentLength': bytes.length,
+      },
+    );
+
+    await _putBytes(signed.uploadUrl, signed.headers, bytes);
+    return signed.objectKey;
+  }
+
   Future<_SignedUpload> _sign({
     required CatalogImageKind kind,
     required String contentType,
     required int contentLength,
     int? ownerId,
+    String path = '/api/uploads/sign',
+    Map<String, Object?>? body,
   }) async {
     final response = await apiClient.dio.post<Map<String, dynamic>>(
-      '/api/uploads/sign',
-      data: {
-        'imageType': kind.apiName,
-        'contentType': contentType,
-        'contentLength': contentLength,
-        if (ownerId != null) 'ownerId': ownerId,
-      },
+      path,
+      data: body ??
+          {
+            'imageType': kind.apiName,
+            'contentType': contentType,
+            'contentLength': contentLength,
+            if (ownerId != null) 'ownerId': ownerId,
+          },
     );
     final data = response.data;
     if (data == null) {

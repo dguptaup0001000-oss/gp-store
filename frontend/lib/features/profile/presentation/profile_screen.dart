@@ -6,6 +6,7 @@ import '../../../core/util/app_haptics.dart';
 import '../../address/presentation/address_list_screen.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'change_password_screen.dart';
+import 'profile_avatar.dart';
 import '../../notifications/presentation/notifications_screen.dart';
 import '../../notifications/presentation/notifications_providers.dart';
 import '../../orders/presentation/order_history_screen.dart';
@@ -57,11 +58,7 @@ class ProfileScreen extends ConsumerWidget {
               decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12)),
               child: Row(
                 children: [
-                  const CircleAvatar(
-                    radius: 28,
-                    backgroundColor: AppColors.primary,
-                    child: Icon(Icons.person, color: Colors.white, size: 28),
-                  ),
+                  ProfileAvatar(profile: profile),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
