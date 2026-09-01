@@ -35,9 +35,8 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: 'Backend base URL (include /v1)'
+        description: 'Backend base URL (include /v1). No default: localhost cannot work across shards. Production is refused.'
         required: true
-        default: 'http://127.0.0.1:8081/v1'
       total_browse_vus:
         description: 'TOTAL concurrent browse VUs across all shards'
         required: true
@@ -64,9 +63,48 @@ on:
         default: '0'
 
 jobs:
+  # REFUSES PRODUCTION BEFORE A SINGLE RUNNER STARTS.
+  #
+  # load-test.yml and run-concurrent-orders.sh both refuse the live shop -
+  # this workflow did not, and it is the dangerous one: browse-cart-checkout.js
+  # places real orders and seeds real accounts, and the default here is 2000
+  # VUs across four machines. A dispatcher who typed the live hostname into a
+  # free-text box would have done that to the real database from four IPs at
+  # once.
+  #
+  # Its own job so it fails in seconds, before the plan, before any shard has
+  # started, and before seed-accounts.js has created anything anywhere.
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse production and credential-bearing URLs
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -Eeuo pipefail
+          echo "target : ${BASE_URL}"
+          case "${BASE_URL}" in
+            *gpstore.co.in*)
+              echo "::error::Refusing to load test production. This script places real orders and seeds real accounts - see load-tests/run-concurrent-orders.sh, which has refused this since the 5,005-VU run that produced 502s and a bill."
+              exit 1 ;;
+          esac
+          case "${BASE_URL}" in
+            *127.0.0.1*|*localhost*)
+              echo "::error::A loopback address cannot work here. Every shard is a separate runner, so 127.0.0.1 is each shard's own empty machine. Use load-test.yml (target=ci-ephemeral) for a self-contained run, or name a host all shards can reach."
+              exit 1 ;;
+          esac
+          case "${BASE_URL}" in
+            *[Tt][Oo][Kk][Ee][Nn]=*|*[Pp][Aa][Ss][Ss]*=*|*[Kk][Ee][Yy]=*)
+              echo "::error::base_url appears to contain a credential. Pass secrets as secrets, never in the URL."
+              exit 1 ;;
+          esac
+          echo "guard OK"
+
   # Computes the per-shard VU split once, so every shard agrees on it and the
   # arithmetic is visible in the run log rather than hidden in an expression.
   plan:
+    # Gated: nothing is planned or dispatched until the target is allowed.
+    needs: guard
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -126,6 +164,33 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      # PER SHARD, because reachability is per runner. The combined report is
+      # summed across shards, so one shard that cannot reach the target does
+      # not fail loudly - it quietly contributes zeroes and drags the average
+      # down, which reads as the backend being slow. This is the same
+      # diagnostic load-test.yml gained after a run reported 3/3 failures and
+      # 0 B transferred as though it were a backend result.
+      - name: Preflight - can this shard reach the target?
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -uo pipefail
+          echo "shard ${{ matrix.shard }} -> ${BASE_URL}"
+          if ! curl -sS -o /dev/null --max-time 20 \
+               -w 'http_status=%{http_code} dns=%{time_namelookup}s connect=%{time_connect}s tls=%{time_appconnect}s total=%{time_total}s remote=%{remote_ip}\n' \
+               "${BASE_URL}/api/health"; then
+            rc=$?
+            echo "::error::shard ${{ matrix.shard }} cannot reach ${BASE_URL} (curl exit ${rc}). It would measure nothing and drag the combined result down."
+            echo "curl exit 6 = DNS, 7 = connection refused/unreachable, 28 = timeout, 35/60 = TLS."
+            exit 1
+          fi
+          status="$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "${BASE_URL}/api/health" || echo 000)"
+          if [ "${status}" != "200" ]; then
+            echo "::error::${BASE_URL}/api/health answered ${status}, not 200, from shard ${{ matrix.shard }}."
+            exit 1
+          fi
+          echo "shard ${{ matrix.shard }} preflight OK"
 
       - name: Seed test accounts for this shard
         if: ${{ inputs.accounts_per_shard != '0' }}

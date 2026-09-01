@@ -180,12 +180,18 @@ function requireReachable(res, name, url) {
       `error_code ${res.error_code || 0})\n` +
       `  duration : ${Math.round(res.timings ? res.timings.duration : 0)} ms\n\n` +
       `Nothing was sent or received, so no number below says anything about\n` +
-      `the backend. The usual cause is BASE_URL pointing somewhere this\n` +
-      `machine cannot reach. Note the workflow's default is\n` +
-      `http://127.0.0.1:8081/v1 - that is localhost ON THE RUNNER, where no\n` +
-      `backend is listening - so a dispatch that accepts the defaults always\n` +
-      `produces exactly this. Pass the real base_url, and read the preflight\n` +
-      `step for DNS, TLS, HTTP status and timing.\n`
+      `the backend. The cause is BASE_URL pointing somewhere this machine\n` +
+      `cannot reach.\n\n` +
+      `If this came from the Load Test workflow, read its preflight step\n` +
+      `first - it reports DNS, TLS, HTTP status and timing, and refuses to\n` +
+      `let the run start at all when the target does not answer 200. Reaching\n` +
+      `this message from there means something stopped answering DURING the\n` +
+      `run, which is a different and more interesting fault than a wrong\n` +
+      `address: look at the backend log tail the workflow prints at the end.\n\n` +
+      `Running this script by hand instead? BASE_URL must include /v1 - the\n` +
+      `app serves that context path itself - and must point at a backend that\n` +
+      `is actually listening. 127.0.0.1:8081 is only correct if you started\n` +
+      `one locally.\n`
     );
   }
   if (res.status < 200 || res.status >= 300) {

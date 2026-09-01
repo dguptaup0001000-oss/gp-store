@@ -174,6 +174,35 @@ once those are in place, re-running this same script at higher `BROWSE_VUS`/`CAR
 (or via a distributed generator) is what actually closes in on validating 50k.
 
 
+## Which target the workflows run against
+
+Both workflows used to default `base_url` to `http://127.0.0.1:8081/v1`.
+That address is correct in FORM - the app really does serve `/v1`
+(`server.servlet.context-path`) - but on a GitHub runner nothing is
+listening on it, so every dispatch that accepted the defaults failed. The
+only other address in existence is production, which
+`run-concurrent-orders.sh` refuses outright because this script places real
+orders. There was no third option, and so no way to run these at all.
+
+**`load-test.yml` now builds one.** Its `target` input defaults to
+`ci-ephemeral`, which boots the real backend on the runner against a
+throwaway Postgres and Redis, seeds the catalogue through the shop's own
+`POST /api/admin/catalog/seed`, and points the test at it. Nothing is
+mocked - same jar, same Flyway schema, same Redis-backed rate limiter - and
+the database dies with the runner.
+
+Read those numbers as a **floor**, not a capacity figure: k6 and the JVM
+share one runner's CPU, which is the phone's old confound moved in-process.
+What it is genuinely good for is comparing runs on identical hardware, so a
+change that doubles a query count or adds a lock shows up. For an absolute
+number, dispatch `target=custom` against a host you are allowed to
+saturate.
+
+Both workflows now refuse `*gpstore.co.in*`, matching
+`run-concurrent-orders.sh`. The distributed one additionally refuses
+loopback addresses, which cannot work there at all - every shard is a
+separate machine, so `127.0.0.1` is each shard's own empty runner.
+
 ## Running high VU counts on GitHub Actions (distributed)
 
 `.github/workflows/load-test.yml` runs everything on ONE runner. That is the
@@ -183,7 +212,12 @@ generator rather than the backend.
 
 `.github/workflows/load-test-distributed.yml` splits the load across several
 runners instead. Inputs are TOTALS - it divides them by `shards` itself and
-prints the arithmetic in the run summary.
+prints the arithmetic in the run summary. It has no `ci-ephemeral` option
+and cannot have one: the shards are separate machines, so there is no single
+localhost for them to share. `base_url` is required there with no default,
+and every shard preflights the target before it seeds or generates anything
+- otherwise a shard that cannot reach the host contributes zeroes to the
+summed report, which reads as the backend being slow.
 
 ### What one runner can actually generate
 
