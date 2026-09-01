@@ -19,15 +19,30 @@ import subprocess
 import time
 from typing import Any
 
-REQUIRED_CHECK_NAMES = ("build-and-test", "schema-migrate")
+# Checks that must be SUCCESS before this script merges anything.
+#
+# flutter-checks was added after PR #153 merged with a failing Flutter test.
+# The two backend jobs were the whole list, so a Dart failure could not block
+# a merge - and because build-apk is ignored below, nothing else compiled the
+# app either. The result was that no Dart in this repository was gated by
+# anything at all, which is not what "ignore the APK build" was meant to mean.
+REQUIRED_CHECK_NAMES = ("build-and-test", "schema-migrate", "flutter-checks")
 IGNORE_CHECK_NAMES = {
     "enable github auto-merge",
     "enable auto-merge",
     "auto-merge eligible prs",
     "auto-merge eligible pr",
     "auto-merge eligible pr into main",
-    # APK builds are a separate release artifact. A missing Play keystore
-    # or Flutter flake must not block merging a backend fix.
+    # APK builds are a separate release artifact, and this ignore is still
+    # right: a missing Play keystore or a signing hiccup must not block a
+    # backend fix, and three signed release builds take ~16 minutes that
+    # every merge would otherwise wait for.
+    #
+    # It is only SAFE, though, because flutter-checks above now runs the
+    # analyzer and the Flutter tests separately, in about two minutes, with
+    # no secrets. Before that job existed this entry silently ignored the
+    # app's correctness along with its packaging. Do not remove
+    # flutter-checks from REQUIRED_CHECK_NAMES and leave these here.
     "build-apk",
     "build apk and deploy web",
 }

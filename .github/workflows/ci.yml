@@ -299,6 +299,66 @@ jobs:
           name: schema-migrate-surefire-reports
           path: backend/target/surefire-reports/
 
+  # THE ONLY JOB THAT COMPILES DART BEFORE A MERGE.
+  #
+  # It exists because of a specific failure. build-apk runs analyze, the
+  # Flutter tests AND three release builds, and auto-merge deliberately
+  # IGNORES it - a missing Play keystore must not block a backend fix. The
+  # side effect nobody noticed is that ignoring build-apk ignored the only
+  # check that compiles the app at all, so no Dart was gated by anything:
+  # PR #153 merged with a failing Flutter test, and main carried a leaked
+  # timer until #154.
+  #
+  # Requiring build-apk instead would have fixed that and broken the original
+  # rule - and cost every merge sixteen minutes, which is what three signed
+  # release builds take. So the two concerns are separated here rather than
+  # traded off: correctness of the code (fast, hermetic, no secrets) is
+  # required; producing the release artifact (slow, needs a keystore) stays
+  # ignored.
+  #
+  # Deliberately duplicates build-apk's Flutter setup instead of sharing it.
+  # The alternative is making the packaging job depend on this one, which
+  # serialises sixteen minutes behind two and delays the artifact for no
+  # correctness gain - these run in parallel, and the duplication is four
+  # lines with a pinned version that a test asserts stays in step.
+  flutter-checks:
+    name: flutter-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          # Must match build-and-deploy.yml. See the long comment there for
+          # why this is pinned rather than 'stable' (freezed 2.x caps the
+          # analyzer below what current stable's Dart needs).
+          flutter-version: '3.35.7'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate freezed/json_serializable code
+        # Every domain model is a .freezed.dart/.g.dart part file, and those
+        # are gitignored - without this, analyze fails on the whole app
+        # rather than on anything a person wrote.
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Analyze
+        # Catches what a test suite never sees: an unused import, a dead
+        # null-check, a class used but never imported. The analyzer compiles
+        # every library in lib/; `flutter test` compiles only what a test
+        # reaches.
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run Flutter tests
+        run: flutter test
+
   build-and-push-image:
     needs: [build-and-test, schema-migrate]
     runs-on: ubuntu-latest
@@ -348,13 +408,25 @@ jobs:
 
   automerge:
     name: Auto-merge eligible PR
-    needs: [build-and-test, schema-migrate]
+    # flutter-checks is here because auto-merge previously waited only for the
+    # two backend jobs and merged while the app's own tests were still
+    # running - #153 merged 27 seconds before its Flutter failure was
+    # reported. Waiting for it costs about two minutes and is the difference
+    # between gating the Dart in this repository and not gating it at all.
+    needs: [build-and-test, schema-migrate, flutter-checks]
     # Job if must not mention pull_request vs push: a statically false if
     # skips immediately and aborts sibling jobs that are still queued.
+    #
+    # needs['flutter-checks'], NOT needs.flutter-checks: a hyphen inside a
+    # property path is parsed as SUBTRACTION by the expression language, so
+    # the dotted form evaluates to a number and the condition silently stops
+    # gating anything. Index syntax is the only correct way to reference a
+    # hyphenated job id.
     if: |
       always() &&
       needs.build-and-test.result == 'success' &&
-      needs.schema-migrate.result == 'success'
+      needs.schema-migrate.result == 'success' &&
+      needs['flutter-checks'].result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
