@@ -28,25 +28,52 @@ CUSTOMER_PACKAGE = "in.gpstore.customer"
 ADMIN_PACKAGE = "in.gpstore.admin"
 WORKER_PACKAGE = "com.gpstore.worker"
 
+# Only the worker runs a location foreground service. Forbidding the pair in
+# the other two APKs is not tidiness: a foreground-service permission that
+# arrives by plugin merge drags the whole app into Google Play's Foreground
+# Service declaration review, for a service it does not have.
+FOREGROUND_LOCATION_PERMISSIONS = {
+    "android.permission.FOREGROUND_SERVICE",
+    "android.permission.FOREGROUND_SERVICE_LOCATION",
+}
+
 CUSTOMER_FORBIDDEN_PERMISSIONS = {
     "android.permission.CAMERA",
     "android.permission.ACCESS_BACKGROUND_LOCATION",
     "android.permission.BLUETOOTH_CONNECT",
     "android.permission.BLUETOOTH_SCAN",
-}
+} | FOREGROUND_LOCATION_PERMISSIONS
 ADMIN_FORBIDDEN_PERMISSIONS = {
     "android.permission.CAMERA",
     "android.permission.ACCESS_BACKGROUND_LOCATION",
     "android.permission.RECORD_AUDIO",
-}
+    "android.permission.ACCESS_FINE_LOCATION",
+    "android.permission.ACCESS_COARSE_LOCATION",
+} | FOREGROUND_LOCATION_PERMISSIONS
 WORKER_FORBIDDEN_PERMISSIONS = {
+    # THE ONE THAT MATTERS. A foreground service tracks a rider while they are
+    # working; background location would track them when they are not. The
+    # whole design rests on that line, and this is what stops a dependency bump
+    # quietly crossing it.
     "android.permission.ACCESS_BACKGROUND_LOCATION",
     "android.permission.RECORD_AUDIO",
     "android.permission.BLUETOOTH_CONNECT",
     "android.permission.BLUETOOTH_SCAN",
 }
+ADMIN_REQUIRED_PERMISSIONS = {
+    # Paired thermal printer for order receipts.
+    "android.permission.BLUETOOTH_CONNECT",
+}
 WORKER_REQUIRED_PERMISSIONS = {
     "android.permission.CAMERA",
+    # Without these the location service dies on Android 14 the instant it
+    # starts - a failure that appears only on the newest phones, only in
+    # release, and only once a rider is out on a delivery.
+    "android.permission.FOREGROUND_SERVICE",
+    "android.permission.FOREGROUND_SERVICE_LOCATION",
+    # The service's ongoing notification is hidden without this on API 33+,
+    # which would leave a rider tracked with nothing on screen saying so.
+    "android.permission.POST_NOTIFICATIONS",
 }
 
 
@@ -79,6 +106,9 @@ def permission_violations(package: str, perms: set[str]) -> list[str]:
         extra = sorted(perms & ADMIN_FORBIDDEN_PERMISSIONS)
         if extra:
             problems.append(f"admin APK must not declare {extra}")
+        missing = sorted(ADMIN_REQUIRED_PERMISSIONS - perms)
+        if missing:
+            problems.append(f"admin APK must declare {missing}")
     if package == WORKER_PACKAGE:
         extra = sorted(perms & WORKER_FORBIDDEN_PERMISSIONS)
         if extra:
@@ -86,6 +116,26 @@ def permission_violations(package: str, perms: set[str]) -> list[str]:
         missing = sorted(WORKER_REQUIRED_PERMISSIONS - perms)
         if missing:
             problems.append(f"worker APK must declare {missing}")
+    return problems
+
+
+# A shipped APK has no business containing a desktop executable. win_ble's
+# BLEServer.exe arrives transitively from the thermal-printer package and is
+# excluded in android/app/build.gradle; this is what proves the exclusion
+# actually worked, because a Gradle property that silently stops matching
+# fails in no other visible way.
+FORBIDDEN_ASSET_SUFFIXES = (".exe", ".dll", ".msi")
+
+
+def forbidden_payload_problems(apk: str) -> list[str]:
+    problems: list[str] = []
+    with zipfile.ZipFile(apk) as archive:
+        for entry in archive.namelist():
+            lowered = entry.lower()
+            if lowered.endswith(FORBIDDEN_ASSET_SUFFIXES):
+                problems.append(
+                    f"{os.path.basename(apk)} ships a desktop binary: {entry}"
+                )
     return problems
 
 
@@ -304,6 +354,9 @@ def main() -> None:
         for problem in native_lib_elf_problems(apk):
             print(f"ELF_ALIGN_TOO_SMALL {apk}: {problem}")
             failed = True
+        for problem in forbidden_payload_problems(apk):
+            print(f"FORBIDDEN_PAYLOAD {problem}")
+            failed = True
 
     worker_pkgs = {pkg for name, pkg in seen.items() if "worker" in name.lower()}
     admin_pkgs = {pkg for name, pkg in seen.items() if "admin" in name.lower()}
@@ -346,16 +399,44 @@ if __name__ == "__main__":
             ADMIN_PACKAGE, {"android.permission.BLUETOOTH_CONNECT"}
         )
         assert permission_violations(
+            ADMIN_PACKAGE, {"android.permission.ACCESS_FINE_LOCATION"}
+        ), "admin has no location feature - it must not ship the permission"
+        assert permission_violations(
             WORKER_PACKAGE, {"android.permission.INTERNET"}
         ), "worker missing CAMERA must fail"
-        assert not permission_violations(
-            WORKER_PACKAGE,
-            {"android.permission.CAMERA", "android.permission.ACCESS_FINE_LOCATION"},
+
+        # The complete, correct worker set. Everything below removes exactly
+        # one thing from it, so each assertion names a single cause.
+        worker_ok = {
+            "android.permission.CAMERA",
+            "android.permission.ACCESS_FINE_LOCATION",
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.FOREGROUND_SERVICE_LOCATION",
+            "android.permission.POST_NOTIFICATIONS",
+        }
+        assert not permission_violations(WORKER_PACKAGE, worker_ok), permission_violations(
+            WORKER_PACKAGE, worker_ok
         )
+        for dropped in sorted(WORKER_REQUIRED_PERMISSIONS):
+            assert permission_violations(
+                WORKER_PACKAGE, worker_ok - {dropped}
+            ), f"worker APK without {dropped} must fail"
+        assert permission_violations(
+            WORKER_PACKAGE, worker_ok | {"android.permission.ACCESS_BACKGROUND_LOCATION"}
+        ), "background location must never reach the worker APK"
         assert permission_violations(
             WORKER_PACKAGE,
             {"android.permission.CAMERA", "android.permission.RECORD_AUDIO"},
         )
+
+        # A foreground-service permission merged into the shopper or admin APK
+        # would drag it into Play's Foreground Service review for a service it
+        # does not run.
+        for other in (CUSTOMER_PACKAGE, ADMIN_PACKAGE):
+            for granted in sorted(FOREGROUND_LOCATION_PERMISSIONS):
+                assert permission_violations(
+                    other, {granted}
+                ), f"{other} must not declare {granted}"
         assert elf_pt_load_alignments(fake_elf64_le([65536, 65536, 65536])) == [
             65536,
             65536,
@@ -387,6 +468,20 @@ if __name__ == "__main__":
                 )
             assert not native_lib_elf_problems(good), native_lib_elf_problems(good)
             assert native_lib_elf_problems(bad), "4 KiB CameraX jni must fail"
+
+            assert not forbidden_payload_problems(good), forbidden_payload_problems(good)
+            windows = os.path.join(tmp, "windows.apk")
+            with zipfile.ZipFile(windows, "w") as zf:
+                # The real path win_ble's asset lands at.
+                zf.writestr(
+                    "assets/flutter_assets/packages/win_ble/assets/BLEServer.exe",
+                    b"MZ",
+                )
+            assert forbidden_payload_problems(windows), "BLEServer.exe must fail"
+            mixed_case = os.path.join(tmp, "mixed.apk")
+            with zipfile.ZipFile(mixed_case, "w") as zf:
+                zf.writestr("assets/flutter_assets/packages/win_ble/BLEServer.EXE", b"MZ")
+            assert forbidden_payload_problems(mixed_case), "case must not be a way past this"
         print("self-test ok")
         sys.exit(0)
     main()

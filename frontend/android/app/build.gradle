@@ -61,6 +61,28 @@ android {
     compileSdk flutter.compileSdkVersion
     ndkVersion flutter.ndkVersion
 
+    androidResources {
+        // KEEP A WINDOWS EXECUTABLE OUT OF AN ANDROID APK.
+        //
+        // print_bluetooth_thermal depends on win_ble, which ships
+        // BLEServer.exe as a package asset. Flutter bundles a package's
+        // declared assets for EVERY platform, so a helper binary that only
+        // means anything on Windows is copied into
+        // assets/flutter_assets/packages/win_ble/ and shipped to phones. It
+        // cannot run on Android - it is dead weight in every download, and an
+        // unexplained .exe inside a shipped APK is exactly the kind of thing
+        // a security review stops on.
+        //
+        // Excluded here rather than by dropping the dependency: Bluetooth
+        // receipt printing is a working admin feature, and win_ble is only
+        // reachable from it on desktop.
+        //
+        // The list before the last entry is AGP's own default - setting this
+        // property REPLACES the default rather than adding to it, so omitting
+        // them would start packaging .git and .svn directories into assets.
+        ignoreAssetsPattern "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:!BLEServer.exe"
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11

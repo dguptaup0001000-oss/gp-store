@@ -51,9 +51,10 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
 
   @override
   void dispose() {
-    // The GPS stream stops with the screen. There is no background service
-    // and no foreground notification, which is the point: when this app is
-    // not open, this app is not tracking anybody.
+    // Tears down the foreground service with the screen. This is the last
+    // line of defence rather than the plan: every deliberate exit below stops
+    // tracking explicitly, because a service that outlived its screen would
+    // keep a rider on the shop's map with no way for them to tell.
     _location.stop();
     super.dispose();
   }
@@ -122,6 +123,15 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
       // actually answered gets said out loud.
       if (mounted && !isConnectivityFailure(e)) {
         _tell(extractErrorMessage(e));
+        // AND STOP FOLLOWING THEM. The server answered and refused: this
+        // account is deactivated, or an administrator unlinked the worker
+        // record. Tracking is only defensible while somebody is on shift with
+        // a delivery out, and the server has just said this person is not. A
+        // connectivity failure is deliberately excluded - a rider in a tunnel
+        // is still out delivering, and killing the service there would lose
+        // the position for the rest of the trip.
+        await _location.stop();
+        if (mounted) setState(() => _locationProblem = null);
       }
     } finally {
       if (mounted) setState(() => _refreshing = false);
@@ -152,7 +162,14 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
         ],
       ),
     );
-    if (confirmed == true) await widget.onSignOut();
+    if (confirmed == true) {
+      // Before the session goes, not after. Sign-out rebuilds the gate and
+      // would dispose this screen anyway, but "anyway" is not good enough for
+      // a foreground service: if that rebuild is ever reordered or delayed,
+      // the difference is a rider still being followed after signing out.
+      await _location.stop();
+      await widget.onSignOut();
+    }
   }
 
   void _tell(String message) {

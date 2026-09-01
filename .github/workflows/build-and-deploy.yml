@@ -193,6 +193,8 @@ jobs:
       - name: Verify APK permission policy (no device)
         run: |
           python3 tool/verify_apk_release.py --self-test
+          python3 tool/assert_worker_location_manifest.py --self-test
+          python3 tool/assert_worker_location_manifest.py
           python3 tool/rename_flavor_apks.py --self-test
           python3 tool/assert_app_separation.py --self-test
           python3 tool/assert_app_separation.py

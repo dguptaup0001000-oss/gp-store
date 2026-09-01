@@ -11,11 +11,39 @@
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
 
-    <!-- Foreground-only location while an active delivery screen is open.
-         No ACCESS_BACKGROUND_LOCATION. Tracking stops when the app is not
-         visible. -->
+    <!-- LOCATION, WHILE A DELIVERY IS OUT.
+         A rider cannot hold the app open on screen while riding, so tracking
+         that dies on screen-lock is tracking that never runs when it matters.
+         A foreground service is what Android gives you for exactly this: the
+         work continues with the screen off, and the rider can see at a glance
+         that it is running, because the service must show a notification.
+         Started only while an assigned delivery is live (see
+         WorkerLocationService) and stopped the moment it is not.
+
+         NOT ACCESS_BACKGROUND_LOCATION, and the distinction is the whole
+         point. Background location would let this app read a rider's position
+         when it is not running at all - off shift, at home, asleep. A
+         foreground service started from a visible screen needs only the
+         while-in-use grant below, and it stops when the service stops. The
+         capability to follow somebody off shift simply does not exist here.
+         Removed explicitly so no merged plugin manifest can reintroduce it. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove"/>
+
+    <!-- FOREGROUND_SERVICE is the install-time permission for running one at
+         all (API 28+). FOREGROUND_SERVICE_LOCATION is separately required on
+         API 34+ for a service whose type is "location" - without it Android
+         14 throws SecurityException the instant the service starts, so the
+         feature fails on exactly the newest phones and nowhere else. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+
+    <!-- The service's own ongoing notification is what tells the rider they
+         are being tracked, and on API 33+ it is hidden unless this is granted.
+         Requested at the moment tracking starts, never on first launch - see
+         WorkerLocationService.start(). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <uses-permission android:name="android.permission.DUMP" tools:node="remove"/>
     <uses-permission android:name="android.permission.NFC" tools:node="remove"/>
@@ -47,6 +75,22 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Geolocator's own location service, redeclared rather than left to
+             the plugin's merged manifest.
+             android:foregroundServiceType is not optional: a service started
+             as type location without it is refused by Android 14, and a
+             manifest that merely inherits the attribute from a transitive
+             dependency is one dependency bump away from losing it silently.
+             tools:node="merge" keeps the plugin's own attributes and asserts
+             this one - a conflicting value fails the build instead of
+             shipping. AndroidManifestForegroundServiceTest pins the pair, and
+             verify_apk_release.py re-checks the permissions in the built APK. -->
+        <service
+            android:name="com.baseflow.geolocator.GeolocatorLocationService"
+            android:foregroundServiceType="location"
+            android:exported="false"
+            tools:node="merge" />
 
         <meta-data
             android:name="flutterEmbedding"

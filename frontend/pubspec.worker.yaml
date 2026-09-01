@@ -31,6 +31,21 @@ dependencies:
   # platform channel, not a map SDK - no tiles, no key, no rendering.
   url_launcher: ^6.3.1
 
+  # POST_NOTIFICATIONS, and only for that.
+  #
+  # The location foreground service must post an ongoing notification, and on
+  # API 33+ that notification is HIDDEN unless the permission is granted - so a
+  # rider would be tracked with nothing on screen saying so. The customer app
+  # gets this prompt from FirebaseMessaging; this APK has no Firebase, so
+  # without this package there is no way to ask at all.
+  #
+  # A SECOND DELIBERATE ADDITION TO A LIST THAT EXISTS TO STAY SHORT. Same pin
+  # as the customer pubspec so one lockfile resolves both, and pinned rather
+  # than floated for the reason recorded there: permission_handler_android
+  # 14.0.0 fails to resolve its own Kotlin block against this project's Gradle
+  # template. It ships a platform channel, not a framework.
+  permission_handler: ^12.0.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
