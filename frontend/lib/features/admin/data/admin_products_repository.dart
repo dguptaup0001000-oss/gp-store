@@ -7,6 +7,7 @@ import '../domain/admin_coupon_models.dart';
 import '../domain/admin_customer_model.dart';
 import '../domain/admin_payment_model.dart';
 import '../domain/presence_model.dart';
+import '../domain/worker_login_account.dart';
 import '../domain/admin_review_model.dart';
 import '../domain/analytics_models.dart';
 import '../domain/audit_log_model.dart';
@@ -392,6 +393,38 @@ class AdminProductsRepository {
       'usageLimit': usageLimit,
       'active': active,
     });
+  }
+
+  /// Which account this rider signs in with, if any.
+  Future<WorkerLoginAccount> getWorkerLoginAccount(int partnerId) async {
+    final response =
+        await apiClient.dio.get('/api/delivery-partners/$partnerId/login-account');
+    return WorkerLoginAccount.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// Attaches an EXISTING customer account so the rider can use the worker app.
+  ///
+  /// The server refuses an address nobody has registered, rather than creating
+  /// an account - one invented here would have no password and could not sign
+  /// in either. It also refuses an account already used by another rider, and
+  /// one that has no password. Those refusals arrive as the backend's own
+  /// sentences, which say what the admin should do next, so nothing here
+  /// second-guesses them.
+  Future<WorkerLoginAccount> linkWorkerLoginAccount(int partnerId, String email) async {
+    final response = await apiClient.dio.put(
+      '/api/delivery-partners/$partnerId/login-account',
+      data: {'email': email},
+    );
+    return WorkerLoginAccount.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
+  Future<WorkerLoginAccount> unlinkWorkerLoginAccount(int partnerId) async {
+    final response =
+        await apiClient.dio.delete('/api/delivery-partners/$partnerId/login-account');
+    return WorkerLoginAccount.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
   }
 
   Future<void> deactivateCoupon(int couponId) async {

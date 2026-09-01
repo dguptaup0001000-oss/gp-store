@@ -1,10 +1,12 @@
 package com.gpstore.service;
 
 import com.gpstore.config.PageRequests;
+import com.gpstore.dto.response.WorkerLoginAccountView;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.entity.Role;
 import com.gpstore.exception.BadRequestException;
+import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.DeliveryPartnerRepository;
@@ -100,6 +102,133 @@ public class DeliveryPartnerService {
         }
 
         return saved;
+    }
+
+    /**
+     * Which account, if any, this partner signs in with.
+     *
+     * Transactional because {@code account} is LAZY and this application runs
+     * with open-in-view=false - reading the email has to happen while the
+     * session is still open, which is exactly why this returns a DTO rather
+     * than letting Jackson walk the association later.
+     */
+    @Transactional(readOnly = true)
+    public WorkerLoginAccountView getLoginAccount(Long partnerId) {
+        DeliveryPartner partner = repository.findById(partnerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
+        return describe(partner.getAccount());
+    }
+
+    /**
+     * Attaches an existing customer account to this partner so they can sign
+     * in to the worker app.
+     *
+     * WHY THIS EXISTS. save() links an account by MOBILE NUMBER and creates it
+     * for OTP sign-in - the account it makes has no email and no password. The
+     * worker app has no OTP form at all; email and password is its only way
+     * in. So every partner the roster screen created could be dispatched work
+     * they had no way to log in and collect. The symptom was a worker typing
+     * their Gmail address into the worker app and being told "You don't have
+     * permission to do that" - a 403 from /api/worker/me, because the account
+     * they were typing was a plain customer that no partner row pointed at.
+     *
+     * IT LINKS, IT NEVER CREATES. An account invented here would have no
+     * password, so it could not sign in either - the same dead end one step
+     * further along. If no account exists, the admin is told to have the
+     * person register in the customer app first, which is a thing they can
+     * actually do.
+     *
+     * LINKING GRANTS A ROLE, so this is deliberately admin-only (SecurityConfig
+     * gates /api/delivery-partners/** on DELIVERY_MANAGE) and refuses anything
+     * ambiguous rather than guessing.
+     */
+    @Transactional
+    public WorkerLoginAccountView linkLoginAccount(Long partnerId, String rawEmail) {
+        DeliveryPartner partner = repository.findById(partnerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
+
+        if (rawEmail == null || rawEmail.isBlank()) {
+            throw new BadRequestException("An email address is required.");
+        }
+        String email = rawEmail.trim();
+
+        Customer account = customerRepository.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new BadRequestException(
+                        "No account exists with that email. Ask them to register in the "
+                                + "customer app with this address and a password, then link it here."));
+
+        // An account with no password cannot use the worker app's only sign-in
+        // form. Linking it anyway would report success and leave the worker
+        // still locked out, with nothing on screen explaining why.
+        if (account.getPassword() == null || account.getPassword().isBlank()) {
+            throw new BadRequestException(
+                    "That account has no password - it can only sign in by OTP. The worker "
+                            + "app needs an email and password, so ask them to set one in the "
+                            + "customer app first.");
+        }
+
+        // findByAccountId returns Optional, so two partners sharing one account
+        // would throw a non-unique-result error on the worker's very next
+        // request. Refuse here, where an admin can read why.
+        repository.findByAccountId(account.getId()).ifPresent(existing -> {
+            if (!existing.getId().equals(partner.getId())) {
+                throw new ConflictException(
+                        "That account is already the login for " + existing.getName()
+                                + ". Unlink it there first.");
+            }
+        });
+
+        // Same rule save() uses: they need DELIVERY_BOY to pass SecurityConfig's
+        // check on the worker endpoints, and an ADMIN is never downgraded into
+        // one by being handed a delivery round.
+        if (account.getRole() != Role.ADMIN) {
+            account.setRole(Role.DELIVERY_BOY);
+        }
+        account = customerRepository.save(account);
+        // JwtFilter re-checks the role against the live row, and this cache
+        // sits in front of that read - without invalidating it the promotion
+        // would not take effect until the entry expired.
+        accountStatusService.invalidate(account.getId());
+
+        partner.setAccount(account);
+        repository.save(partner);
+
+        return describe(account);
+    }
+
+    /**
+     * Detaches the login account.
+     *
+     * Demotes DELIVERY_BOY back to CUSTOMER, because an account left with that
+     * role but no roster row can still reach the worker endpoints - it just
+     * gets "no delivery partner profile" from every one of them. Any other
+     * role is left alone: this is unlinking a rider, not a place to change
+     * what an ADMIN or a MANAGER is.
+     */
+    @Transactional
+    public WorkerLoginAccountView unlinkLoginAccount(Long partnerId) {
+        DeliveryPartner partner = repository.findById(partnerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
+
+        Customer account = partner.getAccount();
+        partner.setAccount(null);
+        repository.save(partner);
+
+        if (account != null && account.getRole() == Role.DELIVERY_BOY) {
+            account.setRole(Role.CUSTOMER);
+            customerRepository.save(account);
+            accountStatusService.invalidate(account.getId());
+        }
+        return WorkerLoginAccountView.none();
+    }
+
+    private WorkerLoginAccountView describe(Customer account) {
+        if (account == null) {
+            return WorkerLoginAccountView.none();
+        }
+        boolean hasPassword = account.getPassword() != null && !account.getPassword().isBlank();
+        boolean hasEmail = account.getEmail() != null && !account.getEmail().isBlank();
+        return new WorkerLoginAccountView(true, account.getEmail(), hasEmail && hasPassword);
     }
 
     public List<DeliveryPartner> getAll(Pageable pageable) {

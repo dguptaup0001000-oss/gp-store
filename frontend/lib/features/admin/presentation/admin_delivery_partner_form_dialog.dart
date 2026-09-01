@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/delivery_partner_models.dart';
+import '../domain/worker_login_account.dart';
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
 
@@ -25,6 +26,15 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
   late bool _available;
   bool _isSaving = false;
 
+  // The worker-app login. Loaded separately from the roster fields because it
+  // lives on a different record - the Customer account - and because reading
+  // it has to happen server-side inside a transaction (the association is
+  // lazy and the backend runs with open-in-view off).
+  WorkerLoginAccount? _login;
+  bool _loadingLogin = false;
+  bool _savingLogin = false;
+  late final TextEditingController _loginEmailController;
+
   bool get _isEditing => widget.partner != null;
 
   @override
@@ -36,6 +46,90 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
     _vehicleNumberController = TextEditingController(text: p?.vehicleNumber ?? '');
     _vehicleType = p?.vehicleType ?? 'BIKE';
     _available = p?.available ?? true;
+    _loginEmailController = TextEditingController();
+    final partnerId = p?.id;
+    if (partnerId != null) {
+      // Assigned directly rather than through setState: initState runs inside
+      // the parent's build pass, and setState there is markNeedsBuild during
+      // build, which throws. The first build has not happened yet, so the
+      // spinner shows anyway.
+      _loadingLogin = true;
+      _loadLogin(partnerId);
+    }
+  }
+
+  /// Called once, from initState, which is why it does not raise the spinner
+  /// itself - see the note there.
+  Future<void> _loadLogin(int partnerId) async {
+    try {
+      final login =
+          await ref.read(adminProductsRepositoryProvider).getWorkerLoginAccount(partnerId);
+      if (!mounted) return;
+      setState(() {
+        _login = login;
+        _loginEmailController.text = login.email ?? '';
+      });
+    } catch (_) {
+      // Not fatal: the rest of the dialog still edits the roster record, so
+      // this leaves the section in its empty state rather than blocking Save.
+      // Reopening the dialog retries.
+      if (mounted) setState(() => _login = null);
+    } finally {
+      if (mounted) setState(() => _loadingLogin = false);
+    }
+  }
+
+  Future<void> _linkLogin() async {
+    final partnerId = widget.partner?.id;
+    if (partnerId == null) return;
+    final email = _loginEmailController.text.trim();
+    if (email.isEmpty) return;
+
+    setState(() => _savingLogin = true);
+    try {
+      final login = await ref
+          .read(adminProductsRepositoryProvider)
+          .linkWorkerLoginAccount(partnerId, email);
+      if (!mounted) return;
+      setState(() {
+        _login = login;
+        _loginEmailController.text = login.email ?? '';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('This rider can now sign in to the worker app.'),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      // The backend's refusals name the next step ("ask them to register in
+      // the customer app first"), so they are shown as-is.
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+    } finally {
+      if (mounted) setState(() => _savingLogin = false);
+    }
+  }
+
+  Future<void> _unlinkLogin() async {
+    final partnerId = widget.partner?.id;
+    if (partnerId == null) return;
+
+    setState(() => _savingLogin = true);
+    try {
+      final login = await ref
+          .read(adminProductsRepositoryProvider)
+          .unlinkWorkerLoginAccount(partnerId);
+      if (!mounted) return;
+      setState(() {
+        _login = login;
+        _loginEmailController.clear();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+    } finally {
+      if (mounted) setState(() => _savingLogin = false);
+    }
   }
 
   @override
@@ -43,6 +137,7 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
     _nameController.dispose();
     _mobileController.dispose();
     _vehicleNumberController.dispose();
+    _loginEmailController.dispose();
     super.dispose();
   }
 
@@ -80,6 +175,86 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  /// Only shown when editing: linking needs a partner id, and a rider who does
+  /// not exist yet cannot be given a login.
+  Widget _buildWorkerLoginSection(BuildContext context) {
+    if (_loadingLogin) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Center(
+          child: SizedBox(
+              height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+        ),
+      );
+    }
+
+    final login = _login;
+    final linked = login?.linked ?? false;
+    final canSignIn = login?.canSignIn ?? false;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Worker app sign-in',
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Text(
+          // Says what to do BEFORE they try an address that will be refused.
+          'The worker app signs in with an email and password. Enter the '
+          'address of an account they have already registered in the '
+          'customer app.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _loginEmailController,
+          keyboardType: TextInputType.emailAddress,
+          autocorrect: false,
+          decoration: const InputDecoration(
+            labelText: 'Login email',
+            hintText: 'rider@gmail.com',
+          ),
+        ),
+        // Linked but unusable is a real state, and the one every partner
+        // created by this screen used to be in - an OTP account with no
+        // password. Saying "linked" alone would hide that.
+        if (linked && !canSignIn) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Linked, but this account has no password, so it cannot sign in '
+            'to the worker app yet.',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            FilledButton.tonal(
+              onPressed: _savingLogin ? null : _linkLogin,
+              child: _savingLogin
+                  ? const SizedBox(
+                      height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text(linked ? 'Update login' : 'Link login'),
+            ),
+            if (linked) ...[
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: _savingLogin ? null : _unlinkLogin,
+                child: const Text('Unlink'),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
   }
 
   @override
@@ -126,6 +301,10 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
                 value: _available,
                 onChanged: hapticizeValue((value) => setState(() => _available = value)),
               ),
+              if (_isEditing) ...[
+                const Divider(height: 24),
+                _buildWorkerLoginSection(context),
+              ],
             ],
           ),
         ),
