@@ -32,6 +32,14 @@ class AdminLiveClockPanel extends ConsumerStatefulWidget {
 }
 
 class _AdminLiveClockPanelState extends ConsumerState<AdminLiveClockPanel> {
+  /// EVERY timer this widget starts is held, including the one-shot alignment
+  /// timer below. That one was originally fired and forgotten, on the
+  /// reasoning that it lasts under a second and its callback checks `mounted`
+  /// - but a timer nobody holds is a timer dispose() cannot cancel, and
+  /// Flutter's test binding fails any test whose widget tree is torn down
+  /// with one still pending. It failed four existing admin dashboard tests
+  /// the moment this panel was added to the screen.
+  Timer? _align;
   Timer? _tick;
   Timer? _poll;
   DateTime _now = DateTime.now();
@@ -43,7 +51,7 @@ class _AdminLiveClockPanelState extends ConsumerState<AdminLiveClockPanel> {
     // the seconds hand steps when the second actually changes instead of
     // drifting a few hundred milliseconds off for the life of the screen.
     final msToNextSecond = 1000 - DateTime.now().millisecond;
-    Timer(Duration(milliseconds: msToNextSecond), () {
+    _align = Timer(Duration(milliseconds: msToNextSecond), () {
       if (!mounted) return;
       setState(() => _now = DateTime.now());
       _tick = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -63,6 +71,7 @@ class _AdminLiveClockPanelState extends ConsumerState<AdminLiveClockPanel> {
 
   @override
   void dispose() {
+    _align?.cancel();
     _tick?.cancel();
     _poll?.cancel();
     super.dispose();
