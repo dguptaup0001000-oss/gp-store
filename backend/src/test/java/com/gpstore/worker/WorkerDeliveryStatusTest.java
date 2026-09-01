@@ -15,6 +15,7 @@ import com.gpstore.enums.PaymentStatus;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
+import com.gpstore.support.DispatchSafeTeardown;
 import com.gpstore.repository.AddressRepository;
 import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.DeliveryBatchRepository;
@@ -31,7 +32,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
@@ -116,23 +116,24 @@ class WorkerDeliveryStatusTest {
      * an assignment already committed lands within milliseconds, and by the
      * second pass there is no available partner left to start another.
      */
+    /**
+     * Retire the fixture partners, then delete, retrying the dispatch race away.
+     *
+     * The mechanism and the reasons live in DispatchSafeTeardown - this class
+     * was one of the three that each rediscovered the same race and patched it
+     * differently. FAIL rather than TOLERATE: nothing here exercises real
+     * dispatch, so a delete that never succeeds is a genuine ordering bug and
+     * should say so.
+     */
     @AfterEach
     void cleanUp() {
-        // Retire BEFORE anything else, so the window below stops growing.
+        DispatchSafeTeardown.sweep(this::retirePartners, this::deleteFixtures,
+                DispatchSafeTeardown.WhenStuck.FAIL);
+    }
+
+    private void retirePartners() {
         jdbc.update("UPDATE delivery_partners SET available = false, active = false WHERE name LIKE ?",
                 PREFIX + "%");
-
-        DataIntegrityViolationException stillArriving = null;
-        for (int attempt = 0; attempt < 5; attempt++) {
-            try {
-                deleteFixtures();
-                return;
-            } catch (DataIntegrityViolationException raced) {
-                // A row that did not exist when the pass started. Sweep again.
-                stillArriving = raced;
-            }
-        }
-        throw stillArriving;
     }
 
     private void deleteFixtures() {
@@ -162,10 +163,6 @@ class WorkerDeliveryStatusTest {
         jdbc.update("DELETE FROM orders WHERE order_number LIKE ?", PREFIX + "%");
         jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE full_name LIKE ?", MARKER + "%");
         jdbc.update("DELETE FROM addresses WHERE full_name LIKE ?", MARKER + "%");
-        // Re-assert the retirement on every pass: a dispatcher that was mid
-        // assignment when cleanUp started can still write availability back.
-        jdbc.update("UPDATE delivery_partners SET available = false, active = false WHERE name LIKE ?",
-                PREFIX + "%");
         jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
                 + "(SELECT id FROM delivery_batches WHERE delivery_partner_id IN "
                 + " (SELECT id FROM delivery_partners WHERE name LIKE ?))", PREFIX + "%");

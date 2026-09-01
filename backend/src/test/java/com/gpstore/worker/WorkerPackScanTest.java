@@ -1,5 +1,6 @@
 package com.gpstore.worker;
 
+import com.gpstore.support.DispatchSafeTeardown;
 import com.gpstore.entity.*;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.repository.*;
@@ -99,12 +100,43 @@ class WorkerPackScanTest {
         order = newOrder(shopper, territory, OrderStatus.PACKING);
     }
 
+    /**
+     * Retire the fixture partners, then delete everything, as one retried unit.
+     *
+     * EVERY statement is inside deleteFixtureRows, and that is the fix rather
+     * than a tidy-up. This teardown used to run two thirds of its deletes
+     * inline here and only the partner ones inside a tolerant try/catch - so a
+     * batch that gained a delivery mid-teardown made the guarded part swallow
+     * its error, the partners survived, and DELETE FROM customers below hit
+     * the foreign key from one of them with nothing to catch it. A leftover
+     * that was tolerated on purpose became a red suite blaming the wrong line.
+     *
+     * See DispatchSafeTeardown for the race and why retiring comes first.
+     */
     @AfterEach
     void cleanUp() {
         // Pack-scan notifications run after commit on the side-effects pool.
         // If we delete orders while a task is still in flight, the INSERT
         // lands after DELETE FROM notifications and the FK on orders fails.
+        // Waited for once, outside the retry: it is this context's own pool,
+        // and re-awaiting it on every pass would only add latency.
         awaitSideEffectsIdle();
+
+        DispatchSafeTeardown.sweep(this::retirePartners, this::deleteFixtureRows,
+                // TOLERATE: this class drives real pack-scan dispatch, so an
+                // assignment can legitimately still be arriving. What is left
+                // behind is retired and therefore inert.
+                DispatchSafeTeardown.WhenStuck.TOLERATE);
+    }
+
+    private void retirePartners() {
+        jdbc.update("UPDATE delivery_partners SET available = false, active = false "
+                + "WHERE name LIKE ? OR account_customer_id IN "
+                + "(SELECT id FROM customers WHERE full_name LIKE ?)",
+                PREFIX + "%", MARKER + "%");
+    }
+
+    private void deleteFixtureRows() {
         jdbc.update("DELETE FROM order_scan_events WHERE order_number LIKE ? OR worker_name LIKE ?",
                 PREFIX + "%", PREFIX + "%");
         jdbc.update("DELETE FROM notifications WHERE customer_id IN "
@@ -121,55 +153,6 @@ class WorkerPackScanTest {
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM delivery_subzones WHERE code LIKE ?", PREFIX + "%");
         jdbc.update("DELETE FROM delivery_zones WHERE code LIKE ?", PREFIX + "%");
-        // RETIRE BEFORE DELETING, and the order is load-bearing - the same
-        // race that bit TerritoryDispatchTest. While a fixture worker exists
-        // with available = true they are a real candidate for the least-loaded
-        // fallback path, and fourteen test classes in this suite run with a
-        // live outbox worker (they do not disable outbox.drain-interval-ms,
-        // Spring caches their contexts, and those contexts are never closed).
-        // So a worker belonging to a class that finished minutes ago can
-        // auto-assign an order to one of these and open a batch against them
-        // between these two statements.
-        //
-        // Marking them unavailable and inactive first closes the window
-        // instead of racing it; the deletes then have a stable target, and
-        // anything that still slipped in leaves them retired rather than
-        // failing the test.
-        jdbc.update("UPDATE delivery_partners SET available = false, active = false "
-                + "WHERE name LIKE ? OR account_customer_id IN "
-                + "(SELECT id FROM customers WHERE full_name LIKE ?)",
-                PREFIX + "%", MARKER + "%");
-        // RETRY, THEN TOLERATE.
-        //
-        // The tolerance used to guard only the partner deletes, and the
-        // customer delete sat outside it - which made things worse rather
-        // than safer. A batch that gained a delivery mid-teardown made the
-        // batch delete throw; that was swallowed, so the partners survived;
-        // and three lines later DELETE FROM customers hit the foreign key
-        // from one of those surviving partners, with nothing to catch it. A
-        // deliberately tolerated leftover became a red suite anyway, blaming
-        // a statement that was not the problem.
-        //
-        // So the whole sequence is one unit now. A retry is what actually
-        // fixes the ordinary case: the first pass loses to a dispatcher that
-        // was already mid-assignment, and by the second there is no available
-        // fixture partner left for it to choose, so the rows it added delete
-        // cleanly.
-        for (int attempt = 0; attempt < 3; attempt++) {
-            try {
-                deleteFixtureRows();
-                return;
-            } catch (org.springframework.dao.DataIntegrityViolationException stillReferenced) {
-                // Next pass sweeps whatever arrived during this one.
-            }
-        }
-        // Still referenced after three passes. The partners are unavailable
-        // and inactive, so they are inert: a handful of leftover rows is a
-        // far smaller problem than a red suite that says nothing about the
-        // code.
-    }
-
-    private void deleteFixtureRows() {
         jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
                 + "(SELECT id FROM delivery_batches WHERE delivery_partner_id IN "
                 + " (SELECT id FROM delivery_partners WHERE name LIKE ? "

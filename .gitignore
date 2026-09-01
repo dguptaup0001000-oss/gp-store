@@ -77,3 +77,11 @@ gpstore-*.sql.gz
 *.b64
 key.properties
 upload-keystore.jks
+
+# Python bytecode. Six .pyc files were tracked, which is worse than untidy:
+# a stale .pyc shadows an edited .py for anyone whose interpreter matches the
+# cached magic number, so a CI script could run code nobody can see in the
+# diff. They are also interpreter-version specific and conflict on every
+# merge.
+__pycache__/
+*.py[cod]
