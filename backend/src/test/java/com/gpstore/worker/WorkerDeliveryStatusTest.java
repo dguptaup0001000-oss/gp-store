@@ -31,6 +31,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
@@ -91,8 +92,50 @@ class WorkerDeliveryStatusTest {
         delivery = newDelivery(worker, DeliveryStatus.ASSIGNED);
     }
 
+    /**
+     * Teardown has to win a race against a writer it cannot see.
+     *
+     * Fourteen classes in this suite each cache their own Spring context, and
+     * they all run in one JVM against one database. This class silences its
+     * OWN schedulers with the properties above, but the other contexts keep a
+     * live dispatcher running the whole time - and until the UPDATE below
+     * lands, the fixture partners here are available=true, which makes them
+     * real auto-assignment candidates for it.
+     *
+     * When it takes one, DeliveryService.assignDelivery writes a delivery row
+     * into a WD- batch and queues a "New Delivery Assigned" push to
+     * partner.getAccount() - a WORKER_STATUS_TEST customer. Both land on
+     * ANOTHER context's orderSideEffectsExecutor, so awaitSideEffectsIdle()
+     * below cannot observe them: it can only see this context's pool. The row
+     * appears between two of the DELETEs and the teardown dies on a foreign
+     * key, naming this test for an assignment it never made.
+     *
+     * Two things close it. Retiring the partners is now the FIRST statement
+     * rather than the last, so no new assignment can select them. That still
+     * leaves whatever was already in flight, so the deletes get a few passes:
+     * an assignment already committed lands within milliseconds, and by the
+     * second pass there is no available partner left to start another.
+     */
     @AfterEach
     void cleanUp() {
+        // Retire BEFORE anything else, so the window below stops growing.
+        jdbc.update("UPDATE delivery_partners SET available = false, active = false WHERE name LIKE ?",
+                PREFIX + "%");
+
+        DataIntegrityViolationException stillArriving = null;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try {
+                deleteFixtures();
+                return;
+            } catch (DataIntegrityViolationException raced) {
+                // A row that did not exist when the pass started. Sweep again.
+                stillArriving = raced;
+            }
+        }
+        throw stillArriving;
+    }
+
+    private void deleteFixtures() {
         // NOTIFICATIONS FIRST, and they are not optional here. Moving a
         // delivery to DELIVERED notifies the customer, so this test creates
         // notification rows as a side effect of the thing it is testing - and
@@ -119,11 +162,8 @@ class WorkerDeliveryStatusTest {
         jdbc.update("DELETE FROM orders WHERE order_number LIKE ?", PREFIX + "%");
         jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE full_name LIKE ?", MARKER + "%");
         jdbc.update("DELETE FROM addresses WHERE full_name LIKE ?", MARKER + "%");
-        // Retire before deleting - same live-partner race the other worker and
-        // territory tests document: fourteen classes in this suite run with a
-        // live outbox worker against the shared database, so an available
-        // fixture partner is a real auto-assignment candidate right up until
-        // the moment it is deleted.
+        // Re-assert the retirement on every pass: a dispatcher that was mid
+        // assignment when cleanUp started can still write availability back.
         jdbc.update("UPDATE delivery_partners SET available = false, active = false WHERE name LIKE ?",
                 PREFIX + "%");
         jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
@@ -133,6 +173,11 @@ class WorkerDeliveryStatusTest {
                 + "(SELECT id FROM delivery_partners WHERE name LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", PREFIX + "%");
         jdbc.update("DELETE FROM delivery_partners WHERE account_customer_id IN "
+                + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
+        // Last thing before the customers go: the partner-assignment push is
+        // written to partner.getAccount(), so it can appear long after the
+        // sweep at the top of this method.
+        jdbc.update("DELETE FROM notifications WHERE customer_id IN "
                 + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM customers WHERE full_name LIKE ?", MARKER + "%");
     }

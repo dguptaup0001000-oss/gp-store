@@ -21,6 +21,7 @@ import com.gpstore.service.CartService;
 import com.gpstore.service.OrderService;
 
 import jakarta.persistence.EntityManagerFactory;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -89,6 +90,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CheckoutPerformanceTest {
 
     private static final int CART_SIZE = 10;
+
+    /**
+     * Start every measurement from a quiet executor.
+     *
+     * The tests here place real orders, and placing one queues notification
+     * work on orderSideEffectsExecutor. Hibernate's Statistics are
+     * SessionFactory-wide rather than per-thread, so a task still draining
+     * from the PREVIOUS test is counted against the next test's block. That
+     * is invisible when this class runs alone and shows up under suite load.
+     */
+    @BeforeEach
+    void quiesce() {
+        awaitSideEffectsIdle();
+    }
 
     // Spy, not mock: the real service still runs - this only counts how many
     // times checkout asks the database for the cart. See
@@ -422,6 +437,15 @@ class CheckoutPerformanceTest {
 
         // Warm up so one-off query-plan costs are not attributed here.
         orderService.getOwnedOrderDetail(orderId, fixture.customerId, false);
+
+        // Let the order-placed notifications finish first, exactly as the two
+        // status-change tests above do. Hibernate's Statistics are
+        // SessionFactory-wide, so an after-commit task still running on
+        // orderSideEffectsExecutor is counted against the block below. This
+        // test read 15 queries instead of 2 in a full-suite run for that
+        // reason - the placeOrder above is asynchronous, and under suite load
+        // its side effects land later than they do when this class runs alone.
+        awaitSideEffectsIdle();
 
         QueryCounter.Result result = QueryCounter.measure(entityManagerFactory,
                 () -> orderService.getOwnedOrderDetail(orderId, fixture.customerId, false));
