@@ -32,8 +32,20 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
   // lazy and the backend runs with open-in-view off).
   WorkerLoginAccount? _login;
   bool _loadingLogin = false;
-  bool _savingLogin = false;
+
+  /// Whether the read above failed, kept apart from "nothing is linked".
+  ///
+  /// The status line makes a definite claim either way, and "not set up yet"
+  /// when we simply could not find out is a claim we have not earned - it
+  /// would send the shopkeeper to fix something that may already be fine.
+  bool _loginLoadFailed = false;
   late final TextEditingController _loginEmailController;
+
+  /// A refusal about the login email specifically, shown under that field.
+  ///
+  /// Under the field and not in a SnackBar: the dialog stays open so the
+  /// address can be corrected, and a SnackBar slides in behind it.
+  String? _loginError;
 
   bool get _isEditing => widget.partner != null;
 
@@ -67,68 +79,59 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
       if (!mounted) return;
       setState(() {
         _login = login;
+        _loginLoadFailed = false;
         _loginEmailController.text = login.email ?? '';
       });
     } catch (_) {
       // Not fatal: the rest of the dialog still edits the roster record, so
-      // this leaves the section in its empty state rather than blocking Save.
-      // Reopening the dialog retries.
-      if (mounted) setState(() => _login = null);
+      // this says so rather than blocking Save. Reopening the dialog retries.
+      if (mounted) {
+        setState(() {
+          _login = null;
+          _loginLoadFailed = true;
+        });
+      }
     } finally {
       if (mounted) setState(() => _loadingLogin = false);
     }
   }
 
-  Future<void> _linkLogin() async {
+  /// Applies whatever the login-email field says, as part of Save.
+  ///
+  /// THIS USED TO BE ITS OWN BUTTON, and that was wrong. The address sits in
+  /// a text field, in a form, above a Save button - so Save is what somebody
+  /// presses, and it silently discarded the address they had just typed. The
+  /// rider stayed locked out and the screen reported success. A field that
+  /// only takes effect via a second, separate button is a trap.
+  ///
+  /// Runs BEFORE the roster update: it is the part that can be refused (an
+  /// unregistered address, an account with no password, one already used by
+  /// another rider), so a refusal leaves the whole record untouched and the
+  /// dialog open on the field that has to change.
+  ///
+  /// Returns true when saving may continue.
+  Future<bool> _applyLoginChange() async {
     final partnerId = widget.partner?.id;
-    if (partnerId == null) return;
-    final email = _loginEmailController.text.trim();
-    if (email.isEmpty) return;
+    if (partnerId == null) return true;
 
-    setState(() => _savingLogin = true);
+    final wanted = _loginEmailController.text.trim();
+    final current = _login?.email?.trim() ?? '';
+    // Case-insensitive: the server matches the address that way, so differing
+    // only in case is not a change and must not spend a request.
+    if (wanted.toLowerCase() == current.toLowerCase()) return true;
+
+    final repository = ref.read(adminProductsRepositoryProvider);
     try {
-      final login = await ref
-          .read(adminProductsRepositoryProvider)
-          .linkWorkerLoginAccount(partnerId, email);
-      if (!mounted) return;
-      setState(() {
-        _login = login;
-        _loginEmailController.text = login.email ?? '';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('This rider can now sign in to the worker app.'),
-      ));
+      final login = wanted.isEmpty
+          ? await repository.unlinkWorkerLoginAccount(partnerId)
+          : await repository.linkWorkerLoginAccount(partnerId, wanted);
+      if (mounted) setState(() => _login = login);
+      return true;
     } catch (e) {
-      if (!mounted) return;
       // The backend's refusals name the next step ("ask them to register in
       // the customer app first"), so they are shown as-is.
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
-    } finally {
-      if (mounted) setState(() => _savingLogin = false);
-    }
-  }
-
-  Future<void> _unlinkLogin() async {
-    final partnerId = widget.partner?.id;
-    if (partnerId == null) return;
-
-    setState(() => _savingLogin = true);
-    try {
-      final login = await ref
-          .read(adminProductsRepositoryProvider)
-          .unlinkWorkerLoginAccount(partnerId);
-      if (!mounted) return;
-      setState(() {
-        _login = login;
-        _loginEmailController.clear();
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
-    } finally {
-      if (mounted) setState(() => _savingLogin = false);
+      if (mounted) setState(() => _loginError = extractErrorMessage(e));
+      return false;
     }
   }
 
@@ -144,9 +147,18 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isSaving = true);
+    setState(() {
+      _isSaving = true;
+      _loginError = null;
+    });
 
     try {
+      // First, because it is the fallible half - see _applyLoginChange.
+      if (!await _applyLoginChange()) {
+        return;
+      }
+      if (!mounted) return;
+
       final repository = ref.read(adminProductsRepositoryProvider);
 
       final model = DeliveryPartnerModel(
@@ -193,6 +205,7 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
     final login = _login;
     final linked = login?.linked ?? false;
     final canSignIn = login?.canSignIn ?? false;
+    final ready = linked && canSignIn && !_loginLoadFailed;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,10 +217,12 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
                 ?.copyWith(fontWeight: FontWeight.w600)),
         const SizedBox(height: 4),
         Text(
-          // Says what to do BEFORE they try an address that will be refused.
+          // Says what to do BEFORE they type an address that will be refused,
+          // and says that Save is what applies it - there is no second button.
           'The worker app signs in with an email and password. Enter the '
           'address of an account they have already registered in the '
-          'customer app.',
+          'customer app, then press Save. Clear the field and Save to take '
+          'their access away.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 10),
@@ -215,42 +230,54 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
           controller: _loginEmailController,
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
-          decoration: const InputDecoration(
+          enabled: !_isSaving,
+          onChanged: (_) {
+            // A refusal is about the address that caused it, so it stops
+            // being shown the moment that address is edited.
+            if (_loginError != null) setState(() => _loginError = null);
+          },
+          decoration: InputDecoration(
             labelText: 'Login email',
             hintText: 'rider@gmail.com',
+            errorText: _loginError,
+            // The refusals name a next step and do not fit one line.
+            errorMaxLines: 4,
           ),
         ),
-        // Linked but unusable is a real state, and the one every partner
-        // created by this screen used to be in - an OTP account with no
-        // password. Saying "linked" alone would hide that.
-        if (linked && !canSignIn) ...[
-          const SizedBox(height: 8),
-          Text(
-            'Linked, but this account has no password, so it cannot sign in '
-            'to the worker app yet.',
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: Theme.of(context).colorScheme.error),
-          ),
-        ],
         const SizedBox(height: 8),
+        // What the rider can do RIGHT NOW, in one line. "Linked" on its own
+        // would hide the state every partner used to be in - an OTP account
+        // with no password, attached perfectly well and unable to sign in.
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            FilledButton.tonal(
-              onPressed: _savingLogin ? null : _linkLogin,
-              child: _savingLogin
-                  ? const SizedBox(
-                      height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text(linked ? 'Update login' : 'Link login'),
+            Icon(
+              ready ? Icons.check_circle_outline : Icons.info_outline,
+              size: 16,
+              color: ready
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.error,
             ),
-            if (linked) ...[
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: _savingLogin ? null : _unlinkLogin,
-                child: const Text('Unlink'),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _loginLoadFailed
+                    ? 'Could not read the current sign-in for this rider. '
+                        'Setting an address below still works.'
+                    : !linked
+                        ? 'Not set up yet - this rider cannot open the worker app.'
+                        : canSignIn
+                            ? 'Set up. This rider can sign in to the worker app.'
+                            : 'Attached, but that account has no password, so it '
+                                'still cannot sign in. Ask them to set one in the '
+                                'customer app.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: ready
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.error,
+                    ),
               ),
-            ],
+            ),
           ],
         ),
       ],

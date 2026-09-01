@@ -139,24 +139,49 @@ class WorkerPackScanTest {
                 + "WHERE name LIKE ? OR account_customer_id IN "
                 + "(SELECT id FROM customers WHERE full_name LIKE ?)",
                 PREFIX + "%", MARKER + "%");
-        try {
-            jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
-                    + "(SELECT id FROM delivery_batches WHERE delivery_partner_id IN "
-                    + " (SELECT id FROM delivery_partners WHERE name LIKE ? "
-                    + "  OR account_customer_id IN (SELECT id FROM customers WHERE full_name LIKE ?)))",
-                    PREFIX + "%", MARKER + "%");
-            jdbc.update("DELETE FROM delivery_batches WHERE delivery_partner_id IN "
-                    + "(SELECT id FROM delivery_partners WHERE name LIKE ? "
-                    + " OR account_customer_id IN (SELECT id FROM customers WHERE full_name LIKE ?))",
-                    PREFIX + "%", MARKER + "%");
-            jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", PREFIX + "%");
-            jdbc.update("DELETE FROM delivery_partners WHERE account_customer_id IN "
-                    + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
-        } catch (org.springframework.dao.DataIntegrityViolationException retiredButReferenced) {
-            // Already unavailable and inactive, so inert. A handful of leftover
-            // rows is a far smaller problem than a red suite that says nothing
-            // about the code.
+        // RETRY, THEN TOLERATE.
+        //
+        // The tolerance used to guard only the partner deletes, and the
+        // customer delete sat outside it - which made things worse rather
+        // than safer. A batch that gained a delivery mid-teardown made the
+        // batch delete throw; that was swallowed, so the partners survived;
+        // and three lines later DELETE FROM customers hit the foreign key
+        // from one of those surviving partners, with nothing to catch it. A
+        // deliberately tolerated leftover became a red suite anyway, blaming
+        // a statement that was not the problem.
+        //
+        // So the whole sequence is one unit now. A retry is what actually
+        // fixes the ordinary case: the first pass loses to a dispatcher that
+        // was already mid-assignment, and by the second there is no available
+        // fixture partner left for it to choose, so the rows it added delete
+        // cleanly.
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                deleteFixtureRows();
+                return;
+            } catch (org.springframework.dao.DataIntegrityViolationException stillReferenced) {
+                // Next pass sweeps whatever arrived during this one.
+            }
         }
+        // Still referenced after three passes. The partners are unavailable
+        // and inactive, so they are inert: a handful of leftover rows is a
+        // far smaller problem than a red suite that says nothing about the
+        // code.
+    }
+
+    private void deleteFixtureRows() {
+        jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
+                + "(SELECT id FROM delivery_batches WHERE delivery_partner_id IN "
+                + " (SELECT id FROM delivery_partners WHERE name LIKE ? "
+                + "  OR account_customer_id IN (SELECT id FROM customers WHERE full_name LIKE ?)))",
+                PREFIX + "%", MARKER + "%");
+        jdbc.update("DELETE FROM delivery_batches WHERE delivery_partner_id IN "
+                + "(SELECT id FROM delivery_partners WHERE name LIKE ? "
+                + " OR account_customer_id IN (SELECT id FROM customers WHERE full_name LIKE ?))",
+                PREFIX + "%", MARKER + "%");
+        jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", PREFIX + "%");
+        jdbc.update("DELETE FROM delivery_partners WHERE account_customer_id IN "
+                + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM notifications WHERE customer_id IN "
                 + "(SELECT id FROM customers WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM customers WHERE full_name LIKE ?", MARKER + "%");

@@ -168,8 +168,8 @@ public class SecurityConfig {
                     response.setStatus(jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN);
                     response.setContentType("application/json");
                     response.getWriter().write(
-                            "{\"status\":403,\"error\":\"Forbidden\",\"message\":\"You don't have permission to do that.\",\"path\":\""
-                                    + request.getRequestURI() + "\"}");
+                            "{\"status\":403,\"error\":\"Forbidden\",\"message\":\"" + accessDeniedMessage(request)
+                                    + "\",\"path\":\"" + request.getRequestURI() + "\"}");
                 }))
             .authorizeHttpRequests(auth -> auth
                 // Public: auth endpoints and read-only catalog browsing
@@ -379,4 +379,52 @@ public class SecurityConfig {
 
         return http.build();
     }
+
+    /**
+     * What to tell someone whose request was refused here.
+     *
+     * A denial on a worker route is worth a real sentence. The worker app has
+     * one screen - sign in - and reaching this handler with a valid token
+     * means the password was right and the account simply is not a delivery
+     * worker. The generic line sent that person back to retype a password
+     * that was never wrong; the shopkeeper watching over their shoulder had
+     * nothing to act on either. This names the exact control that fixes it.
+     *
+     * DeliveryWorkerController has its own, better sentence for the next step
+     * along - linked account, no roster row - but it can only be reached
+     * AFTER this filter lets the request through, so it never ran for the
+     * case people actually hit.
+     *
+     * Everything else keeps the generic line on purpose: for the admin
+     * console and the customer app, a refusal that described the missing
+     * permission would be telling whoever probed it what to go looking for.
+     */
+    static String accessDeniedMessage(jakarta.servlet.http.HttpServletRequest request) {
+        String path = request.getRequestURI();
+        if (path == null) {
+            return GENERIC_ACCESS_DENIED;
+        }
+        // The app runs under a context path (/v1), and getRequestURI keeps it.
+        String context = request.getContextPath();
+        if (context != null && !context.isEmpty() && path.startsWith(context)) {
+            path = path.substring(context.length());
+        }
+        if (path.startsWith("/api/worker/")) {
+            return WORKER_ACCESS_DENIED;
+        }
+        return GENERIC_ACCESS_DENIED;
+    }
+
+    static final String GENERIC_ACCESS_DENIED = "You don't have permission to do that.";
+
+    /**
+     * No double quotes and no backslashes: this is written straight into a
+     * hand-built JSON body, which does no escaping. (An apostrophe is fine -
+     * the generic message above carries one.)
+     */
+    static final String WORKER_ACCESS_DENIED =
+            "This account is not set up as a delivery worker. Ask the shop to open your "
+                    + "delivery partner record in the admin app and put this email under "
+                    + "Worker app sign-in.";
+
 }
