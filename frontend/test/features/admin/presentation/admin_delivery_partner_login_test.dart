@@ -1,0 +1,210 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:gpstore/core/api/api_client.dart';
+import 'package:gpstore/core/util/app_haptics.dart';
+import 'package:gpstore/features/admin/data/admin_products_repository.dart';
+import 'package:gpstore/features/admin/domain/delivery_partner_models.dart';
+import 'package:gpstore/features/admin/domain/worker_login_account.dart';
+import 'package:gpstore/features/admin/presentation/admin_delivery_partner_form_dialog.dart';
+import 'package:gpstore/features/admin/presentation/admin_providers.dart';
+
+import '../../../support/test_api_client.dart';
+
+/// Save is what applies the rider's login email.
+///
+/// THE REGRESSION THIS PINS. The address sat in a text field, in a form,
+/// above a Save button - and Save did not apply it. It called only
+/// updateDeliveryPartner, which never touches the login link, so the typed
+/// address was discarded, the dialog closed reporting success, and the rider
+/// stayed locked out of the worker app with "You don't have permission to do
+/// that." Linking needed a second, separate button that nobody presses when
+/// there is a Save button right there.
+class _FakeRepository extends AdminProductsRepository {
+  _FakeRepository({this.initial, this.linkError})
+      : super(apiClient: buildTestApiClient(FakeHttpClientAdapter()));
+
+  final WorkerLoginAccount? initial;
+  final Object? linkError;
+
+  final List<String> linked = <String>[];
+  int unlinkCalls = 0;
+  int updateCalls = 0;
+
+  @override
+  Future<WorkerLoginAccount> getWorkerLoginAccount(int partnerId) async {
+    return initial ?? WorkerLoginAccount.none;
+  }
+
+  @override
+  Future<WorkerLoginAccount> linkWorkerLoginAccount(int partnerId, String email) async {
+    if (linkError != null) throw linkError!;
+    linked.add(email);
+    return WorkerLoginAccount(linked: true, email: email, canSignIn: true);
+  }
+
+  @override
+  Future<WorkerLoginAccount> unlinkWorkerLoginAccount(int partnerId) async {
+    unlinkCalls++;
+    return WorkerLoginAccount.none;
+  }
+
+  @override
+  Future<void> updateDeliveryPartner(DeliveryPartnerModel partner) async {
+    updateCalls++;
+  }
+}
+
+const _partner = DeliveryPartnerModel(
+  id: 7,
+  name: 'Deepak Kumar Gupta',
+  mobile: '6388293365',
+  vehicleType: 'BIKE',
+);
+
+/// Pushed through showDialog, not pumped bare: _save pops its route on
+/// success, and a dialog that is the whole home widget has no route to pop.
+Future<void> _open(WidgetTester tester, _FakeRepository repository) async {
+  await tester.pumpWidget(ProviderScope(
+    overrides: [adminProductsRepositoryProvider.overrideWithValue(repository)],
+    child: MaterialApp(
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () => showDialog<bool>(
+              context: context,
+              builder: (_) => const AdminDeliveryPartnerFormDialog(partner: _partner),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ),
+  ));
+  await tester.tap(find.text('open'));
+  await tester.pumpAndSettle();
+}
+
+Finder get _emailField => find.widgetWithText(TextField, 'Login email');
+
+void main() {
+  setUpAll(setUpFakeSecureStorage);
+  setUp(() {
+    AppHaptics.resetForTest();
+    AppHaptics.enabled = false;
+  });
+
+  testWidgets('Save links the address typed into the login field', (tester) async {
+    final repository = _FakeRepository();
+    await _open(tester, repository);
+
+    await tester.enterText(_emailField, 'guptadeepak@gmail.com');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(repository.linked, ['guptadeepak@gmail.com'],
+        reason: 'Save must apply the address. This is the whole bug: it used to '
+            'save the roster fields and silently drop the email.');
+    expect(repository.updateCalls, 1, reason: 'The roster fields still save too.');
+  });
+
+  testWidgets('the address is trimmed before it is sent', (tester) async {
+    final repository = _FakeRepository();
+    await _open(tester, repository);
+
+    await tester.enterText(_emailField, '  guptadeepak@gmail.com  ');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(repository.linked, ['guptadeepak@gmail.com']);
+  });
+
+  testWidgets('an unchanged address is not re-sent', (tester) async {
+    final repository = _FakeRepository(
+      initial: const WorkerLoginAccount(
+          linked: true, email: 'rider@gmail.com', canSignIn: true),
+    );
+    await _open(tester, repository);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(repository.linked, isEmpty,
+        reason: 'Editing only the vehicle number must not spend a link request.');
+    expect(repository.updateCalls, 1);
+  });
+
+  testWidgets('differing only in case is not a change', (tester) async {
+    final repository = _FakeRepository(
+      initial: const WorkerLoginAccount(
+          linked: true, email: 'Rider@Gmail.com', canSignIn: true),
+    );
+    await _open(tester, repository);
+
+    await tester.enterText(_emailField, 'rider@gmail.com');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(repository.linked, isEmpty,
+        reason: 'The server matches the address case-insensitively.');
+  });
+
+  testWidgets('clearing the field and saving takes the access away', (tester) async {
+    final repository = _FakeRepository(
+      initial: const WorkerLoginAccount(
+          linked: true, email: 'rider@gmail.com', canSignIn: true),
+    );
+    await _open(tester, repository);
+
+    await tester.enterText(_emailField, '');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(repository.unlinkCalls, 1);
+    expect(repository.linked, isEmpty);
+  });
+
+  testWidgets('a refused address keeps the dialog open and says why', (tester) async {
+    final repository = _FakeRepository(
+      // An ApiException, because that is what the backend's refusals actually
+      // arrive as - a bare Exception collapses to "Something went wrong" in
+      // extractErrorMessage and would test the wrong path entirely.
+      linkError: ApiException(
+          statusCode: 400,
+          message: 'No account exists with that email. Ask them to register in '
+              'the customer app with this address and a password, then link it here.'),
+    );
+    await _open(tester, repository);
+
+    await tester.enterText(_emailField, 'nobody@gmail.com');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('No account exists with that email'), findsOneWidget,
+        reason: 'The refusal names the next step, and it belongs under the field '
+            'that caused it - not in a SnackBar behind a dialog that has closed.');
+    expect(_emailField, findsOneWidget,
+        reason: 'The dialog must stay open so the address can be corrected.');
+    expect(repository.updateCalls, 0,
+        reason: 'A refused login must not half-save the record.');
+  });
+
+  testWidgets('a rider with no login is told so, not left to guess', (tester) async {
+    final repository = _FakeRepository();
+    await _open(tester, repository);
+
+    expect(find.textContaining('cannot open the worker app'), findsOneWidget);
+  });
+
+  testWidgets('linked without a password is not reported as set up', (tester) async {
+    // The state EVERY partner used to be in: an OTP account attached
+    // perfectly well and unable to sign in. "Linked" alone would hide it.
+    final repository = _FakeRepository(
+      initial: const WorkerLoginAccount(
+          linked: true, email: 'rider@gmail.com', canSignIn: false),
+    );
+    await _open(tester, repository);
+
+    expect(find.textContaining('no password'), findsOneWidget);
+  });
+}
