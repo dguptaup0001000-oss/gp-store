@@ -487,7 +487,14 @@ jobs:
             -c "DROP DATABASE IF EXISTS gpstore_dr_replacement;" -c "CREATE DATABASE gpstore_dr_replacement;"
 
           # A source database with the real schema and a shop's worth of rows.
-          "${PSQL[@]}" pg_dump -h localhost -U gpstore -s -d gpstore_schema_bootstrap \
+          #
+          # WITH DATA, not pg_dump -s. A schema-only copy leaves
+          # flyway_schema_history EMPTY, and the recovery script rejects a
+          # restore whose schema history is missing - correctly, because that
+          # is what a half-restored database looks like. Verified rather than
+          # assumed: a -s dump of a live database reports schema version
+          # "none", which is exactly the guard's failure condition.
+          "${PSQL[@]}" pg_dump -h localhost -U gpstore -d gpstore_schema_bootstrap \
             > /tmp/dr-schema.sql
           docker run --rm --network=host -e PGPASSWORD=gpstore_test_password \
             -v /tmp/dr-schema.sql:/schema.sql:ro postgres:17 \
@@ -545,8 +552,11 @@ jobs:
               SELECT CASE WHEN
                 (SELECT COUNT(*) FROM customers WHERE email = 'rehearsal@example.com') = 1
                 AND (SELECT COUNT(*) FROM orders WHERE order_number LIKE 'REHEARSAL-%') = 2
-                AND (SELECT COUNT(*) FROM payments) = 2
-                AND (SELECT COUNT(*) FROM delivery_partners) = 2
+                AND (SELECT COUNT(*) FROM payments p JOIN orders o ON o.id = p.order_id
+                     WHERE o.order_number LIKE 'REHEARSAL-%') = 2
+                AND (SELECT COUNT(*) FROM delivery_partners
+                     WHERE mobile IN ('9000000002', '9000000003')) = 2
+                AND (SELECT COUNT(*) FROM flyway_schema_history) > 0
               THEN 'shop recovered' ELSE 'DATA MISSING' END;" | tee /tmp/dr/verdict.txt
           grep -q 'shop recovered' /tmp/dr/verdict.txt
 
