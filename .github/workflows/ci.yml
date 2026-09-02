@@ -498,10 +498,35 @@ jobs:
           echo "$PGDG_LINE" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-17
+
+          # INSTALLING IT IS NOT ENOUGH. On Debian and Ubuntu /usr/bin/pg_restore
+          # is postgresql-common's pg_wrapper shim, which picks a version -
+          # and with both 16 and 17 present it keeps choosing the DEFAULT,
+          # which is still 16. The first attempt at this installed 17 and the
+          # script correctly reported "pg_restore is PostgreSQL 16; the server
+          # is 17", because the shim had not changed its mind.
+          #
+          # So put the versioned binaries ahead of the shim, and fail loudly
+          # if they are not where they should be rather than carrying on with
+          # the wrong ones.
+          PG17_BIN=/usr/lib/postgresql/17/bin
+          if [ ! -x "$PG17_BIN/pg_restore" ]; then
+            echo "::error::postgresql-client-17 did not provide $PG17_BIN/pg_restore"
+            ls -la /usr/lib/postgresql/ || true
+            exit 1
+          fi
+          export PATH="$PG17_BIN:$PATH"
+
           # Named up front so any future failure in this step explains itself
           # rather than needing the postgres container's log to diagnose.
           echo "pg_restore: $(pg_restore --version)"
           echo "pg_dump:    $(pg_dump --version)"
+          # And proved, not just printed: the drill is worthless if it runs
+          # against the version it was meant to stop using.
+          pg_restore --version | grep -q ' 17\.' || {
+            echo "::error::pg_restore is still not 17 after prepending $PG17_BIN"
+            exit 1
+          }
 
           export PGPASSWORD=gpstore_test_password
           PSQL=(docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17)
