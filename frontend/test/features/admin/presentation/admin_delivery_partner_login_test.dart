@@ -196,10 +196,14 @@ void main() {
       // An ApiException, because that is what the backend's refusals actually
       // arrive as - a bare Exception collapses to "Something went wrong" in
       // extractErrorMessage and would test the wrong path entirely.
+      // A message the server actually produces now. The old fixture quoted
+      // "register in the customer app", which was the guidance from the
+      // link-only design this replaced - a fixture describing behaviour the
+      // code no longer has is a trap for the next reader.
       linkError: ApiException(
-          statusCode: 400,
-          message: 'No account exists with that email. Ask them to register in '
-              'the customer app with this address and a password, then link it here.'),
+          statusCode: 409,
+          message: 'That address belongs to a staff account. Use an address '
+              'that is not already used by an administrator.'),
     );
     await _open(tester, repository);
 
@@ -207,7 +211,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('No account exists with that email'), findsOneWidget,
+    expect(find.textContaining('belongs to a staff account'), findsOneWidget,
         reason: 'The refusal names the next step, and it belongs under the field '
             'that caused it - not in a SnackBar behind a dialog that has closed.');
     expect(_emailField, findsOneWidget,
@@ -220,7 +224,10 @@ void main() {
     final repository = _FakeRepository();
     await _open(tester, repository);
 
-    expect(find.textContaining('cannot open the worker app'), findsOneWidget);
+    // Wording changed when the shop started SETTING the credentials rather
+    // than linking an account the rider had made: the status now names the
+    // two fields directly above it instead of describing the consequence.
+    expect(find.textContaining('Not set up yet'), findsOneWidget);
   });
 
   testWidgets('linked without a password is not reported as set up', (tester) async {
