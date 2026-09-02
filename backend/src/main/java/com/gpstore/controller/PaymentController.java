@@ -125,7 +125,7 @@ public class PaymentController {
     @PutMapping("/order/{orderId}/cod/complete")
     public com.gpstore.dto.response.PaymentResponse completeCodPayment(@PathVariable Long orderId) {
         boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
-        return paymentService.completeCodPayment(orderId, currentUser.customerId(), isAdmin);
+        return paymentService.completeCodPayment(orderId, currentUser.get().getWorkerId(), isAdmin);
     }
 
     // Admin only (enforced in SecurityConfig) - confirms a UPI payment

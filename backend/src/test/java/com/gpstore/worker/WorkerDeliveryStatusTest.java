@@ -186,7 +186,7 @@ class WorkerDeliveryStatusTest {
     void deliveredIsRefusedFromAssigned() {
         ConflictException refused = assertThrows(ConflictException.class,
                 () -> deliveryService.updateDeliveryStatus(
-                        delivery.getId(), "DELIVERED", accountOf(worker), false),
+                        delivery.getId(), "DELIVERED", sessionOf(worker), false),
                 "ASSIGNED -> DELIVERED must be refused. Allowing it stamps a delivery time, tells the "
                         + "customer their order arrived, and settles a COD payment for money nobody took.");
 
@@ -204,7 +204,7 @@ class WorkerDeliveryStatusTest {
         for (String rubbish : new String[]{"BANANA", "", "  ", "delivered!"}) {
             assertThrows(BadRequestException.class,
                     () -> deliveryService.updateDeliveryStatus(
-                            delivery.getId(), rubbish, accountOf(worker), false),
+                            delivery.getId(), rubbish, sessionOf(worker), false),
                     "\"" + rubbish + "\" was accepted as a delivery status.");
         }
 
@@ -258,7 +258,7 @@ class WorkerDeliveryStatusTest {
 
         assertThrows(ConflictException.class,
                 () -> deliveryService.updateDeliveryStatus(
-                        delivery.getId(), "CANCELLED", accountOf(worker), false),
+                        delivery.getId(), "CANCELLED", sessionOf(worker), false),
                 "A delivered order cannot be un-delivered - the goods changed hands.");
     }
 
@@ -269,7 +269,7 @@ class WorkerDeliveryStatusTest {
     void anotherWorkersDeliveryIsNotFound() {
         assertThrows(ResourceNotFoundException.class,
                 () -> deliveryService.updateDeliveryStatus(
-                        delivery.getId(), "PACKED", accountOf(otherWorker), false),
+                        delivery.getId(), "PACKED", sessionOf(otherWorker), false),
                 "Authorisation must be checked before anything else, and a stranger's delivery must "
                         + "read as not-found rather than as forbidden.");
 
@@ -280,11 +280,11 @@ class WorkerDeliveryStatusTest {
     @Test
     @DisplayName("a worker cannot read a delivery that is not theirs")
     void anotherWorkersDeliveryIsHiddenOnRead() {
-        assertTrue(deliveryService.getDeliveryById(delivery.getId(), accountOf(worker), false).isPresent(),
+        assertTrue(deliveryService.getDeliveryById(delivery.getId(), sessionOf(worker), false).isPresent(),
                 "the assigned worker must still be able to open their own delivery");
-        assertTrue(deliveryService.getDeliveryById(delivery.getId(), accountOf(otherWorker), false).isEmpty(),
+        assertTrue(deliveryService.getDeliveryById(delivery.getId(), sessionOf(otherWorker), false).isEmpty(),
                 "a stranger's delivery must read as missing, not as someone else's row");
-        assertTrue(deliveryService.getDeliveryById(delivery.getId(), accountOf(otherWorker), true).isPresent(),
+        assertTrue(deliveryService.getDeliveryById(delivery.getId(), sessionOf(otherWorker), true).isPresent(),
                 "an admin can still open any delivery");
     }
 
@@ -301,13 +301,13 @@ class WorkerDeliveryStatusTest {
 
         assertThrows(ResourceNotFoundException.class,
                 () -> paymentService.completeCodPayment(
-                        delivery.getOrder().getId(), accountOf(otherWorker), false),
+                        delivery.getOrder().getId(), sessionOf(otherWorker), false),
                 "COD collection must use the same assigned-partner check as delivery status");
 
         assertEquals(PaymentStatus.COD_PENDING,
                 paymentRepository.findByOrderId(delivery.getOrder().getId()).orElseThrow().getPaymentStatus());
 
-        paymentService.completeCodPayment(delivery.getOrder().getId(), accountOf(worker), false);
+        paymentService.completeCodPayment(delivery.getOrder().getId(), sessionOf(worker), false);
         assertEquals(PaymentStatus.COD_RECEIVED,
                 paymentRepository.findByOrderId(delivery.getOrder().getId()).orElseThrow().getPaymentStatus());
     }
@@ -321,7 +321,7 @@ class WorkerDeliveryStatusTest {
         // somebody else's delivery.
         assertThrows(ResourceNotFoundException.class,
                 () -> deliveryService.updateDeliveryStatus(
-                        delivery.getId(), "DELIVERED", accountOf(otherWorker), false));
+                        delivery.getId(), "DELIVERED", sessionOf(otherWorker), false));
     }
 
     // ------------------------------------------------------------ location
@@ -329,7 +329,7 @@ class WorkerDeliveryStatusTest {
     @Test
     @DisplayName("a position that is not a coordinate is refused")
     void impossibleCoordinatesAreRejected() {
-        Long account = accountOf(worker);
+        Long account = sessionOf(worker);
 
         assertThrows(BadRequestException.class,
                 () -> partnerService.updateMyLocation(account, Double.NaN, 83.94, null),
@@ -349,7 +349,7 @@ class WorkerDeliveryStatusTest {
     @DisplayName("a fix too vague to be useful is refused rather than drawn")
     void wildlyInaccurateFixesAreRejected() {
         assertThrows(BadRequestException.class,
-                () -> partnerService.updateMyLocation(accountOf(worker), 27.162, 83.940, 5000.0),
+                () -> partnerService.updateMyLocation(sessionOf(worker), 27.162, 83.940, 5000.0),
                 "A 5 km accuracy radius is a cell-tower guess. Rendered as a pin it looks exactly as "
                         + "confident as a real fix.");
     }
@@ -358,7 +358,7 @@ class WorkerDeliveryStatusTest {
     @DisplayName("a real position is stored with the server's own timestamp")
     void goodFixesAreStored() {
         LocalDateTime before = LocalDateTime.now().minusSeconds(1);
-        partnerService.updateMyLocation(accountOf(worker), 27.162, 83.940, 12.0);
+        partnerService.updateMyLocation(sessionOf(worker), 27.162, 83.940, 12.0);
 
         DeliveryPartner stored = partnerRepository.findById(worker.getId()).orElseThrow();
         assertEquals(27.162, stored.getCurrentLatitude(), 0.000001);
@@ -376,7 +376,7 @@ class WorkerDeliveryStatusTest {
         // There is no partner id in the request at all, by design. This is the
         // assertion that it stays that way: updating as one worker must never
         // touch another's row.
-        partnerService.updateMyLocation(accountOf(worker), 27.162, 83.940, 10.0);
+        partnerService.updateMyLocation(sessionOf(worker), 27.162, 83.940, 10.0);
 
         assertNull(partnerRepository.findById(otherWorker.getId()).orElseThrow().getCurrentLatitude(),
                 "Another worker's position was written.");
@@ -385,11 +385,16 @@ class WorkerDeliveryStatusTest {
     // ------------------------------------------------------------ fixtures
 
     private void move(String status) {
-        deliveryService.updateDeliveryStatus(delivery.getId(), status, accountOf(worker), false);
+        deliveryService.updateDeliveryStatus(delivery.getId(), status, sessionOf(worker), false);
     }
 
-    private Long accountOf(DeliveryPartner partner) {
-        return partner.getAccount().getId();
+    /**
+     * The id a worker's own session carries - the roster row, not a customer
+     * account. Worker credentials moved onto the roster row, so there is no
+     * account link to translate through any more.
+     */
+    private Long sessionOf(DeliveryPartner partner) {
+        return partner.getId();
     }
 
     private Customer newCustomer(String name, Role role) {

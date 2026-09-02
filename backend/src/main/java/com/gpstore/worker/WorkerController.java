@@ -26,11 +26,12 @@ import java.util.Map;
 /**
  * The delivery worker's app talks to exactly these routes.
  *
- * THERE IS NO LOGIN HERE ON PURPOSE. The worker signs in through the existing
- * /api/auth endpoints with the DELIVERY_BOY account an administrator created
- * for them, and this controller reads that identity from the JWT. Adding a
- * second login path would mean a second place where credentials are checked
- * and a second place to get it wrong, for no gain.
+ * SIGN-IN LIVES NEXT DOOR, in WorkerAuthController. A worker's credentials are
+ * on their roster row, not on a Customer account, so their token carries the
+ * roster id and this controller reads it straight from the JWT. That is what
+ * replaced the old arrangement, where a worker signed in as a customer and
+ * then had to be translated back through an account link that could - and
+ * did - come back empty on a rider who had signed in perfectly well.
  *
  * NOTHING HERE READS AN IDENTITY FROM THE REQUEST. Not a worker id, not a
  * zone, not a subzone, not an order status. Every one of those is looked up
@@ -115,7 +116,7 @@ public class WorkerController {
         //
         // Same rows the delivery app's own /my-assignments returns, built by
         // the same code, so the ownership check has one home and cannot drift.
-        body.put("activeTasks", deliveryService.getMyAssignments(currentUser.customerId()));
+        body.put("activeTasks", deliveryService.getMyAssignments(worker.getId()));
 
         return body;
     }
@@ -207,7 +208,7 @@ public class WorkerController {
      */
     @PostMapping("/scans/pack")
     public WorkerScanService.ScanResult packScan(@Valid @RequestBody PackScanRequest request) {
-        return scanService.packScan(currentUser.customerId(), request.qrToken(), request.clientRequestId());
+        return scanService.packScan(requireWorker().getId(), request.qrToken(), request.clientRequestId());
     }
 
     /**
@@ -255,9 +256,27 @@ public class WorkerController {
                 ? "ON_DELIVERY" : "AVAILABLE";
     }
 
+    /**
+     * The roster row behind this request.
+     *
+     * IT COMES FROM THE TOKEN, not from a lookup that can come back empty.
+     * A worker session carries its own roster id, so the old failure - sign
+     * in successfully, then be told "this login is not linked to a worker
+     * record" with no way to fix it from inside either app - cannot happen
+     * any more. The only remaining case is a staff account visiting the
+     * worker API, which is a different sentence because it has a different
+     * fix.
+     */
     private DeliveryPartner requireWorker() {
-        return partnerRepository.findByAccountId(currentUser.customerId())
+        Long workerId = currentUser.get().getWorkerId();
+        if (workerId == null) {
+            throw new BadRequestException(
+                    "Sign in with a worker login to use the worker app. Staff accounts "
+                            + "manage the roster from the admin app instead.");
+        }
+        return partnerRepository.findById(workerId)
+                .filter(worker -> worker.getDeletedAt() == null)
                 .orElseThrow(() -> new BadRequestException(
-                        "This login is not linked to a worker record. Ask an administrator to link it."));
+                        "This worker account is no longer on the roster."));
     }
 }

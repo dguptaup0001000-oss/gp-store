@@ -418,18 +418,25 @@ public class PaymentService {
      * partner profile all read as the same not-found so order ids cannot be
      * probed.
      */
-    private void assertCallerMayCompleteCod(Long orderId, Long callerCustomerId, boolean isAdmin) {
+    /**
+     * @param callerWorkerId the roster id from a worker's own token. Null for
+     *                       anyone who is not on a worker session, which reads
+     *                       as "order not found" rather than as a different
+     *                       failure - the caller must not learn the order
+     *                       exists.
+     */
+    private void assertCallerMayCompleteCod(Long orderId, Long callerWorkerId, boolean isAdmin) {
         if (isAdmin) {
             return;
         }
-        if (callerCustomerId == null || deliveryRepository == null || deliveryPartnerService == null) {
+        if (callerWorkerId == null || deliveryRepository == null || deliveryPartnerService == null) {
             throw new ResourceNotFoundException("Order not found");
         }
         com.gpstore.entity.Delivery delivery = deliveryRepository.findByOrderId(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
         com.gpstore.entity.DeliveryPartner caller;
         try {
-            caller = deliveryPartnerService.getByAccountIdOrThrow(callerCustomerId);
+            caller = deliveryPartnerService.getLiveWorkerOrThrow(callerWorkerId);
         } catch (ResourceNotFoundException hidden) {
             throw new ResourceNotFoundException("Order not found");
         }
@@ -589,10 +596,10 @@ public class PaymentService {
 
     @Transactional
     public com.gpstore.dto.response.PaymentResponse completeCodPayment(
-            Long orderId, Long callerCustomerId, boolean isAdmin) {
+            Long orderId, Long callerWorkerId, boolean isAdmin) {
 
         Payment payment = lockOrderThenPayment(orderId);
-        assertCallerMayCompleteCod(orderId, callerCustomerId, isAdmin);
+        assertCallerMayCompleteCod(orderId, callerWorkerId, isAdmin);
 
         if (payment.getPaymentMethod() != PaymentMethod.COD) {
             throw new ConflictException("This payment is not a COD payment");

@@ -185,14 +185,17 @@ public class WorkerScanService {
      * and the reason distinguishes a wrong territory from a taken order from a
      * cancelled one.
      *
-     * @param accountCustomerId the authenticated account, from the JWT - never
-     *                          from the request body
+     * @param workerId the roster row from the worker's own token - never from
+     *                 the request body. A worker session carries this
+     *                 directly now, so there is no account link to translate
+     *                 through and no way for it to be missing.
      */
     @Transactional
-    public ScanResult packScan(Long accountCustomerId, String qrToken, String clientRequestId) {
-        DeliveryPartner worker = partnerRepository.findByAccountId(accountCustomerId)
+    public ScanResult packScan(Long workerId, String qrToken, String clientRequestId) {
+        DeliveryPartner worker = partnerRepository.findById(workerId)
+                .filter(candidate -> candidate.getDeletedAt() == null)
                 .orElseThrow(() -> new BadRequestException(
-                        "This login is not linked to a worker record. Ask an administrator to link it."));
+                        "This worker account is no longer on the roster."));
 
         // ---- Replay before anything else -------------------------------
         // A retry must not be able to fail differently from the attempt it is

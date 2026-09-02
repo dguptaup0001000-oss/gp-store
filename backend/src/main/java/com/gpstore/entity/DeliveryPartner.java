@@ -52,4 +52,42 @@ public class DeliveryPartner {
     @JoinColumn(name = "account_customer_id")
     @JsonIgnore
     private Customer account;
+
+    // ---------------------------------------------------------- the login
+    //
+    // THE WORKER'S CREDENTIALS LIVE HERE, not on a Customer row. Signing in
+    // to the worker app reads this record and nothing else - no customer
+    // lookup, no role, no account link. That is what lets one address be an
+    // administrator, a shopper and a rider at the same time: three separate
+    // credentials that cannot collide with each other.
+
+    /** What they type in. Matched case-insensitively; unique among live workers. */
+    private String loginEmail;
+
+    /**
+     * BCrypt output. Never the password, and never serialised - @JsonIgnore
+     * so no admin screen, error body or log line can carry it out of here.
+     */
+    @JsonIgnore
+    private String passwordHash;
+
+    /**
+     * Barred until this moment; null or past means they may sign in.
+     *
+     * A TIMESTAMP RATHER THAN A FLAG, because "closed for an hour" has to end
+     * by itself. A boolean somebody must remember to clear is a worker locked
+     * out all weekend because whoever set it went home.
+     */
+    private LocalDateTime suspendedUntil;
+
+    /** Shown to them at the login screen, so a bar is never unexplained. */
+    private String suspensionReason;
+
+    /**
+     * Soft delete. Deliveries reference this row, so erasing it would leave
+     * finished orders with no rider. Set this and the worker disappears from
+     * the roster, from dispatch and from the login screen, while the shop's
+     * own history stays readable.
+     */
+    private LocalDateTime deletedAt;
 }

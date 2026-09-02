@@ -7,7 +7,6 @@ import '../domain/admin_coupon_models.dart';
 import '../domain/admin_customer_model.dart';
 import '../domain/admin_payment_model.dart';
 import '../domain/presence_model.dart';
-import '../domain/worker_login_account.dart';
 import '../domain/admin_review_model.dart';
 import '../domain/analytics_models.dart';
 import '../domain/audit_log_model.dart';
@@ -395,44 +394,8 @@ class AdminProductsRepository {
     });
   }
 
-  /// Which account this rider signs in with, if any.
-  Future<WorkerLoginAccount> getWorkerLoginAccount(int partnerId) async {
-    final response =
-        await apiClient.dio.get('/api/delivery-partners/$partnerId/login-account');
-    return WorkerLoginAccount.fromJson(
-        Map<String, dynamic>.from(response.data as Map));
-  }
 
-  /// Attaches an EXISTING customer account so the rider can use the worker app.
-  ///
-  /// The server refuses an address nobody has registered, rather than creating
-  /// an account - one invented here would have no password and could not sign
-  /// in either. It also refuses an account already used by another rider, and
-  /// one that has no password. Those refusals arrive as the backend's own
-  /// sentences, which say what the admin should do next, so nothing here
-  /// second-guesses them.
-  /// Sets the email and password this rider signs in to the worker app with.
-  ///
-  /// [password] may be empty ONLY when the account already has one - the shop
-  /// re-saving a rider should not have to retype it, and must not blank it by
-  /// accident. The server decides, because only it knows whether the account
-  /// exists; sending an empty password for a new rider is refused there.
-  Future<WorkerLoginAccount> linkWorkerLoginAccount(
-      int partnerId, String email, String password) async {
-    final response = await apiClient.dio.put(
-      '/api/delivery-partners/$partnerId/login-account',
-      data: {'email': email, 'password': password},
-    );
-    return WorkerLoginAccount.fromJson(
-        Map<String, dynamic>.from(response.data as Map));
-  }
 
-  Future<WorkerLoginAccount> unlinkWorkerLoginAccount(int partnerId) async {
-    final response =
-        await apiClient.dio.delete('/api/delivery-partners/$partnerId/login-account');
-    return WorkerLoginAccount.fromJson(
-        Map<String, dynamic>.from(response.data as Map));
-  }
 
   Future<void> deactivateCoupon(int couponId) async {
     await apiClient.dio.delete('/api/coupons/$couponId');

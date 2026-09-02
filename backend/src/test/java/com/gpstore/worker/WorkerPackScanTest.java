@@ -197,8 +197,15 @@ class WorkerPackScanTest {
         return partnerRepository.save(p);
     }
 
-    private Long accountOf(DeliveryPartner worker) {
-        return worker.getAccount().getId();
+    /**
+     * The id a worker's own session carries.
+     *
+     * It used to be their linked Customer account, because a worker signed in
+     * as a customer. Worker credentials now live on the roster row, so the
+     * token carries the roster id and there is nothing to translate.
+     */
+    private Long sessionOf(DeliveryPartner worker) {
+        return worker.getId();
     }
 
     private Order newOrder(Customer customer, DeliverySubzone subzone, OrderStatus status) {
@@ -273,7 +280,7 @@ class WorkerPackScanTest {
     void primaryWorkerScansSuccessfully() {
         String token = issue(order);
 
-        var result = scanService.packScan(accountOf(primary), token, "req-1");
+        var result = scanService.packScan(sessionOf(primary), token, "req-1");
 
         assertTrue(result.accepted(), result.message());
         assertEquals("ACCEPTED", result.outcome());
@@ -295,7 +302,7 @@ class WorkerPackScanTest {
         // employees; a scan happens at the counter with the order still in the
         // shop. Any word about delivery would send a customer to wait at the
         // door for something that has not left.
-        scanService.packScan(accountOf(primary), issue(order), "req-1");
+        scanService.packScan(sessionOf(primary), issue(order), "req-1");
 
         List<Notification> sent = List.of();
         for (int attempt = 0; attempt < 50; attempt++) {
@@ -346,9 +353,9 @@ class WorkerPackScanTest {
         jdbc.update("INSERT INTO subzone_backup_partners (subzone_id, partner_id, priority) "
                 + "VALUES (?, ?, 1)", territory.getId(), other.getId());
 
-        assertTrue(scanService.packScan(accountOf(primary), token, "req-1").accepted());
+        assertTrue(scanService.packScan(sessionOf(primary), token, "req-1").accepted());
 
-        var second = scanService.packScan(accountOf(other), token, "req-2");
+        var second = scanService.packScan(sessionOf(other), token, "req-2");
 
         assertFalse(second.accepted());
         assertEquals("ALREADY_SCANNED", second.outcome());
@@ -378,7 +385,7 @@ class WorkerPackScanTest {
             pool.submit(() -> {
                 await(start);
                 try {
-                    if (scanService.packScan(accountOf(primary), token, null).accepted()) {
+                    if (scanService.packScan(sessionOf(primary), token, null).accepted()) {
                         accepted.incrementAndGet();
                     }
                 } finally {
@@ -388,7 +395,7 @@ class WorkerPackScanTest {
             pool.submit(() -> {
                 await(start);
                 try {
-                    if (scanService.packScan(accountOf(other), token, null).accepted()) {
+                    if (scanService.packScan(sessionOf(other), token, null).accepted()) {
                         accepted.incrementAndGet();
                     }
                 } finally {
@@ -425,7 +432,7 @@ class WorkerPackScanTest {
     void wrongTerritoryIsRefused() {
         DeliveryPartner stranger = newWorker("stranger");
 
-        var result = scanService.packScan(accountOf(stranger), issue(order), "req-1");
+        var result = scanService.packScan(sessionOf(stranger), issue(order), "req-1");
 
         assertFalse(result.accepted());
         assertEquals("NOT_AUTHORISED", result.outcome());
@@ -443,7 +450,7 @@ class WorkerPackScanTest {
         jdbc.update("INSERT INTO subzone_backup_partners (subzone_id, partner_id, priority) "
                 + "VALUES (?, ?, 1)", territory.getId(), backup.getId());
 
-        var result = scanService.packScan(accountOf(backup), issue(order), "req-1");
+        var result = scanService.packScan(sessionOf(backup), issue(order), "req-1");
 
         assertTrue(result.accepted(), result.message());
         assertTrue(result.message() != null);
@@ -457,7 +464,7 @@ class WorkerPackScanTest {
         assigned.setAssignedWorkerPartner(stranger);
         orderRepository.save(assigned);
 
-        var result = scanService.packScan(accountOf(stranger), issue(order), "req-1");
+        var result = scanService.packScan(sessionOf(stranger), issue(order), "req-1");
 
         assertTrue(result.accepted(), result.message());
     }
@@ -472,7 +479,7 @@ class WorkerPackScanTest {
         assigned.setAssignedWorkerPartner(stranger);
         orderRepository.save(assigned);
 
-        var result = scanService.packScan(accountOf(primary), issue(order), "req-1");
+        var result = scanService.packScan(sessionOf(primary), issue(order), "req-1");
 
         assertFalse(result.accepted());
         assertTrue(result.message().contains(stranger.getName()), result.message());
@@ -484,7 +491,7 @@ class WorkerPackScanTest {
         primary.setActive(false);
         partnerRepository.save(primary);
 
-        var result = scanService.packScan(accountOf(primary), issue(order), "req-1");
+        var result = scanService.packScan(sessionOf(primary), issue(order), "req-1");
 
         assertFalse(result.accepted());
         assertEquals("WORKER_INACTIVE", result.outcome());
@@ -495,7 +502,7 @@ class WorkerPackScanTest {
     @Test
     @DisplayName("a code that is not one of ours says so plainly")
     void unknownTokenIsRefused() {
-        var result = scanService.packScan(accountOf(primary), "not-a-real-token", "req-1");
+        var result = scanService.packScan(sessionOf(primary), "not-a-real-token", "req-1");
 
         assertFalse(result.accepted());
         assertEquals("UNKNOWN_TOKEN", result.outcome());
@@ -512,7 +519,7 @@ class WorkerPackScanTest {
         cancelled.setOrderStatus(OrderStatus.CANCELLED);
         orderRepository.save(cancelled);
 
-        var result = scanService.packScan(accountOf(primary), token, "req-1");
+        var result = scanService.packScan(sessionOf(primary), token, "req-1");
 
         assertFalse(result.accepted());
         assertEquals("NOT_ELIGIBLE", result.outcome());
@@ -527,7 +534,7 @@ class WorkerPackScanTest {
         dispatched.setOrderStatus(OrderStatus.OUT_FOR_DELIVERY);
         orderRepository.save(dispatched);
 
-        var result = scanService.packScan(accountOf(primary), token, "req-1");
+        var result = scanService.packScan(sessionOf(primary), token, "req-1");
 
         assertFalse(result.accepted());
         assertEquals("NOT_ELIGIBLE", result.outcome());
@@ -543,8 +550,8 @@ class WorkerPackScanTest {
         // two notifications.
         String token = issue(order);
 
-        var first = scanService.packScan(accountOf(primary), token, "same-request-id");
-        var second = scanService.packScan(accountOf(primary), token, "same-request-id");
+        var first = scanService.packScan(sessionOf(primary), token, "same-request-id");
+        var second = scanService.packScan(sessionOf(primary), token, "same-request-id");
 
         assertTrue(first.accepted());
         assertTrue(second.accepted(), "the retry must not turn a success into a failure");
@@ -569,7 +576,7 @@ class WorkerPackScanTest {
     void missingRequestIdDoesNotBlockAWorker() {
         // A worker standing at a counter must never be blocked by a
         // client-side detail they cannot see or fix.
-        var result = scanService.packScan(accountOf(primary), issue(order), null);
+        var result = scanService.packScan(sessionOf(primary), issue(order), null);
         assertTrue(result.accepted(), result.message());
     }
 
@@ -582,7 +589,7 @@ class WorkerPackScanTest {
         // counter being told no, and why. Storing only successes leaves the
         // system silent exactly when somebody is asking.
         DeliveryPartner stranger = newWorker("stranger");
-        var result = scanService.packScan(accountOf(stranger), issue(order), "req-1");
+        var result = scanService.packScan(sessionOf(stranger), issue(order), "req-1");
 
         List<OrderScanEvent> history = scanRepository.findByOrderIdOrderByScannedAtDesc(order.getId());
 
@@ -599,7 +606,7 @@ class WorkerPackScanTest {
     @Test
     @DisplayName("a successful scan records who, where and when")
     void successIsAudited() {
-        scanService.packScan(accountOf(primary), issue(order), "req-1");
+        scanService.packScan(sessionOf(primary), issue(order), "req-1");
 
         OrderScanEvent event = scanRepository.findByOrderIdOrderByScannedAtDesc(order.getId()).get(0);
 
@@ -622,7 +629,7 @@ class WorkerPackScanTest {
         Order unmapped = newOrder(shopper, null, OrderStatus.PACKING);
         DeliveryPartner anyone = newWorker("anyone");
 
-        var result = scanService.packScan(accountOf(anyone), issue(unmapped), "req-1");
+        var result = scanService.packScan(sessionOf(anyone), issue(unmapped), "req-1");
 
         assertTrue(result.accepted(), result.message());
         assertNull(result.subzoneCode());

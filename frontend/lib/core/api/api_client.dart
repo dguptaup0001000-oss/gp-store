@@ -213,7 +213,12 @@ class ApiClient {
     unawaited(() async {
       try {
         final refreshToken = await tokenStorage.getRefreshToken();
-        if (refreshToken == null) {
+        // BLANK COUNTS AS ABSENT. A worker session has no refresh token at
+        // all - it is a shift-long access token the server revokes by
+        // re-checking the roster row, not by expiry - and it stores an empty
+        // string. Posting that to /api/auth/refresh would be a guaranteed
+        // round trip to a 401 before the same "sign in again" outcome.
+        if (refreshToken == null || refreshToken.isEmpty) {
           completer.complete(null);
           return;
         }

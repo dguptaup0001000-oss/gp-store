@@ -283,17 +283,17 @@ public class DeliveryService {
 
     @Transactional(readOnly = true)
     public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryById(
-            Long id, Long callerCustomerId, boolean isAdmin) {
+            Long id, Long callerWorkerId, boolean isAdmin) {
         return deliveryRepository.findById(id)
-                .filter(delivery -> staffMaySee(delivery, callerCustomerId, isAdmin))
+                .filter(delivery -> staffMaySee(delivery, callerWorkerId, isAdmin))
                 .map(com.gpstore.dto.response.DeliveryResponse::from);
     }
 
     @Transactional(readOnly = true)
     public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryByOrderId(
-            Long orderId, Long callerCustomerId, boolean isAdmin) {
+            Long orderId, Long callerWorkerId, boolean isAdmin) {
         return deliveryRepository.findByOrderId(orderId)
-                .filter(delivery -> staffMaySee(delivery, callerCustomerId, isAdmin))
+                .filter(delivery -> staffMaySee(delivery, callerWorkerId, isAdmin))
                 .map(com.gpstore.dto.response.DeliveryResponse::from);
     }
 
@@ -302,11 +302,15 @@ public class DeliveryService {
      * Missing assignment reads as empty so a guessed id is not distinguishable
      * from a delivery that belongs to someone else.
      */
-    private boolean staffMaySee(Delivery delivery, Long callerCustomerId, boolean isAdmin) {
+    /**
+     * @param callerWorkerId the roster id from a worker's own token; ignored
+     *                       for an admin, who may see any delivery.
+     */
+    private boolean staffMaySee(Delivery delivery, Long callerWorkerId, boolean isAdmin) {
         if (isAdmin) {
             return true;
         }
-        DeliveryPartner caller = deliveryPartnerService.getByAccountIdOrThrow(callerCustomerId);
+        DeliveryPartner caller = deliveryPartnerService.getLiveWorkerOrThrow(callerWorkerId);
         Long assignedPartnerId = delivery.getBatch() != null && delivery.getBatch().getDeliveryPartner() != null
                 ? delivery.getBatch().getDeliveryPartner().getId()
                 : null;
@@ -385,7 +389,7 @@ public class DeliveryService {
      * allowed to make this particular move are two different questions.
      */
     @Transactional
-    public com.gpstore.dto.response.DeliveryResponse updateDeliveryStatus(Long deliveryId, String status, Long callerCustomerId, boolean isAdmin) {
+    public com.gpstore.dto.response.DeliveryResponse updateDeliveryStatus(Long deliveryId, String status, Long callerWorkerId, boolean isAdmin) {
 
         Delivery delivery = deliveryRepository.findById(deliveryId)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery not found"));
@@ -395,7 +399,9 @@ public class DeliveryService {
         // entirely, meaning any logged-in DELIVERY_BOY could update ANY
         // delivery by guessing an id, not just their own.
         if (!isAdmin) {
-            DeliveryPartner caller = deliveryPartnerService.getByAccountIdOrThrow(callerCustomerId);
+            // The roster id from the worker's own token. An admin never
+            // reaches this branch, which is why they may have none.
+            DeliveryPartner caller = deliveryPartnerService.getLiveWorkerOrThrow(callerWorkerId);
             Long assignedPartnerId = delivery.getBatch() != null && delivery.getBatch().getDeliveryPartner() != null
                     ? delivery.getBatch().getDeliveryPartner().getId()
                     : null;
@@ -438,8 +444,7 @@ public class DeliveryService {
         auditLogService.log("DELIVERY_STATUS_" + target.name(), "Delivery", delivery.getId(),
                 "from=" + (current == null ? "NONE" : current.name())
                         + ", to=" + target.name()
-                        + ", by=" + (isAdmin ? "admin" : "worker")
-                        + " account " + callerCustomerId);
+                        + ", by=" + (isAdmin ? "admin" : "worker " + callerWorkerId));
 
         Order order = delivery.getOrder();
 
@@ -488,11 +493,11 @@ public class DeliveryService {
         return com.gpstore.dto.response.DeliveryResponse.from(deliveryRepository.save(delivery));
     }
 
-    /** A delivery partner's own active assignments - resolved via their linked Customer account, never a client-supplied partner id. */
+    /** A delivery partner's own active assignments - resolved from their own worker token, never a client-supplied partner id. */
     @Transactional(readOnly = true)
 
-    public List<com.gpstore.dto.response.MyDeliveryResponse> getMyAssignments(Long callerCustomerId) {
-        DeliveryPartner partner = deliveryPartnerService.getByAccountIdOrThrow(callerCustomerId);
+    public List<com.gpstore.dto.response.MyDeliveryResponse> getMyAssignments(Long workerId) {
+        DeliveryPartner partner = deliveryPartnerService.getLiveWorkerOrThrow(workerId);
         return deliveryRepository.findActiveByPartnerId(partner.getId()).stream()
                 .map(com.gpstore.dto.response.MyDeliveryResponse::from)
                 .toList();

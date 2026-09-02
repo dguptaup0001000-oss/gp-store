@@ -29,10 +29,14 @@ public class JwtFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final CustomerAccountStatusService accountStatusService;
+    private final com.gpstore.worker.WorkerAccessService workerAccessService;
 
-    public JwtFilter(JwtService jwtService, CustomerAccountStatusService accountStatusService) {
+    public JwtFilter(JwtService jwtService,
+                     CustomerAccountStatusService accountStatusService,
+                     com.gpstore.worker.WorkerAccessService workerAccessService) {
         this.jwtService = jwtService;
         this.accountStatusService = accountStatusService;
+        this.workerAccessService = workerAccessService;
     }
 
     @Override
@@ -61,6 +65,36 @@ public class JwtFilter extends OncePerRequestFilter {
                 String email = claims.getSubject();
                 Long customerId = claims.get("customerId", Long.class);
                 String role = claims.get("role", String.class);
+                Long workerId = claims.get("workerId", Long.class);
+
+                // A WORKER SESSION IS ITS OWN THING and never touches the
+                // customers table. Their credentials live on the roster row,
+                // so the whole status question - deleted, switched off,
+                // suspended until four o'clock - is answered from there.
+                //
+                // Checked on EVERY request, not just at sign-in: these tokens
+                // have no refresh token and last a shift, so a worker the shop
+                // just removed has to stop working now, not this evening.
+                if (workerId != null) {
+                    com.gpstore.worker.WorkerAccess.Decision decision =
+                            workerAccess(workerId);
+                    if (!decision.allowed()) {
+                        SecurityContextHolder.clearContext();
+                        rejectWorker(response, decision.message());
+                        return;
+                    }
+                    List<GrantedAuthority> workerAuthorities = new ArrayList<>();
+                    for (String authority : RolePermissions.authorityNamesForRoleName(role)) {
+                        workerAuthorities.add(new SimpleGrantedAuthority(authority));
+                    }
+                    SecurityContextHolder.getContext().setAuthentication(
+                            new UsernamePasswordAuthenticationToken(
+                                    new AuthenticatedUser(null, email, role, workerId),
+                                    null,
+                                    workerAuthorities));
+                    filterChain.doFilter(request, response);
+                    return;
+                }
 
                 // A valid signature is not enough. Deactivating an account
                 // revokes refresh tokens but an already-issued access JWT
@@ -120,6 +154,30 @@ public class JwtFilter extends OncePerRequestFilter {
         return "/api/auth/refresh".equals(path)
                 || "/api/auth/logout".equals(path)
                 || "/api/auth/logout-all".equals(path);
+    }
+
+    private com.gpstore.worker.WorkerAccess.Decision workerAccess(Long workerId) {
+        try {
+            return workerAccessService.resolve(workerId);
+        } catch (RuntimeException ex) {
+            // Fail closed, exactly as the customer path does: if we cannot
+            // confirm this worker is still on the roster, do not authenticate.
+            log.warn("Worker status check failed for workerId={}: {}", workerId, ex.getMessage());
+            return new com.gpstore.worker.WorkerAccess.Decision(
+                    com.gpstore.worker.WorkerAccess.Verdict.DELETED,
+                    "Could not confirm this worker account. Try again in a moment.");
+        }
+    }
+
+    private static void rejectWorker(HttpServletResponse response, String message) throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setContentType("application/json");
+        // The worker app shows this sentence verbatim, so it has to be the
+        // one WorkerAccess wrote - "paused for another 3 hours" is the whole
+        // difference between waiting and going home.
+        response.getWriter().write(
+                "{\"status\":401,\"error\":\"Unauthorized\",\"message\":"
+                        + com.fasterxml.jackson.databind.node.TextNode.valueOf(message) + "}");
     }
 
     private CustomerAccountStatusService.Snapshot accountIsLive(Long customerId) {
