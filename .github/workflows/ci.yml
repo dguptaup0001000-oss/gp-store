@@ -454,6 +454,167 @@ jobs:
           bash ../deploy/production/evaluate-offbox-result.sh "$RESULT_FILE"
           echo "CI encrypted off-box isolate-restore passed."
 
+      # ------------------------------------------------------------------
+      # THE PATH NOBODY REHEARSES, REHEARSED.
+      #
+      # Everything above proves a backup can be restored into an ISOLATED
+      # database - which is the drill, and is right to refuse production.
+      # The consequence was that the one path that matters when the server is
+      # actually gone, restoring into the real database on a replacement box,
+      # had no script and no test: eight manual steps out of
+      # DISASTER_RECOVERY.md, performed once, at whatever hour the box died.
+      #
+      # This runs recover-onto-new-vps.sh the way an operator would, against a
+      # database seeded with a shop's worth of rows, and checks the rows came
+      # back. It also checks the two guards HOLD, because a recovery script
+      # that will overwrite a live shop is worse than no script at all.
+      # ------------------------------------------------------------------
+      - name: Recovery onto a replacement server
+        working-directory: .
+        run: |
+          set -Eeuo pipefail
+          chmod +x deploy/production/recover-onto-new-vps.sh \
+                   deploy/production/seed-rehearsal-rows.sh
+
+          # The guards first, with no database in reach at all.
+          RECOVER_SELFTEST=1 deploy/production/recover-onto-new-vps.sh
+
+          # MATCHING CLIENT TOOLS, and this is the point rather than a
+          # workaround. The runner ships postgresql-client-16; the database is
+          # postgres:17, so the dump is written by pg_dump 17 and the runner's
+          # pg_restore 16 cannot read it - it reports "unsupported version in
+          # file header", which reads like a corrupt backup and is not.
+          #
+          # That is exactly what a replacement VPS looks like: a fresh Ubuntu
+          # installs whatever client its release ships, a major version behind
+          # the server the shop runs. So the drill installs the matching
+          # client the way a real recovery has to, and the script now names
+          # the mismatch instead of letting pg_restore be cryptic about it.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          PGDG_KEY=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          PGDG_LINE="deb [signed-by=$PGDG_KEY] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main"
+          echo "$PGDG_LINE" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+          # INSTALLING IT IS NOT ENOUGH. On Debian and Ubuntu /usr/bin/pg_restore
+          # is postgresql-common's pg_wrapper shim, which picks a version -
+          # and with both 16 and 17 present it keeps choosing the DEFAULT,
+          # which is still 16. The first attempt at this installed 17 and the
+          # script correctly reported "pg_restore is PostgreSQL 16; the server
+          # is 17", because the shim had not changed its mind.
+          #
+          # So put the versioned binaries ahead of the shim, and fail loudly
+          # if they are not where they should be rather than carrying on with
+          # the wrong ones.
+          PG17_BIN=/usr/lib/postgresql/17/bin
+          if [ ! -x "$PG17_BIN/pg_restore" ]; then
+            echo "::error::postgresql-client-17 did not provide $PG17_BIN/pg_restore"
+            ls -la /usr/lib/postgresql/ || true
+            exit 1
+          fi
+          export PATH="$PG17_BIN:$PATH"
+
+          # Named up front so any future failure in this step explains itself
+          # rather than needing the postgres container's log to diagnose.
+          echo "pg_restore: $(pg_restore --version)"
+          echo "pg_dump:    $(pg_dump --version)"
+          # And proved, not just printed: the drill is worthless if it runs
+          # against the version it was meant to stop using.
+          pg_restore --version | grep -q ' 17\.' || {
+            echo "::error::pg_restore is still not 17 after prepending $PG17_BIN"
+            exit 1
+          }
+
+          export PGPASSWORD=gpstore_test_password
+          PSQL=(docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17)
+
+          "${PSQL[@]}" psql -h localhost -U gpstore -d postgres -v ON_ERROR_STOP=1 \
+            -c "DROP DATABASE IF EXISTS gpstore_dr_scratch;" -c "CREATE DATABASE gpstore_dr_scratch;" \
+            -c "DROP DATABASE IF EXISTS gpstore_dr_replacement;" -c "CREATE DATABASE gpstore_dr_replacement;"
+
+          # A source database with the real schema and a shop's worth of rows.
+          #
+          # WITH DATA, not pg_dump -s. A schema-only copy leaves
+          # flyway_schema_history EMPTY, and the recovery script rejects a
+          # restore whose schema history is missing - correctly, because that
+          # is what a half-restored database looks like. Verified rather than
+          # assumed: a -s dump of a live database reports schema version
+          # "none", which is exactly the guard's failure condition.
+          "${PSQL[@]}" pg_dump -h localhost -U gpstore -d gpstore_schema_bootstrap \
+            > /tmp/dr-schema.sql
+          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password \
+            -v /tmp/dr-schema.sql:/schema.sql:ro postgres:17 \
+            psql -h localhost -U gpstore -d gpstore_dr_scratch -v ON_ERROR_STOP=1 -q -f /schema.sql
+          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password \
+            -v "$PWD/deploy/production/seed-rehearsal-rows.sh:/seed.sh:ro" postgres:17 \
+            /bin/sh /seed.sh localhost 5432 gpstore gpstore_dr_scratch
+
+          # The encrypted off-box artifact, with a job-ephemeral passphrase -
+          # this job must never possess the production one.
+          mkdir -p /tmp/dr
+          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password \
+            -v /tmp/dr:/out postgres:17 \
+            pg_dump -h localhost -U gpstore -Fc -d gpstore_dr_scratch -f /out/gpstore-drill.dump
+          ( cd /tmp/dr && sha256sum gpstore-drill.dump > gpstore-drill.dump.sha256 )
+          PASSFILE="$(mktemp)"; chmod 600 "$PASSFILE"
+          openssl rand -base64 32 > "$PASSFILE"
+          gpg --batch --yes --quiet --symmetric --cipher-algo AES256 \
+            --pinentry-mode loopback --passphrase-file "$PASSFILE" \
+            -o /tmp/dr/gpstore-drill.dump.gpg /tmp/dr/gpstore-drill.dump
+          rm -f /tmp/dr/gpstore-drill.dump
+
+          # An .env with the shape the script checks for. No real secret:
+          # the script confirms keys are PRESENT and never reads their values.
+          printf 'DB_NAME=gpstore\nDB_USERNAME=gpstore\nDB_PASSWORD=gpstore_test_password\nJWT_SECRET=ci-not-a-real-secret\n' \
+            > /tmp/dr/env
+
+          # GUARD 1: it must refuse without the acknowledgement.
+          if BACKEND_ENV_FILE=/tmp/dr/env BACKUP_GPG_PASSPHRASE_FILE="$PASSFILE" \
+               deploy/production/recover-onto-new-vps.sh /tmp/dr/gpstore-drill.dump.gpg \
+               localhost 5432 gpstore gpstore_dr_replacement; then
+            echo "::error::recovery ran without the acknowledgement"; exit 1
+          fi
+
+          # The real thing.
+          I_HAVE_LOST_THE_PRODUCTION_SERVER=yes \
+          BACKEND_ENV_FILE=/tmp/dr/env BACKUP_GPG_PASSPHRASE_FILE="$PASSFILE" \
+            deploy/production/recover-onto-new-vps.sh /tmp/dr/gpstore-drill.dump.gpg \
+            localhost 5432 gpstore gpstore_dr_replacement
+
+          # GUARD 2: the target now holds orders, so a second run must refuse.
+          if I_HAVE_LOST_THE_PRODUCTION_SERVER=yes \
+             BACKEND_ENV_FILE=/tmp/dr/env BACKUP_GPG_PASSPHRASE_FILE="$PASSFILE" \
+               deploy/production/recover-onto-new-vps.sh /tmp/dr/gpstore-drill.dump.gpg \
+               localhost 5432 gpstore gpstore_dr_replacement; then
+            echo "::error::recovery overwrote a database that had orders in it"; exit 1
+          fi
+
+          rm -f "$PASSFILE"
+
+          # The shop's rows have to actually be there. A restore that exits 0
+          # over an empty schema looks like success everywhere except the data.
+          "${PSQL[@]}" psql -h localhost -U gpstore -d gpstore_dr_replacement \
+            -v ON_ERROR_STOP=1 -Atc "
+              SELECT CASE WHEN
+                (SELECT COUNT(*) FROM customers WHERE email = 'rehearsal@example.com') = 1
+                AND (SELECT COUNT(*) FROM orders WHERE order_number LIKE 'REHEARSAL-%') = 2
+                AND (SELECT COUNT(*) FROM payments p JOIN orders o ON o.id = p.order_id
+                     WHERE o.order_number LIKE 'REHEARSAL-%') = 2
+                AND (SELECT COUNT(*) FROM delivery_partners
+                     WHERE mobile IN ('9000000002', '9000000003')) = 2
+                AND (SELECT COUNT(*) FROM flyway_schema_history) > 0
+              THEN 'shop recovered' ELSE 'DATA MISSING' END;" | tee /tmp/dr/verdict.txt
+          grep -q 'shop recovered' /tmp/dr/verdict.txt
+
+          # No plaintext copy of the shop may survive the drill.
+          if find /tmp/dr -name '*.dump' -not -name '*.gpg' | grep -q .; then
+            echo "::error::a plaintext dump was left behind"; exit 1
+          fi
+          echo "Recovery onto a replacement server: verified end to end."
+
       - name: Upload schema-migrate test results
         if: always()
         uses: actions/upload-artifact@v4

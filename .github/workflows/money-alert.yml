@@ -1,0 +1,125 @@
+# Tells the shop when somebody's money is stuck.
+#
+# THE GAP THIS CLOSES. The backend counts refunds in flight and the age of
+# the oldest, and exposes both as Prometheus gauges behind SYSTEM_ADMIN. That
+# made a stuck refund observable. It did not make it noticed: a gauge nobody
+# scrapes is a number nobody reads, and the reconciliation's warning goes to
+# a log file on the box.
+#
+# A failed run here emails whoever watches the repository - the same
+# mechanism the backup alert already uses. No new service, no new bill, no
+# pager account to keep alive.
+#
+# WHAT IT WILL NOT PRINT. Counts, ages and thresholds. money-health.sql
+# selects aggregates only - no customer name, email, phone, order number or
+# per-order amount - because this output lands in an Actions log kept for
+# ninety days. The payment ids needed to actually fix a stuck refund are in
+# the admin screens and the application log; this exists to make a person go
+# and look.
+name: Money alert
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Hourly, offset from the backup alert's :17 so the two are not competing
+    # for the same SSH concurrency group at the same minute.
+    - cron: "43 * * * *"
+
+# Shared with the backup alert and the deploy: only one thing SSHes to the
+# box at a time.
+concurrency:
+  group: gpstore-prod-ssh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  alert:
+    name: Is any refund stuck or rejected?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # The script's own logic is proved before it is trusted with a verdict
+      # about production. Same convention as harden-ssh and disk-guard: an
+      # alert whose thresholds were never exercised is an alert nobody should
+      # trust.
+      - name: Prove the evaluator's thresholds first
+        run: |
+          set -Eeuo pipefail
+          chmod +x deploy/production/evaluate-money-health.sh
+          MONEY_HEALTH_SELFTEST=1 deploy/production/evaluate-money-health.sh
+
+      - name: Require VPS SSH secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for v in PROD_HOST PROD_USER PROD_SSH_PRIVATE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Collect the counts and evaluate them
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+          PROD_APP_DIR: ${{ secrets.PROD_APP_DIR }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          KEY="$(mktemp)"
+          trap 'rm -f "$KEY"' EXIT
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$KEY"
+          chmod 600 "$KEY"
+          APP_DIR="${PROD_APP_DIR:-/opt/gp-store}"
+
+          # The SQL travels over stdin rather than being written to the box:
+          # nothing to leave behind, and the query under review in this repo
+          # is provably the one that ran. psql inside the container connects
+          # over the local socket as POSTGRES_USER, so no database password
+          # crosses the wire or appears in a process list.
+          ssh -i "$KEY" \
+            -p "${PROD_PORT:-22}" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            "${PROD_USER}@${PROD_HOST}" \
+            "cd '$APP_DIR/backend' && docker compose -f docker-compose.yml exec -T postgres \
+               sh -c 'psql -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At -f -'" \
+            < deploy/production/money-health.sql \
+            > /tmp/money.txt
+
+          echo "Collected (counts and ages only, by design):"
+          cat /tmp/money.txt
+
+          chmod +x deploy/production/evaluate-money-health.sh
+          deploy/production/evaluate-money-health.sh /tmp/money.txt
+
+      - name: What to do when this fails
+        if: failure()
+        run: |
+          echo "::error::GP-STORE has money that has not reached a customer."
+          echo "REFUND_STUCK  - the provider took the refund and has not settled it."
+          echo "                Open the Cashfree dashboard and search the refund id"
+          echo "                (gpsr-<paymentId>). The reconciliation re-asks every"
+          echo "                30 minutes, so a refund still stuck after 3 days is"
+          echo "                one the provider is not going to settle on its own."
+          echo "REFUND_REJECTED - the provider refused it. refund_failure_reason on"
+          echo "                the payment row carries their words. The customer is"
+          echo "                still owed; this needs a person, not a retry."
+          echo "UNREADABLE/MISSING - the query itself failed. Check the postgres"
+          echo "                container is up before assuming the money is fine."

@@ -28,13 +28,34 @@ These are operator estimates for this architecture, not a vendor SLA.
 | **RPO** (off-box) | up to **6 hours** | Off-box workflow runs 01:20, 07:20, 13:20, 19:20 UTC, after each successful production deploy on `main`, and takes a fresh dump first |
 | **RTO** (same VPS, Postgres volume intact) | **15–45 minutes** | Redeploy from `main`; no restore |
 | **RTO** (same VPS, database lost, dump on volume) | **1–3 hours** | Restore latest `.dump` into a recovered Postgres, then boot |
-| **RTO** (VPS gone, recover from off-box `.gpg`) | **several hours** | New VPS + Docker + decrypt artifact + restore + DNS/TLS + `.env` |
+| **RTO** (VPS gone, recover from off-box `.gpg`) | **1–2 hours** | New VPS + Docker + `.env` + `recover-onto-new-vps.sh` + DNS/TLS. The restore itself is one command and a few minutes; the hours are provisioning, secrets and DNS propagation |
 
 If the last off-box run failed, RPO is “last successful artifact”, which can
 be older. The hourly **Backup alert** workflow and the Off-box job itself
 email on failure. Act on a red run the same day.
 
 ## VPS-loss recovery (from the encrypted off-box artifact)
+
+**There is a script for steps 3-7.** `recover-onto-new-vps.sh` does the
+decrypt, the checksum, the restore and the verification in one command, and
+CI drills it end to end on every change — including that its guards hold, so
+it cannot restore over a shop that still has orders in it. The manual list
+below is what it does, kept because an operator should be able to read what a
+script is about to do to their database before they run it, and because steps
+1, 2 and 8 still need a person.
+
+```bash
+I_HAVE_LOST_THE_PRODUCTION_SERVER=yes \
+BACKUP_GPG_PASSPHRASE_FILE=/safe/passphrase \
+  ./deploy/production/recover-onto-new-vps.sh \
+    gpstore-YYYYMMDDThhmmssZ.dump.gpg 127.0.0.1 5432 gpstore gpstore
+```
+
+It refuses unless you mean it, refuses a database that already holds orders,
+checks everything it needs *before* touching the data, and shreds the
+plaintext dump on exit. It will not provision the server, recreate
+`backend/.env`, or move DNS — those need credentials a script must never
+hold, and it tells you which are still outstanding.
 
 1. Provision a replacement Ubuntu VPS. Do not reuse a compromised disk.
 2. Recreate `/opt/gp-store` from `main` (`deploy/production/prepare-vps.sh` /
