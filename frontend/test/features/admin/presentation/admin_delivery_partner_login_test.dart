@@ -28,6 +28,7 @@ class _FakeRepository extends AdminProductsRepository {
   final Object? linkError;
 
   final List<String> linked = <String>[];
+  final List<String> passwords = <String>[];
   int unlinkCalls = 0;
   int updateCalls = 0;
 
@@ -37,9 +38,11 @@ class _FakeRepository extends AdminProductsRepository {
   }
 
   @override
-  Future<WorkerLoginAccount> linkWorkerLoginAccount(int partnerId, String email) async {
+  Future<WorkerLoginAccount> linkWorkerLoginAccount(
+      int partnerId, String email, String password) async {
     if (linkError != null) throw linkError!;
     linked.add(email);
+    passwords.add(password);
     return WorkerLoginAccount(linked: true, email: email, canSignIn: true);
   }
 
@@ -86,6 +89,9 @@ Future<void> _open(WidgetTester tester, _FakeRepository repository) async {
 }
 
 Finder get _emailField => find.widgetWithText(TextField, 'Login email');
+Finder get _passwordField => find.widgetWithText(TextField, 'Password');
+Finder get _newPasswordField =>
+    find.widgetWithText(TextField, 'New password (optional)');
 
 void main() {
   setUpAll(setUpFakeSecureStorage);
@@ -99,12 +105,16 @@ void main() {
     await _open(tester, repository);
 
     await tester.enterText(_emailField, 'guptadeepak@gmail.com');
+    await tester.enterText(_passwordField, 'rider-passphrase');
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
     expect(repository.linked, ['guptadeepak@gmail.com'],
         reason: 'Save must apply the address. This is the whole bug: it used to '
             'save the roster fields and silently drop the email.');
+    expect(repository.passwords, ['rider-passphrase'],
+        reason: 'And the password, because the shop sets it - nothing else '
+            'in this system ever gives a rider one.');
     expect(repository.updateCalls, 1, reason: 'The roster fields still save too.');
   });
 
@@ -132,6 +142,23 @@ void main() {
     expect(repository.linked, isEmpty,
         reason: 'Editing only the vehicle number must not spend a link request.');
     expect(repository.updateCalls, 1);
+  }
+
+  testWidgets('a new password alone is enough to resend, same address', (tester) async {
+    final repository = _FakeRepository(
+      initial: const WorkerLoginAccount(
+          linked: true, email: 'rider@gmail.com', canSignIn: true),
+    );
+    await _open(tester, repository);
+
+    // Resetting a forgotten password must not require changing the address -
+    // and the unchanged-address shortcut would otherwise swallow it.
+    await tester.enterText(_newPasswordField, 'a-brand-new-passphrase');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(repository.linked, ['rider@gmail.com']);
+    expect(repository.passwords, ['a-brand-new-passphrase']);
   });
 
   testWidgets('differing only in case is not a change', (tester) async {

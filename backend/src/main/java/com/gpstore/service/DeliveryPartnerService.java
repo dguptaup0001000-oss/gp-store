@@ -29,6 +29,7 @@ public class DeliveryPartnerService {
     private final DeliveryRepository deliveryRepository;
     private final CustomerRepository customerRepository;
     private final CustomerAccountStatusService accountStatusService;
+    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
     /**
      * How vague a GPS fix may be and still be worth recording, in metres.
@@ -46,11 +47,13 @@ public class DeliveryPartnerService {
             DeliveryRepository deliveryRepository,
             CustomerRepository customerRepository,
             CustomerAccountStatusService accountStatusService,
+            org.springframework.security.crypto.password.PasswordEncoder passwordEncoder,
             @Value("${delivery.max-location-accuracy-meters:500}") double maxLocationAccuracyMeters) {
         this.repository = repository;
         this.deliveryRepository = deliveryRepository;
         this.customerRepository = customerRepository;
         this.accountStatusService = accountStatusService;
+        this.passwordEncoder = passwordEncoder;
         this.maxLocationAccuracyMeters = maxLocationAccuracyMeters;
     }
 
@@ -120,30 +123,38 @@ public class DeliveryPartnerService {
     }
 
     /**
-     * Attaches an existing customer account to this partner so they can sign
-     * in to the worker app.
+     * Gives a rider the credentials they sign in to the worker app with.
      *
-     * WHY THIS EXISTS. save() links an account by MOBILE NUMBER and creates it
-     * for OTP sign-in - the account it makes has no email and no password. The
-     * worker app has no OTP form at all; email and password is its only way
-     * in. So every partner the roster screen created could be dispatched work
-     * they had no way to log in and collect. The symptom was a worker typing
-     * their Gmail address into the worker app and being told "You don't have
-     * permission to do that" - a 403 from /api/worker/me, because the account
-     * they were typing was a plain customer that no partner row pointed at.
+     * WHY THIS CREATES THE ACCOUNT RATHER THAN LINKING ONE. The first version
+     * of this refused to create anything: the shopkeeper had to send the rider
+     * away to register in the CUSTOMER app first, then come back and type the
+     * address here. That is backwards for how a shop actually hires somebody -
+     * you take somebody on and hand them a login - and it could never have
+     * worked anyway, because nothing in this system ever set a password for a
+     * rider. The roster screen made accounts by mobile number for OTP, and the
+     * worker app has no OTP form. Every path ended at a rider who could not
+     * sign in.
      *
-     * IT LINKS, IT NEVER CREATES. An account invented here would have no
-     * password, so it could not sign in either - the same dead end one step
-     * further along. If no account exists, the admin is told to have the
-     * person register in the customer app first, which is a thing they can
-     * actually do.
+     * So the shop sets both halves here, and the rider is told them. One
+     * screen, no second app, no self-registration.
      *
-     * LINKING GRANTS A ROLE, so this is deliberately admin-only (SecurityConfig
-     * gates /api/delivery-partners/** on DELIVERY_MANAGE) and refuses anything
-     * ambiguous rather than guessing.
+     * WHAT IT REFUSES, and each of these is a way this could otherwise be used
+     * to take an account over:
+     *
+     *   - An ADMIN or other staff account. Setting a password is a takeover,
+     *     and DELIVERY_MANAGE is a narrower permission than the one guarding
+     *     staff accounts - so whoever can manage the roster must not be able
+     *     to reset the owner's password through it and sign in as them.
+     *   - An account already used by a different rider, which would otherwise
+     *     make findByAccountId non-unique and break that rider's next request.
+     *   - A password too short to be worth having.
+     *
+     * The password is hashed with the same encoder as registration and never
+     * logged, echoed, or returned. WorkerLoginAccountView carries only the
+     * address and whether sign-in is possible.
      */
     @Transactional
-    public WorkerLoginAccountView linkLoginAccount(Long partnerId, String rawEmail) {
+    public WorkerLoginAccountView linkLoginAccount(Long partnerId, String rawEmail, String rawPassword) {
         DeliveryPartner partner = repository.findById(partnerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
 
@@ -151,39 +162,61 @@ public class DeliveryPartnerService {
             throw new BadRequestException("An email address is required.");
         }
         String email = rawEmail.trim();
+        String password = rawPassword == null ? "" : rawPassword.trim();
 
-        Customer account = customerRepository.findByEmailIgnoreCase(email)
-                .orElseThrow(() -> new BadRequestException(
-                        "No account exists with that email. Ask them to register in the "
-                                + "customer app with this address and a password, then link it here."));
+        Customer account = customerRepository.findByEmailIgnoreCase(email).orElse(null);
 
-        // An account with no password cannot use the worker app's only sign-in
-        // form. Linking it anyway would report success and leave the worker
-        // still locked out, with nothing on screen explaining why.
-        if (account.getPassword() == null || account.getPassword().isBlank()) {
-            throw new BadRequestException(
-                    "That account has no password - it can only sign in by OTP. The worker "
-                            + "app needs an email and password, so ask them to set one in the "
-                            + "customer app first.");
-        }
-
-        // findByAccountId returns Optional, so two partners sharing one account
-        // would throw a non-unique-result error on the worker's very next
-        // request. Refuse here, where an admin can read why.
-        repository.findByAccountId(account.getId()).ifPresent(existing -> {
-            if (!existing.getId().equals(partner.getId())) {
-                throw new ConflictException(
-                        "That account is already the login for " + existing.getName()
-                                + ". Unlink it there first.");
+        if (account == null) {
+            // Brand new rider. A password is not optional here - an account
+            // created without one is the exact dead end this replaced.
+            requireUsablePassword(password);
+            account = new Customer();
+            account.setFullName(partner.getName());
+            account.setEmail(email);
+            account.setPassword(passwordEncoder.encode(password));
+            // The roster row's mobile, but only if no other account holds it -
+            // the column is unique, and a rider who already shops here would
+            // otherwise collide on save.
+            if (partner.getMobile() != null && !partner.getMobile().isBlank()
+                    && customerRepository.findByMobileNumber(partner.getMobile()).isEmpty()) {
+                account.setMobileNumber(partner.getMobile());
             }
-        });
-
-        // Same rule save() uses: they need DELIVERY_BOY to pass SecurityConfig's
-        // check on the worker endpoints, and an ADMIN is never downgraded into
-        // one by being handed a delivery round.
-        if (account.getRole() != Role.ADMIN) {
             account.setRole(Role.DELIVERY_BOY);
+            account.setEnabled(true);
+            account.setActive(true);
+            // Verified because the shop vouched for them in person. There is no
+            // email round trip to complete and no way for them to do one.
+            account.setVerified(true);
+        } else {
+            // NEVER through a staff account. A shopkeeper with DELIVERY_MANAGE
+            // could otherwise type the owner's address, set a password of their
+            // choosing, and sign in as the owner.
+            if (isStaff(account.getRole())) {
+                throw new ConflictException(
+                        "That address belongs to a staff account. Use an address that is not "
+                                + "already used by an administrator.");
+            }
+            repository.findByAccountId(account.getId()).ifPresent(existing -> {
+                if (!existing.getId().equals(partner.getId())) {
+                    throw new ConflictException(
+                            "That address is already the login for " + existing.getName()
+                                    + ". Unlink it there first.");
+                }
+            });
+            // Blank password on an account that already has one means "leave
+            // the password alone" - re-saving the partner should not force the
+            // shopkeeper to retype it, or reset a rider's working password by
+            // accident.
+            boolean hasPassword = account.getPassword() != null && !account.getPassword().isBlank();
+            if (!password.isEmpty() || !hasPassword) {
+                requireUsablePassword(password);
+                account.setPassword(passwordEncoder.encode(password));
+            }
+            account.setRole(Role.DELIVERY_BOY);
+            account.setEnabled(true);
+            account.setActive(true);
         }
+
         account = customerRepository.save(account);
         // JwtFilter re-checks the role against the live row, and this cache
         // sits in front of that read - without invalidating it the promotion
@@ -194,6 +227,28 @@ public class DeliveryPartnerService {
         repository.save(partner);
 
         return describe(account);
+    }
+
+    /** Short enough to guess is not a credential. Matched to registration. */
+    private void requireUsablePassword(String password) {
+        if (password == null || password.trim().length() < MIN_WORKER_PASSWORD_LENGTH) {
+            throw new BadRequestException(
+                    "Set a password of at least " + MIN_WORKER_PASSWORD_LENGTH
+                            + " characters for this rider.");
+        }
+    }
+
+    private static final int MIN_WORKER_PASSWORD_LENGTH = 8;
+
+    /**
+     * Anything that is not a shopper or a rider.
+     *
+     * Written as "not one of two" rather than "is one of seven" on purpose: a
+     * role added later is treated as privileged until somebody decides
+     * otherwise, which fails in the safe direction.
+     */
+    private static boolean isStaff(Role role) {
+        return role != null && role != Role.CUSTOMER && role != Role.DELIVERY_BOY;
     }
 
     /**
