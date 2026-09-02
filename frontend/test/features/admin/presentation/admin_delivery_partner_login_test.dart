@@ -142,7 +142,7 @@ void main() {
     expect(repository.linked, isEmpty,
         reason: 'Editing only the vehicle number must not spend a link request.');
     expect(repository.updateCalls, 1);
-  }
+  });
 
   testWidgets('a new password alone is enough to resend, same address', (tester) async {
     final repository = _FakeRepository(
