@@ -45,9 +45,20 @@ public class OutboxWorker {
     public static final String EVENT_ORDER_PLACED = "ORDER_PLACED";
     public static final String EVENT_ORDER_CANCELLED = "ORDER_CANCELLED";
 
+    /**
+     * A cancelled prepaid order owes its customer money back.
+     *
+     * Durable rather than best-effort, and for the plainest reason there
+     * is: it is somebody's money. If Cashfree is down when an order is
+     * cancelled, the refund has to survive that and go out later, not
+     * evaporate into a log line nobody reads.
+     */
+    public static final String EVENT_REFUND_REQUESTED = "REFUND_REQUESTED";
+
     private final OutboxEventRepository outboxEventRepository;
     private final InvoiceService invoiceService;
     private final DeliveryService deliveryService;
+    private final PaymentService paymentService;
     private final AuditLogService auditLogService;
     private final OutboxWorker self;
     private final int batchSize;
@@ -59,6 +70,10 @@ public class OutboxWorker {
             OutboxEventRepository outboxEventRepository,
             InvoiceService invoiceService,
             @Lazy DeliveryService deliveryService,
+            // @Lazy for the same reason as DeliveryService: PaymentService
+            // reaches back into order handling, and eager wiring closes the
+            // loop into a circular dependency at startup.
+            @Lazy PaymentService paymentService,
             AuditLogService auditLogService,
             // Own proxy, so the per-event transactions below actually apply -
             // a plain this.call() bypasses Spring's transactional proxy and
@@ -73,6 +88,7 @@ public class OutboxWorker {
         this.outboxEventRepository = outboxEventRepository;
         this.invoiceService = invoiceService;
         this.deliveryService = deliveryService;
+        this.paymentService = paymentService;
         this.auditLogService = auditLogService;
         this.self = self;
         this.batchSize = batchSize;
@@ -241,6 +257,10 @@ public class OutboxWorker {
             handleOrderCancelled(aggregateId);
             return;
         }
+        if (EVENT_REFUND_REQUESTED.equals(eventType)) {
+            handleRefundRequested(aggregateId);
+            return;
+        }
         // An unknown type is a code/data mismatch, not a transient fault -
         // let it fail and be retried/dead-lettered rather than silently
         // marking work done that nothing actually performed.
@@ -288,6 +308,25 @@ public class OutboxWorker {
                 invoiceService.cancelInvoice(invoice.getInvoiceId());
             }
         });
+    }
+
+    /**
+     * Sends the refund a cancelled prepaid order promised its customer.
+     *
+     * NOT BEST-EFFORT, and not swallowed. If the provider is unreachable this
+     * must throw, so the event is retried and eventually dead-lettered where
+     * somebody can see it. A refund that quietly gave up would be the exact
+     * failure this whole path exists to prevent: the shop believing the money
+     * went back when it did not.
+     *
+     * IDEMPOTENT, as at-least-once delivery requires - sendRefundToProvider
+     * returns without doing anything for a refund that is already settled,
+     * already sent, or was never owed. Its refund id is derived from the
+     * payment, so even a send that does go out twice reaches the same refund
+     * at the provider rather than paying the customer twice.
+     */
+    private void handleRefundRequested(Long orderId) {
+        paymentService.sendRefundToProvider(orderId);
     }
 
     /**
