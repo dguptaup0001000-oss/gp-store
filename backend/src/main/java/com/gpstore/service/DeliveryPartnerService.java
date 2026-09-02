@@ -11,7 +11,9 @@ import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliveryRepository;
+import com.gpstore.security.AdminPermission;
 import com.gpstore.security.CustomerAccountStatusService;
+import com.gpstore.security.RolePermissions;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -188,14 +190,6 @@ public class DeliveryPartnerService {
             // email round trip to complete and no way for them to do one.
             account.setVerified(true);
         } else {
-            // NEVER through a staff account. A shopkeeper with DELIVERY_MANAGE
-            // could otherwise type the owner's address, set a password of their
-            // choosing, and sign in as the owner.
-            if (isStaff(account.getRole())) {
-                throw new ConflictException(
-                        "That address belongs to a staff account. Use an address that is not "
-                                + "already used by an administrator.");
-            }
             repository.findByAccountId(account.getId()).ifPresent(existing -> {
                 if (!existing.getId().equals(partner.getId())) {
                     throw new ConflictException(
@@ -203,6 +197,42 @@ public class DeliveryPartnerService {
                                     + ". Unlink it there first.");
                 }
             });
+
+            // THE OWNER IS OFTEN ALSO THE RIDER, and refusing staff accounts
+            // outright left a one-person shop unable to put its own address on
+            // the roster at all.
+            //
+            // What made a staff account dangerous was never the LINK - it was
+            // SETTING A PASSWORD on one. That is a takeover: DELIVERY_MANAGE is
+            // narrower than the permission guarding staff accounts, so whoever
+            // edits the roster could otherwise type the owner's address, choose
+            // a password, and sign in as the owner. So the password is refused,
+            // loudly, and only the link goes through.
+            //
+            // Their role is left alone too. Promoting an administrator to
+            // DELIVERY_BOY would strip every permission they have - the roster
+            // screen must not be a way to demote the owner.
+            if (isStaff(account.getRole())) {
+                if (!password.isEmpty()) {
+                    throw new ConflictException(
+                            "That address belongs to a staff account, so its password can only be "
+                                    + "changed by its owner. Leave the password blank and they sign "
+                                    + "in to the worker app with the password they already use.");
+                }
+                if (!RolePermissions.forRole(account.getRole())
+                        .contains(AdminPermission.DELIVERY_MANAGE)) {
+                    // Linking them would look like it worked and then fail at
+                    // the door, because /api/worker/** admits DELIVERY_MANAGE or
+                    // a delivery rider and this account is neither.
+                    throw new ConflictException(
+                            "That staff account does not have delivery access, so it cannot open "
+                                    + "the worker app. Give it delivery permissions first, or use a "
+                                    + "different address.");
+                }
+                partner.setAccount(account);
+                repository.save(partner);
+                return describe(account);
+            }
             // Blank password on an account that already has one means "leave
             // the password alone" - re-saving the partner should not force the
             // shopkeeper to retype it, or reset a rider's working password by

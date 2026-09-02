@@ -237,10 +237,10 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
           // self-registration, no second app, no OTP - which is what the
           // earlier wording asked for and what nothing could deliver.
           'Choose the email and password this rider will type into the worker '
-          'app, then press Save and tell them. If they already shop here with '
-          'that email, leave the password blank and they keep the one they '
-          'have - the same account works for both apps. Clear the email and '
-          'Save to take their access away.',
+          'app, then press Save and tell them. If that email already signs in '
+          'here - as a shopper, or as you the owner - leave the password blank '
+          'and they keep the one they have; one account works for every app. '
+          'Clear the email and Save to take their access away.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 10),
@@ -276,8 +276,8 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
             // field looked mandatory.
             helperText: linked
                 ? 'Only fill this in to change it'
-                : 'At least 8 characters. Leave blank if they already shop '
-                    'here with this email.',
+                : 'At least 8 characters. Leave blank if this email already '
+                    'signs in here.',
             helperMaxLines: 3,
             // Shown on request: the shopkeeper has to read this out to the
             // rider, and typing a password they cannot see into a phone twice
