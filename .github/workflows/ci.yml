@@ -479,6 +479,30 @@ jobs:
           # The guards first, with no database in reach at all.
           RECOVER_SELFTEST=1 deploy/production/recover-onto-new-vps.sh
 
+          # MATCHING CLIENT TOOLS, and this is the point rather than a
+          # workaround. The runner ships postgresql-client-16; the database is
+          # postgres:17, so the dump is written by pg_dump 17 and the runner's
+          # pg_restore 16 cannot read it - it reports "unsupported version in
+          # file header", which reads like a corrupt backup and is not.
+          #
+          # That is exactly what a replacement VPS looks like: a fresh Ubuntu
+          # installs whatever client its release ships, a major version behind
+          # the server the shop runs. So the drill installs the matching
+          # client the way a real recovery has to, and the script now names
+          # the mismatch instead of letting pg_restore be cryptic about it.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          PGDG_KEY=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          PGDG_LINE="deb [signed-by=$PGDG_KEY] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main"
+          echo "$PGDG_LINE" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          # Named up front so any future failure in this step explains itself
+          # rather than needing the postgres container's log to diagnose.
+          echo "pg_restore: $(pg_restore --version)"
+          echo "pg_dump:    $(pg_dump --version)"
+
           export PGPASSWORD=gpstore_test_password
           PSQL=(docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17)
 

@@ -88,6 +88,38 @@ check_target_is_empty() {
     OVERWRITE_A_DATABASE_WITH_ORDERS_IN_IT=yes"
 }
 
+# A dump written by a NEWER pg_dump cannot be read by an older pg_restore.
+#
+# WHY THIS IS WORTH ITS OWN CHECK. It is the likeliest thing to go wrong on a
+# replacement box, and the least obvious: a fresh Ubuntu installs whatever
+# postgresql-client its release ships, which is usually a major version
+# behind the server the shop actually runs. pg_restore then fails with
+# "unsupported version (1.NN) in file header", which reads like a corrupt
+# backup. An operator who believes their backup is corrupt at 2am does
+# something much worse than installing a package.
+#
+# Caught here, before the database is touched, and named.
+check_client_matches_server() {
+  local client_major="$1" server_major="$2"
+  if [[ -z "$client_major" || -z "$server_major" ]]; then
+    # Not knowing is not the same as mismatching. Say so and continue -
+    # pg_restore will still refuse loudly if it genuinely cannot read it.
+    log "WARNING: could not determine client/server PostgreSQL versions; continuing."
+    return 0
+  fi
+  if [[ "$client_major" -lt "$server_major" ]]; then
+    die "pg_restore is PostgreSQL $client_major but the server is $server_major.
+  An older pg_restore cannot read a dump written by a newer pg_dump - it will
+  say \"unsupported version ... in file header\", which looks like a corrupt
+  backup and is not. Your backup is fine.
+  Install the matching client on this box and re-run:
+    sudo apt-get install -y postgresql-client-$server_major"
+  fi
+  if [[ "$client_major" -gt "$server_major" ]]; then
+    log "NOTE: pg_restore is $client_major against a $server_major server. That direction works."
+  fi
+}
+
 # .env carries the shop's secrets and this script must never read their
 # values - only confirm the operator has already put them back, because a
 # backend that boots without them fails in ways that look like a bad restore.
@@ -135,6 +167,11 @@ if [[ "${RECOVER_SELFTEST:-0}" == "1" ]]; then
   expect "a target with orders is refused" 1 check_target_is_empty 42
   OVERWRITE_A_DATABASE_WITH_ORDERS_IN_IT=yes \
     expect "and can be overridden deliberately" 0 check_target_is_empty 42
+
+  expect "an older client than the server is refused" 1 check_client_matches_server 16 17
+  expect "a matching client is fine" 0 check_client_matches_server 17 17
+  expect "a newer client than the server is fine" 0 check_client_matches_server 17 16
+  expect "unknown versions do not block the restore" 0 check_client_matches_server "" 17
 
   printf 'DB_PASSWORD=secret-not-read\nJWT_SECRET=also-not-read\n' > "$tmp/.env"
   expect "an env with the keys passes" 0 check_env_has_keys "$tmp/.env" DB_PASSWORD JWT_SECRET
@@ -192,6 +229,11 @@ psql -h "$HOST" -p "$PORT" -U "$DB_USER" -d postgres -Atc 'SELECT 1' >/dev/null 
   || die "cannot reach Postgres at $HOST:$PORT as $DB_USER.
   Start Postgres (and only Postgres) before restoring - the backend must stay
   down until the data is back."
+SERVER_MAJOR="$(psql -h "$HOST" -p "$PORT" -U "$DB_USER" -d postgres -Atc \
+  "SELECT current_setting('server_version_num')::int / 10000" 2>/dev/null || true)"
+CLIENT_MAJOR="$(pg_restore --version 2>/dev/null | grep -oE '[0-9]+' | head -n1 || true)"
+log "pg_restore is PostgreSQL ${CLIENT_MAJOR:-unknown}; the server is ${SERVER_MAJOR:-unknown}."
+check_client_matches_server "$CLIENT_MAJOR" "$SERVER_MAJOR"
 log "Postgres is reachable. gpg, psql and pg_restore are present."
 
 step "3/6  Is the target a replacement, or a live shop?"
