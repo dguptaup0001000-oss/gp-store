@@ -156,7 +156,13 @@ public class DeliveryPartnerService {
      * address and whether sign-in is possible.
      */
     @Transactional
-    public WorkerLoginAccountView linkLoginAccount(Long partnerId, String rawEmail, String rawPassword) {
+    /**
+     * @param actorManagesAccounts whether the person doing this already holds
+     *     CUSTOMERS_MANAGE - see the staff branch below for why that, and not
+     *     the target's role, is the question that matters.
+     */
+    public WorkerLoginAccountView linkLoginAccount(
+            Long partnerId, String rawEmail, String rawPassword, boolean actorManagesAccounts) {
         DeliveryPartner partner = repository.findById(partnerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
 
@@ -198,27 +204,26 @@ public class DeliveryPartnerService {
                 }
             });
 
-            // THE OWNER IS OFTEN ALSO THE RIDER, and refusing staff accounts
-            // outright left a one-person shop unable to put its own address on
-            // the roster at all.
+            // THE OWNER IS OFTEN ALSO THE RIDER, and the question this branch
+            // has to answer is WHO IS ASKING - not whose account it is.
             //
-            // What made a staff account dangerous was never the LINK - it was
-            // SETTING A PASSWORD on one. That is a takeover: DELIVERY_MANAGE is
-            // narrower than the permission guarding staff accounts, so whoever
-            // edits the roster could otherwise type the owner's address, choose
-            // a password, and sign in as the owner. So the password is refused,
-            // loudly, and only the link goes through.
+            // The escalation to prevent is a roster-only operator setting a
+            // password on the owner's account and then signing in as them.
+            // DELIVERY_MANAGE is narrower than CUSTOMERS_MANAGE, so a
+            // DELIVERY_MANAGER (who has the former and not the latter) must not
+            // get there. But an owner who ALREADY holds CUSTOMERS_MANAGE can
+            // set that password on the customer screens anyway - refusing them
+            // here buys nothing and leaves a one-person shop unable to put its
+            // own address on its own roster. That is the dead end that produced
+            // "This login is not linked to a worker record" with no way out.
             //
-            // Their role is left alone too. Promoting an administrator to
-            // DELIVERY_BOY would strip every permission they have - the roster
-            // screen must not be a way to demote the owner.
+            // So the gate is the actor's permission, checked on the server from
+            // the authenticated role - never a flag from the request.
+            //
+            // Their role is left alone regardless. Promoting an administrator
+            // to DELIVERY_BOY would strip every permission they have - the
+            // roster screen must not be a way to demote the owner.
             if (isStaff(account.getRole())) {
-                if (!password.isEmpty()) {
-                    throw new ConflictException(
-                            "That address belongs to a staff account, so its password can only be "
-                                    + "changed by its owner. Leave the password blank and they sign "
-                                    + "in to the worker app with the password they already use.");
-                }
                 if (!RolePermissions.forRole(account.getRole())
                         .contains(AdminPermission.DELIVERY_MANAGE)) {
                     // Linking them would look like it worked and then fail at
@@ -228,6 +233,18 @@ public class DeliveryPartnerService {
                             "That staff account does not have delivery access, so it cannot open "
                                     + "the worker app. Give it delivery permissions first, or use a "
                                     + "different address.");
+                }
+                if (!password.isEmpty()) {
+                    if (!actorManagesAccounts) {
+                        throw new ConflictException(
+                                "That address belongs to a staff account, and you cannot set a "
+                                        + "password on one from here. Leave the password blank to "
+                                        + "link it - they sign in with the password they already "
+                                        + "use.");
+                    }
+                    requireUsablePassword(password);
+                    account.setPassword(passwordEncoder.encode(password));
+                    account = customerRepository.save(account);
                 }
                 partner.setAccount(account);
                 repository.save(partner);

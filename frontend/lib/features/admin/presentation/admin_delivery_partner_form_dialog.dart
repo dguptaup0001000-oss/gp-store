@@ -143,9 +143,19 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
       }
       return true;
     } catch (e) {
-      // The backend's refusals name the next step ("ask them to register in
-      // the customer app first"), so they are shown as-is.
-      if (mounted) setState(() => _loginError = extractErrorMessage(e));
+      // The backend's refusals name the next step, so they are shown as-is.
+      final message = extractErrorMessage(e);
+      if (mounted) {
+        setState(() => _loginError = message);
+        // AND in a SnackBar, because the inline error alone was missed for a
+        // whole afternoon: it renders below the password field, in a dialog
+        // that scrolls, with the keyboard covering the bottom of the screen.
+        // A refused Save that looks like nothing happened is worse than the
+        // refusal - you retype the password and press Save again, forever.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), duration: const Duration(seconds: 6)),
+        );
+      }
       return false;
     }
   }

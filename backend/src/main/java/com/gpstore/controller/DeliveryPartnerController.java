@@ -4,7 +4,9 @@ import com.gpstore.config.PageRequests;
 import com.gpstore.dto.request.LocationUpdateRequest;
 import com.gpstore.dto.response.WorkerLoginAccountView;
 import com.gpstore.entity.DeliveryPartner;
+import com.gpstore.security.AdminPermission;
 import com.gpstore.security.CurrentUser;
+import com.gpstore.security.RolePermissions;
 import com.gpstore.service.DeliveryPartnerService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
@@ -68,7 +70,13 @@ public class DeliveryPartnerController {
     @PutMapping("/{id}/login-account")
     public WorkerLoginAccountView linkLoginAccount(
             @PathVariable Long id, @Valid @RequestBody LinkLoginAccountRequest request) {
-        return service.linkLoginAccount(id, request.getEmail(), request.getPassword());
+        // Derived from the authenticated role on the server, exactly the way
+        // JwtFilter derives authorities - never taken from the request body.
+        boolean actorManagesAccounts = RolePermissions
+                .forRoleName(currentUser.get().getRole())
+                .contains(AdminPermission.CUSTOMERS_MANAGE);
+        return service.linkLoginAccount(
+                id, request.getEmail(), request.getPassword(), actorManagesAccounts);
     }
 
     @DeleteMapping("/{id}/login-account")
