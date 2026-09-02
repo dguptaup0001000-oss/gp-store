@@ -144,7 +144,7 @@ void main() {
       expect(labels, containsAll(['Products', 'Inventory', 'Analytics']));
       expect(labels, isNot(contains('Customers')));
       expect(labels, isNot(contains('Payments')));
-      expect(labels, isNot(contains('Delivery Partners')));
+      expect(labels, isNot(contains('Delivery Workers')));
     });
 
     test('empty groups are dropped, never left as a bare heading', () {

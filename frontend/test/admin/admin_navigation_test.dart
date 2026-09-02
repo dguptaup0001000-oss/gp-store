@@ -19,7 +19,11 @@ void main() {
     'Categories',
     'Inventory',
     'Coupons',
-    'Delivery Partners',
+    // 'Delivery Partners' was here. It is not a screen that went missing: it
+    // was REPLACED by 'Delivery Workers' (in addedSince below), which does
+    // the same job and also owns the rider's app login. Two roster screens
+    // where one of them could set a worker's credentials and the other could
+    // not is what made worker sign-in so hard to get right.
     'Territories',
     'Delivery Pricing',
     'Customers',
@@ -49,6 +53,7 @@ void main() {
     const addedSince = {
       'Packing List',
       'Store Hours',
+      'Delivery Workers',
     };
 
     final labels = AdminNav.all.map((d) => d.label).toSet();

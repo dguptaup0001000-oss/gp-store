@@ -2,7 +2,6 @@ package com.gpstore.controller;
 
 import com.gpstore.config.PageRequests;
 import com.gpstore.dto.request.LocationUpdateRequest;
-import com.gpstore.dto.response.WorkerLoginAccountView;
 import com.gpstore.entity.DeliveryPartner;
 import com.gpstore.security.AdminPermission;
 import com.gpstore.security.CurrentUser;
@@ -62,92 +61,26 @@ public class DeliveryPartnerController {
     //
     // Placed above the /me/** routes purely for readability; SecurityConfig
     // orders the rules, not this file.
-    @GetMapping("/{id}/login-account")
-    public WorkerLoginAccountView getLoginAccount(@PathVariable Long id) {
-        return service.getLoginAccount(id);
-    }
+    // The worker's login used to be attached here, by pointing a roster row
+    // at a Customer account. It now lives on the roster row itself and is
+    // managed at /api/admin/workers - see WorkerAdminController. Two ways to
+    // set the same credential is what made this so hard to get right.
 
-    @PutMapping("/{id}/login-account")
-    public WorkerLoginAccountView linkLoginAccount(
-            @PathVariable Long id, @Valid @RequestBody LinkLoginAccountRequest request) {
-        // Derived from the authenticated role on the server, exactly the way
-        // JwtFilter derives authorities - never taken from the request body.
-        boolean actorManagesAccounts = RolePermissions
-                .forRoleName(currentUser.get().getRole())
-                .contains(AdminPermission.CUSTOMERS_MANAGE);
-        return service.linkLoginAccount(
-                id, request.getEmail(), request.getPassword(), actorManagesAccounts);
-    }
 
-    @DeleteMapping("/{id}/login-account")
-    public WorkerLoginAccountView unlinkLoginAccount(@PathVariable Long id) {
-        return service.unlinkLoginAccount(id);
-    }
-
-    public static class LinkLoginAccountRequest {
-        /** The address the rider will type into the worker app. */
-        @NotBlank
-        @Email
-        private String email;
-
-        /**
-         * The password the shop is giving this rider.
-         *
-         * WRITE ONLY, and the annotation is what enforces it: without
-         * Access.WRITE_ONLY, a request body echoed back in a validation error
-         * - or this class ever being used as a response - would put a plaintext
-         * password on the wire. Nothing reads it back out.
-         *
-         * Optional on an account that already has one, so re-saving a rider
-         * does not force the shopkeeper to retype it. Required otherwise; the
-         * service decides, because only it knows whether the account exists.
-         * Length is checked there too - a @Size here would reject the empty
-         * "leave it alone" case.
-         */
-        @com.fasterxml.jackson.annotation.JsonProperty(
-                access = com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY)
-        private String password;
-
-        public String getEmail() {
-            return email;
-        }
-
-        public void setEmail(String email) {
-            this.email = email;
-        }
-
-        public String getPassword() {
-            return password;
-        }
-
-        public void setPassword(String password) {
-            this.password = password;
-        }
-
-        /**
-         * No password, ever, in a log line or a stack trace. The default
-         * toString of a class like this is one @Slf4j call away from writing a
-         * credential to disk.
-         */
-        @Override
-        public String toString() {
-            return "LinkLoginAccountRequest{email=" + email + ", password=***}";
-        }
-    }
 
     // A delivery partner setting their OWN availability (e.g. going off
     // duty) - resolved from their own account, never a client-supplied id,
     // so this can never touch anyone else's record.
     @PutMapping("/me/availability")
     public DeliveryPartner setMyAvailability(@RequestParam boolean available) {
-        return service.setMyAvailability(currentUser.customerId(), available);
+        return service.setMyAvailability(currentUser.get().getWorkerId(), available);
     }
 
     // A delivery partner viewing their OWN roster record - needed so the
     // app can show real current availability on load, not a guess.
     @GetMapping("/me")
     public DeliveryPartner getMyProfile() {
-        return service.getByAccountIdOrThrow(currentUser.customerId());
+        return service.getLiveWorkerOrThrow(currentUser.get().getWorkerId());
     }
 
     // A delivery partner's own app pushing its live GPS position (called
@@ -156,7 +89,7 @@ public class DeliveryPartnerController {
     // location.
     @PutMapping("/me/location")
     public DeliveryPartner updateMyLocation(@Valid @RequestBody LocationUpdateRequest request) {
-        return service.updateMyLocation(currentUser.customerId(), request.getLatitude(),
+        return service.updateMyLocation(currentUser.get().getWorkerId(), request.getLatitude(),
                 request.getLongitude(), request.getAccuracyMeters());
     }
 

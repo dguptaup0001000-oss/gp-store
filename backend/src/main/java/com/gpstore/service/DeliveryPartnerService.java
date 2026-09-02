@@ -109,229 +109,11 @@ public class DeliveryPartnerService {
         return saved;
     }
 
-    /**
-     * Which account, if any, this partner signs in with.
-     *
-     * Transactional because {@code account} is LAZY and this application runs
-     * with open-in-view=false - reading the email has to happen while the
-     * session is still open, which is exactly why this returns a DTO rather
-     * than letting Jackson walk the association later.
-     */
-    @Transactional(readOnly = true)
-    public WorkerLoginAccountView getLoginAccount(Long partnerId) {
-        DeliveryPartner partner = repository.findById(partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
-        return describe(partner.getAccount());
-    }
-
-    /**
-     * Gives a rider the credentials they sign in to the worker app with.
-     *
-     * WHY THIS CREATES THE ACCOUNT RATHER THAN LINKING ONE. The first version
-     * of this refused to create anything: the shopkeeper had to send the rider
-     * away to register in the CUSTOMER app first, then come back and type the
-     * address here. That is backwards for how a shop actually hires somebody -
-     * you take somebody on and hand them a login - and it could never have
-     * worked anyway, because nothing in this system ever set a password for a
-     * rider. The roster screen made accounts by mobile number for OTP, and the
-     * worker app has no OTP form. Every path ended at a rider who could not
-     * sign in.
-     *
-     * So the shop sets both halves here, and the rider is told them. One
-     * screen, no second app, no self-registration.
-     *
-     * WHAT IT REFUSES, and each of these is a way this could otherwise be used
-     * to take an account over:
-     *
-     *   - An ADMIN or other staff account. Setting a password is a takeover,
-     *     and DELIVERY_MANAGE is a narrower permission than the one guarding
-     *     staff accounts - so whoever can manage the roster must not be able
-     *     to reset the owner's password through it and sign in as them.
-     *   - An account already used by a different rider, which would otherwise
-     *     make findByAccountId non-unique and break that rider's next request.
-     *   - A password too short to be worth having.
-     *
-     * The password is hashed with the same encoder as registration and never
-     * logged, echoed, or returned. WorkerLoginAccountView carries only the
-     * address and whether sign-in is possible.
-     */
-    @Transactional
-    /**
-     * @param actorManagesAccounts whether the person doing this already holds
-     *     CUSTOMERS_MANAGE - see the staff branch below for why that, and not
-     *     the target's role, is the question that matters.
-     */
-    public WorkerLoginAccountView linkLoginAccount(
-            Long partnerId, String rawEmail, String rawPassword, boolean actorManagesAccounts) {
-        DeliveryPartner partner = repository.findById(partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
-
-        if (rawEmail == null || rawEmail.isBlank()) {
-            throw new BadRequestException("An email address is required.");
-        }
-        String email = rawEmail.trim();
-        String password = rawPassword == null ? "" : rawPassword.trim();
-
-        Customer account = customerRepository.findByEmailIgnoreCase(email).orElse(null);
-
-        if (account == null) {
-            // Brand new rider. A password is not optional here - an account
-            // created without one is the exact dead end this replaced.
-            requireUsablePassword(password);
-            account = new Customer();
-            account.setFullName(partner.getName());
-            account.setEmail(email);
-            account.setPassword(passwordEncoder.encode(password));
-            // The roster row's mobile, but only if no other account holds it -
-            // the column is unique, and a rider who already shops here would
-            // otherwise collide on save.
-            if (partner.getMobile() != null && !partner.getMobile().isBlank()
-                    && customerRepository.findByMobileNumber(partner.getMobile()).isEmpty()) {
-                account.setMobileNumber(partner.getMobile());
-            }
-            account.setRole(Role.DELIVERY_BOY);
-            account.setEnabled(true);
-            account.setActive(true);
-            // Verified because the shop vouched for them in person. There is no
-            // email round trip to complete and no way for them to do one.
-            account.setVerified(true);
-        } else {
-            repository.findByAccountId(account.getId()).ifPresent(existing -> {
-                if (!existing.getId().equals(partner.getId())) {
-                    throw new ConflictException(
-                            "That address is already the login for " + existing.getName()
-                                    + ". Unlink it there first.");
-                }
-            });
-
-            // THE OWNER IS OFTEN ALSO THE RIDER, and the question this branch
-            // has to answer is WHO IS ASKING - not whose account it is.
-            //
-            // The escalation to prevent is a roster-only operator setting a
-            // password on the owner's account and then signing in as them.
-            // DELIVERY_MANAGE is narrower than CUSTOMERS_MANAGE, so a
-            // DELIVERY_MANAGER (who has the former and not the latter) must not
-            // get there. But an owner who ALREADY holds CUSTOMERS_MANAGE can
-            // set that password on the customer screens anyway - refusing them
-            // here buys nothing and leaves a one-person shop unable to put its
-            // own address on its own roster. That is the dead end that produced
-            // "This login is not linked to a worker record" with no way out.
-            //
-            // So the gate is the actor's permission, checked on the server from
-            // the authenticated role - never a flag from the request.
-            //
-            // Their role is left alone regardless. Promoting an administrator
-            // to DELIVERY_BOY would strip every permission they have - the
-            // roster screen must not be a way to demote the owner.
-            if (isStaff(account.getRole())) {
-                if (!RolePermissions.forRole(account.getRole())
-                        .contains(AdminPermission.DELIVERY_MANAGE)) {
-                    // Linking them would look like it worked and then fail at
-                    // the door, because /api/worker/** admits DELIVERY_MANAGE or
-                    // a delivery rider and this account is neither.
-                    throw new ConflictException(
-                            "That staff account does not have delivery access, so it cannot open "
-                                    + "the worker app. Give it delivery permissions first, or use a "
-                                    + "different address.");
-                }
-                if (!password.isEmpty()) {
-                    if (!actorManagesAccounts) {
-                        throw new ConflictException(
-                                "That address belongs to a staff account, and you cannot set a "
-                                        + "password on one from here. Leave the password blank to "
-                                        + "link it - they sign in with the password they already "
-                                        + "use.");
-                    }
-                    requireUsablePassword(password);
-                    account.setPassword(passwordEncoder.encode(password));
-                    account = customerRepository.save(account);
-                }
-                partner.setAccount(account);
-                repository.save(partner);
-                return describe(account);
-            }
-            // Blank password on an account that already has one means "leave
-            // the password alone" - re-saving the partner should not force the
-            // shopkeeper to retype it, or reset a rider's working password by
-            // accident.
-            boolean hasPassword = account.getPassword() != null && !account.getPassword().isBlank();
-            if (!password.isEmpty() || !hasPassword) {
-                requireUsablePassword(password);
-                account.setPassword(passwordEncoder.encode(password));
-            }
-            account.setRole(Role.DELIVERY_BOY);
-            account.setEnabled(true);
-            account.setActive(true);
-        }
-
-        account = customerRepository.save(account);
-        // JwtFilter re-checks the role against the live row, and this cache
-        // sits in front of that read - without invalidating it the promotion
-        // would not take effect until the entry expired.
-        accountStatusService.invalidate(account.getId());
-
-        partner.setAccount(account);
-        repository.save(partner);
-
-        return describe(account);
-    }
-
-    /** Short enough to guess is not a credential. Matched to registration. */
-    private void requireUsablePassword(String password) {
-        if (password == null || password.trim().length() < MIN_WORKER_PASSWORD_LENGTH) {
-            throw new BadRequestException(
-                    "Set a password of at least " + MIN_WORKER_PASSWORD_LENGTH
-                            + " characters for this rider.");
-        }
-    }
-
-    private static final int MIN_WORKER_PASSWORD_LENGTH = 8;
-
-    /**
-     * Anything that is not a shopper or a rider.
-     *
-     * Written as "not one of two" rather than "is one of seven" on purpose: a
-     * role added later is treated as privileged until somebody decides
-     * otherwise, which fails in the safe direction.
-     */
-    private static boolean isStaff(Role role) {
-        return role != null && role != Role.CUSTOMER && role != Role.DELIVERY_BOY;
-    }
-
-    /**
-     * Detaches the login account.
-     *
-     * Demotes DELIVERY_BOY back to CUSTOMER, because an account left with that
-     * role but no roster row can still reach the worker endpoints - it just
-     * gets "no delivery partner profile" from every one of them. Any other
-     * role is left alone: this is unlinking a rider, not a place to change
-     * what an ADMIN or a MANAGER is.
-     */
-    @Transactional
-    public WorkerLoginAccountView unlinkLoginAccount(Long partnerId) {
-        DeliveryPartner partner = repository.findById(partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
-
-        Customer account = partner.getAccount();
-        partner.setAccount(null);
-        repository.save(partner);
-
-        if (account != null && account.getRole() == Role.DELIVERY_BOY) {
-            account.setRole(Role.CUSTOMER);
-            customerRepository.save(account);
-            accountStatusService.invalidate(account.getId());
-        }
-        return WorkerLoginAccountView.none();
-    }
-
-    private WorkerLoginAccountView describe(Customer account) {
-        if (account == null) {
-            return WorkerLoginAccountView.none();
-        }
-        boolean hasPassword = account.getPassword() != null && !account.getPassword().isBlank();
-        boolean hasEmail = account.getEmail() != null && !account.getEmail().isBlank();
-        return new WorkerLoginAccountView(true, account.getEmail(), hasEmail && hasPassword);
-    }
+    // The worker's login used to be attached here, by pointing a roster row
+    // at a Customer account and setting that account's password. It now lives
+    // on the roster row itself - see WorkerAdminService. One place to set a
+    // worker's credentials instead of two, which is what made the old one so
+    // hard to get right.
 
     public List<DeliveryPartner> getAll(Pageable pageable) {
         return repository.findAll(pageable).getContent();
@@ -352,15 +134,37 @@ public class DeliveryPartnerService {
     }
 
     /**
+     * The roster row for a worker-app session.
+     *
+     * THE ID COMES FROM THE TOKEN. A worker session carries its own roster id,
+     * so this is a primary-key read rather than a translation through an
+     * account link that could be missing - which is what used to strand a
+     * signed-in rider with "not linked to a worker record".
+     *
+     * Still filtered on deletedAt: a removed worker keeps their row so the
+     * shop's delivery history stays readable, and must not keep working.
+     */
+    public DeliveryPartner getLiveWorkerOrThrow(Long workerId) {
+        if (workerId == null) {
+            throw new BadRequestException(
+                    "Sign in with a worker login to use the worker app.");
+        }
+        return repository.findById(workerId)
+                .filter(worker -> worker.getDeletedAt() == null)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "This worker account is no longer on the roster."));
+    }
+
+    /**
      * Self-service - a delivery partner setting THEIR OWN availability
      * (e.g. going off duty). Deliberately only touches the `available`
      * field on their own resolved record - unlike the bulk update() above,
      * this can never be used to edit someone else's record, since the
-     * partner is resolved from the caller's own account, never a
+     * partner is resolved from the caller's own token, never a
      * client-supplied id.
      */
-    public DeliveryPartner setMyAvailability(Long customerId, boolean available) {
-        DeliveryPartner partner = getByAccountIdOrThrow(customerId);
+    public DeliveryPartner setMyAvailability(Long workerId, boolean available) {
+        DeliveryPartner partner = getLiveWorkerOrThrow(workerId);
         partner.setAvailable(available);
         return repository.save(partner);
     }
@@ -369,11 +173,11 @@ public class DeliveryPartnerService {
      * Self-service - a delivery partner's own app pushing its live GPS
      * position while on a run (called every few seconds). Same ownership
      * pattern as setMyAvailability() above: resolved from the caller's own
-     * account, never a client-supplied partner id, so this can never be
+     * token, never a client-supplied partner id, so this can never be
      * used to spoof someone else's location.
      */
-    public DeliveryPartner updateMyLocation(Long customerId, Double latitude, Double longitude) {
-        return updateMyLocation(customerId, latitude, longitude, null);
+    public DeliveryPartner updateMyLocation(Long workerId, Double latitude, Double longitude) {
+        return updateMyLocation(workerId, latitude, longitude, null);
     }
 
     /**
@@ -381,9 +185,9 @@ public class DeliveryPartnerService {
      *                       it did not say. Fixes vaguer than the configured
      *                       ceiling are refused rather than stored.
      */
-    public DeliveryPartner updateMyLocation(Long customerId, Double latitude, Double longitude,
+    public DeliveryPartner updateMyLocation(Long workerId, Double latitude, Double longitude,
                                             Double accuracyMeters) {
-        DeliveryPartner partner = getByAccountIdOrThrow(customerId);
+        DeliveryPartner partner = getLiveWorkerOrThrow(workerId);
 
         // NaN and infinity get past @DecimalMin/@DecimalMax - the comparison
         // they do is false for NaN in both directions, so neither bound

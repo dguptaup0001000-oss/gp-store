@@ -18,9 +18,22 @@ import '../domain/delivery_partner_models.dart';
 import '../domain/delivery_pricing_models.dart';
 import '../domain/inventory_models.dart';
 import '../domain/territory_models.dart';
+import '../data/admin_workers_repository.dart';
+import '../domain/worker_models.dart';
 
 final adminProductsRepositoryProvider = Provider<AdminProductsRepository>((ref) {
   return AdminProductsRepository(apiClient: ref.watch(apiClientProvider));
+});
+
+final adminWorkersRepositoryProvider = Provider<AdminWorkersRepository>((ref) {
+  return AdminWorkersRepository(apiClient: ref.watch(apiClientProvider));
+});
+
+/// The roster. autoDispose for the same reason as everything below it, and
+/// because a suspension that expires while the page is closed should be gone
+/// when it is reopened rather than read from a stale cache.
+final adminWorkersProvider = FutureProvider.autoDispose<List<AdminWorker>>((ref) {
+  return ref.watch(adminWorkersRepositoryProvider).list();
 });
 
 // autoDispose on every provider below this point (admin screens are

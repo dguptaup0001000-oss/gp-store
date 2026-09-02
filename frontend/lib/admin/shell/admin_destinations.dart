@@ -9,7 +9,7 @@ import '../../features/admin/presentation/admin_category_list_screen.dart';
 import '../../features/admin/presentation/admin_coupon_list_screen.dart';
 import '../../features/admin/presentation/admin_customers_screen.dart';
 import '../../features/admin/presentation/admin_delivery_breaches_screen.dart';
-import '../../features/admin/presentation/admin_delivery_partners_screen.dart';
+import '../../features/admin/presentation/admin_workers_screen.dart';
 import '../../features/admin/presentation/admin_delivery_pricing_screen.dart';
 import '../../features/admin/presentation/admin_inventory_screen.dart';
 import '../../features/admin/presentation/admin_order_list_screen.dart';
@@ -194,12 +194,12 @@ class AdminNav {
       title: 'Delivery',
       destinations: [
         AdminDestination(
-          id: 'partners',
+          id: 'workers',
           requires: AdminPermission.deliveryManage,
-          label: 'Delivery Partners',
-          icon: Icons.delivery_dining_outlined,
-          description: 'Your delivery team and availability',
-          builder: _partners,
+          label: 'Delivery Workers',
+          icon: Icons.badge_outlined,
+          description: 'Hire, pause and remove riders, and set their app login',
+          builder: _workers,
         ),
         AdminDestination(
           id: 'territories',
@@ -347,8 +347,7 @@ class AdminNav {
       const AdminCategoryListScreen();
   static Widget _inventory(BuildContext context) => const AdminInventoryScreen();
   static Widget _coupons(BuildContext context) => const AdminCouponListScreen();
-  static Widget _partners(BuildContext context) =>
-      const AdminDeliveryPartnersScreen();
+  static Widget _workers(BuildContext context) => const AdminWorkersScreen();
   static Widget _territories(BuildContext context) =>
       const AdminTerritoriesScreen();
   static Widget _deliveryPricing(BuildContext context) =>

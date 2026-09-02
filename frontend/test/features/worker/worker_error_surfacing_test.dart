@@ -84,11 +84,13 @@ void main() {
     testWidgets('an unlinked account is named, not blamed on the connection',
         (tester) async {
       final adapter = FakeHttpClientAdapter()
+        // The worker's OWN endpoint, and its own shape: an access token and
+        // no refresh token. A worker is not a customer account any more, so
+        // this is not /api/auth/login and does not return a token pair.
         ..on(
             'POST',
-            '/api/auth/login',
-            (_) => const FakeResponse(
-                {'token': 'access-abc', 'refreshToken': 'refresh-xyz'}))
+            '/api/worker/auth/login',
+            (_) => const FakeResponse({'accessToken': 'access-abc', 'workerId': 7}))
         ..on('GET', '/api/worker/me',
             (_) => const FakeResponse({'message': notLinked}, statusCode: 400));
 
@@ -124,7 +126,7 @@ void main() {
       final adapter = FakeHttpClientAdapter()
         ..on(
             'POST',
-            '/api/auth/login',
+            '/api/worker/auth/login',
             (options) => throw DioException(
                   requestOptions: options,
                   type: DioExceptionType.connectionError,

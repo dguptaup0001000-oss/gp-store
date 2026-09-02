@@ -283,6 +283,15 @@ public class SecurityConfig {
                 // an administrator can exercise the same flow while setting a
                 // phone up - it grants no ability a worker does not already
                 // have over their own record.
+                // The worker app's own sign-in. Must sit BEFORE the rule
+                // below, or the worker could never reach the endpoint that
+                // gets them a token in the first place.
+                .requestMatchers(HttpMethod.POST, "/api/worker/auth/login").permitAll()
+                // The roster page in the admin dashboard. Same permission that
+                // already means "runs dispatch"; deliberately NOT reachable by
+                // a delivery worker, who must not be able to edit the roster
+                // they appear on.
+                .requestMatchers("/api/admin/workers/**").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
                 .requestMatchers("/api/worker/**").hasAnyAuthority(AdminPermission.DELIVERY_MANAGE.authority(), "ROLE_DELIVERY_BOY")
                 .requestMatchers("/api/orders/admin/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
                 .requestMatchers("/api/orders/customer/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())

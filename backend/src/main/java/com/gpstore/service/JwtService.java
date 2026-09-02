@@ -82,6 +82,29 @@ public class JwtService {
                 .compact();
     }
 
+    /**
+     * A worker-app session.
+     *
+     * NO customerId CLAIM, because a worker is no longer a customer row. The
+     * roster id is the identity, and JwtFilter re-checks it against the live
+     * delivery_partners record on every request - so deleting or suspending a
+     * worker takes effect on their very next tap rather than whenever this
+     * token happens to expire.
+     *
+     * That live re-check is also why there is no refresh token to go with
+     * this one: revocation here does not depend on token lifetime at all.
+     */
+    public String generateWorkerToken(Long workerId, String loginEmail, long workerExpirationMs) {
+        return Jwts.builder()
+                .setSubject(loginEmail)
+                .claim("workerId", workerId)
+                .claim("role", Role.DELIVERY_BOY.name())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + workerExpirationMs))
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+
     private Claims extractClaims(String token) {
         return Jwts.parserBuilder()
                 .setSigningKey(key)

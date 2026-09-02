@@ -58,13 +58,13 @@ public class DeliveryController {
     @GetMapping("/{id}")
     public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryById(@PathVariable Long id) {
         boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
-        return deliveryService.getDeliveryById(id, currentUser.customerId(), isAdmin);
+        return deliveryService.getDeliveryById(id, currentUser.get().getWorkerId(), isAdmin);
     }
 
     @GetMapping("/order/{orderId}")
     public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryByOrderId(@PathVariable Long orderId) {
         boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
-        return deliveryService.getDeliveryByOrderId(orderId, currentUser.customerId(), isAdmin);
+        return deliveryService.getDeliveryByOrderId(orderId, currentUser.get().getWorkerId(), isAdmin);
     }
 
     // Lets a customer check their own order's delivery status/ETA.
@@ -88,7 +88,10 @@ public class DeliveryController {
             @RequestParam String status) {
 
         boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
-        return deliveryService.updateDeliveryStatus(id, status, currentUser.customerId(), isAdmin);
+        // A worker session carries the roster id; an admin carries none and
+        // does not need one, because isAdmin skips the ownership lookup.
+        return deliveryService.updateDeliveryStatus(
+                id, status, currentUser.get().getWorkerId(), isAdmin);
     }
 
     // A delivery partner's own active assignments - resolved from their

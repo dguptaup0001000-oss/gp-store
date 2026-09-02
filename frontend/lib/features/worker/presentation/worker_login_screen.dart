@@ -13,9 +13,14 @@ import '../domain/worker_models.dart';
 /// into the shop's data that nobody needs and somebody would eventually have to
 /// defend.
 ///
-/// It uses the SAME /api/auth/login as everyone else. A second credential path
-/// would mean a second place passwords are checked and a second place to get it
-/// wrong, in exchange for nothing.
+/// PHONE NUMBER OR EMAIL, whichever the rider has to hand. The shop records
+/// both, both are unique, and a worker standing in the street should not have
+/// to remember which one was typed into the roster.
+///
+/// It posts to /api/worker/auth/login, which checks the credentials the shop
+/// set on the worker's own record. That is deliberately NOT the customer login:
+/// a worker is no longer a customer account, so the same address can belong to
+/// the shop owner, a shopper and a rider without those three colliding.
 class WorkerLoginScreen extends StatefulWidget {
   const WorkerLoginScreen({
     super.key,
@@ -63,10 +68,10 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
 
   Future<void> _signIn() async {
     if (_busy) return;
-    final email = _identifier.text.trim();
-    if (!email.contains('@') || email.contains(' ')) {
+    final identifier = _identifier.text.trim();
+    if (identifier.isEmpty) {
       setState(() {
-        _error = 'Enter the email address for this worker account.';
+        _error = 'Enter your phone number or email address.';
       });
       return;
     }
@@ -77,21 +82,21 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
 
     try {
       final response = await widget.apiClient.dio.post(
-        '/api/auth/login',
+        '/api/worker/auth/login',
         data: {
-          'email': email,
+          'identifier': identifier,
           'password': _password.text,
         },
       );
 
-      // PARSED, NOT CAST. `body['token'] as String` threw a TypeError on any
-      // reply that was not the expected pair - a proxy's HTML error page, a
-      // body with a null token - and the catch below turned that into the
-      // connection message, sending a worker to check a connection that was
-      // working. parseRefreshPayload already does this check for the refresh
-      // endpoint, which returns the identical shape.
-      final tokens = parseRefreshPayload(response.data);
-      if (tokens == null) {
+      // READ, NOT CAST. Casting threw a TypeError on any reply that was not
+      // the expected shape - a proxy's HTML error page, a body with a null
+      // token - and the catch below turned that into the connection message,
+      // sending a worker to check a connection that was working.
+      final body = response.data;
+      final accessToken =
+          body is Map && body['accessToken'] is String ? body['accessToken'] as String : null;
+      if (accessToken == null || accessToken.isEmpty) {
         if (!mounted) return;
         setState(() => _error =
             'Signed in, but the server\'s reply could not be read. This is a '
@@ -99,19 +104,25 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
         return;
       }
 
-      // Hold in memory only until /api/worker/me confirms this account is a
-      // worker. Persisting first left a customer (or disabled) session on
-      // disk when me() failed.
+      // NO REFRESH TOKEN, on purpose. A worker session lasts a shift and the
+      // server re-checks the roster row on every request, so a rider who is
+      // paused or removed stops working on their next tap rather than whenever
+      // a token happened to expire. When the shift-long token does run out the
+      // client simply asks them to sign in again, which is what it already
+      // does when there is nothing to refresh with.
+      //
+      // Held in memory only until /api/worker/me answers, so a reply that
+      // turns out not to be a usable session never reaches disk.
       widget.tokenStorage.holdTokensInMemory(
-        accessToken: tokens.access,
-        refreshToken: tokens.refresh,
+        accessToken: accessToken,
+        refreshToken: '',
       );
 
       try {
         final profile = await widget.repository.me();
         await widget.tokenStorage.saveTokens(
-          accessToken: tokens.access,
-          refreshToken: tokens.refresh,
+          accessToken: accessToken,
+          refreshToken: '',
         );
         await widget.tokenStorage.setRememberMe(true);
         if (!mounted) return;
@@ -168,7 +179,7 @@ class _WorkerLoginScreenState extends State<WorkerLoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
                   decoration: const InputDecoration(
-                    labelText: 'Email',
+                    labelText: 'Phone number or email',
                     border: OutlineInputBorder(),
                   ),
                 ),
