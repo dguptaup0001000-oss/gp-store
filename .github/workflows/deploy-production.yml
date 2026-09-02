@@ -102,6 +102,11 @@ jobs:
           # Its thresholds decide whether anyone is told the shop owes
           # money, so the decisions are checked here, not just the syntax.
           MONEY_HEALTH_SELFTEST=1 deploy/production/evaluate-money-health.sh
+          bash -n deploy/production/recover-onto-new-vps.sh
+          chmod +x deploy/production/recover-onto-new-vps.sh
+          # Its guards are the only thing between a tired operator and
+          # a restore over a live shop, so they are checked every deploy.
+          RECOVER_SELFTEST=1 deploy/production/recover-onto-new-vps.sh
           sh -n backend/docker/backup/backup.sh
           python3 -m py_compile .github/scripts/wait_for_ci.py
           python3 -m py_compile .github/scripts/automerge_eligible_pr.py
