@@ -44,6 +44,10 @@ public class PaymentService {
     private final int onlineTimeoutMinutes;
     private final int expiryBatchSize;
     private final int maxExpiryBatchesPerRun;
+    private final int refundReconcileMinAgeMinutes;
+    private final int refundStuckAfterHours;
+    private final int refundReconcileBatchSize;
+    private final int maxRefundReconcileBatchesPerRun;
 
     /**
      * This bean's own proxy, needed so the expiry sweep's per-payment
@@ -76,7 +80,18 @@ public class PaymentService {
             @org.springframework.beans.factory.annotation.Value("${payment.upi-timeout-minutes}") int upiTimeoutMinutes,
             @org.springframework.beans.factory.annotation.Value("${payment.online-timeout-minutes:60}") int onlineTimeoutMinutes,
             @org.springframework.beans.factory.annotation.Value("${payment.expiry-batch-size:100}") int expiryBatchSize,
-            @org.springframework.beans.factory.annotation.Value("${payment.expiry-max-batches-per-run:50}") int maxExpiryBatchesPerRun) {
+            @org.springframework.beans.factory.annotation.Value("${payment.expiry-max-batches-per-run:50}") int maxExpiryBatchesPerRun,
+            // A refund settles through a bank over days, so asking the
+            // provider about one that went out a minute ago tells you
+            // nothing and spends a rate limit. Half an hour is long enough
+            // that the answer means something.
+            @org.springframework.beans.factory.annotation.Value("${refund.reconcile-min-age-minutes:30}") int refundReconcileMinAgeMinutes,
+            // Beyond this, a refund is not slow, it is stuck, and a person
+            // needs to open the provider dashboard. Three days is past the
+            // outside of a normal bank settlement.
+            @org.springframework.beans.factory.annotation.Value("${refund.stuck-after-hours:72}") int refundStuckAfterHours,
+            @org.springframework.beans.factory.annotation.Value("${refund.reconcile-batch-size:50}") int refundReconcileBatchSize,
+            @org.springframework.beans.factory.annotation.Value("${refund.reconcile-max-batches-per-run:20}") int maxRefundReconcileBatchesPerRun) {
 
         this.paymentRepository = paymentRepository;
         this.orderRepository = orderRepository;
@@ -94,6 +109,10 @@ public class PaymentService {
         this.onlineTimeoutMinutes = onlineTimeoutMinutes;
         this.expiryBatchSize = expiryBatchSize;
         this.maxExpiryBatchesPerRun = maxExpiryBatchesPerRun;
+        this.refundReconcileMinAgeMinutes = refundReconcileMinAgeMinutes;
+        this.refundStuckAfterHours = refundStuckAfterHours;
+        this.refundReconcileBatchSize = refundReconcileBatchSize;
+        this.maxRefundReconcileBatchesPerRun = maxRefundReconcileBatchesPerRun;
     }
 
     /**
@@ -664,6 +683,12 @@ public class PaymentService {
         payment.setProviderRefundId(refund.providerRefundId());
         payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
 
+        // STAMPED HERE AND NOWHERE ELSE - the moment the provider took the
+        // request. This is the clock the reconciliation measures against, so
+        // setting it any earlier (at the intention) or later (at settlement)
+        // would make "stuck for four days" mean something else.
+        payment.setRefundRequestedAt(LocalDateTime.now());
+
         // The provider CAN answer SUCCESS immediately - a wallet refund often
         // does - and when it does there is no reason to make the shop wait for
         // a webhook to see it.
@@ -816,6 +841,212 @@ public class PaymentService {
                 "orderId=" + orderId + ", amount=" + saved.getRefundAmount()
                         + ", channel=" + saved.getRefundChannel());
         return com.gpstore.dto.response.PaymentResponse.from(saved);
+    }
+
+    /**
+     * Asks the provider what became of the refunds we sent and never saw land.
+     *
+     * THE GAP THIS CLOSES. A refund settles through a bank over days, so
+     * REFUND_PENDING is a perfectly normal state to sit in for a while. The
+     * failure it hides is the one that never leaves: Cashfree accepted the
+     * refund, the webhook that would have confirmed it was lost or never
+     * sent, and the row stays REFUND_PENDING for ever. Nothing else asks
+     * about those. V37 added an index for exactly this query and then
+     * nothing issued it - so the shop's books could say a customer was owed
+     * money that had in fact been returned days ago, or, the way round that
+     * actually hurts, could say a refund was on its way when the provider
+     * had rejected it and nobody was looking.
+     *
+     * A PULL, DELIBERATELY, rather than trusting the webhook. The webhook is
+     * the fast path and this is the one that cannot be lost: a push that
+     * never arrives is invisible, while a poll that fails just runs again.
+     *
+     * @SchedulerLock so only one instance sweeps on any tick, matching the
+     * expiry sweep above.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(
+            fixedDelayString = "${refund.reconcile-interval-ms:1800000}",
+            initialDelayString = "${refund.reconcile-initial-delay-ms:120000}")
+    @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(
+            name = "reconcileRefundsAwaitingProvider",
+            lockAtMostFor = "15m",
+            lockAtLeastFor = "1m")
+    public void reconcileRefundsAwaitingProvider() {
+        reconcileRefundsNow();
+    }
+
+    /**
+     * The sweep itself, with the cluster coordination left on the caller.
+     *
+     * SPLIT DELIBERATELY, the same shape as expireStalePendingUpiPayments and
+     * expireStalePending above. ShedLock's lockAtLeastFor is a floor on how
+     * often the SCHEDULE may fire - it exists so a second instance cannot
+     * re-run a fast, mostly-empty pass moments later. It is deployment
+     * coordination, not part of what this sweep does, and leaving it on the
+     * only entry point makes the behaviour untestable: a second call inside
+     * the lock window is silently skipped, so a test would be asserting
+     * against a method body that never ran.
+     */
+    void reconcileRefundsNow() {
+
+        LocalDateTime askedBefore = LocalDateTime.now().minusMinutes(refundReconcileMinAgeMinutes);
+
+        // Batched and un-transactional at this level, for the same reasons
+        // as the expiry sweep: after any gap in the scheduler this set is as
+        // large as the gap, one transaction over all of it would hold
+        // order/payment locks for the whole run against rows live checkouts
+        // touch, and a single provider hiccup would cost the entire run's
+        // progress instead of one refund.
+        int checked = 0;
+        int settled = 0;
+        int stuck = 0;
+
+        for (int batch = 0; batch < maxRefundReconcileBatchesPerRun; batch++) {
+
+            // PAGED BY INDEX, not always page 0. The expiry sweep can keep
+            // asking for the first page because expiring a payment removes it
+            // from its query - reconciling one usually does NOT: a refund the
+            // provider still calls PENDING is exactly where it was, and
+            // re-reading page 0 would ask about the same fifty refunds until
+            // the batch limit ran out while the fifty-first was never checked
+            // at all.
+            //
+            // The cost of paging by index is that a refund which settles
+            // mid-run shifts the window and one row can be skipped. That row
+            // is picked up on the next run half an hour later, which is a far
+            // better trade than never reaching the tail of the list.
+            List<Payment> inFlight = paymentRepository.findRefundsAwaitingProvider(
+                    askedBefore,
+                    org.springframework.data.domain.PageRequest.of(batch, refundReconcileBatchSize));
+
+            if (inFlight.isEmpty()) {
+                break;
+            }
+
+            for (Payment payment : inFlight) {
+                checked++;
+                boolean landed = false;
+                try {
+                    // Through the proxy, so REQUIRES_NEW applies and each
+                    // refund commits on its own.
+                    landed = self.reconcileOneRefund(payment.getId());
+                } catch (RuntimeException providerTrouble) {
+                    // ONE BAD REFUND MUST NOT END THE RUN. The provider being
+                    // slow, rate-limiting us, or not recognising one refund id
+                    // says nothing about the next refund in the list, and a
+                    // sweep that gives up on the first error is a sweep that
+                    // stops working the first busy afternoon.
+                    log.warn("Could not reconcile refund for paymentId={}: {}",
+                            payment.getId(), providerTrouble.getMessage());
+                }
+
+                if (landed) {
+                    settled++;
+                } else if (isStuck(payment)) {
+                    // Only what is STILL in flight counts as stuck. One that
+                    // just landed was late, not stuck, and reporting it would
+                    // send somebody to the dashboard to look at a refund that
+                    // is already done.
+                    stuck++;
+                }
+            }
+
+            // A short batch means the query has drained.
+            if (inFlight.size() < refundReconcileBatchSize) {
+                break;
+            }
+        }
+
+        if (checked > 0) {
+            log.info("Refund reconciliation: checked {}, settled {}, still in flight beyond {}h: {}",
+                    checked, settled, refundStuckAfterHours, stuck);
+        }
+
+        if (stuck > 0) {
+            // WARN, not INFO, because this is the line that should reach a
+            // person: a refund past the outside of a bank settlement is not
+            // slow any more. No customer detail in it - a payment id is
+            // enough to find the row, and the alternative would put someone's
+            // money and identity in a log file.
+            log.warn("{} refund(s) have been with the provider for more than {} hours and have "
+                            + "not landed. Check them in the Cashfree dashboard.",
+                    stuck, refundStuckAfterHours);
+        }
+    }
+
+    private boolean isStuck(Payment payment) {
+        LocalDateTime askedAt = payment.getRefundRequestedAt();
+        // An unknown request time is not evidence of being stuck - it is a
+        // refund from before the column existed. Counting those as stuck
+        // would raise a false alarm on the first run after deploying.
+        return askedAt != null
+                && askedAt.isBefore(LocalDateTime.now().minusHours(refundStuckAfterHours));
+    }
+
+    /**
+     * Reconciles one refund against the provider.
+     *
+     * @return true when this call settled the refund, so the sweep can tell
+     *         progress from a run that found everything still in flight.
+     *
+     * REQUIRES_NEW so each refund commits independently, and the lock order
+     * is ORDER -> PAYMENT exactly as everywhere else in this class. Taking
+     * them the other way round here would deadlock against a cancellation or
+     * a webhook working on the same order.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public boolean reconcileOneRefund(Long paymentId) {
+
+        Payment unlocked = paymentRepository.findById(paymentId).orElse(null);
+        if (unlocked == null || unlocked.getOrder() == null) {
+            return false;
+        }
+
+        Payment payment = lockOrderThenPayment(unlocked.getOrder().getId());
+
+        // RE-READ UNDER THE LOCK. Between the sweep's query and this line a
+        // webhook may have settled it, or a shopkeeper may have. Their
+        // transition wins; asking the provider again would just be noise.
+        if (payment.getRefundedAt() != null || payment.getRefundId() == null) {
+            return false;
+        }
+
+        PaymentGateway.GatewayRefund refund =
+                paymentGateway.fetchRefund(payment.getProviderOrderId(), payment.getRefundId());
+
+        switch (refund.state()) {
+            case SUCCEEDED -> {
+                settleRefund(payment, "reconciled-with-provider");
+                paymentRepository.save(payment);
+                auditLogService.log("REFUND_RECONCILED", "Payment", payment.getId(),
+                        "provider confirmed the refund landed; refundId=" + payment.getRefundId());
+                log.info("Refund reconciliation settled paymentId={} that no webhook had confirmed.",
+                        payment.getId());
+                return true;
+            }
+            case FAILED, CANCELLED -> {
+                // Recorded, not thrown - same reasoning as completeRefund.
+                // The shop needs the provider's own words on the row, and
+                // throwing here would roll that write back and leave the next
+                // run rediscovering the same thing with nothing to show.
+                String reason = trimReason(refund.failureReason());
+                if (!java.util.Objects.equals(reason, payment.getRefundFailureReason())) {
+                    payment.setRefundFailureReason(reason);
+                    paymentRepository.save(payment);
+                    auditLogService.log("REFUND_FAILED", "Payment", payment.getId(),
+                            "provider reports " + refund.state() + " for refundId="
+                                    + payment.getRefundId());
+                }
+                // NOT counted as settled: the money did not go back, and the
+                // row still needs a person. It stays in the sweep's sights.
+                return false;
+            }
+            default -> {
+                // Still travelling. Normal for days - nothing to do but ask
+                // again next time.
+                return false;
+            }
+        }
     }
 
     /** The one place REFUNDED is set, so it cannot be set without a timestamp. */

@@ -72,4 +72,48 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
                                      @Param("cutoff") LocalDateTime cutoff,
                                      Pageable pageable);
 
+    /**
+     * Refunds we asked the provider for and never saw land.
+     *
+     * WHY THIS QUERY HAS TO EXIST. A refund settles through a bank over
+     * days, so REFUND_PENDING is a normal state to sit in for a while. The
+     * failure it hides is the one that never leaves: Cashfree accepted the
+     * refund, the webhook that would have confirmed it was lost or never
+     * sent, and the row stays REFUND_PENDING for ever. Nothing else in the
+     * system asks about those, so without this the shop's own books say a
+     * customer is owed money that may in fact already be back in their
+     * account - or, worse, may not be, with nobody looking.
+     *
+     * refundedAt IS NULL rather than a status check: the status is what a
+     * settlement writes, so keying on the timestamp asks the narrower and
+     * more honest question of whether anything ever confirmed the landing.
+     * refundId IS NOT NULL keeps cash refunds out - they never went to a
+     * provider and there is nobody to ask.
+     *
+     * Oldest first, and Pageable rather than a List, for the same reason as
+     * findStaleForExpiry above: after any gap in the scheduler this set is
+     * as large as the gap, and one batch per run keeps a bad day from
+     * turning into a long transaction holding locks across every refund the
+     * shop has outstanding.
+     */
+    @Query("select p from Payment p "
+            + "where p.refundId is not null and p.refundedAt is null "
+            + "and (p.refundRequestedAt is null or p.refundRequestedAt < :askedBefore) "
+            + "order by p.refundRequestedAt asc nulls first, p.id asc")
+    List<Payment> findRefundsAwaitingProvider(@Param("askedBefore") LocalDateTime askedBefore,
+                                              Pageable pageable);
+
+    /** How many refunds are in the air right now, for the metric. */
+    @Query("select count(p) from Payment p where p.refundId is not null and p.refundedAt is null")
+    long countRefundsAwaitingProvider();
+
+    /**
+     * The oldest in-flight refund's request time, or null when none is in
+     * flight. A count alone cannot tell a busy afternoon from a refund that
+     * has been stuck since Tuesday; this is the half that can.
+     */
+    @Query("select min(p.refundRequestedAt) from Payment p "
+            + "where p.refundId is not null and p.refundedAt is null")
+    LocalDateTime oldestRefundAwaitingProvider();
+
 }

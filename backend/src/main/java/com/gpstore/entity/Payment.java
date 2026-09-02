@@ -119,6 +119,17 @@ private PaymentStatus paymentStatus;
     @Column(name = "refunded_at")
     private LocalDateTime refundedAt;
 
+    /**
+     * When the provider was asked, which is what makes a stuck refund
+     * visible. Distinct from updatedAt, which any write to this row moves -
+     * an unrelated status touch would otherwise reset a stuck refund's age
+     * to zero, hiding exactly the case worth catching.
+     *
+     * Null for refunds that predate the column, and for cash.
+     */
+    @Column(name = "refund_requested_at")
+    private LocalDateTime refundRequestedAt;
+
     @Column(name = "refund_failure_reason", length = 255)
     private String refundFailureReason;
 
@@ -147,6 +158,9 @@ private PaymentStatus paymentStatus;
 
     public LocalDateTime getRefundedAt() { return refundedAt; }
     public void setRefundedAt(LocalDateTime refundedAt) { this.refundedAt = refundedAt; }
+
+    public LocalDateTime getRefundRequestedAt() { return refundRequestedAt; }
+    public void setRefundRequestedAt(LocalDateTime at) { this.refundRequestedAt = at; }
 
     public String getRefundFailureReason() { return refundFailureReason; }
     public void setRefundFailureReason(String reason) { this.refundFailureReason = reason; }

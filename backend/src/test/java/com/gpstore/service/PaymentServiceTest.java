@@ -49,7 +49,7 @@ class PaymentServiceTest {
         // InventoryRestorationConcurrencyTest instead.
         paymentService = new PaymentService(
                 paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService,
-                null, null, new com.gpstore.payment.gateway.CashfreeProperties(), null, null, null, null, 30, 60, 100, 50);
+                null, null, new com.gpstore.payment.gateway.CashfreeProperties(), null, null, null, null, 30, 60, 100, 50, 30, 72, 50, 20);
     }
 
     @Test
@@ -132,7 +132,7 @@ class PaymentServiceTest {
                 paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService,
                 // The extra null is the PaymentGateway: refunds are the only
                 // thing that uses it, and no test in this class refunds.
-                null, null, props, null, null, null, null, 30, 60, 100, 50);
+                null, null, props, null, null, null, null, 30, 60, 100, 50, 30, 72, 50, 20);
 
         assertEquals(PaymentMethod.ONLINE, paymentService.parsePaymentMethod("ONLINE"));
         assertEquals(PaymentMethod.COD, paymentService.parsePaymentMethod("COD"));
