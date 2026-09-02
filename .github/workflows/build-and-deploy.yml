@@ -477,6 +477,17 @@ jobs:
           mv build/app/outputs/bundle/adminRelease/app-admin-release.aab \
             build/app/outputs/bundle/admin/gpstore-admin-release.aab
 
+      # The bundle is what Play receives. The APK checks above are
+      # APK-specific, so without this a desktop binary could be stripped from
+      # every APK and still ship to real phones inside the .aab.
+      - name: Verify app bundles carry no desktop binaries
+        if: steps.play_signing.outputs.enabled == 'true'
+        working-directory: frontend
+        run: |
+          python3 tool/verify_apk_release.py --payload-only \
+            build/app/outputs/bundle/customer/gpstore-customer-release.aab \
+            build/app/outputs/bundle/admin/gpstore-admin-release.aab
+
       - name: Upload customer ARM64 APK
         uses: actions/upload-artifact@v4
         with:

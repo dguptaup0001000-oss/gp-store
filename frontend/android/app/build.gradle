@@ -61,27 +61,6 @@ android {
     compileSdk flutter.compileSdkVersion
     ndkVersion flutter.ndkVersion
 
-    androidResources {
-        // KEEP A WINDOWS EXECUTABLE OUT OF AN ANDROID APK.
-        //
-        // print_bluetooth_thermal depends on win_ble, which ships
-        // BLEServer.exe as a package asset. Flutter bundles a package's
-        // declared assets for EVERY platform, so a helper binary that only
-        // means anything on Windows is copied into
-        // assets/flutter_assets/packages/win_ble/ and shipped to phones. It
-        // cannot run on Android - it is dead weight in every download, and an
-        // unexplained .exe inside a shipped APK is exactly the kind of thing
-        // a security review stops on.
-        //
-        // Excluded here rather than by dropping the dependency: Bluetooth
-        // receipt printing is a working admin feature, and win_ble is only
-        // reachable from it on desktop.
-        //
-        // The list before the last entry is AGP's own default - setting this
-        // property REPLACES the default rather than adding to it, so omitting
-        // them would start packaging .git and .svn directories into assets.
-        ignoreAssetsPattern "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:!BLEServer.exe"
-    }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
@@ -194,11 +173,6 @@ android {
         }
     }
 
-    androidResources {
-        // packaging.resources.excludes does not strip Flutter package assets.
-        // BLEServer.exe is Windows-only (win_ble via the thermal printer plugin).
-        ignoreAssetsPattern "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:BLEServer.exe"
-    }
 
     // Uncompressed native libs, page-aligned by AGP (zipalign is part of
     // assembleRelease — do not unzip/repack/sign by hand afterwards).
@@ -276,4 +250,47 @@ configurations.all {
 
 flutter {
     source "../.."
+}
+
+// KEEP A WINDOWS EXECUTABLE OUT OF THE ANDROID APKs.
+//
+// print_bluetooth_thermal depends on win_ble, which declares
+// assets/BLEServer.exe in its pubspec. Flutter bundles a package's declared
+// assets for EVERY platform, so a helper binary that only means anything on
+// Windows was copied into assets/flutter_assets/packages/win_ble/ and shipped
+// to phones. It cannot run on Android: it is dead weight in every download,
+// and an unexplained .exe inside a shipped APK is what a security review
+// stops on.
+//
+// TWO EARLIER ATTEMPTS USED androidResources.ignoreAssetsPattern AND NEITHER
+// WORKED - the build stayed green and the file kept shipping, which is why
+// this is now enforced in verify_apk_release.py against the BUILT APK rather
+// than trusted. That property is applied by mergeAssets when it scans SOURCE
+// SET asset folders. Flutter's package assets are not in a source set: the
+// Flutter Gradle plugin copies them into the merged assets directory
+// AFTERWARDS, in copyFlutterAssets<Variant>, so the pattern never sees them.
+//
+// Hooking that copy task is therefore the earliest point where the file
+// actually exists on disk under our control, and it runs before
+// package<Variant> consumes the directory.
+//
+// Deliberately NOT dropping the dependency: Bluetooth receipt printing is a
+// working admin feature and win_ble is only reachable from it on desktop.
+tasks.configureEach { task ->
+    if (task.name.startsWith("copyFlutterAssets")) {
+        task.doLast {
+            def removed = 0
+            task.outputs.files.each { root ->
+                if (!root.exists()) return
+                fileTree(root) {
+                    include "**/packages/win_ble/**/*.exe"
+                }.each { stale ->
+                    if (stale.delete()) removed++
+                }
+            }
+            // Printed, not silent: if win_ble is ever dropped or renames its
+            // asset this says zero, and the APK check is what fails loudly.
+            logger.lifecycle("strip-desktop-assets: removed ${removed} file(s) after ${task.name}")
+        }
+    }
 }
