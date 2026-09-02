@@ -110,9 +110,25 @@ public class PaymentController {
                 "paymentStatus", gatewayPaymentService.reconcile(orderId, currentUser.customerId()).name());
     }
 
+    /**
+     * Sends money back, all of it or part of it.
+     *
+     * THE BODY IS OPTIONAL AND THAT IS THE POINT. No body means the whole
+     * order, which is what cancelling means and what the admin's plain Refund
+     * button has always meant - so every existing caller keeps working
+     * without knowing this changed. A body with an amount refunds that much.
+     *
+     * The amount is checked against the payment inside the service, under the
+     * order and payment row locks, because a number in a request body is a
+     * request, not a fact.
+     */
     @PutMapping("/order/{orderId}/refund")
-    public com.gpstore.dto.response.PaymentResponse refundPayment(@PathVariable Long orderId) {
-        return paymentService.refundPayment(orderId);
+    public com.gpstore.dto.response.PaymentResponse refundPayment(
+            @PathVariable Long orderId,
+            @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody(required = false)
+            com.gpstore.dto.request.RefundRequest request) {
+        return paymentService.refundPayment(orderId,
+                request != null ? request.getAmount() : null);
     }
 
     // Admin only (enforced in SecurityConfig).

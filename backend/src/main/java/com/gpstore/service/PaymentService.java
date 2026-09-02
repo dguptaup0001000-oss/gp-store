@@ -595,6 +595,38 @@ public class PaymentService {
      */
     @Transactional
     public com.gpstore.dto.response.PaymentResponse refundPayment(Long orderId) {
+        // The whole thing, which is what cancelling an order and most admin
+        // refunds mean.
+        return refundPayment(orderId, null);
+    }
+
+    /**
+     * Refunds part of a payment, or all of it.
+     *
+     * WHY PART OF ONE IS A REAL THING. A customer keeps three items out of
+     * five and hands back the rest. Until now the only refund the shop could
+     * issue was the whole order, so the shopkeeper's choices were to give
+     * back too much or to settle it in cash off the books - and the second is
+     * how a shop's records stop matching its bank.
+     *
+     * V37 stored refund_amount separately from amount for exactly this day,
+     * so the history of a partial refund is already correct: amount is what
+     * the customer paid, refund_amount is what went back.
+     *
+     * WHAT THIS DELIBERATELY DOES NOT DO. One refund per payment, whole or
+     * partial. A SECOND, separate partial refund on the same payment is
+     * refused rather than half-supported: the refund id is derived from the
+     * payment id, so a second refund would either collide with the first at
+     * the provider or need a refunds table to hang from - and a table is the
+     * honest way to do it, not a suffix bolted on here. The invariant below
+     * is written in terms of what is left to refund rather than the payment
+     * total, so the day that table arrives this check is already correct.
+     *
+     * @param requestedAmount what to send back, or null for the full payment.
+     */
+    @Transactional
+    public com.gpstore.dto.response.PaymentResponse refundPayment(Long orderId,
+                                                                  BigDecimal requestedAmount) {
 
         Payment payment = lockOrderThenPayment(orderId);
 
@@ -619,10 +651,12 @@ public class PaymentService {
             throw new ConflictException("A refund for this order has already been requested.");
         }
 
-        BigDecimal amount = payment.getAmount();
-        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+        BigDecimal paid = payment.getAmount();
+        if (paid == null || paid.compareTo(BigDecimal.ZERO) <= 0) {
             throw new ConflictException("This payment has no amount to refund.");
         }
+
+        BigDecimal amount = amountToRefund(payment, paid, requestedAmount);
 
         if (isCashRefund(payment)) {
             // COD money never went through a provider, so there is nothing to
@@ -701,6 +735,52 @@ public class PaymentService {
                 "orderId=" + orderId + ", amount=" + amount + ", channel=GATEWAY"
                         + ", refundId=" + refundId + ", providerState=" + refund.state());
         return saved;
+    }
+
+    /**
+     * How much may actually go back, and the refusals that protect the shop.
+     *
+     * THE ONE INVARIANT: a customer can never be sent back more than they
+     * paid. Every branch here exists to keep that true against a typo, a
+     * double-submitted form, or a client sending whatever it likes - the
+     * amount arrives from a request body, so it is not trusted, only checked.
+     *
+     * Expressed as "what is left to refund" rather than "the payment total",
+     * so it stays correct if refunds ever become multiple rows.
+     */
+    private static BigDecimal amountToRefund(Payment payment, BigDecimal paid,
+                                             BigDecimal requestedAmount) {
+
+        BigDecimal alreadyRefunded = payment.getRefundAmount() != null
+                && payment.getPaymentStatus() == PaymentStatus.REFUNDED
+                ? payment.getRefundAmount()
+                : BigDecimal.ZERO;
+
+        BigDecimal remaining = paid.subtract(alreadyRefunded);
+
+        if (requestedAmount == null) {
+            // No figure given means the whole of what is left, which is the
+            // full payment for a first refund.
+            return remaining;
+        }
+
+        // Money is two decimal places. A request for 10.005 is a client bug
+        // or someone probing for a rounding gap; round half-up to the paisa
+        // and check THAT, so what is validated is exactly what is sent.
+        BigDecimal wanted = requestedAmount.setScale(2, java.math.RoundingMode.HALF_UP);
+
+        if (wanted.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("A refund has to be for more than zero.");
+        }
+
+        if (wanted.compareTo(remaining) > 0) {
+            // The figures are the shop's own and it is their order, so naming
+            // them helps; there is no customer detail in either.
+            throw new ConflictException("This order has " + remaining
+                    + " left to refund, so " + wanted + " cannot be sent back.");
+        }
+
+        return wanted;
     }
 
     /**
