@@ -179,6 +179,30 @@ class WorkerLoginAccountTest {
     }
 
     @Test
+    @DisplayName("a shopper who becomes a rider keeps their own password")
+    void existingShopperKeepsTheirPassword() {
+        // THE CASE THE SHOP ACTUALLY HAS: one person who buys here and also
+        // delivers, on one email. The shop must not reset the password they
+        // already chose just to give them a delivery job, so a blank password
+        // means "leave it alone".
+        DeliveryPartner partner = rosterOnlyPartner();
+        String email = "both-" + unique() + "@gmail.com";
+        Customer shopper = shopper(email, encoder.encode("their-own-password"));
+        String before = shopper.getPassword();
+
+        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, "");
+
+        assertTrue(view.canSignIn(), "They could already sign in; that must not change.");
+        Customer after = customers.findByEmailIgnoreCase(email).orElseThrow();
+        assertEquals(before, after.getPassword(), "Their password must be byte-identical.");
+        assertTrue(encoder.matches("their-own-password", after.getPassword()),
+                "and must still be the one they chose.");
+        assertEquals(Role.DELIVERY_BOY, after.getRole(),
+                "They gain the delivery job - and RolePermissions keeps ROLE_CUSTOMER "
+                        + "alongside it, so their own checkout still works.");
+    }
+
+    @Test
     @DisplayName("a password too short to be worth having is refused")
     void shortPasswordIsRefused() {
         DeliveryPartner partner = rosterOnlyPartner();

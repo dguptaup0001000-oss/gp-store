@@ -99,11 +99,8 @@ public class JwtFilter extends OncePerRequestFilter {
                 // database row, so recomputing the set here means a change
                 // of role applies on the very next request.
                 List<GrantedAuthority> authorities = new ArrayList<>();
-                if (role != null) {
-                    authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
-                    for (AdminPermission permission : RolePermissions.forRoleName(role)) {
-                        authorities.add(new SimpleGrantedAuthority(permission.authority()));
-                    }
+                for (String authority : RolePermissions.authorityNamesForRoleName(role)) {
+                    authorities.add(new SimpleGrantedAuthority(authority));
                 }
 
                 UsernamePasswordAuthenticationToken auth =
