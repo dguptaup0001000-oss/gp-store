@@ -213,9 +213,11 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('belongs to a staff account'), findsOneWidget,
-        reason: 'The refusal names the next step, and it belongs under the field '
-            'that caused it - not in a SnackBar behind a dialog that has closed.');
+    expect(find.textContaining('belongs to a staff account'), findsNWidgets(2),
+        reason: 'Twice on purpose: under the field that caused it, AND in a '
+            'SnackBar. The inline error is the one that explains which field is '
+            'wrong; the SnackBar is the one you actually see, because the inline '
+            'one renders below the fold with the keyboard over it.');
     expect(_emailField, findsOneWidget,
         reason: 'The dialog must stay open so the address can be corrected.');
     expect(repository.updateCalls, 0,
