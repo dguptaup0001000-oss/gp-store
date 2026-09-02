@@ -382,6 +382,22 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # THE BUNDLE IS WHAT GOES TO PLAY. The checks above are APK-specific
+    # (signature, zipalign, ELF load alignment), but a desktop binary shipping
+    # inside an .aab reaches real phones just the same - and stripping it from
+    # the APKs while leaving it in the bundle would be the worst outcome: a
+    # green check and a shipped .exe.
+    if len(sys.argv) > 2 and sys.argv[1] == "--payload-only":
+        failed = False
+        for archive in sys.argv[2:]:
+            problems = forbidden_payload_problems(archive)
+            for problem in problems:
+                print(f"FORBIDDEN_PAYLOAD {problem}")
+                failed = True
+            if not problems:
+                print(f"PAYLOAD_OK {os.path.basename(archive)}")
+        sys.exit(1 if failed else 0)
+
     if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
         assert permission_violations(
             CUSTOMER_PACKAGE, {"android.permission.CAMERA"}
@@ -482,6 +498,16 @@ if __name__ == "__main__":
             with zipfile.ZipFile(mixed_case, "w") as zf:
                 zf.writestr("assets/flutter_assets/packages/win_ble/BLEServer.EXE", b"MZ")
             assert forbidden_payload_problems(mixed_case), "case must not be a way past this"
+
+            # Same scan must work on a bundle, which is a zip like any other.
+            bundle = os.path.join(tmp, "app.aab")
+            with zipfile.ZipFile(bundle, "w") as zf:
+                zf.writestr("base/assets/flutter_assets/packages/win_ble/assets/BLEServer.exe", b"MZ")
+            assert forbidden_payload_problems(bundle), "an .aab must be scanned too"
+            clean_bundle = os.path.join(tmp, "clean.aab")
+            with zipfile.ZipFile(clean_bundle, "w") as zf:
+                zf.writestr("base/assets/flutter_assets/AssetManifest.json", b"{}")
+            assert not forbidden_payload_problems(clean_bundle)
         print("self-test ok")
         sys.exit(0)
     main()
