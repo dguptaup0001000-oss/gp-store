@@ -129,6 +129,57 @@ public final class RolePermissions {
         return BY_ROLE.getOrDefault(role, NONE);
     }
 
+    /**
+     * Every authority a role carries, as a request should see them.
+     *
+     * ONE PLACE, because JwtFilter and the test annotation both need the
+     * answer and a second copy is a drift waiting to happen.
+     *
+     * A RIDER IS ALSO A SHOPPER, and this is where that is decided. The same
+     * person can hold a delivery job and buy their own groceries with the same
+     * account - which is what a shop with three staff actually looks like -
+     * and DELIVERY_BOY replacing CUSTOMER used to take their shopping away.
+     * Not visibly, either: browsing and the cart are gated on being
+     * authenticated, so everything looked normal right up to the checkout,
+     * where the three payment routes require ROLE_CUSTOMER and the order they
+     * had just built could not be paid for.
+     *
+     * So the delivery role ADDS to being a customer rather than replacing it.
+     * It grants nothing new on its own: ROLE_CUSTOMER only reaches routes that
+     * act on the caller's OWN cart, orders and payments, resolved from the
+     * authenticated id and never from the request.
+     *
+     * Staff roles deliberately do not get it. A shopkeeper buying from their
+     * own shop is a real thing but a separate decision, and it should be made
+     * on purpose rather than inherited from a helper.
+     */
+    public static Set<String> authorityNames(Role role) {
+        if (role == null) {
+            return Set.of();
+        }
+        Set<String> authorities = new java.util.LinkedHashSet<>();
+        authorities.add("ROLE_" + role.name());
+        if (role == Role.DELIVERY_BOY) {
+            authorities.add("ROLE_" + Role.CUSTOMER.name());
+        }
+        for (AdminPermission permission : forRole(role)) {
+            authorities.add(permission.authority());
+        }
+        return Collections.unmodifiableSet(authorities);
+    }
+
+    /** Same, for a role name off a JWT or a database row. Fails closed. */
+    public static Set<String> authorityNamesForRoleName(String roleName) {
+        if (roleName == null || roleName.isBlank()) {
+            return Set.of();
+        }
+        try {
+            return authorityNames(Role.valueOf(roleName.trim().toUpperCase()));
+        } catch (IllegalArgumentException unknownRole) {
+            return Set.of();
+        }
+    }
+
     /** True for any role that is staff - i.e. holds at least one permission. */
     public static boolean isStaff(Role role) {
         return !forRole(role).isEmpty();

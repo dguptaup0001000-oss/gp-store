@@ -7,6 +7,7 @@ import com.gpstore.entity.DeliveryZone;
 import com.gpstore.repository.DeliveryPartnerRepository;
 import com.gpstore.repository.DeliverySubzoneRepository;
 import com.gpstore.repository.DeliveryZoneRepository;
+import com.gpstore.territory.TerritoryDispatchService.DispatchDecision;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -185,26 +186,67 @@ class TerritoryDispatchTest {
      * async behaviour should not run a live drain, and the ones that were
      * doing so have been given outbox.drain-interval-ms. This call is the
      * belt to that pair of braces. It does not make the race impossible - a
-     * worker could still fire in the microseconds after it - but it removes
-     * the seconds-wide window that was actually being lost, and it fails
-     * loudly rather than as a mysterious identifier mismatch.
+     * worker could still fire in the microseconds after it - so clearing is
+     * only half of it. {@link #decideOnATie()} is the other half: it CHECKS
+     * AGAIN after the decision and throws the decision away if the window was
+     * lost, which is what finally closed this.
      */
-    private void settleFixtureLoad() {
+    private void clearFixtureLoad() {
         jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
                 + "(SELECT id FROM delivery_batches WHERE delivery_partner_id IN "
                 + " (SELECT id FROM delivery_partners WHERE name LIKE ?))", PREFIX + "%");
+    }
+
+    /**
+     * The id of the first fixture rider carrying live work, or null if the
+     * scores this class assumes are tied really are tied.
+     */
+    private Long busyFixtureRider() {
         for (Long partnerId : createdPartners) {
-            if (partnerId == null) {
+            if (partnerId != null && deliveryRepository.countActiveByPartnerId(partnerId) > 0) {
+                return partnerId;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A dispatch decision taken with every fixture rider verifiably idle -
+     * before AND after the scoring.
+     *
+     * CLEARING FIRST IS NOT ENOUGH, and that is the whole point of this
+     * method. An outbox worker in a sibling context can assign an order in
+     * the gap between the clear and the score, and one order is 0.8 km of
+     * score - more than enough to flip two riders standing on the same spot.
+     * The clear alone left microseconds open, and CI kept finding them.
+     *
+     * So the check runs again afterwards, and a decision taken during a lost
+     * window is discarded rather than asserted on. chooseFor is
+     * {@code @Transactional(readOnly = true)}, so re-taking it costs a query
+     * and changes nothing.
+     *
+     * <p>This does not weaken the assertion: the test still has to pass with
+     * both riders genuinely idle. It only refuses to judge a run where the
+     * premise was not true. If the premise never holds, that is a real
+     * problem in the suite and this fails saying so.
+     */
+    private DispatchDecision decideOnATie() {
+        Long busy = null;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            clearFixtureLoad();
+            if (busyFixtureRider() != null) {
                 continue;
             }
-            long load = deliveryRepository.countActiveByPartnerId(partnerId);
-            assertEquals(0, load,
-                    "fixture rider " + partnerId + " still carries " + load
-                            + " live order(s) after cleanup, so the scores this test "
-                            + "assumes are tied are not tied. Something is assigning to "
-                            + "fixture riders mid-test - check that new @SpringBootTest "
-                            + "classes which place orders set outbox.drain-interval-ms.");
+            DispatchDecision decision = dispatch.chooseFor(reload(west), DEST_LAT, DEST_LNG);
+            busy = busyFixtureRider();
+            if (busy == null) {
+                return decision;
+            }
         }
+        return fail("fixture rider " + busy + " picked up live work while this test was scoring, "
+                + "four times running, so the scores this test assumes are tied are not tied. "
+                + "Something is assigning to fixture riders mid-test - check that new "
+                + "@SpringBootTest classes which place orders set outbox.drain-interval-ms.");
     }
 
     private DeliverySubzone newSubzone(String code, String boundary, int capacity) {
@@ -358,9 +400,8 @@ class TerritoryDispatchTest {
         setPrimary(west, local);
         addNamedBackup(west, second, 2);
         addNamedBackup(west, first, 1);
-        settleFixtureLoad();
 
-        var decision = dispatch.chooseFor(reload(west), DEST_LAT, DEST_LNG);
+        var decision = decideOnATie();
 
         // Both are equally close and equally idle, so priority is the only
         // thing that can decide it - which is exactly what it is for.
@@ -431,9 +472,8 @@ class TerritoryDispatchTest {
         setPrimary(west, local);
         addNamedBackup(west, slightlyFurther, 1);
         addNamedBackup(west, near, 2);
-        settleFixtureLoad();
 
-        var decision = dispatch.chooseFor(reload(west), DEST_LAT, DEST_LNG);
+        var decision = decideOnATie();
 
         assertEquals(near.getId(), decision.partner().getId(),
                 "both passed the gate, so the closer one wins on score even though it was declared "

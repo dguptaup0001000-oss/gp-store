@@ -29,9 +29,8 @@ public class WithStaffSecurityContextFactory
     @Override
     public SecurityContext createSecurityContext(WithStaff annotation) {
         List<GrantedAuthority> authorities = new ArrayList<>();
-        authorities.add(new SimpleGrantedAuthority("ROLE_" + annotation.value().name()));
-        for (AdminPermission permission : RolePermissions.forRole(annotation.value())) {
-            authorities.add(new SimpleGrantedAuthority(permission.authority()));
+        for (String authority : RolePermissions.authorityNames(annotation.value())) {
+            authorities.add(new SimpleGrantedAuthority(authority));
         }
 
         User principal = new User(annotation.username(), "", authorities);
