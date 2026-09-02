@@ -202,8 +202,10 @@ void main() {
       // code no longer has is a trap for the next reader.
       linkError: ApiException(
           statusCode: 409,
-          message: 'That address belongs to a staff account. Use an address '
-              'that is not already used by an administrator.'),
+          message: 'That address belongs to a staff account, so its password '
+              'can only be changed by its owner. Leave the password blank and '
+              'they sign in to the worker app with the password they already '
+              'use.'),
     );
     await _open(tester, repository);
 

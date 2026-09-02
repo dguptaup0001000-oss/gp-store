@@ -240,10 +240,12 @@ class WorkerLoginAccountTest {
         owner.setRole(Role.ADMIN);
         customers.save(owner);
 
-        // THE ESCALATION THIS CLOSES. Setting a password is a takeover, and
-        // DELIVERY_MANAGE is a narrower permission than the one guarding staff
-        // accounts - so whoever can edit the roster must not be able to reset
-        // the owner's password here and then sign in as them.
+        // THE ESCALATION THIS CLOSES, and the reason it is about the PASSWORD
+        // rather than the link. DELIVERY_MANAGE is a narrower permission than
+        // the one guarding staff accounts, so whoever can edit the roster must
+        // not be able to choose the owner's password here and then sign in as
+        // them. Linking is allowed (see theOwnerCanBeTheirOwnRider); writing a
+        // credential onto a staff account never is.
         assertThrows(ConflictException.class,
                 () -> service.linkLoginAccount(partner.getId(), email, PASSWORD));
 
@@ -251,6 +253,62 @@ class WorkerLoginAccountTest {
         assertEquals(Role.ADMIN, unchanged.getRole(), "The role must not have been touched.");
         assertFalse(encoder.matches(PASSWORD, unchanged.getPassword()),
                 "and neither must the password.");
+        assertTrue(partners.findById(partner.getId()).orElseThrow().getAccount() == null,
+                "and a refused attempt must not leave the partner half-linked.");
+    }
+
+    @Test
+    @DisplayName("the owner can be their own rider, with the password they already have")
+    void theOwnerCanBeTheirOwnRider() {
+        // THE ONE-PERSON SHOP. The owner does the deliveries, and refusing
+        // staff accounts outright left them unable to put their own address on
+        // the roster at all - the worker app answered "this login is not linked
+        // to a worker record" and the roster screen offered no way to fix it.
+        DeliveryPartner partner = rosterOnlyPartner();
+        String email = "owner-" + unique() + "@gmail.com";
+        Customer owner = shopper(email, encoder.encode("the-owners-own-password"));
+        owner.setRole(Role.ADMIN);
+        customers.save(owner);
+        String before = customers.findById(owner.getId()).orElseThrow().getPassword();
+
+        // Blank password: they already have one, and it is not this screen's
+        // business what it is.
+        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, "");
+
+        assertTrue(view.linked(), "The address must now be the rider's login.");
+        assertTrue(view.canSignIn(), "They already have a password, so they can sign in.");
+        assertEquals(owner.getId(),
+                partners.findById(partner.getId()).orElseThrow().getAccount().getId(),
+                "and findByAccountId is what the worker app uses to find the roster row - "
+                        + "without this link it reports no worker record.");
+
+        Customer after = customers.findById(owner.getId()).orElseThrow();
+        assertEquals(Role.ADMIN, after.getRole(),
+                "Linking must not demote the owner to a delivery rider - that would strip "
+                        + "every permission they have, including the one they used to do this.");
+        assertEquals(before, after.getPassword(), "Their password must be byte-identical.");
+        assertTrue(encoder.matches("the-owners-own-password", after.getPassword()),
+                "and must still be the one they chose.");
+    }
+
+    @Test
+    @DisplayName("a staff account without delivery access is refused, not linked into a dead end")
+    void staffWithoutDeliveryAccessIsRefused() {
+        // /api/worker/** admits DELIVERY_MANAGE or a delivery rider. Linking an
+        // account that is neither would look like it worked in the admin app
+        // and then fail at the door, which is the failure this whole thread has
+        // been about. Say so at the point of the mistake instead.
+        DeliveryPartner partner = rosterOnlyPartner();
+        String email = "support-" + unique() + "@gmail.com";
+        Customer support = shopper(email, encoder.encode("their-own-password"));
+        support.setRole(Role.SUPPORT);
+        customers.save(support);
+
+        assertThrows(ConflictException.class,
+                () -> service.linkLoginAccount(partner.getId(), email, ""));
+
+        assertNull(partners.findById(partner.getId()).orElseThrow().getAccount(),
+                "A refused link must leave the roster row alone.");
     }
 
     @Test
@@ -291,10 +349,8 @@ class WorkerLoginAccountTest {
         customers.save(admin);
         String before = customers.findById(admin.getId()).orElseThrow().getPassword();
 
-        // The rule got STRICTER when this endpoint started setting passwords.
-        // It used to link an admin and merely decline to demote them; now it
-        // refuses outright, because the operation writes a credential and
-        // DELIVERY_MANAGE must not be a route to one on a staff account.
+        // A password typed against a staff address is refused, and a refusal
+        // must be total: no role change, no password change, nothing written.
         assertThrows(ConflictException.class,
                 () -> service.linkLoginAccount(partner.getId(), email, PASSWORD));
 
@@ -338,9 +394,9 @@ class WorkerLoginAccountTest {
         String email = "boss-" + unique() + "@gmail.com";
         Customer admin = shopper(email, "$2a$10$hashedpasswordvaluegoeshere1234567890abcd");
 
-        // Linked as an ordinary account first, then promoted - because linking
-        // a staff account is now refused outright. The property under test is
-        // about UNLINK, which must not touch a role it did not grant.
+        // Linked as an ordinary account first, then promoted, so the role
+        // under test is one this endpoint did NOT grant. The property is about
+        // UNLINK, which must not take away what it never gave.
         service.linkLoginAccount(partner.getId(), email, PASSWORD);
         admin.setRole(Role.ADMIN);
         customers.save(admin);
