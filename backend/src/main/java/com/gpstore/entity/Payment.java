@@ -90,8 +90,69 @@ private PaymentStatus paymentStatus;
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    // ------------------------------------------------------------ refunds
+    //
+    // A REFUND IS A THING THAT HAPPENED, not just a status. The status alone
+    // could say REFUNDED while the money was still at the provider, because
+    // nothing ever left the building. These carry the evidence.
+
+    /**
+     * This application's id for the refund, and the key the provider dedups
+     * on. Derived from the payment, never random - a retry after a timeout
+     * must reach the same refund rather than send the money twice.
+     */
+    @Column(name = "refund_id", length = 64)
+    private String refundId;
+
+    /** The provider's own id, for reconciling against their dashboard. */
+    @Column(name = "provider_refund_id", length = 64)
+    private String providerRefundId;
+
+    @Column(name = "refund_amount", precision = 12, scale = 2)
+    private BigDecimal refundAmount;
+
+    /**
+     * Set when the provider confirms, or when a shopkeeper records handing
+     * cash back. Never set at the moment of asking - that is the difference
+     * between "we asked" and "they have it".
+     */
+    @Column(name = "refunded_at")
+    private LocalDateTime refundedAt;
+
+    @Column(name = "refund_failure_reason", length = 255)
+    private String refundFailureReason;
+
+    /**
+     * CASH or GATEWAY. A COD refund never touches the provider and must not
+     * be reconciled against it; without this the two are indistinguishable
+     * afterwards.
+     */
+    @Column(name = "refund_channel", length = 16)
+    @Enumerated(EnumType.STRING)
+    private RefundChannel refundChannel;
+
+    public enum RefundChannel { CASH, GATEWAY }
+
     public Payment() {
     }
+
+    public String getRefundId() { return refundId; }
+    public void setRefundId(String refundId) { this.refundId = refundId; }
+
+    public String getProviderRefundId() { return providerRefundId; }
+    public void setProviderRefundId(String providerRefundId) { this.providerRefundId = providerRefundId; }
+
+    public BigDecimal getRefundAmount() { return refundAmount; }
+    public void setRefundAmount(BigDecimal refundAmount) { this.refundAmount = refundAmount; }
+
+    public LocalDateTime getRefundedAt() { return refundedAt; }
+    public void setRefundedAt(LocalDateTime refundedAt) { this.refundedAt = refundedAt; }
+
+    public String getRefundFailureReason() { return refundFailureReason; }
+    public void setRefundFailureReason(String reason) { this.refundFailureReason = reason; }
+
+    public RefundChannel getRefundChannel() { return refundChannel; }
+    public void setRefundChannel(RefundChannel refundChannel) { this.refundChannel = refundChannel; }
 
     public Long getId() {
         return id;

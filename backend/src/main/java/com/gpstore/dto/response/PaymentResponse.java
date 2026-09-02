@@ -23,10 +23,16 @@ public class PaymentResponse {
     private final String paymentStatus;
     private final String transactionId;
     private final LocalDateTime paymentDate;
+    private final String refundChannel;
+    private final BigDecimal refundAmount;
+    private final LocalDateTime refundedAt;
+    private final String refundFailureReason;
 
     public PaymentResponse(Long id, Long orderId, String orderNumber, String customerName, BigDecimal amount,
                             String paymentMethod, String paymentStatus, String transactionId,
-                            LocalDateTime paymentDate) {
+                            LocalDateTime paymentDate,
+                            String refundChannel, BigDecimal refundAmount,
+                            LocalDateTime refundedAt, String refundFailureReason) {
         this.id = id;
         this.orderId = orderId;
         this.orderNumber = orderNumber;
@@ -36,6 +42,10 @@ public class PaymentResponse {
         this.paymentStatus = paymentStatus;
         this.transactionId = transactionId;
         this.paymentDate = paymentDate;
+        this.refundChannel = refundChannel;
+        this.refundAmount = refundAmount;
+        this.refundedAt = refundedAt;
+        this.refundFailureReason = refundFailureReason;
     }
 
     public static PaymentResponse from(Payment payment) {
@@ -51,7 +61,11 @@ public class PaymentResponse {
                 payment.getPaymentMethod() != null ? payment.getPaymentMethod().name() : null,
                 payment.getPaymentStatus() != null ? payment.getPaymentStatus().name() : null,
                 payment.getTransactionId(),
-                payment.getPaymentDate()
+                payment.getPaymentDate(),
+                payment.getRefundChannel() != null ? payment.getRefundChannel().name() : null,
+                payment.getRefundAmount(),
+                payment.getRefundedAt(),
+                payment.getRefundFailureReason()
         );
     }
 
@@ -64,4 +78,14 @@ public class PaymentResponse {
     public String getPaymentStatus() { return paymentStatus; }
     public String getTransactionId() { return transactionId; }
     public LocalDateTime getPaymentDate() { return paymentDate; }
+
+    // WHY THE REFUND FACTS ARE ON THE WIRE. A refund that the provider
+    // refused leaves the payment REFUND_PENDING, which on its own is
+    // indistinguishable from one still travelling. The shop needs the reason
+    // to act, and refundedAt is the difference between "we asked" and "they
+    // have it".
+    public String getRefundChannel() { return refundChannel; }
+    public BigDecimal getRefundAmount() { return refundAmount; }
+    public LocalDateTime getRefundedAt() { return refundedAt; }
+    public String getRefundFailureReason() { return refundFailureReason; }
 }

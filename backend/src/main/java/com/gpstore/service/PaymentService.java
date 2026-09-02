@@ -5,6 +5,9 @@ import com.gpstore.dto.response.PaymentInitiationResponse;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.enums.PaymentMethod;
 import com.gpstore.enums.PaymentStatus;
+import com.gpstore.payment.gateway.PaymentGateway;
+
+import java.math.BigDecimal;
 import com.gpstore.entity.Order;
 import com.gpstore.entity.Payment;
 import com.gpstore.exception.BadRequestException;
@@ -24,6 +27,8 @@ import java.util.Optional;
 public class PaymentService {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PaymentService.class);
+
+    private final com.gpstore.payment.gateway.PaymentGateway paymentGateway;
 
     private final PaymentRepository paymentRepository;
     private final OrderRepository orderRepository;
@@ -61,6 +66,10 @@ public class PaymentService {
             com.gpstore.repository.OutboxEventRepository outboxEventRepository,
             NotificationService notificationService,
             com.gpstore.payment.gateway.CashfreeProperties cashfreeProperties,
+            // The low-level gateway, not GatewayPaymentService: that one
+            // already depends on this class, and asking for it here would be a
+            // cycle. Refunding needs the provider call and nothing else.
+            com.gpstore.payment.gateway.PaymentGateway paymentGateway,
             com.gpstore.repository.DeliveryRepository deliveryRepository,
             DeliveryPartnerService deliveryPartnerService,
             @org.springframework.context.annotation.Lazy PaymentService self,
@@ -77,6 +86,7 @@ public class PaymentService {
         this.outboxEventRepository = outboxEventRepository;
         this.notificationService = notificationService;
         this.cashfreeProperties = cashfreeProperties;
+        this.paymentGateway = paymentGateway;
         this.deliveryRepository = deliveryRepository;
         this.deliveryPartnerService = deliveryPartnerService;
         this.self = self;
@@ -545,28 +555,107 @@ public class PaymentService {
             return paymentRepository.findByTransactionId(transactionId).map(com.gpstore.dto.response.PaymentResponse::from);
         }
 
+    /**
+     * Sends the money back.
+     *
+     * WHAT THIS USED TO DO, AND WHY IT WAS WORSE THAN NOTHING. It set
+     * REFUND_PENDING, wrote an audit line, and returned. No request ever left
+     * the building. For COD that is honest - the cash goes back at the door.
+     * For a PREPAID order the shop's screen said REFUNDED while the money was
+     * still at Cashfree, and the only person who found out was the customer.
+     *
+     * TWO CHANNELS, DECIDED HERE. Cash goes back by hand and is recorded as
+     * done. A gateway payment is actually refunded at the provider and stays
+     * REFUND_PENDING until the provider says the money moved - refunds settle
+     * through a bank over days, so "we asked" and "they have it" are different
+     * facts and this method only ever claims the first.
+     *
+     * THE REFUND ID IS DERIVED, NOT GENERATED. It comes from the payment id,
+     * so a retry after a timeout carries the id Cashfree has already seen and
+     * is deduplicated there. A random id would send the shop's money twice.
+     */
     @Transactional
     public com.gpstore.dto.response.PaymentResponse refundPayment(Long orderId) {
 
         Payment payment = lockOrderThenPayment(orderId);
 
-        if (payment.getPaymentMethod() == PaymentMethod.COD &&
-                payment.getPaymentStatus() == PaymentStatus.COD_PENDING) {
+        if (payment.getPaymentMethod() == PaymentMethod.COD
+                && payment.getPaymentStatus() == PaymentStatus.COD_PENDING) {
             throw new ConflictException("Refund is not required for unpaid COD order");
         }
-
         if (payment.getPaymentStatus() == PaymentStatus.REFUNDED) {
             throw new ConflictException("Payment is already refunded");
         }
+        if (payment.getPaymentStatus() == PaymentStatus.REFUND_PENDING) {
+            // Not an error worth blocking on, but it must not send a SECOND
+            // request to the provider - so say so and stop.
+            throw new ConflictException("A refund for this order has already been requested.");
+        }
 
+        BigDecimal amount = payment.getAmount();
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ConflictException("This payment has no amount to refund.");
+        }
+
+        if (isCashRefund(payment)) {
+            // COD money never went through a provider, so there is nothing to
+            // ask. The shopkeeper hands it back and this records that.
+            payment.setRefundChannel(Payment.RefundChannel.CASH);
+            payment.setRefundAmount(amount);
+            payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
+            Payment saved = paymentRepository.save(payment);
+            auditLogService.log("REFUND_INITIATED", "Payment", saved.getId(),
+                    "orderId=" + orderId + ", amount=" + amount + ", channel=CASH");
+            return com.gpstore.dto.response.PaymentResponse.from(saved);
+        }
+
+        String refundId = refundIdFor(payment);
+        payment.setRefundChannel(Payment.RefundChannel.GATEWAY);
+        payment.setRefundId(refundId);
+        payment.setRefundAmount(amount);
+        payment.setRefundFailureReason(null);
+
+        PaymentGateway.GatewayRefund refund;
+        try {
+            refund = paymentGateway.requestRefund(new PaymentGateway.GatewayRefundRequest(
+                    payment.getProviderOrderId(), refundId, amount,
+                    "Refund for order " + orderId));
+        } catch (RuntimeException gatewayRefused) {
+            // NOTHING IS PERSISTED as pending when the provider never took the
+            // request - a REFUND_PENDING row nobody asked for would sit in the
+            // reconciliation report forever. The transaction rolls back and
+            // the shopkeeper sees the provider's own reason.
+            log.error("Refund request to provider failed for orderId={}: {}",
+                    orderId, gatewayRefused.getMessage());
+            throw gatewayRefused;
+        }
+
+        payment.setProviderRefundId(refund.providerRefundId());
         payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
+
+        // The provider CAN answer SUCCESS immediately - a wallet refund often
+        // does - and when it does there is no reason to make the shop wait for
+        // a webhook to see it.
+        if (refund.state() == PaymentGateway.GatewayRefund.State.SUCCEEDED) {
+            settleRefund(payment, "gateway-immediate");
+        }
 
         Payment saved = paymentRepository.save(payment);
         auditLogService.log("REFUND_INITIATED", "Payment", saved.getId(),
-                "orderId=" + orderId + ", amount=" + saved.getAmount());
+                "orderId=" + orderId + ", amount=" + amount + ", channel=GATEWAY"
+                        + ", refundId=" + refundId + ", providerState=" + refund.state());
         return com.gpstore.dto.response.PaymentResponse.from(saved);
     }
 
+    /**
+     * Marks a refund as landed.
+     *
+     * FOR CASH, the shopkeeper saying so IS the evidence - they handed over
+     * the notes. For a GATEWAY refund it is not: this asks the provider, and
+     * refuses to mark it refunded unless the provider says SUCCESS. Somebody
+     * clicking "complete" is not a bank transfer, and the whole point of this
+     * work is that the record and the money agree.
+     */
     @Transactional
     public com.gpstore.dto.response.PaymentResponse completeRefund(Long orderId) {
 
@@ -576,12 +665,86 @@ public class PaymentService {
             throw new ConflictException("Payment is not waiting for refund");
         }
 
-        payment.setPaymentStatus(PaymentStatus.REFUNDED);
+        if (payment.getRefundChannel() == Payment.RefundChannel.GATEWAY) {
+            PaymentGateway.GatewayRefund refund =
+                    paymentGateway.fetchRefund(payment.getProviderOrderId(), payment.getRefundId());
+
+            switch (refund.state()) {
+                case SUCCEEDED -> settleRefund(payment, "gateway-confirmed");
+                case FAILED, CANCELLED -> {
+                    // RECORDED AND RETURNED, NOT THROWN. Two earlier attempts
+                    // got this wrong in ways worth writing down. Throwing after
+                    // a save rolls the save back, so the shop got an error
+                    // toast and a row that remembered nothing about why. Doing
+                    // the save in a REQUIRES_NEW transaction deadlocks instead,
+                    // because the outer transaction is already holding this
+                    // payment row.
+                    //
+                    // So the failure is part of the answer: the status stays
+                    // REFUND_PENDING and refundFailureReason carries the
+                    // provider's own words, on the wire and in the row, where
+                    // the shop can still see it tomorrow.
+                    payment.setRefundFailureReason(trimReason(refund.failureReason()));
+                    auditLogService.log("REFUND_FAILED", "Payment", payment.getId(),
+                            "orderId=" + orderId + ", providerState=" + refund.state());
+                }
+                default -> throw new ConflictException(
+                        "The provider has not sent this refund yet. It usually takes a few "
+                                + "days to reach the customer's bank - check again later.");
+            }
+        } else {
+            // Cash. Recorded, not verified, because there is nothing to ask.
+            settleRefund(payment, "cash");
+        }
 
         Payment saved = paymentRepository.save(payment);
         auditLogService.log("REFUND_COMPLETED", "Payment", saved.getId(),
-                "orderId=" + orderId + ", amount=" + saved.getAmount());
+                "orderId=" + orderId + ", amount=" + saved.getRefundAmount()
+                        + ", channel=" + saved.getRefundChannel());
         return com.gpstore.dto.response.PaymentResponse.from(saved);
+    }
+
+    /** The one place REFUNDED is set, so it cannot be set without a timestamp. */
+    private void settleRefund(Payment payment, String how) {
+        payment.setPaymentStatus(PaymentStatus.REFUNDED);
+        payment.setRefundedAt(LocalDateTime.now());
+        payment.setRefundFailureReason(null);
+        if (payment.getRefundAmount() == null) {
+            payment.setRefundAmount(payment.getAmount());
+        }
+        log.info("Refund settled for paymentId={} via {}", payment.getId(), how);
+    }
+
+    /**
+     * Cash whenever the money never went through a provider - a COD order the
+     * rider collected, or any payment with no provider order id behind it
+     * (imported or manually recorded). Asking Cashfree to refund an order it
+     * has never heard of would fail, loudly, on a shopkeeper doing the right
+     * thing.
+     */
+    static boolean isCashRefund(Payment payment) {
+        if (payment.getPaymentMethod() == PaymentMethod.COD) {
+            return true;
+        }
+        String providerOrderId = payment.getProviderOrderId();
+        return providerOrderId == null || providerOrderId.isBlank();
+    }
+
+    /**
+     * Deterministic, and that is the entire safety property.
+     *
+     * The same payment always produces the same refund id, so a request that
+     * timed out and is retried carries an id the provider has already seen and
+     * is refused as a duplicate there - instead of sending a second refund
+     * with the shop's money.
+     */
+    public static String refundIdFor(Payment payment) {
+        return "gpsr-" + payment.getId();
+    }
+
+    private static String trimReason(String reason) {
+        if (reason == null) return null;
+        return reason.length() > 255 ? reason.substring(0, 255) : reason;
     }
 
     /**

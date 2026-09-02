@@ -1,0 +1,63 @@
+# Tells the shop when the shop is down.
+#
+# THE GAP THIS CLOSES. The deploy refuses to finish unless health comes back
+# UP, and a separate workflow alerts on failed backups. Between those two,
+# nothing watched a running system: if Postgres stopped or the disk filled at
+# two in the morning, the first anybody heard was a customer.
+#
+# A failed run here emails whoever watches the repository, which is the same
+# mechanism the backup alert already uses - no new service, no new bill.
+#
+# NO SSH, DELIBERATELY. This probes the public URL, so it tests what a
+# customer actually gets: DNS, the certificate, Traefik, and the app behind
+# them. It needs no secret and cannot leak one.
+name: Uptime alert
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every ten minutes. GitHub's scheduler is best-effort and skews under
+    # load, so this is "roughly every ten minutes" rather than a guarantee -
+    # which is the right expectation for a free alarm on a one-shop system.
+    # Tighter than this mostly buys duplicate runs, not faster detection.
+    - cron: "*/10 * * * *"
+
+# Never stack. A slow probe during an outage would otherwise pile runs up
+# behind each other and turn one outage into a wall of identical emails.
+concurrency:
+  group: gpstore-uptime-alert
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Is the API answering from the public internet?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Probe the public health endpoint
+        env:
+          # A repository variable so the domain is not pinned in the workflow,
+          # with the live default. Not a secret: this endpoint is permitAll,
+          # by design, so that health checks work without credentials.
+          PUBLIC_HEALTH_URL: ${{ vars.PUBLIC_HEALTH_URL || 'https://api.gpstore.co.in/v1/api/health/ready' }}
+        run: |
+          set -Eeuo pipefail
+          chmod +x deploy/production/probe-public-health.sh
+          deploy/production/probe-public-health.sh
+
+      - name: What to do when this fails
+        if: failure()
+        run: |
+          echo "::error::GP-STORE is not answering on the public internet."
+          echo "Check, in this order:"
+          echo "  1. deploy/production/check-health.sh on the VPS - is the container up?"
+          echo "  2. Disk space. deploy/production/disk-guard.sh, and docker system df."
+          echo "  3. Postgres and Redis containers, then Traefik and the certificate."
+          echo "  4. deploy/production/DISASTER_RECOVERY.md if the box itself is gone."
