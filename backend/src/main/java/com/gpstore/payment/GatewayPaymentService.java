@@ -15,6 +15,7 @@ import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.dto.response.GatewayCheckoutResponse;
 import com.gpstore.payment.gateway.CashfreeProperties;
+import com.gpstore.payment.gateway.CashfreeGateway;
 import com.gpstore.payment.gateway.CashfreeSignatureVerifier;
 import com.gpstore.payment.gateway.PaymentGateway;
 import com.gpstore.payment.gateway.PaymentGateway.GatewayOrderStatus;
@@ -315,6 +316,17 @@ public class GatewayPaymentService {
             return WebhookResult.accepted(Outcome.UNKNOWN_ORDER);
         }
 
+        // A REFUND WEBHOOK IS NOT A PAYMENT WEBHOOK. Its payload carries
+        // data.refund and no data.payment, so falling through to the payment
+        // path would read a null status and record UNKNOWN - which is how a
+        // refund that actually landed stayed REFUND_PENDING forever, and the
+        // shop had no way to tell a settled refund from a stuck one.
+        if (isRefundEvent(eventType)) {
+            Outcome refundOutcome = applyRefundVerdict(payment, data.path("refund"));
+            recordEvent(eventId, eventType, payment, providerOrderId, refundOutcome, null);
+            return WebhookResult.accepted(refundOutcome);
+        }
+
         GatewayOrderStatus verdict = new GatewayOrderStatus(
                 providerOrderId,
                 text(paymentNode, "cf_payment_id"),
@@ -326,6 +338,72 @@ public class GatewayPaymentService {
         Outcome outcome = applyVerdict(payment, verdict, "webhook");
         recordEvent(eventId, eventType, payment, providerOrderId, outcome, null);
         return WebhookResult.accepted(outcome);
+    }
+
+    static boolean isRefundEvent(String eventType) {
+        return eventType != null && eventType.toUpperCase().contains("REFUND");
+    }
+
+    /**
+     * A refund the provider has now settled, failed or cancelled.
+     *
+     * IT ONLY EVER MOVES A REFUND THIS APPLICATION ASKED FOR. The refund_id
+     * in the payload has to match the one on the payment row - otherwise this
+     * is somebody else's refund, or one raised by hand in the Cashfree
+     * dashboard against an order we have not recorded, and guessing which
+     * payment it belongs to would mark the wrong order refunded.
+     *
+     * SUCCESS is the only state that sets REFUNDED. PENDING and ONHOLD leave
+     * the row alone so the reconciliation report still shows it as in flight.
+     */
+    private Outcome applyRefundVerdict(Payment payment, JsonNode refundNode) {
+        String refundId = text(refundNode, "refund_id");
+        if (refundId == null || payment.getRefundId() == null
+                || !refundId.equals(payment.getRefundId())) {
+            log.warn("Refund webhook for paymentId={} does not match a refund we requested",
+                    payment.getId());
+            return Outcome.IGNORED;
+        }
+
+        if (payment.getPaymentStatus() == PaymentStatus.REFUNDED) {
+            return Outcome.ALREADY_SETTLED;
+        }
+
+        PaymentGateway.GatewayRefund.State state =
+                CashfreeGateway.mapRefundState(text(refundNode, "refund_status"));
+
+        String cfRefundId = text(refundNode, "cf_refund_id");
+        if (cfRefundId != null) {
+            payment.setProviderRefundId(cfRefundId);
+        }
+
+        switch (state) {
+            case SUCCEEDED -> {
+                payment.setPaymentStatus(PaymentStatus.REFUNDED);
+                payment.setRefundedAt(java.time.LocalDateTime.now());
+                payment.setRefundFailureReason(null);
+                if (payment.getRefundAmount() == null) {
+                    payment.setRefundAmount(decimal(refundNode, "refund_amount"));
+                }
+                paymentRepository.save(payment);
+                auditLogService.log("REFUND_SETTLED", "Payment", payment.getId(),
+                        "refundId=" + refundId + ", via=webhook");
+                return Outcome.APPLIED;
+            }
+            case FAILED, CANCELLED -> {
+                String reason = text(refundNode, "status_description");
+                payment.setRefundFailureReason(
+                        reason == null ? "Provider reported " + state : reason);
+                paymentRepository.save(payment);
+                auditLogService.log("REFUND_FAILED", "Payment", payment.getId(),
+                        "refundId=" + refundId + ", state=" + state);
+                return Outcome.APPLIED;
+            }
+            default -> {
+                // Still moving. Deliberately no state change.
+                return Outcome.IGNORED;
+            }
+        }
     }
 
     // ------------------------------------------------------------------

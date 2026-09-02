@@ -278,7 +278,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.equals("/api/auth/refresh")
                 || path.equals("/api/auth/logout")
                 || path.equals("/api/auth/logout-all")
-                || path.equals("/api/auth/change-password")) {
+                || path.equals("/api/auth/change-password")
+                // THE WORKER APP'S FRONT DOOR. It is a public credential
+                // endpoint like every other line here, and it only ever
+                // matched by accident before - as a write under /api/worker/,
+                // which put it in the looser ADMIN bucket. Password guessing
+                // does not care which app it is aimed at.
+                || path.equals("/api/worker/auth/login")) {
             return Bucket.AUTH;
         }
 
@@ -383,9 +389,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private String identity(Bucket bucket, HttpServletRequest request) {
         if (bucket != Bucket.AUTH && bucket != Bucket.WEBHOOK) {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedUser user
-                    && user.getCustomerId() != null) {
-                return "cust:" + user.getCustomerId();
+            if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedUser user) {
+                if (user.getCustomerId() != null) {
+                    return "cust:" + user.getCustomerId();
+                }
+                // A WORKER SESSION HAS NO customerId - their credentials live
+                // on the roster row, not a customer account - so this used to
+                // fall through to the IP. Three riders standing in the shop on
+                // its wifi then shared one bucket, and one of them scanning
+                // quickly could throttle the other two.
+                if (user.getWorkerId() != null) {
+                    return "worker:" + user.getWorkerId();
+                }
             }
         }
         return "ip:" + clientIp(request);

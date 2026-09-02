@@ -215,6 +215,32 @@ class RateLimitFilterTest {
     }
 
     @Test
+    void workerSignInIsTreatedAsAuthNotAsAnAdminWrite() throws Exception {
+        // It is a public credential endpoint. It used to land in ADMIN only
+        // because it is a write under /api/worker/, which gave password
+        // guessing against riders a looser limit than guessing against
+        // customers - for no reason anybody chose.
+        //
+        // AUTH is 20/min here and ADMIN is 30, so 25 hits separates them: it
+        // must be refused, and it would have been allowed before.
+        RateLimitFilter tight = new RateLimitFilter(redis, false, 20, 20, 60, 30, 60);
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(25L);
+
+        MockHttpServletResponse workerLogin = new MockHttpServletResponse();
+        tight.doFilter(request("POST", "/api/worker/auth/login"), workerLogin, new MockFilterChain());
+        assertEquals(429, workerLogin.getStatus(),
+                "25 sign-in attempts a minute is over the 20 the AUTH bucket allows");
+
+        // The rest of the worker API is unchanged - a rider scanning cartons
+        // quickly is not abuse and must not be squeezed to the login limit.
+        MockHttpServletResponse scan = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        tight.doFilter(request("POST", "/api/worker/scans/pack"), scan, chain);
+        assertNotNull(chain.getRequest(), "25 scans/min is under the 30 the ADMIN bucket allows");
+        assertEquals(200, scan.getStatus());
+    }
+
+    @Test
     void uploadsUseTheirOwnHigherBucket() throws Exception {
         when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(31L);
 

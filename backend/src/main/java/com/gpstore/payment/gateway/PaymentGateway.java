@@ -45,6 +45,50 @@ public interface PaymentGateway {
      */
     GatewayOrderStatus fetchOrderStatus(String providerOrderId);
 
+    /**
+     * Asks the gateway to send money back.
+     *
+     * IDEMPOTENT BY THE REFUND ID, which is this application's own and is
+     * derived from the payment rather than generated fresh. A retry after a
+     * timeout therefore reaches the SAME refund at the provider instead of
+     * creating a second one - which is the only defence that matters here,
+     * because the failure mode is refunding a customer twice with the shop's
+     * money.
+     */
+    GatewayRefund requestRefund(GatewayRefundRequest request);
+
+    /**
+     * What the gateway now says about a refund we asked for.
+     *
+     * A refund is not instant - it settles through the customer's bank over
+     * days - so the state at the end of requestRefund is PENDING, and this is
+     * how "did it actually land" gets answered without waiting on a webhook.
+     */
+    GatewayRefund fetchRefund(String providerOrderId, String refundId);
+
+    record GatewayRefundRequest(
+            String providerOrderId,
+            /** This application's id for the refund. Doubles as the idempotency key. */
+            String refundId,
+            BigDecimal amount,
+            String note) {}
+
+    /** The provider's view of one refund, normalised. */
+    record GatewayRefund(
+            String refundId,
+            String providerRefundId,
+            State state,
+            BigDecimal amount,
+            String failureReason) {
+
+        /**
+         * PENDING is the normal answer immediately after asking, and is
+         * deliberately not success - marking a payment REFUNDED here would
+         * tell the shop the money is back before the bank has moved it.
+         */
+        public enum State { PENDING, SUCCEEDED, FAILED, CANCELLED, UNKNOWN }
+    }
+
     /** The session the client is given. Deliberately carries no credential. */
     record GatewaySession(String providerOrderId, String paymentSessionId) {}
 

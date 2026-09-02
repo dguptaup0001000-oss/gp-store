@@ -93,6 +93,10 @@ jobs:
           bash -n deploy/production/evaluate-backup-status.sh
           bash -n deploy/production/evaluate-offbox-result.sh
           bash -n deploy/production/backup-restore-drill.sh
+          bash -n deploy/production/probe-public-health.sh
+          # Runs under /bin/sh in a postgres container, so check both.
+          bash -n deploy/production/seed-rehearsal-rows.sh
+          sh -n deploy/production/seed-rehearsal-rows.sh
           sh -n backend/docker/backup/backup.sh
           python3 -m py_compile .github/scripts/wait_for_ci.py
           python3 -m py_compile .github/scripts/automerge_eligible_pr.py

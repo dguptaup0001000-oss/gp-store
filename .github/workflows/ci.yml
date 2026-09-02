@@ -240,6 +240,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Full history and every branch ref. The migration rehearsal below
+          # needs the merge base with main to know which migrations are new,
+          # and needs origin/main itself to build the schema production is
+          # running today. A shallow checkout has neither.
+          fetch-depth: 0
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -277,6 +283,119 @@ jobs:
           REDIS_HOST: localhost
           REDIS_PORT: 6379
         run: ./mvnw -B test -Pschema-bootstrap -Dtest=ProductionSchemaValidateTest -DexcludedGroups=
+
+      # ------------------------------------------------------------------
+      # THE REHEARSAL THE SHOP DOES NOT OTHERWISE GET.
+      #
+      # Everything above proves migrations APPLY: from empty, in order, with
+      # Hibernate validating the result. What it cannot prove is that a
+      # migration survives meeting DATA - a NOT NULL with no default on a
+      # table that already has rows, a unique index over a column that already
+      # has duplicates, a narrowed type existing values do not fit. All of
+      # those pass against an empty database and fail against the shop's.
+      #
+      # There is no staging environment, so production is otherwise the first
+      # place a migration ever meets a real row. This builds the schema as it
+      # is DEPLOYED TODAY (from origin/main), puts a customer, an order, a
+      # payment and a worker in it, and only then applies the migrations this
+      # branch adds - which is exactly what the next deploy will do.
+      #
+      # Skips itself when a branch adds no migrations, so it costs nothing on
+      # the majority of changes.
+      # ------------------------------------------------------------------
+      - name: Are there new migrations to rehearse?
+        id: newmig
+        # The job's default working directory is backend/, but a git pathspec
+        # resolves relative to the working directory - so this has to run from
+        # the repository root or it would match nothing and skip forever.
+        working-directory: .
+        run: |
+          set -Eeuo pipefail
+          git fetch --no-tags origin main
+          NEW="$(git diff --name-only origin/main...HEAD -- \
+            backend/src/main/resources/db/migration/ | grep '\.sql$' || true)"
+          if [ -z "$NEW" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No new migrations on this branch - nothing to rehearse."
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "New migrations to rehearse against existing rows:"
+            echo "$NEW"
+          fi
+
+      - name: Build the schema as production has it today
+        if: steps.newmig.outputs.found == 'true'
+        working-directory: .
+        env:
+          DB_URL: jdbc:postgresql://localhost:5432/gpstore_rehearsal
+          DB_USERNAME: gpstore
+          DB_PASSWORD: gpstore_test_password
+          JWT_SECRET: ci-test-secret-not-for-real-use-1234567890123456789012345
+          DDL_AUTO: update
+          FLYWAY_ENABLED: 'true'
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: |
+          set -Eeuo pipefail
+          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17 \
+            psql -h localhost -U gpstore -d postgres -v ON_ERROR_STOP=1 \
+            -c "DROP DATABASE IF EXISTS gpstore_rehearsal;" -c "CREATE DATABASE gpstore_rehearsal;"
+          # A worktree of origin/main, built and bootstrapped on its own. The
+          # entities matter as much as the scripts: ddl-auto=update creates
+          # tables from THIS branch's entities, so bootstrapping here rather
+          # than in the worktree would hand the new migration a schema that
+          # already had its columns - and rehearse nothing.
+          git worktree add /tmp/prev-release origin/main
+          cd /tmp/prev-release/backend
+          ./mvnw -B test -Pschema-bootstrap -Dtest=EmptyDatabaseBootstrapTest -DexcludedGroups=
+
+      - name: Put a shop's worth of rows in it
+        if: steps.newmig.outputs.found == 'true'
+        # Repo root: the -v mount below is resolved from $PWD.
+        working-directory: .
+        run: |
+          set -Eeuo pipefail
+          chmod +x deploy/production/seed-rehearsal-rows.sh
+          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password \
+            -v "$PWD/deploy/production/seed-rehearsal-rows.sh:/seed.sh:ro" \
+            postgres:17 /bin/sh /seed.sh localhost 5432 gpstore gpstore_rehearsal
+
+      - name: Apply this branch's migrations to it
+        if: steps.newmig.outputs.found == 'true'
+        env:
+          DB_URL: jdbc:postgresql://localhost:5432/gpstore_rehearsal
+          DB_USERNAME: gpstore
+          DB_PASSWORD: gpstore_test_password
+          JWT_SECRET: ci-test-secret-not-for-real-use-1234567890123456789012345
+          # validate, exactly as production runs. If the new migration leaves
+          # the schema disagreeing with the entities, this fails here instead
+          # of on the shop.
+          DDL_AUTO: validate
+          FLYWAY_ENABLED: 'true'
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: ./mvnw -B test -Pschema-bootstrap -Dtest=ProductionSchemaValidateTest -DexcludedGroups=
+
+      - name: The rows must still be there
+        if: steps.newmig.outputs.found == 'true'
+        run: |
+          set -Eeuo pipefail
+          # A migration that applies cleanly but blanks existing data is worse
+          # than one that fails: the deploy goes green and the shop finds out
+          # later.
+          docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17 \
+            psql -h localhost -U gpstore -d gpstore_rehearsal -v ON_ERROR_STOP=1 -Atc "
+              SELECT CASE WHEN
+                (SELECT COUNT(*) FROM customers WHERE email = 'rehearsal@example.com') = 1
+                AND (SELECT COUNT(*) FROM orders WHERE order_number LIKE 'REHEARSAL-%') = 2
+                AND (SELECT COUNT(*) FROM delivery_partners
+                     WHERE mobile IN ('9000000002', '9000000003')) = 2
+                AND (SELECT p.amount FROM payments p JOIN orders o ON o.id = p.order_id
+                     WHERE o.order_number = 'REHEARSAL-1') = 499.00
+                AND (SELECT p.payment_status FROM payments p JOIN orders o ON o.id = p.order_id
+                     WHERE o.order_number = 'REHEARSAL-2') = 'COD_PENDING'
+              THEN 'rows survived' ELSE 'DATA LOST' END;" | tee /tmp/rehearsal.txt
+          grep -q 'rows survived' /tmp/rehearsal.txt
 
       - name: Backup and restore drill
         run: |

@@ -138,6 +138,77 @@ public class CashfreeGateway implements PaymentGateway {
                 null);
     }
 
+    @Override
+    public GatewayRefund requestRefund(GatewayRefundRequest request) {
+        requireConfigured();
+
+        JsonNode response = send("POST",
+                "/orders/" + request.providerOrderId() + "/refunds",
+                buildRefundBody(request).toString(),
+                "The refund could not be sent to the payment provider. Nothing has been refunded - try again.");
+        return readRefund(response, request.refundId());
+    }
+
+    @Override
+    public GatewayRefund fetchRefund(String providerOrderId, String refundId) {
+        requireConfigured();
+
+        JsonNode response = send("GET", "/orders/" + providerOrderId + "/refunds/" + refundId, null,
+                "Could not check the refund with the payment provider. Try again in a moment.");
+        return readRefund(response, refundId);
+    }
+
+    /**
+     * The refund body, extracted for the same reason as buildOrderBody: a
+     * wrong field name here is only discovered by a live refund failing, with
+     * a customer already waiting for their money.
+     *
+     * refund_id IS THE IDEMPOTENCY KEY. Cashfree rejects a second refund
+     * using an id it has already seen, which is exactly what should happen
+     * when this call is retried after a timeout - the shop must not send the
+     * money twice.
+     */
+    ObjectNode buildRefundBody(GatewayRefundRequest request) {
+        ObjectNode body = objectMapper.createObjectNode();
+        // Scale 2 for the same reason as the order amount: a BigDecimal in
+        // scientific notation is not a number Cashfree will match.
+        body.put("refund_amount", request.amount().setScale(2, java.math.RoundingMode.HALF_UP));
+        body.put("refund_id", request.refundId());
+        if (request.note() != null && !request.note().isBlank()) {
+            body.put("refund_note", request.note());
+        }
+        return body;
+    }
+
+    private GatewayRefund readRefund(JsonNode response, String requestedRefundId) {
+        String refundId = text(response, "refund_id");
+        return new GatewayRefund(
+                refundId != null ? refundId : requestedRefundId,
+                text(response, "cf_refund_id"),
+                mapRefundState(text(response, "refund_status")),
+                response.hasNonNull("refund_amount") ? response.get("refund_amount").decimalValue() : null,
+                text(response, "status_description"));
+    }
+
+    /**
+     * Cashfree's refund_status vocabulary, normalised.
+     *
+     * ONLY "SUCCESS" IS SUCCESS. PENDING and ONHOLD both mean the money has
+     * not reached the customer yet, and an unrecognised value maps to UNKNOWN
+     * rather than to success - so a vocabulary change at the provider leaves a
+     * refund waiting for a human instead of silently marking it done.
+     */
+    public static GatewayRefund.State mapRefundState(String refundStatus) {
+        if (refundStatus == null) return GatewayRefund.State.UNKNOWN;
+        return switch (refundStatus.toUpperCase()) {
+            case "SUCCESS" -> GatewayRefund.State.SUCCEEDED;
+            case "PENDING", "ONHOLD" -> GatewayRefund.State.PENDING;
+            case "CANCELLED" -> GatewayRefund.State.CANCELLED;
+            case "FAILED" -> GatewayRefund.State.FAILED;
+            default -> GatewayRefund.State.UNKNOWN;
+        };
+    }
+
     /**
      * Cashfree's order_status vocabulary, normalised.
      *
@@ -159,6 +230,15 @@ public class CashfreeGateway implements PaymentGateway {
     }
 
     private JsonNode send(String method, String path, String jsonBody) {
+        return send(method, path, jsonBody, "Payment could not be started. Please try again.");
+    }
+
+    /**
+     * @param failureMessage what the caller sees when Cashfree refuses or is
+     *     unreachable. A refund that fails must not tell a shopkeeper their
+     *     PAYMENT could not be started - they would retry the wrong thing.
+     */
+    private JsonNode send(String method, String path, String jsonBody, String failureMessage) {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(properties.baseUrl() + path))
                 .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
@@ -181,7 +261,7 @@ public class CashfreeGateway implements PaymentGateway {
                 // request would put it in the log.
                 log.error("Cashfree {} {} failed: HTTP {} {}", method, path, response.statusCode(),
                         safeMessage(response.body()));
-                throw new BadRequestException("Payment could not be started. Please try again.");
+                throw new BadRequestException(failureMessage);
             }
 
             return objectMapper.readTree(response.body());
@@ -189,10 +269,10 @@ public class CashfreeGateway implements PaymentGateway {
             throw e;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new BadRequestException("Payment could not be started. Please try again.");
+            throw new BadRequestException(failureMessage);
         } catch (Exception e) {
             log.error("Cashfree {} {} error: {}", method, path, e.getClass().getSimpleName());
-            throw new BadRequestException("Payment could not be started. Please try again.");
+            throw new BadRequestException(failureMessage);
         }
     }
 
