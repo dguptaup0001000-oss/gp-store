@@ -411,10 +411,17 @@ class AdminProductsRepository {
   /// one that has no password. Those refusals arrive as the backend's own
   /// sentences, which say what the admin should do next, so nothing here
   /// second-guesses them.
-  Future<WorkerLoginAccount> linkWorkerLoginAccount(int partnerId, String email) async {
+  /// Sets the email and password this rider signs in to the worker app with.
+  ///
+  /// [password] may be empty ONLY when the account already has one - the shop
+  /// re-saving a rider should not have to retype it, and must not blank it by
+  /// accident. The server decides, because only it knows whether the account
+  /// exists; sending an empty password for a new rider is refused there.
+  Future<WorkerLoginAccount> linkWorkerLoginAccount(
+      int partnerId, String email, String password) async {
     final response = await apiClient.dio.put(
       '/api/delivery-partners/$partnerId/login-account',
-      data: {'email': email},
+      data: {'email': email, 'password': password},
     );
     return WorkerLoginAccount.fromJson(
         Map<String, dynamic>.from(response.data as Map));

@@ -68,7 +68,7 @@ public class DeliveryPartnerController {
     @PutMapping("/{id}/login-account")
     public WorkerLoginAccountView linkLoginAccount(
             @PathVariable Long id, @Valid @RequestBody LinkLoginAccountRequest request) {
-        return service.linkLoginAccount(id, request.getEmail());
+        return service.linkLoginAccount(id, request.getEmail(), request.getPassword());
     }
 
     @DeleteMapping("/{id}/login-account")
@@ -77,14 +77,28 @@ public class DeliveryPartnerController {
     }
 
     public static class LinkLoginAccountRequest {
-        /**
-         * An address that must ALREADY belong to a registered account. The
-         * service refuses rather than creating one - an invented account would
-         * have no password and could not sign in either.
-         */
+        /** The address the rider will type into the worker app. */
         @NotBlank
         @Email
         private String email;
+
+        /**
+         * The password the shop is giving this rider.
+         *
+         * WRITE ONLY, and the annotation is what enforces it: without
+         * Access.WRITE_ONLY, a request body echoed back in a validation error
+         * - or this class ever being used as a response - would put a plaintext
+         * password on the wire. Nothing reads it back out.
+         *
+         * Optional on an account that already has one, so re-saving a rider
+         * does not force the shopkeeper to retype it. Required otherwise; the
+         * service decides, because only it knows whether the account exists.
+         * Length is checked there too - a @Size here would reject the empty
+         * "leave it alone" case.
+         */
+        @com.fasterxml.jackson.annotation.JsonProperty(
+                access = com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY)
+        private String password;
 
         public String getEmail() {
             return email;
@@ -92,6 +106,24 @@ public class DeliveryPartnerController {
 
         public void setEmail(String email) {
             this.email = email;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public void setPassword(String password) {
+            this.password = password;
+        }
+
+        /**
+         * No password, ever, in a log line or a stack trace. The default
+         * toString of a class like this is one @Slf4j call away from writing a
+         * credential to disk.
+         */
+        @Override
+        public String toString() {
+            return "LinkLoginAccountRequest{email=" + email + ", password=***}";
         }
     }
 

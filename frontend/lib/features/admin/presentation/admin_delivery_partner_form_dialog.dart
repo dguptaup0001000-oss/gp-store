@@ -40,6 +40,8 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
   /// would send the shopkeeper to fix something that may already be fine.
   bool _loginLoadFailed = false;
   late final TextEditingController _loginEmailController;
+  late final TextEditingController _loginPasswordController;
+  bool _showPassword = false;
 
   /// A refusal about the login email specifically, shown under that field.
   ///
@@ -59,6 +61,7 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
     _vehicleType = p?.vehicleType ?? 'BIKE';
     _available = p?.available ?? true;
     _loginEmailController = TextEditingController();
+    _loginPasswordController = TextEditingController();
     final partnerId = p?.id;
     if (partnerId != null) {
       // Assigned directly rather than through setState: initState runs inside
@@ -115,17 +118,29 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
     if (partnerId == null) return true;
 
     final wanted = _loginEmailController.text.trim();
+    final password = _loginPasswordController.text;
     final current = _login?.email?.trim() ?? '';
-    // Case-insensitive: the server matches the address that way, so differing
-    // only in case is not a change and must not spend a request.
-    if (wanted.toLowerCase() == current.toLowerCase()) return true;
+    // Case-insensitive on the address: the server matches it that way, so
+    // differing only in case is not a change. A typed password IS a change
+    // even when the address is identical - that is how a rider's password
+    // gets reset when they forget it.
+    final sameEmail = wanted.toLowerCase() == current.toLowerCase();
+    if (sameEmail && password.isEmpty) return true;
 
     final repository = ref.read(adminProductsRepositoryProvider);
     try {
       final login = wanted.isEmpty
           ? await repository.unlinkWorkerLoginAccount(partnerId)
-          : await repository.linkWorkerLoginAccount(partnerId, wanted);
-      if (mounted) setState(() => _login = login);
+          : await repository.linkWorkerLoginAccount(partnerId, wanted, password);
+      if (mounted) {
+        setState(() {
+          _login = login;
+          // Never leave a credential sitting in a text field on a shared
+          // shop phone once it has been accepted.
+          _loginPasswordController.clear();
+          _showPassword = false;
+        });
+      }
       return true;
     } catch (e) {
       // The backend's refusals name the next step ("ask them to register in
@@ -141,6 +156,7 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
     _mobileController.dispose();
     _vehicleNumberController.dispose();
     _loginEmailController.dispose();
+    _loginPasswordController.dispose();
     super.dispose();
   }
 
@@ -217,12 +233,13 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
                 ?.copyWith(fontWeight: FontWeight.w600)),
         const SizedBox(height: 4),
         Text(
-          // Says what to do BEFORE they type an address that will be refused,
-          // and says that Save is what applies it - there is no second button.
-          'The worker app signs in with an email and password. Enter the '
-          'address of an account they have already registered in the '
-          'customer app, then press Save. Clear the field and Save to take '
-          'their access away.',
+          // The shop CREATES these credentials and tells the rider. No
+          // self-registration, no second app, no OTP - which is what the
+          // earlier wording asked for and what nothing could deliver.
+          'Choose the email and password this rider will type into the worker '
+          'app, then press Save and tell them. Leave the password blank to '
+          'keep the one they have. Clear the email and Save to take their '
+          'access away.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 10),
@@ -242,6 +259,30 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
             errorText: _loginError,
             // The refusals name a next step and do not fit one line.
             errorMaxLines: 4,
+          ),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _loginPasswordController,
+          obscureText: !_showPassword,
+          autocorrect: false,
+          enableSuggestions: false,
+          enabled: !_isSaving,
+          decoration: InputDecoration(
+            labelText: linked ? 'New password (optional)' : 'Password',
+            helperText: linked
+                ? 'Only fill this in to change it'
+                : 'At least 8 characters',
+            // Shown on request: the shopkeeper has to read this out to the
+            // rider, and typing a password they cannot see into a phone twice
+            // is how the wrong one gets set.
+            suffixIcon: IconButton(
+              icon: Icon(_showPassword ? Icons.visibility_off : Icons.visibility),
+              tooltip: _showPassword ? 'Hide password' : 'Show password',
+              onPressed: _isSaving
+                  ? null
+                  : () => setState(() => _showPassword = !_showPassword),
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -265,7 +306,7 @@ class _AdminDeliveryPartnerFormDialogState extends ConsumerState<AdminDeliveryPa
                     ? 'Could not read the current sign-in for this rider. '
                         'Setting an address below still works.'
                     : !linked
-                        ? 'Not set up yet - this rider cannot open the worker app.'
+                        ? 'Not set up yet - set an email and password above.'
                         : canSignIn
                             ? 'Set up. This rider can sign in to the worker app.'
                             : 'Attached, but that account has no password, so it '
