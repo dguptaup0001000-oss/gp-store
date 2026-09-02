@@ -1166,6 +1166,13 @@ public class OrderService {
         // being acted on rather than trusted from an unlocked read.
         Payment payment = paymentRepository.findByOrderIdForUpdate(orderId).orElse(null);
 
+        // Set below, acted on after the payment row is saved. The provider is
+        // NOT called from in here: this method holds the order row, the
+        // payment row and every inventory row the order touches, and a slow
+        // Cashfree would stall every other write against this order - while a
+        // provider timeout would roll the cancellation back, stock and all.
+        boolean refundNeedsSending = false;
+
         if (payment != null) {
 
             if (payment.getPaymentMethod() == PaymentMethod.COD
@@ -1176,6 +1183,21 @@ public class OrderService {
             } else if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
 
                 payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
+
+                // WHICH WAY THE MONEY HAS TO TRAVEL BACK, decided here and
+                // written down. Until this existed, a cancelled prepaid order
+                // sat at REFUND_PENDING with no channel and no refund id,
+                // which read to completeRefund as a cash refund - so pressing
+                // "complete" stamped it REFUNDED while the customer's money
+                // was still at Cashfree. That is the whole bug the refund
+                // work set out to kill, surviving on the path that carries
+                // most of the traffic.
+                boolean cash = PaymentService.isCashRefund(payment);
+                payment.setRefundChannel(cash
+                        ? Payment.RefundChannel.CASH
+                        : Payment.RefundChannel.GATEWAY);
+                payment.setRefundAmount(payment.getAmount());
+                refundNeedsSending = !cash;
 
             } else if (payment.getPaymentStatus() == PaymentStatus.PENDING) {
 
@@ -1213,6 +1235,18 @@ public class OrderService {
         // cancellation or not at all.
         outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
                 OutboxWorker.AGGREGATE_ORDER, savedOrder.getId(), OutboxWorker.EVENT_ORDER_CANCELLED));
+
+        // THE MONEY, on the same terms as the invoice above and for a
+        // stronger reason: it is the customer's. The row commits with the
+        // cancellation or not at all, so a crash between the two cannot
+        // produce a cancelled order that owes a refund nothing will ever
+        // send. The worker makes the provider call afterwards, with none of
+        // this transaction's locks held, and retries while Cashfree is down.
+        if (refundNeedsSending) {
+            outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
+                    OutboxWorker.AGGREGATE_ORDER, savedOrder.getId(),
+                    OutboxWorker.EVENT_REFUND_REQUESTED));
+        }
 
         // The push notification is genuinely best-effort and involves a
         // blocking network call to Google (FirebaseMessaging.send), so it

@@ -586,9 +586,17 @@ public class PaymentService {
         if (payment.getPaymentStatus() == PaymentStatus.REFUNDED) {
             throw new ConflictException("Payment is already refunded");
         }
-        if (payment.getPaymentStatus() == PaymentStatus.REFUND_PENDING) {
+        if (payment.getPaymentStatus() == PaymentStatus.REFUND_PENDING
+                && refundWasActuallyRequested(payment)) {
             // Not an error worth blocking on, but it must not send a SECOND
             // request to the provider - so say so and stop.
+            //
+            // ONLY WHEN SOMETHING WAS REALLY SENT. Cancelling a paid order
+            // also lands on REFUND_PENDING, and for a while this refused
+            // those too - which left the shop unable to send a refund the
+            // system had merely written down. A pending row with no refund id
+            // and no channel is an intention, not a request, and the whole
+            // point of this method is to turn one into the other.
             throw new ConflictException("A refund for this order has already been requested.");
         }
 
@@ -608,6 +616,29 @@ public class PaymentService {
                     "orderId=" + orderId + ", amount=" + amount + ", channel=CASH");
             return com.gpstore.dto.response.PaymentResponse.from(saved);
         }
+
+        Payment saved = askTheProviderForTheMoneyBack(payment, orderId, amount);
+        return com.gpstore.dto.response.PaymentResponse.from(saved);
+    }
+
+    /**
+     * Sends one gateway refund, and is safe to call again.
+     *
+     * WHY THIS IS SEPARATE FROM refundPayment. Two callers need it and they
+     * arrive from opposite directions. An admin pressing Refund is inside a
+     * request and wants the provider's refusal in their face. The outbox
+     * worker draining a cancelled order has nobody to show it to and must
+     * retry instead. The rules about what is sent and what is written are the
+     * same either way, so they live here once.
+     *
+     * SAFE TO CALL AGAIN, because outbox delivery is at-least-once: this
+     * WILL run twice for some orders. The refund id is derived from the
+     * payment, so a second send carries the id Cashfree has already seen and
+     * is deduplicated there - but a second send is still a second HTTP call
+     * and a second audit line, so a refund that already has its provider id
+     * short-circuits before making one.
+     */
+    private Payment askTheProviderForTheMoneyBack(Payment payment, Long orderId, BigDecimal amount) {
 
         String refundId = refundIdFor(payment);
         payment.setRefundChannel(Payment.RefundChannel.GATEWAY);
@@ -644,7 +675,73 @@ public class PaymentService {
         auditLogService.log("REFUND_INITIATED", "Payment", saved.getId(),
                 "orderId=" + orderId + ", amount=" + amount + ", channel=GATEWAY"
                         + ", refundId=" + refundId + ", providerState=" + refund.state());
-        return com.gpstore.dto.response.PaymentResponse.from(saved);
+        return saved;
+    }
+
+    /**
+     * The outbox's way in: send the refund a cancellation promised.
+     *
+     * WHY CANCELLATION DOES NOT CALL THE PROVIDER ITSELF. cancelOrder holds
+     * locks on the order row, the payment row and every inventory row the
+     * order touches. An HTTP call to Cashfree while holding them would let a
+     * slow provider stall every other write against that order, and a
+     * provider timeout would roll the whole cancellation back - stock and
+     * all. So the cancellation commits the intention durably and this runs
+     * afterwards with no lock of that transaction held.
+     *
+     * EVERY EXIT HERE IS A NO-OP RATHER THAN AN ERROR, except a provider
+     * failure. The outbox retries, so a state that says "somebody else
+     * already handled this" must not look like work still to do.
+     */
+    @Transactional
+    public void sendRefundToProvider(Long orderId) {
+
+        Payment payment = paymentRepository.findByOrderIdForUpdate(orderId).orElse(null);
+        if (payment == null) {
+            return;
+        }
+
+        if (payment.getPaymentStatus() != PaymentStatus.REFUND_PENDING) {
+            // Already settled, or never owed. A redelivery landing on a
+            // REFUNDED row is the normal shape of at-least-once.
+            return;
+        }
+
+        if (isCashRefund(payment)) {
+            // The shopkeeper hands this back at the door. Asking Cashfree for
+            // money it never took would fail on every retry until the event
+            // dead-lettered.
+            return;
+        }
+
+        if (payment.getRefundId() != null && payment.getProviderRefundId() != null) {
+            // Already sent, and the provider answered. Nothing to do.
+            return;
+        }
+
+        BigDecimal amount = payment.getRefundAmount() != null
+                ? payment.getRefundAmount()
+                : payment.getAmount();
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            log.warn("Refund for orderId={} has no amount to send; nothing queued to the provider.",
+                    orderId);
+            return;
+        }
+
+        askTheProviderForTheMoneyBack(payment, orderId, amount);
+    }
+
+    /**
+     * Did a refund actually go anywhere, or was it only written down?
+     *
+     * A cancellation sets REFUND_PENDING and stops - it deliberately makes no
+     * network call while holding the order's locks. Until the outbox sends
+     * it, the row carries no refund id and no channel, and treating that as
+     * "already requested" is what left shops unable to refund a cancelled
+     * order at all.
+     */
+    private static boolean refundWasActuallyRequested(Payment payment) {
+        return payment.getRefundId() != null || payment.getRefundChannel() != null;
     }
 
     /**
@@ -665,7 +762,24 @@ public class PaymentService {
             throw new ConflictException("Payment is not waiting for refund");
         }
 
-        if (payment.getRefundChannel() == Payment.RefundChannel.GATEWAY) {
+        // ASKED OF THE PAYMENT, NOT OF THE COLUMN. refundChannel is null on
+        // every refund that cancellation started, and reading null as "cash"
+        // is precisely how a prepaid order used to get stamped REFUNDED
+        // without a rupee moving. isCashRefund looks at what the money
+        // actually did - a COD order, or a payment with no provider order id
+        // behind it - which cannot be null and cannot be wrong.
+        if (!isCashRefund(payment)) {
+
+            // Nothing was ever sent. Settling here would be the original bug
+            // wearing a new column: a REFUNDED row for money still sitting at
+            // the provider. The refund has to go out first, and refundPayment
+            // (or the outbox) is what sends it.
+            if (payment.getRefundId() == null) {
+                throw new ConflictException(
+                        "This refund has not been sent to the payment provider yet. "
+                                + "Send the refund first, then mark it complete.");
+            }
+
             PaymentGateway.GatewayRefund refund =
                     paymentGateway.fetchRefund(payment.getProviderOrderId(), payment.getRefundId());
 
