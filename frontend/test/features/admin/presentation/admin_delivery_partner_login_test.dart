@@ -220,6 +220,11 @@ void main() {
         reason: 'The dialog must stay open so the address can be corrected.');
     expect(repository.updateCalls, 0,
         reason: 'A refused login must not half-save the record.');
+    expect(find.byType(SnackBar), findsOneWidget,
+        reason: 'The inline error alone was missed for a whole afternoon - it '
+            'renders below the password field, in a dialog that scrolls, with '
+            'the keyboard over the bottom of the screen. A refusal that looks '
+            'like nothing happened gets the same password retyped forever.');
   });
 
   testWidgets('a rider with no login is told so, not left to guess', (tester) async {

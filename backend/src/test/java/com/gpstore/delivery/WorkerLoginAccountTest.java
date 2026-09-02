@@ -78,6 +78,16 @@ class WorkerLoginAccountTest {
     private static final String MARKER = "WLAT-";
 
     /** Long enough to pass the minimum. Never a real credential. */
+    /**
+     * Whether the person pressing Save already holds CUSTOMERS_MANAGE.
+     *
+     * The owner does; a DELIVERY_MANAGER, who can edit the roster and nothing
+     * about accounts, does not. That difference is the whole staff rule, so
+     * every call site says which one it is rather than passing a bare boolean.
+     */
+    private static final boolean AS_OWNER = true;
+    private static final boolean AS_ROSTER_ONLY = false;
+
     private static final String PASSWORD = "rider-test-passphrase";
 
     @Autowired
@@ -133,7 +143,7 @@ class WorkerLoginAccountTest {
         String email = "rider-" + unique() + "@gmail.com";
         Customer account = shopper(email, "$2a$10$hashedpasswordvaluegoeshere1234567890abcd");
 
-        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, PASSWORD);
+        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_OWNER);
 
         assertTrue(view.linked());
         assertEquals(email, view.email());
@@ -149,7 +159,7 @@ class WorkerLoginAccountTest {
         String email = "rider-" + unique() + "@gmail.com";
         Customer account = shopper(email, "$2a$10$hashedpasswordvaluegoeshere1234567890abcd");
 
-        service.linkLoginAccount(partner.getId(), email, PASSWORD);
+        service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_OWNER);
 
         // findByAccountId is what every worker endpoint resolves through.
         assertEquals(partner.getId(),
@@ -165,7 +175,7 @@ class WorkerLoginAccountTest {
         // THE WHOLE POINT OF THE REWRITE. This used to be refused, sending the
         // shopkeeper away to register the rider in the CUSTOMER app first -
         // which never worked, because nothing there set a password either.
-        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, PASSWORD);
+        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_OWNER);
 
         assertTrue(view.linked());
         assertTrue(view.canSignIn(), "A rider the shop just set up must be able to sign in.");
@@ -190,7 +200,7 @@ class WorkerLoginAccountTest {
         Customer shopper = shopper(email, encoder.encode("their-own-password"));
         String before = shopper.getPassword();
 
-        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, "");
+        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, "", AS_OWNER);
 
         assertTrue(view.canSignIn(), "They could already sign in; that must not change.");
         Customer after = customers.findByEmailIgnoreCase(email).orElseThrow();
@@ -209,7 +219,7 @@ class WorkerLoginAccountTest {
 
         BadRequestException thrown = assertThrows(BadRequestException.class,
                 () -> service.linkLoginAccount(
-                        partner.getId(), "short-" + unique() + "@gmail.com", "abc"));
+                        partner.getId(), "short-" + unique() + "@gmail.com", "abc", AS_OWNER));
 
         assertTrue(thrown.getMessage().contains("8"), thrown.getMessage());
     }
@@ -224,7 +234,7 @@ class WorkerLoginAccountTest {
         // This is precisely the account the roster screen used to create: no
         // password, so no way into an app whose only door is email+password.
         // It is now completed rather than refused.
-        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, PASSWORD);
+        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_OWNER);
 
         assertTrue(view.canSignIn());
         assertTrue(encoder.matches(PASSWORD,
@@ -240,14 +250,14 @@ class WorkerLoginAccountTest {
         owner.setRole(Role.ADMIN);
         customers.save(owner);
 
-        // THE ESCALATION THIS CLOSES, and the reason it is about the PASSWORD
-        // rather than the link. DELIVERY_MANAGE is a narrower permission than
-        // the one guarding staff accounts, so whoever can edit the roster must
-        // not be able to choose the owner's password here and then sign in as
-        // them. Linking is allowed (see theOwnerCanBeTheirOwnRider); writing a
-        // credential onto a staff account never is.
+        // THE ESCALATION THIS CLOSES, and the reason it turns on WHO IS
+        // ASKING. A DELIVERY_MANAGER holds DELIVERY_MANAGE and not
+        // CUSTOMERS_MANAGE, so they can edit the roster and nothing about
+        // accounts - they must not be able to choose the owner's password here
+        // and then sign in as them. Linking is still allowed for them (see
+        // theOwnerCanBeTheirOwnRider); writing a credential is not.
         assertThrows(ConflictException.class,
-                () -> service.linkLoginAccount(partner.getId(), email, PASSWORD));
+                () -> service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_ROSTER_ONLY));
 
         Customer unchanged = customers.findByEmailIgnoreCase(email).orElseThrow();
         assertEquals(Role.ADMIN, unchanged.getRole(), "The role must not have been touched.");
@@ -273,7 +283,7 @@ class WorkerLoginAccountTest {
 
         // Blank password: they already have one, and it is not this screen's
         // business what it is.
-        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, "");
+        WorkerLoginAccountView view = service.linkLoginAccount(partner.getId(), email, "", AS_OWNER);
 
         assertTrue(view.linked(), "The address must now be the rider's login.");
         assertTrue(view.canSignIn(), "They already have a password, so they can sign in.");
@@ -292,6 +302,37 @@ class WorkerLoginAccountTest {
     }
 
     @Test
+    @DisplayName("the owner can set an email AND a password on their own account in one Save")
+    void theOwnerCanSetBothHalvesOnTheirOwnAccount() {
+        // WHAT THE SHOP ACTUALLY DOES. The owner types an address and a
+        // password and presses Save - the same two fields every other rider
+        // gets. Refusing that because the address happens to be staff left a
+        // one-person shop with no way to put itself on its own roster, and
+        // bought nothing: an operator holding CUSTOMERS_MANAGE can set that
+        // password on the customer screens anyway.
+        DeliveryPartner partner = rosterOnlyPartner();
+        String email = "boss-" + unique() + "@gmail.com";
+        Customer owner = shopper(email, encoder.encode("the-old-one"));
+        owner.setRole(Role.ADMIN);
+        customers.save(owner);
+
+        WorkerLoginAccountView view = service.linkLoginAccount(
+                partner.getId(), email, PASSWORD, AS_OWNER);
+
+        assertTrue(view.canSignIn());
+        assertEquals(owner.getId(),
+                partners.findById(partner.getId()).orElseThrow().getAccount().getId(),
+                "and the roster row must point at it, or the worker app still reports "
+                        + "no worker record.");
+
+        Customer after = customers.findById(owner.getId()).orElseThrow();
+        assertTrue(encoder.matches(PASSWORD, after.getPassword()),
+                "The password they typed is the one that now works.");
+        assertEquals(Role.ADMIN, after.getRole(),
+                "and setting it must not cost them their own permissions.");
+    }
+
+    @Test
     @DisplayName("a staff account without delivery access is refused, not linked into a dead end")
     void staffWithoutDeliveryAccessIsRefused() {
         // /api/worker/** admits DELIVERY_MANAGE or a delivery rider. Linking an
@@ -305,7 +346,7 @@ class WorkerLoginAccountTest {
         customers.save(support);
 
         assertThrows(ConflictException.class,
-                () -> service.linkLoginAccount(partner.getId(), email, ""));
+                () -> service.linkLoginAccount(partner.getId(), email, "", AS_OWNER));
 
         assertNull(partners.findById(partner.getId()).orElseThrow().getAccount(),
                 "A refused link must leave the roster row alone.");
@@ -319,13 +360,13 @@ class WorkerLoginAccountTest {
         String email = "shared-" + unique() + "@gmail.com";
         shopper(email, "$2a$10$hashedpasswordvaluegoeshere1234567890abcd");
 
-        service.linkLoginAccount(first.getId(), email, PASSWORD);
+        service.linkLoginAccount(first.getId(), email, PASSWORD, AS_OWNER);
 
         // findByAccountId returns Optional, so a second link would throw a
         // non-unique-result error on the rider's very next request - far from
         // the admin who caused it.
         assertThrows(ConflictException.class,
-                () -> service.linkLoginAccount(second.getId(), email, PASSWORD));
+                () -> service.linkLoginAccount(second.getId(), email, PASSWORD, AS_OWNER));
     }
 
     @Test
@@ -335,8 +376,8 @@ class WorkerLoginAccountTest {
         String email = "again-" + unique() + "@gmail.com";
         shopper(email, "$2a$10$hashedpasswordvaluegoeshere1234567890abcd");
 
-        service.linkLoginAccount(partner.getId(), email, PASSWORD);
-        assertDoesNotThrow(() -> service.linkLoginAccount(partner.getId(), email, PASSWORD));
+        service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_OWNER);
+        assertDoesNotThrow(() -> service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_OWNER));
     }
 
     @Test
@@ -349,10 +390,11 @@ class WorkerLoginAccountTest {
         customers.save(admin);
         String before = customers.findById(admin.getId()).orElseThrow().getPassword();
 
-        // A password typed against a staff address is refused, and a refusal
-        // must be total: no role change, no password change, nothing written.
+        // A password typed against a staff address by someone who cannot
+        // manage accounts is refused, and a refusal must be total: no role
+        // change, no password change, nothing written.
         assertThrows(ConflictException.class,
-                () -> service.linkLoginAccount(partner.getId(), email, PASSWORD));
+                () -> service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_ROSTER_ONLY));
 
         Customer after = customers.findById(admin.getId()).orElseThrow();
         assertEquals(Role.ADMIN, after.getRole());
@@ -367,7 +409,7 @@ class WorkerLoginAccountTest {
         shopper(email, "$2a$10$hashedpasswordvaluegoeshere1234567890abcd");
 
         assertDoesNotThrow(
-                () -> service.linkLoginAccount(partner.getId(), "  " + email.toUpperCase() + "  ", PASSWORD));
+                () -> service.linkLoginAccount(partner.getId(), "  " + email.toUpperCase() + "  ", PASSWORD, AS_OWNER));
     }
 
     @Test
@@ -377,7 +419,7 @@ class WorkerLoginAccountTest {
         String email = "leaver-" + unique() + "@gmail.com";
         Customer account = shopper(email, "$2a$10$hashedpasswordvaluegoeshere1234567890abcd");
 
-        service.linkLoginAccount(partner.getId(), email, PASSWORD);
+        service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_OWNER);
         WorkerLoginAccountView after = service.unlinkLoginAccount(partner.getId());
 
         assertFalse(after.linked());
@@ -397,7 +439,7 @@ class WorkerLoginAccountTest {
         // Linked as an ordinary account first, then promoted, so the role
         // under test is one this endpoint did NOT grant. The property is about
         // UNLINK, which must not take away what it never gave.
-        service.linkLoginAccount(partner.getId(), email, PASSWORD);
+        service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_OWNER);
         admin.setRole(Role.ADMIN);
         customers.save(admin);
 
@@ -413,7 +455,7 @@ class WorkerLoginAccountTest {
         DeliveryPartner partner = rosterOnlyPartner();
         String email = "lazy-" + unique() + "@gmail.com";
         shopper(email, "$2a$10$hashedpasswordvaluegoeshere1234567890abcd");
-        service.linkLoginAccount(partner.getId(), email, PASSWORD);
+        service.linkLoginAccount(partner.getId(), email, PASSWORD, AS_OWNER);
 
         // DeliveryPartner.account is LAZY and the app runs open-in-view=false,
         // so reading the email outside a transaction would throw. The service
@@ -436,7 +478,7 @@ class WorkerLoginAccountTest {
     @DisplayName("a missing rider is a 404, not a silent no-op")
     void missingPartnerIsNotFound() {
         assertThrows(ResourceNotFoundException.class,
-                () -> service.linkLoginAccount(987654321L, "someone@gmail.com", PASSWORD));
+                () -> service.linkLoginAccount(987654321L, "someone@gmail.com", PASSWORD, AS_OWNER));
         assertThrows(ResourceNotFoundException.class,
                 () -> service.getLoginAccount(987654321L));
     }
