@@ -323,7 +323,29 @@ public class CustomerService {
         // are the same shape of query, so they move for consistency.
         notificationRepository.deleteByCustomerId(customerId);
         wishlistRepository.deleteByCustomerIdBulk(customerId);
-        addressRepository.deleteByCustomerIdBulk(customerId);
+        // ADDRESSES ARE TWO CASES, NOT ONE, and treating them as one broke
+        // account deletion for every customer who had ever bought anything.
+        //
+        // orders.address_id is a foreign key to addresses with NO ACTION on
+        // delete, so deleting an address an order still points at is refused
+        // by Postgres. That rolled back the whole deletion and the customer
+        // saw "That refers to something that no longer exists" - on a screen
+        // where they had just asked to delete their account, having done
+        // nothing wrong. A shopper who had never ordered could delete their
+        // account; the only kind of shopper a shop actually has could not.
+        //
+        // So: the ones nothing references go, and the ones an order still
+        // needs are scrubbed and detached. The row survives because the order
+        // has to keep a record of where it was delivered - that is the shop's
+        // accounting - but nothing identifying a person survives in it.
+        // Same trade as the customer row itself, which is anonymised here
+        // rather than dropped.
+        // ORDER MATTERS BETWEEN THESE TWO. Anonymising first detaches every
+        // address from the customer, and the delete below selects by
+        // customer id - so it would then match nothing and keep rows nothing
+        // references. Delete first, scrub what is left.
+        addressRepository.deleteUnreferencedByCustomerIdBulk(customerId);
+        addressRepository.anonymiseByCustomerIdBulk(customerId);
         cartRepository.findByCustomerId(customerId).ifPresent(cartRepository::delete);
         // The usage history goes too. Deleting an account anonymises the
         // customer row rather than removing it, so anything keyed on the id

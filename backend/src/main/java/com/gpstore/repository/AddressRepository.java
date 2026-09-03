@@ -38,8 +38,53 @@ public interface AddressRepository extends JpaRepository<Address, Long> {
             org.springframework.data.domain.Pageable pageable);
 
 
-    /** Bulk delete for account deletion - see NotificationRepository.deleteByCustomerId. */
+    /**
+     * Bulk delete for account deletion, but ONLY the addresses nothing needs.
+     *
+     * orders.address_id is a foreign key to this table with NO ACTION on
+     * delete, so deleting an address an order still points at is refused by
+     * the database - which used to fail the whole account deletion for any
+     * customer who had ever bought anything. The referenced ones are scrubbed
+     * instead; see CustomerService.deleteOwnAccount.
+     */
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
-    @org.springframework.data.jpa.repository.Query("delete from Address a where a.customer.id = :customerId")
-    int deleteByCustomerIdBulk(@org.springframework.data.repository.query.Param("customerId") Long customerId);
+    @org.springframework.data.jpa.repository.Query("""
+            delete from Address a
+            where a.customer.id = :customerId
+              and not exists (select 1 from Order o where o.address = a)
+            """)
+    int deleteUnreferencedByCustomerIdBulk(
+            @org.springframework.data.repository.query.Param("customerId") Long customerId);
+
+    /**
+     * Takes the person out of an address the shop's own order history still
+     * needs, and detaches it from the account.
+     *
+     * WHAT SURVIVES AND WHY. The row stays because an order has to keep a
+     * record of where it went - that is the shop's accounting, not the
+     * customer's data - but everything that identifies a human being goes:
+     * the name, the phone, the door, the coordinates, and the directions
+     * somebody wrote to their own home.
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
+    @org.springframework.data.jpa.repository.Query("""
+            update Address a set
+                a.customer = null,
+                a.fullName = 'Deleted User',
+                a.mobileNumber = null,
+                a.houseNo = null,
+                a.buildingName = null,
+                a.floor = null,
+                a.landmark = null,
+                a.deliveryInstructions = null,
+                a.formattedAddress = null,
+                a.placeId = null,
+                a.latitude = null,
+                a.longitude = null,
+                a.locationAccuracy = null,
+                a.label = null
+            where a.customer.id = :customerId
+            """)
+    int anonymiseByCustomerIdBulk(
+            @org.springframework.data.repository.query.Param("customerId") Long customerId);
 }
