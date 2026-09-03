@@ -18,10 +18,54 @@ public class CustomerController {
 
     private final CustomerService customerService;
     private final CurrentUser currentUser;
+    private final com.gpstore.engagement.AdminCustomerDetailService customerDetailService;
+    private final com.gpstore.engagement.AppSessionService appSessionService;
 
-    public CustomerController(CustomerService customerService, CurrentUser currentUser) {
+    public CustomerController(CustomerService customerService, CurrentUser currentUser,
+                              com.gpstore.engagement.AdminCustomerDetailService customerDetailService,
+                              com.gpstore.engagement.AppSessionService appSessionService) {
         this.customerService = customerService;
         this.currentUser = currentUser;
+        this.customerDetailService = customerDetailService;
+        this.appSessionService = appSessionService;
+    }
+
+    /**
+     * Everything the shop knows about one customer, for the admin screen.
+     *
+     * STAFF ONLY, pinned to CUSTOMERS_VIEW in SecurityConfig above the general
+     * customer rules. This returns a named person's phone number, their home
+     * address and the contents of their basket - it must never be reachable by
+     * the customer-facing app, and there is no route that makes it so.
+     *
+     * ONE CALL rather than the client stitching together six. On a shop
+     * counter's connection, six requests are six chances to render a customer
+     * with no addresses because one of them timed out.
+     */
+    @GetMapping("/{id}/detail")
+    public com.gpstore.dto.response.AdminCustomerDetailResponse getCustomerDetail(@PathVariable Long id) {
+        return customerDetailService.of(id);
+    }
+
+    /**
+     * The app reporting how long it was open, when it goes to the background.
+     *
+     * THE CUSTOMER'S OWN SESSION AND NOBODY ELSE'S. The id comes from the
+     * token, never the body - otherwise one account could file time against
+     * another, and the figure a shopkeeper reads would be whatever a client
+     * chose to say about somebody else.
+     *
+     * NEVER FAILS THE CALLER FOR BAD TELEMETRY. A refused or capped session
+     * returns 0 rather than an error: a customer must not see something go
+     * wrong in their app because a number about them was implausible. The
+     * response says what was actually recorded so the app can stop guessing.
+     */
+    @PostMapping("/me/app-session")
+    public java.util.Map<String, Integer> recordAppSession(
+            @Valid @RequestBody com.gpstore.dto.request.AppSessionRequest request) {
+        int recorded = appSessionService.record(
+                customerService.getById(currentUser.customerId()), request.getSeconds());
+        return java.util.Map.of("recordedSeconds", recorded);
     }
 
     // Admin only (enforced in SecurityConfig) - e.g. creating an account for a phone order.

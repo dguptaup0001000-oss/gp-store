@@ -15,6 +15,28 @@ class ProfileRepository {
   final ApiClient apiClient;
   final ImageUploadService _uploads;
 
+  /// Report how long the app was in the foreground, in seconds.
+  ///
+  /// The account comes from the token, never from this body - the client
+  /// cannot file time against somebody else. The server caps the figure and
+  /// answers with what it actually recorded, which may be less than what was
+  /// sent or zero; nothing in the app changes either way.
+  ///
+  /// Errors are swallowed on purpose. This is telemetry: a customer must
+  /// never see their app misbehave because a number about them failed to
+  /// upload, and it must never trigger the token-refresh path on its way out
+  /// the door.
+  Future<void> reportAppSession(int seconds) async {
+    try {
+      await apiClient.dio.post(
+        '/api/customers/me/app-session',
+        data: {'seconds': seconds},
+      );
+    } catch (_) {
+      // Deliberately ignored - see above.
+    }
+  }
+
   Future<Profile> getMyProfile() async {
     final response = await apiClient.dio.get('/api/customers/me');
     return Profile.fromJson(response.data as Map<String, dynamic>);

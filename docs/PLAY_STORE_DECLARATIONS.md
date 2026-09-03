@@ -100,6 +100,52 @@ never on first launch:
 `NFC` and `DUMP` are stripped with `tools:node="remove"`, and the NFC hardware
 feature is marked not-required, so the apps install on devices without it.
 
+## 8. App interactions — Customer app ONLY
+
+The customer app times how long it is in the foreground and posts that number
+to the shop's own backend when the app is backgrounded. Under Play's Data
+safety taxonomy this is **App activity → App interactions**, and it must be
+declared as collected. It is declared above.
+
+**What is actually sent, in full: one integer, the number of seconds.**
+`POST /api/customers/me/app-session` with a body of `{"seconds": N}`. That is
+the entire payload. The account it counts against comes from the auth token,
+never from the body.
+
+What is deliberately **not** collected, so the declaration cannot quietly grow
+into something wider later:
+
+| Not collected | Why it matters |
+|---|---|
+| Which screens were opened | The shop asked "do they use the app", not "what did they look at" |
+| What was searched for | Search terms are content, not usage |
+| Which products were viewed or tapped | Same |
+| Where the phone was during a session | Location is declared separately and has nothing to do with this |
+| A timeline of visits | Only totals and a last-seen date are ever shown |
+
+Other facts a reviewer may ask about:
+
+- **Not collected while signed out.** The endpoint is authenticated, and the
+  app does not call it for an anonymous browse — so an unregistered visitor is
+  not timed at all.
+- **Not collected in the Admin or Delivery Worker apps.** Both pass no session
+  handler, so staff phones are never timed. This is a metric about shoppers.
+- **Not shared with anyone.** It goes to the shop's own backend and appears on
+  one staff screen (Customers → a customer → App usage). No third party, no
+  analytics SDK, no ad network.
+- **Deleted with the account.** Account deletion anonymises the customer row
+  in place rather than dropping it, so nothing keyed on the id disappears by
+  itself — `CustomerService.deleteOwnAccount` deletes these rows explicitly,
+  alongside the notifications, wishlist, addresses and cart.
+- **Reported by the client and capped server-side** (per session and per hour),
+  and the staff screen says so in plain words rather than presenting the figure
+  as a measurement.
+
+Code: `frontend/lib/core/lifecycle/app_session_tracker.dart` (what is timed),
+`backend/.../engagement/AppSessionService.java` (the caps),
+`backend/.../entity/CustomerAppSession.java` (what is stored — customer, start,
+end, seconds, and nothing else).
+
 ---
 
 ## Data safety
@@ -117,6 +163,7 @@ builds (`appLog` is a no-op outside debug).
 | Purchase history | Yes | No | Order history, receipts |
 | Payment info | **Not collected by the app.** Card/UPI details are entered in Cashfree's own flow and never touch GP-STORE code | — | — |
 | Crash logs, diagnostics | Customer / Admin, via Crashlytics | No | Stability |
+| App interactions | **Customer app only** — a count of seconds per foreground stretch, nothing else | No | Telling a returning shopper from somebody who installed the app once. See §8 |
 
 Encrypted in transit: **yes** — HTTPS only, cleartext disabled at the manifest
 and network-security-config level. Users can request deletion: **yes** —

@@ -9,6 +9,7 @@ import '../data/territory_repository.dart';
 import '../domain/admin_coupon_models.dart';
 import '../domain/presence_model.dart';
 import '../domain/admin_customer_model.dart';
+import '../domain/admin_customer_detail_model.dart';
 import '../domain/admin_payment_model.dart';
 import '../domain/admin_review_model.dart';
 import '../domain/analytics_models.dart';
@@ -182,6 +183,16 @@ final adminAllOrdersProvider = AsyncNotifierProvider.autoDispose<AdminAllOrdersC
 
 final adminCustomerOrdersProvider = FutureProvider.autoDispose.family<List<OrderSummary>, int>((ref, customerId) {
   return ref.watch(adminProductsRepositoryProvider).getCustomerOrders(customerId);
+});
+
+/// Everything about one customer, for the staff detail screen.
+///
+/// autoDispose on purpose: this is the most sensitive response the
+/// application produces, so it should not sit in memory after the
+/// shopkeeper has closed the screen.
+final adminCustomerDetailProvider =
+    FutureProvider.autoDispose.family<AdminCustomerDetail, int>((ref, customerId) {
+  return ref.watch(adminProductsRepositoryProvider).getCustomerDetail(customerId);
 });
 
 typedef AdminReviewsPage = ({List<AdminReview> reviews, int page, int totalPages});

@@ -322,7 +322,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || method.equals("PATCH") || method.equals("DELETE");
         if (isWrite && (path.startsWith("/api/carts")
                 || path.startsWith("/api/cart-items")
-                || path.startsWith("/api/reviews"))) {
+                || path.startsWith("/api/reviews")
+                // Telemetry the app posts on its own, not something a person
+                // chose to do. MUTATION because it fails OPEN: usage figures
+                // going missing for an hour is a rounding error, while a
+                // customer's app erroring because a limiter is down is not.
+                || path.equals("/api/customers/me/app-session"))) {
             return Bucket.MUTATION;
         }
 
