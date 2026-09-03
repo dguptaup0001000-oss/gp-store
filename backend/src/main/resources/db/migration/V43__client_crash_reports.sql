@@ -24,7 +24,12 @@
 -- grouping UI, no alerting. It is a table a person can query when a rider
 -- says "it closed again", and that is a large improvement on nothing.
 
-CREATE TABLE client_crash_reports (
+-- IF NOT EXISTS, like every other table here. The bootstrap job runs
+-- Hibernate with ddl-auto=update BEFORE Flyway (see
+-- FlywayAfterSchemaConfig), so on an empty database Hibernate has
+-- already created this table from the entity by the time V43 runs.
+-- A bare CREATE TABLE fails there with "relation already exists".
+CREATE TABLE IF NOT EXISTS client_crash_reports (
     id           BIGSERIAL PRIMARY KEY,
 
     -- WHICH APP, from the token and the request, not from a claim the body
@@ -63,5 +68,5 @@ CREATE TABLE client_crash_reports (
 
 -- The two questions anyone actually asks: what broke recently, and is this
 -- the same thing that broke last week.
-CREATE INDEX idx_crash_reports_reported_at ON client_crash_reports (reported_at DESC);
-CREATE INDEX idx_crash_reports_app_reported ON client_crash_reports (app, reported_at DESC);
+CREATE INDEX IF NOT EXISTS idx_crash_reports_reported_at ON client_crash_reports (reported_at DESC);
+CREATE INDEX IF NOT EXISTS idx_crash_reports_app_reported ON client_crash_reports (app, reported_at DESC);
