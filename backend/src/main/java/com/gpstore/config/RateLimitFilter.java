@@ -333,7 +333,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 // CHECKOUT because it moves no money by itself - the shop's
                 // approval does that, and approval is a staff route in the
                 // ADMIN bucket.
-                || path.startsWith("/api/returns"))) {
+                || path.startsWith("/api/returns")
+                // Same category as app-session above: something the app posts
+                // about itself, not something a person chose to do. It FAILS
+                // OPEN, and that is the right way round here - the reporter
+                // is an app that has already crashed, and a limiter outage
+                // must not be the reason the shop never hears about it. The
+                // row count has its own ceiling in CrashReportService, so
+                // failing open costs noise, never disk.
+                || path.equals("/api/client/crash-reports"))) {
             return Bucket.MUTATION;
         }
 

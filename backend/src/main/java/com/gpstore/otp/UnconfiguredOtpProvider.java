@@ -23,7 +23,7 @@ public class UnconfiguredOtpProvider implements OtpProvider {
 
     public UnconfiguredOtpProvider() {
         this("OTP provider is unconfigured. Password login still works. "
-                + "Email OTP needs SMTP_HOST and OTP_EMAIL_FROM. "
+                + "Email OTP needs SMTP_HOST and SMTP_FROM. "
                 + "SMS OTP needs MSG91_AUTH_KEY and MSG91_OTP_TEMPLATE_ID. "
                 + "The mock provider is not used in production.");
     }

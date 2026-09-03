@@ -93,7 +93,39 @@ class WorkerLifecycleEndToEndTest {
         wipeFixtures();
     }
 
+    /**
+     * CHILDREN FIRST. Five tables carry a foreign key to delivery_partners,
+     * and deleting a partner while any of them still points at it fails the
+     * whole teardown - which then leaves the fixture behind for the next
+     * test, and the next run.
+     *
+     * Only ONE row here is ours to delete: a subzone_backup_partners row is
+     * nothing but the link itself, and its partner_id is NOT NULL, so there
+     * is no link to clear - the row goes.
+     *
+     * Everything else keeps its row and loses the link, because none of it
+     * belongs to this test. A batch, an order and a subzone all outlive the
+     * worker who happened to be on them, and every one of those columns is
+     * nullable for exactly that reason: a worker can leave without taking
+     * the work with them. Deleting a batch here is not tidying up, it is
+     * destroying somebody else's record - and it does not even work, because
+     * deliveries reference the batch in turn.
+     */
     private void wipeFixtures() {
+        String ours = "SELECT id FROM delivery_partners WHERE name LIKE ?";
+
+        jdbc.update("UPDATE delivery_batches SET delivery_partner_id = NULL "
+                + "WHERE delivery_partner_id IN (" + ours + ")", MARKER + "%");
+        jdbc.update("DELETE FROM subzone_backup_partners WHERE partner_id IN (" + ours + ")",
+                MARKER + "%");
+
+        jdbc.update("UPDATE orders SET assigned_worker_partner_id = NULL "
+                + "WHERE assigned_worker_partner_id IN (" + ours + ")", MARKER + "%");
+        jdbc.update("UPDATE orders SET packed_by_partner_id = NULL "
+                + "WHERE packed_by_partner_id IN (" + ours + ")", MARKER + "%");
+        jdbc.update("UPDATE delivery_subzones SET primary_partner_id = NULL "
+                + "WHERE primary_partner_id IN (" + ours + ")", MARKER + "%");
+
         jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", MARKER + "%");
         jdbc.update("DELETE FROM customers WHERE full_name LIKE ?", MARKER + "%");
     }

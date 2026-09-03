@@ -424,6 +424,18 @@ public class SecurityConfig {
                 // (or reactivate) ANY other customer's account.
                 .requestMatchers(HttpMethod.PUT, "/api/customers/*/active").hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
 
+                // ANY SIGNED-IN APP MAY REPORT ITS OWN CRASH - a rider's
+                // session and a customer's session both land here, which is
+                // the point: the worker APK has no other way to say it died.
+                //
+                // Stated explicitly even though anyRequest() below would
+                // permit exactly the same thing. A rule that is only correct
+                // because of what it falls through to is one reordering away
+                // from being wrong, and this endpoint writes rows. WRITE
+                // ONLY: there is no GET here to open up, so nothing about
+                // this line can expose one app's crashes to another.
+                .requestMatchers(HttpMethod.POST, "/api/client/crash-reports").authenticated()
+
                 // Everything else requires a valid, authenticated customer
                 .anyRequest().authenticated()
             )

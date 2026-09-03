@@ -29,6 +29,16 @@ import static org.junit.jupiter.api.Assertions.*;
  * does, and MockMvc does not run the container's ERROR dispatch.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        // THE AUTH LIMITER IS NOT WHAT THIS CLASS TESTS. Fixtures here
+        // register real accounts over HTTP, and in CI every test shares
+        // one IP, so a suite that grew past 20 registrations a minute
+        // started failing on 429 in the FIXTURE - a red build that says
+        // nothing about the behaviour under test. Raised here only; the
+        // production default in RateLimitFilter is untouched, and the
+        // limiter still runs. Same override ConcurrentHttpOrderLoadTest
+        // already uses for the same reason.
+        "rate-limit.auth-per-minute=250",
+        "rate-limit.mutation-per-minute=250",
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",
