@@ -327,7 +327,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 // chose to do. MUTATION because it fails OPEN: usage figures
                 // going missing for an hour is a rounding error, while a
                 // customer's app erroring because a limiter is down is not.
-                || path.equals("/api/customers/me/app-session"))) {
+                || path.equals("/api/customers/me/app-session")
+                // A return request is a customer action on their own order,
+                // the same shape as adding to a cart. MUTATION rather than
+                // CHECKOUT because it moves no money by itself - the shop's
+                // approval does that, and approval is a staff route in the
+                // ADMIN bucket.
+                || path.startsWith("/api/returns"))) {
             return Bucket.MUTATION;
         }
 

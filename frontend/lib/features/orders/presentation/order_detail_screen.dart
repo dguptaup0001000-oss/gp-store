@@ -11,6 +11,7 @@ import '../../checkout/presentation/checkout_providers.dart';
 import '../domain/online_payment_recovery.dart';
 import '../domain/order_models.dart';
 import '../domain/payment_status.dart';
+import '../../returns/presentation/request_return_screen.dart';
 import 'invoice_screen.dart';
 import 'orders_providers.dart';
 import '../../../core/images/gp_network_image.dart';
@@ -355,6 +356,31 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
           icon: const Icon(Icons.receipt_outlined, size: 18),
           label: const Text('View Invoice'),
         ),
+        // RETURNS ONLY ON A DELIVERED ORDER. Before it arrives there is
+        // nothing to send back and cancelling is the right action; the
+        // backend refuses anything else, and offering a button that will be
+        // refused is worse than not offering it.
+        if (order.orderStatus == 'DELIVERED') ...[
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: hapticize(() async {
+              final sent = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(
+                    builder: (_) => RequestReturnScreen(order: order)),
+              );
+              if (sent == true && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                        'Sent. The shop will check the items and let you know.'),
+                  ),
+                );
+              }
+            }),
+            icon: const Icon(Icons.assignment_return_outlined, size: 18),
+            label: const Text('Return items'),
+          ),
+        ],
         if (order.isCancellable) ...[
           const SizedBox(height: 24),
           OutlinedButton(

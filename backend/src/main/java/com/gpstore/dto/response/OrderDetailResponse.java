@@ -101,6 +101,15 @@ public class OrderDetailResponse {
     public DeliveryTrackingInfo getDelivery() { return delivery; }
 
     public static class OrderItemResponse {
+        /**
+         * The ORDER LINE's id, which returns need and nothing else did.
+         *
+         * variantId is not enough: two lines on one order can carry the same
+         * variant at different prices - a coupon applied to one, a price
+         * change between orders - so "return the variant" cannot say which
+         * price to refund. A return names the line.
+         */
+        private final Long orderItemId;
         private final Long variantId;
         private final String productName;
         private final String productBrand;
@@ -116,9 +125,10 @@ public class OrderDetailResponse {
         // discontinued or gone permanently out of stock.
         private final Boolean currentlyAvailable;
 
-        private OrderItemResponse(Long variantId, String productName, String productBrand, Double variantQuantity,
+        private OrderItemResponse(Long orderItemId, Long variantId, String productName, String productBrand, Double variantQuantity,
                                    String unit, String imageUrl, Integer quantity, BigDecimal price,
                                    BigDecimal totalPrice, Boolean currentlyAvailable) {
+            this.orderItemId = orderItemId;
             this.variantId = variantId;
             this.productName = productName;
             this.productBrand = productBrand;
@@ -152,6 +162,7 @@ public class OrderDetailResponse {
                     : (forStaff ? product.getName() : product.customerFacingName());
 
             return new OrderItemResponse(
+                    item.getId(),
                     variant != null ? variant.getId() : null,
                     displayName,
                     product != null ? product.getBrand() : null,
@@ -167,6 +178,7 @@ public class OrderDetailResponse {
             );
         }
 
+        public Long getOrderItemId() { return orderItemId; }
         public Long getVariantId() { return variantId; }
         public String getProductName() { return productName; }
         public String getProductBrand() { return productBrand; }

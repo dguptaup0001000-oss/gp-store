@@ -385,6 +385,23 @@ public class SecurityConfig {
                 // means "may look at customers".
                 .requestMatchers(HttpMethod.GET, "/api/customers/*/detail")
                     .hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
+                // RETURNS: the staff side of the counter.
+                //
+                // The customer routes below these need no rule - they take the
+                // account from the token and never from the URL, so there is
+                // nothing to tamper with. The STAFF routes do, and urgently:
+                // /api/returns/** otherwise falls through to
+                // anyRequest().authenticated(), which would let any signed-in
+                // shopper approve their own return and send themselves a
+                // refund. Approving is the one that moves money, so it takes
+                // the refund permission rather than a general admin one.
+                .requestMatchers(HttpMethod.POST, "/api/returns/*/approve")
+                    .hasAuthority(AdminPermission.PAYMENTS_REFUND.authority())
+                .requestMatchers(HttpMethod.POST, "/api/returns/*/reject")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.GET, "/api/returns/pending", "/api/returns/pending/count")
+                    .hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+
                 // Without this, any authenticated customer could deactivate
                 // (or reactivate) ANY other customer's account.
                 .requestMatchers(HttpMethod.PUT, "/api/customers/*/active").hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())

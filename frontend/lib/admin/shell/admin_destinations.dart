@@ -16,6 +16,7 @@ import '../../features/admin/presentation/admin_order_list_screen.dart';
 import '../../features/admin/presentation/admin_payments_screen.dart';
 import '../../features/admin/presentation/admin_printer_settings_screen.dart';
 import '../../features/admin/presentation/admin_product_list_screen.dart';
+import '../../features/admin/presentation/admin_returns_screen.dart';
 import '../../features/admin/presentation/admin_reviews_screen.dart';
 import '../../features/admin/presentation/admin_territories_screen.dart';
 import '../../features/admin/presentation/admin_voice_settings_screen.dart';
@@ -142,6 +143,19 @@ class AdminNav {
           icon: Icons.payments_outlined,
           description: 'Confirm UPI, process refunds',
           builder: _payments,
+        ),
+        AdminDestination(
+          id: 'returns',
+          // ordersView, not paymentsRefund: this screen is the QUEUE. Seeing
+          // what customers have sent back is an operations question. The
+          // approve button behind it is the one that moves money, and the
+          // backend gates that separately on the refund permission - so a
+          // staff member who may look cannot pay.
+          requires: AdminPermission.ordersView,
+          label: 'Returns',
+          icon: Icons.assignment_return_outlined,
+          description: 'Items customers have sent back',
+          builder: _returns,
         ),
         AdminDestination(
           id: 'breaches',
@@ -353,6 +367,8 @@ class AdminNav {
   static Widget _deliveryPricing(BuildContext context) =>
       const AdminDeliveryPricingScreen();
   static Widget _customers(BuildContext context) => const AdminCustomersScreen();
+
+  static Widget _returns(BuildContext context) => const AdminReturnsScreen();
   static Widget _reviews(BuildContext context) => const AdminReviewsScreen();
   static Widget _broadcast(BuildContext context) => const AdminBroadcastScreen();
   static Widget _analytics(BuildContext context) => const AdminAnalyticsScreen();
