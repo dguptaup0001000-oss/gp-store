@@ -34,6 +34,12 @@ class OrderSummary with _$OrderSummary {
 @freezed
 class OrderItemDetail with _$OrderItemDetail {
   const factory OrderItemDetail({
+    /// The ORDER LINE's id, which returns name.
+    ///
+    /// variantId is not enough: two lines on one order can carry the same
+    /// variant at different prices, so "return the variant" cannot say which
+    /// price to refund.
+    int? orderItemId,
     int? variantId,
     String? productName,
     String? productBrand,

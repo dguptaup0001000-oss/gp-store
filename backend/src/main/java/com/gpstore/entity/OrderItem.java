@@ -59,6 +59,19 @@ private BigDecimal totalPrice;
 
     private Boolean active;
     
+    /**
+     * Added for returns, which name the order LINE they are sending back.
+     *
+     * This class writes its accessors by hand and simply never had one for
+     * the id - nothing had needed to refer to a line from outside the order
+     * before. A return does: two lines can carry the same variant at
+     * different prices, so "which product" is not enough to say what is
+     * coming back or what it was charged at.
+     */
+    public Long getId() {
+        return id;
+    }
+
     public Order getOrder() {
     return order;
 }
