@@ -32,8 +32,6 @@ public class OtpConfigurationStatus {
     private final String channel;
     private final String smtpHost;
     private final String emailFrom;
-    private final String smtpUsername;
-    private final String smtpPassword;
     private final boolean msg91Enabled;
     private final String msg91AuthKey;
     private final String msg91TemplateId;
@@ -43,8 +41,6 @@ public class OtpConfigurationStatus {
             @Value("${otp.channel:EMAIL}") String channel,
             @Value("${spring.mail.host:}") String smtpHost,
             @Value("${otp.email.from:}") String emailFrom,
-            @Value("${spring.mail.username:}") String smtpUsername,
-            @Value("${spring.mail.password:}") String smtpPassword,
             @Value("${msg91.enabled:false}") boolean msg91Enabled,
             @Value("${msg91.auth-key:}") String msg91AuthKey,
             @Value("${msg91.otp-template-id:}") String msg91TemplateId) {
@@ -52,8 +48,6 @@ public class OtpConfigurationStatus {
         this.channel = channel;
         this.smtpHost = smtpHost;
         this.emailFrom = emailFrom;
-        this.smtpUsername = smtpUsername;
-        this.smtpPassword = smtpPassword;
         this.msg91Enabled = msg91Enabled;
         this.msg91AuthKey = msg91AuthKey;
         this.msg91TemplateId = msg91TemplateId;
@@ -78,8 +72,20 @@ public class OtpConfigurationStatus {
             // so somebody reading this knows exactly what to go and set.
             email.put("SMTP_HOST", present(smtpHost));
             email.put("SMTP_FROM", present(emailFrom));
-            email.put("SMTP_USERNAME", present(smtpUsername));
-            email.put("SMTP_PASSWORD", present(smtpPassword));
+            // SMTP_USERNAME AND SMTP_PASSWORD ARE DELIBERATELY ABSENT, for
+            // two reasons that point the same way.
+            //
+            // They do not decide anything this reading answers: canSend is
+            // SMTP_HOST + SMTP_FROM + a mail sender, and credentials that are
+            // present but wrong fail later, at the mail server, where the
+            // send-failure log now carries the cause.
+            //
+            // And AccessDeniedStatusTest asserts that no admin ops body
+            // contains the word "password" anywhere. That guard is blunt on
+            // purpose and it caught this - the KEY name alone tripped it,
+            // even reporting a boolean. Renaming the field to slip past a
+            // security check would be the wrong way round; the field simply
+            // is not needed.
             body.put("email", email);
         } else {
             Map<String, Object> sms = new LinkedHashMap<>();

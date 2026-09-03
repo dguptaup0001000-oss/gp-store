@@ -23,13 +23,11 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("OTP configuration status")
 class OtpConfigurationStatusTest {
 
-    private static final String SECRET = "hunter2-not-a-real-password";
     private static final String AUTH_KEY = "msg91-secret-auth-key";
 
     private OtpConfigurationStatus email(OtpProvider provider, String host, String from) {
         return new OtpConfigurationStatus(
-                provider, "EMAIL", host, from, "shop@gmail.com", SECRET,
-                false, "", "");
+                provider, "EMAIL", host, from, false, "", "");
     }
 
     @Test
@@ -82,20 +80,22 @@ class OtpConfigurationStatusTest {
     }
 
     @Test
-    @DisplayName("no secret value appears anywhere in the reading")
+    @DisplayName("a secret handed in never comes back out")
     void secretsAreNeverEchoed() {
-        String rendered = email(
-                new EmailOtpProvider(null, "shop@gmail.com", null),
-                "smtp.gmail.com", "shop@gmail.com").status().toString();
-
-        assertFalse(rendered.contains(SECRET),
-                "the SMTP password reached an admin status page");
-
+        // ONLY THE MSG91 KEY IS TESTED HERE, and that is not an oversight.
+        // This class no longer takes the SMTP password at all - the field was
+        // removed rather than merely kept out of the output - so asserting it
+        // does not appear would be a test that cannot fail. The auth key IS
+        // still passed in, because MSG91_AUTH_KEY's presence is part of the
+        // reading, so it is the one that needs holding down.
         Map<String, Object> sms = new OtpConfigurationStatus(
-                new UnconfiguredOtpProvider("test"), "SMS", "", "", "", "",
+                new UnconfiguredOtpProvider("test"), "SMS", "", "",
                 true, AUTH_KEY, "template-1").status();
+
         assertFalse(sms.toString().contains(AUTH_KEY),
                 "the MSG91 auth key reached an admin status page");
+        assertEquals(true, ((Map<?, ?>) sms.get("sms")).get("MSG91_AUTH_KEY"),
+                "presence must still be reported - a boolean, not the key");
     }
 
     @Test
@@ -108,8 +108,24 @@ class OtpConfigurationStatusTest {
 
         // Booleans, not strings - a field that could hold a value is a field
         // that will eventually hold the wrong one.
-        assertInstanceOf(Boolean.class, mail.get("SMTP_PASSWORD"));
-        assertEquals(true, mail.get("SMTP_PASSWORD"));
+        assertInstanceOf(Boolean.class, mail.get("SMTP_HOST"));
         assertEquals(true, mail.get("SMTP_HOST"));
+        assertEquals(true, mail.get("SMTP_FROM"));
+    }
+
+    @Test
+    @DisplayName("the word password appears nowhere, not even as a field name")
+    void noFieldIsCalledPassword() {
+        // AccessDeniedStatusTest asserts an admin ops body contains no
+        // "password" anywhere, and it caught an earlier version of this class
+        // reporting SMTP_PASSWORD as a boolean - the key name alone was
+        // enough to trip it. Held here too, next to the code, so the next
+        // person to add a field finds out before the ops endpoint does.
+        String rendered = email(
+                new EmailOtpProvider(null, "shop@gmail.com", null),
+                "smtp.gmail.com", "shop@gmail.com").status().toString().toLowerCase();
+
+        assertFalse(rendered.contains("password"), rendered);
+        assertFalse(rendered.contains("passphrase"), rendered);
     }
 }
