@@ -62,6 +62,7 @@ class PartialRefundsTest {
     @Autowired private PaymentRepository paymentRepository;
     @Autowired private OrderRepository orderRepository;
     @Autowired private CustomerRepository customerRepository;
+    @Autowired private com.gpstore.repository.RefundRepository refundRepository;
 
     @MockitoSpyBean private PaymentGateway gateway;
 
@@ -189,17 +190,18 @@ class PartialRefundsTest {
         paymentService.refundPayment(order.getId(), new BigDecimal("200.00"));
         reset(gateway);
 
-        // The refund id is derived from the payment id, so a second refund
-        // would collide with the first at the provider. Refusing is the
-        // honest answer until refunds are their own rows; silently reusing
-        // the id could send the money twice.
+        // ONE IN FLIGHT AT A TIME. The first refund is still PENDING at the
+        // provider, and it owns the payment's mirror columns that the
+        // reconciliation reads. A second refund starting now would overwrite
+        // them and the first would stop being chased. Once it settles, a
+        // second refund is allowed - twoPartialRefundsBothLand proves that.
         assertThrows(ConflictException.class,
                 () -> paymentService.refundPayment(order.getId(), new BigDecimal("100.00")));
         verify(gateway, never()).requestRefund(any());
     }
 
     @Test
-    @DisplayName("a partial refund settles as REFUNDED for the part that went back")
+    @DisplayName("a partial refund settles as PARTIALLY_REFUNDED, not REFUNDED")
     void aPartialRefundSettles() {
         Order order = persistedOrder();
         Payment payment = onlinePayment(order);
@@ -208,11 +210,121 @@ class PartialRefundsTest {
         paymentService.refundPayment(order.getId(), new BigDecimal("125.50"));
 
         Payment after = paymentRepository.findById(payment.getId()).orElseThrow();
-        assertEquals(PaymentStatus.REFUNDED, after.getPaymentStatus());
+
+        // THIS USED TO SAY REFUNDED, and that was a lie the shop's own screen
+        // told: 374.50 of the customer's money had not come back. It was also
+        // load-bearing - the refund path refuses to refund a payment it
+        // believes is already refunded, so the label locked the remainder
+        // away. Both problems are the same problem.
+        assertEquals(PaymentStatus.PARTIALLY_REFUNDED, after.getPaymentStatus());
         assertNotNull(after.getRefundedAt());
         assertEquals(0, new BigDecimal("125.50").compareTo(after.getRefundAmount()),
                 "The row has to say how much went back, or the books cannot be reconciled.");
         assertEquals(0, PAID.compareTo(after.getAmount()));
+    }
+
+    @Test
+    @DisplayName("a full refund is still REFUNDED")
+    void aFullRefundIsStillRefunded() {
+        Order order = persistedOrder();
+        Payment payment = onlinePayment(order);
+        stubRefund(payment, "cf_partial_full", GatewayRefund.State.SUCCEEDED);
+
+        paymentService.refundPayment(order.getId(), PAID);
+
+        Payment after = paymentRepository.findById(payment.getId()).orElseThrow();
+        assertEquals(PaymentStatus.REFUNDED, after.getPaymentStatus(),
+                "All of it came back, so the old label is still the right one.");
+    }
+
+    @Test
+    @DisplayName("two partial refunds on one payment, and the second one lands")
+    void twoPartialRefundsBothLand() {
+        Order order = persistedOrder();
+        Payment payment = onlinePayment(order);
+        stubRefund(payment, "cf_two_a", GatewayRefund.State.SUCCEEDED);
+
+        // Tuesday: the customer hands back one item.
+        paymentService.refundPayment(order.getId(), new BigDecimal("200.00"));
+        // Thursday: they hand back another.
+        paymentService.refundPayment(order.getId(), new BigDecimal("100.00"));
+
+        Payment after = paymentRepository.findById(payment.getId()).orElseThrow();
+        assertEquals(PaymentStatus.PARTIALLY_REFUNDED, after.getPaymentStatus());
+        assertEquals(0, new BigDecimal("300.00").compareTo(after.getRefundAmount()),
+                "The payment has to total BOTH refunds. Before the ledger this "
+                        + "read 100.00 - the second refund overwrote the first, and "
+                        + "the shop's books were 200 short of what it had paid out.");
+
+        assertEquals(2, refundRepository.countByPaymentId(payment.getId()));
+        assertEquals(0, new BigDecimal("300.00")
+                .compareTo(refundRepository.settledFor(payment.getId())));
+    }
+
+    @Test
+    @DisplayName("two refunds carry different ids, and the first keeps the legacy one")
+    void refundIdsDoNotCollide() {
+        Order order = persistedOrder();
+        Payment payment = onlinePayment(order);
+        stubRefund(payment, "cf_two_b", GatewayRefund.State.SUCCEEDED);
+
+        paymentService.refundPayment(order.getId(), new BigDecimal("200.00"));
+        paymentService.refundPayment(order.getId(), new BigDecimal("100.00"));
+
+        var rows = refundRepository.forPayment(payment.getId());
+        assertEquals(2, rows.size());
+
+        // THE FIRST ONE KEEPS THE OLD FORM. Cashfree deduplicates on this id,
+        // and every refund ever sent used "gpsr-<paymentId>". A refund in
+        // flight when this shipped must, if retried, carry the same id - or
+        // the provider treats the retry as a new refund and the customer is
+        // paid twice.
+        assertEquals("gpsr-" + payment.getId(), rows.get(0).getRefundId());
+        assertEquals("gpsr-" + payment.getId() + "-2", rows.get(1).getRefundId());
+        assertNotEquals(rows.get(0).getRefundId(), rows.get(1).getRefundId(),
+                "Two refunds sharing an id would be deduplicated at the provider, "
+                        + "so the second customer refund would silently never happen.");
+    }
+
+    @Test
+    @DisplayName("the two refunds together can never exceed what was paid")
+    void theSumIsCappedAtWhatWasPaid() {
+        Order order = persistedOrder();
+        Payment payment = onlinePayment(order);
+        stubRefund(payment, "cf_two_c", GatewayRefund.State.SUCCEEDED);
+
+        paymentService.refundPayment(order.getId(), new BigDecimal("400.00"));
+        reset(gateway);
+        stubRefund(payment, "cf_two_c2", GatewayRefund.State.SUCCEEDED);
+
+        // 400 is back; 100 is left. 150 is not available and must not be sent.
+        ConflictException tooMuch = assertThrows(ConflictException.class,
+                () -> paymentService.refundPayment(order.getId(), new BigDecimal("150.00")));
+        assertTrue(tooMuch.getMessage().contains("100.00"), tooMuch.getMessage());
+
+        // The remaining 100 is still refundable, which is the other half of
+        // the same requirement.
+        paymentService.refundPayment(order.getId(), new BigDecimal("100.00"));
+
+        Payment after = paymentRepository.findById(payment.getId()).orElseThrow();
+        assertEquals(PaymentStatus.REFUNDED, after.getPaymentStatus(),
+                "Everything is back now, so it is fully refunded.");
+        assertEquals(0, PAID.compareTo(refundRepository.settledFor(payment.getId())));
+    }
+
+    @Test
+    @DisplayName("nothing more goes back once the whole payment has")
+    void nothingLeftToRefund() {
+        Order order = persistedOrder();
+        Payment payment = onlinePayment(order);
+        stubRefund(payment, "cf_two_d", GatewayRefund.State.SUCCEEDED);
+
+        paymentService.refundPayment(order.getId(), PAID);
+        reset(gateway);
+
+        assertThrows(ConflictException.class,
+                () -> paymentService.refundPayment(order.getId(), new BigDecimal("1.00")));
+        verify(gateway, never()).requestRefund(any());
     }
 
     @Test

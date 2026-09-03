@@ -63,6 +63,9 @@ class AdminStatusBadge extends StatelessWidget {
         return AdminStatusTone.success;
       case 'PENDING':
       case 'REFUND_PENDING':
+      // Money is still owed to the customer, so this is not a settled state
+      // a shopkeeper can stop looking at.
+      case 'PARTIALLY_REFUNDED':
         return AdminStatusTone.warning;
       case 'FAILED':
       case 'CANCELLED':

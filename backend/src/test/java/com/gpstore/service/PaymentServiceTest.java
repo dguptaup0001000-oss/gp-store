@@ -29,6 +29,7 @@ class PaymentServiceTest {
 
     @Mock private PaymentRepository paymentRepository;
     @Mock private OrderRepository orderRepository;
+    @Mock private com.gpstore.repository.RefundRepository refundRepository;
     @Mock private AuditLogService auditLogService;
     @Mock private UpiPaymentService upiPaymentService;
     @Mock private OrderService orderService;
@@ -48,8 +49,19 @@ class PaymentServiceTest {
         // against a live database in UpiExpiryStateMachineTest and
         // InventoryRestorationConcurrencyTest instead.
         paymentService = new PaymentService(
-                paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService,
+                paymentRepository, refundRepository, orderRepository, auditLogService, upiPaymentService, orderService,
                 null, null, new com.gpstore.payment.gateway.CashfreeProperties(), null, null, null, null, 30, 60, 100, 50, 30, 72, 50, 20);
+
+        // The refund ledger, stubbed leniently because most tests here never
+        // reach it. A default mock answers null for the sums and null for
+        // save(), and a null row is an NPE two lines later - which would read
+        // as a bug in the code under test rather than an unstubbed mock.
+        org.mockito.Mockito.lenient().when(refundRepository.committedFor(any()))
+                .thenReturn(BigDecimal.ZERO);
+        org.mockito.Mockito.lenient().when(refundRepository.settledFor(any()))
+                .thenReturn(BigDecimal.ZERO);
+        org.mockito.Mockito.lenient().when(refundRepository.save(any(com.gpstore.entity.Refund.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
     }
 
     @Test
@@ -129,9 +141,10 @@ class PaymentServiceTest {
         props.setAppId("cf_test_app");
         props.setSecretKey("cf_test_secret");
         paymentService = new PaymentService(
-                paymentRepository, orderRepository, auditLogService, upiPaymentService, orderService,
-                // The extra null is the PaymentGateway: refunds are the only
-                // thing that uses it, and no test in this class refunds.
+                paymentRepository, refundRepository, orderRepository, auditLogService, upiPaymentService, orderService,
+                // The nulls are the RefundRepository and the PaymentGateway:
+                // refunds are the only thing that uses either, and no test in
+                // this class refunds.
                 null, null, props, null, null, null, null, 30, 60, 100, 50, 30, 72, 50, 20);
 
         assertEquals(PaymentMethod.ONLINE, paymentService.parsePaymentMethod("ONLINE"));

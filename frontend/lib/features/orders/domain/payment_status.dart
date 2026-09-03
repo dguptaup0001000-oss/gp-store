@@ -6,12 +6,21 @@ class PaymentStatusInfo {
   PaymentStatusInfo._();
 
   /// Money arrived, or COD that is not collected through the gateway.
+  ///
+  /// A REFUNDED or PARTIALLY_REFUNDED order counts as settled because the
+  /// customer DID pay - what happened afterwards does not put them back in
+  /// front of a Pay button. Leaving PARTIALLY_REFUNDED out of this list is
+  /// not a cosmetic miss: needsOnlineRetry falls through to "anything not
+  /// settled is retryable", so the shop app would invite somebody to pay a
+  /// second time for an order they had already paid for and been partly
+  /// refunded on.
   static bool isSettled(String? status) {
     switch (normalize(status)) {
       case 'SUCCESS':
       case 'PAID':
       case 'COD_RECEIVED':
       case 'REFUNDED':
+      case 'PARTIALLY_REFUNDED':
       case 'REFUND_PENDING':
         return true;
       default:

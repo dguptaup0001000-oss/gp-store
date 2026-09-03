@@ -31,6 +31,7 @@ public class PaymentService {
     private final com.gpstore.payment.gateway.PaymentGateway paymentGateway;
 
     private final PaymentRepository paymentRepository;
+    private final com.gpstore.repository.RefundRepository refundRepository;
     private final OrderRepository orderRepository;
     private final AuditLogService auditLogService;
     private final UpiPaymentService upiPaymentService;
@@ -63,6 +64,7 @@ public class PaymentService {
 
     public PaymentService(
             PaymentRepository paymentRepository,
+            com.gpstore.repository.RefundRepository refundRepository,
             OrderRepository orderRepository,
             AuditLogService auditLogService,
             UpiPaymentService upiPaymentService,
@@ -94,6 +96,7 @@ public class PaymentService {
             @org.springframework.beans.factory.annotation.Value("${refund.reconcile-max-batches-per-run:20}") int maxRefundReconcileBatchesPerRun) {
 
         this.paymentRepository = paymentRepository;
+        this.refundRepository = refundRepository;
         this.orderRepository = orderRepository;
         this.auditLogService = auditLogService;
         this.upiPaymentService = upiPaymentService;
@@ -613,14 +616,15 @@ public class PaymentService {
      * so the history of a partial refund is already correct: amount is what
      * the customer paid, refund_amount is what went back.
      *
-     * WHAT THIS DELIBERATELY DOES NOT DO. One refund per payment, whole or
-     * partial. A SECOND, separate partial refund on the same payment is
-     * refused rather than half-supported: the refund id is derived from the
-     * payment id, so a second refund would either collide with the first at
-     * the provider or need a refunds table to hang from - and a table is the
-     * honest way to do it, not a suffix bolted on here. The invariant below
-     * is written in terms of what is left to refund rather than the payment
-     * total, so the day that table arrives this check is already correct.
+     * MANY REFUNDS PER PAYMENT, one at a time. V41 gave refunds their own
+     * rows, so a customer who returns two items on separate days gets two
+     * refunds and the shop's books show both. What is still refused is a
+     * SECOND refund while the first is still in flight: the payment's own
+     * columns mirror the newest refund, and the reconciliation reads them, so
+     * starting a second before the first has landed would lose track of the
+     * first. Sequential is the real shape of the problem anyway - a return
+     * happens, then another one happens - and refusing is one line where
+     * getting concurrency subtly wrong would be somebody's money.
      *
      * @param requestedAmount what to send back, or null for the full payment.
      */
@@ -634,20 +638,18 @@ public class PaymentService {
                 && payment.getPaymentStatus() == PaymentStatus.COD_PENDING) {
             throw new ConflictException("Refund is not required for unpaid COD order");
         }
-        if (payment.getPaymentStatus() == PaymentStatus.REFUNDED) {
-            throw new ConflictException("Payment is already refunded");
-        }
+        // ONE IN FLIGHT AT A TIME. A refund that has been sent and not yet
+        // settled owns the payment's mirror columns and the reconciliation
+        // that reads them, so a second cannot start until it lands or fails.
+        //
+        // ONLY WHEN SOMETHING WAS REALLY SENT. Cancelling a paid order also
+        // lands on REFUND_PENDING, and for a while this refused those too -
+        // which left the shop unable to send a refund the system had merely
+        // written down. A pending status with no refund id and no channel is
+        // an intention, not a request, and the whole point of this method is
+        // to turn one into the other.
         if (payment.getPaymentStatus() == PaymentStatus.REFUND_PENDING
                 && refundWasActuallyRequested(payment)) {
-            // Not an error worth blocking on, but it must not send a SECOND
-            // request to the provider - so say so and stop.
-            //
-            // ONLY WHEN SOMETHING WAS REALLY SENT. Cancelling a paid order
-            // also lands on REFUND_PENDING, and for a while this refused
-            // those too - which left the shop unable to send a refund the
-            // system had merely written down. A pending row with no refund id
-            // and no channel is an intention, not a request, and the whole
-            // point of this method is to turn one into the other.
             throw new ConflictException("A refund for this order has already been requested.");
         }
 
@@ -661,12 +663,17 @@ public class PaymentService {
         if (isCashRefund(payment)) {
             // COD money never went through a provider, so there is nothing to
             // ask. The shopkeeper hands it back and this records that.
+            com.gpstore.entity.Refund row =
+                    openRefundRow(payment, amount, com.gpstore.entity.Refund.Channel.CASH);
+
             payment.setRefundChannel(Payment.RefundChannel.CASH);
-            payment.setRefundAmount(amount);
+            payment.setRefundId(row.getRefundId());
+            payment.setRefundAmount(committedTotal(payment));
             payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
             Payment saved = paymentRepository.save(payment);
             auditLogService.log("REFUND_INITIATED", "Payment", saved.getId(),
-                    "orderId=" + orderId + ", amount=" + amount + ", channel=CASH");
+                    "orderId=" + orderId + ", amount=" + amount + ", channel=CASH"
+                            + ", refundId=" + row.getRefundId());
             return com.gpstore.dto.response.PaymentResponse.from(saved);
         }
 
@@ -693,10 +700,21 @@ public class PaymentService {
      */
     private Payment askTheProviderForTheMoneyBack(Payment payment, Long orderId, BigDecimal amount) {
 
-        String refundId = refundIdFor(payment);
+        // The ledger row comes first, so the id sent to the provider is the
+        // one the shop has written down. Allocated under the payment row lock
+        // this method's caller already holds, and protected by a unique index
+        // on (payment_id, sequence_no) for the day somebody writes a path
+        // that forgets the lock.
+        //
+        // NOTHING HERE SURVIVES A PROVIDER REFUSAL: the gateway call below
+        // throws out of the transaction, and this row rolls back with it.
+        com.gpstore.entity.Refund row =
+                openRefundRow(payment, amount, com.gpstore.entity.Refund.Channel.GATEWAY);
+        String refundId = row.getRefundId();
+
         payment.setRefundChannel(Payment.RefundChannel.GATEWAY);
         payment.setRefundId(refundId);
-        payment.setRefundAmount(amount);
+        payment.setRefundAmount(committedTotal(payment));
         payment.setRefundFailureReason(null);
 
         PaymentGateway.GatewayRefund refund;
@@ -716,12 +734,15 @@ public class PaymentService {
 
         payment.setProviderRefundId(refund.providerRefundId());
         payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
+        row.setProviderRefundId(refund.providerRefundId());
 
         // STAMPED HERE AND NOWHERE ELSE - the moment the provider took the
         // request. This is the clock the reconciliation measures against, so
         // setting it any earlier (at the intention) or later (at settlement)
         // would make "stuck for four days" mean something else.
-        payment.setRefundRequestedAt(LocalDateTime.now());
+        LocalDateTime askedAt = LocalDateTime.now();
+        payment.setRefundRequestedAt(askedAt);
+        row.setRequestedAt(askedAt);
 
         // The provider CAN answer SUCCESS immediately - a wallet refund often
         // does - and when it does there is no reason to make the shop wait for
@@ -748,15 +769,28 @@ public class PaymentService {
      * Expressed as "what is left to refund" rather than "the payment total",
      * so it stays correct if refunds ever become multiple rows.
      */
-    private static BigDecimal amountToRefund(Payment payment, BigDecimal paid,
-                                             BigDecimal requestedAmount) {
+    private BigDecimal amountToRefund(Payment payment, BigDecimal paid,
+                                      BigDecimal requestedAmount) {
 
-        BigDecimal alreadyRefunded = payment.getRefundAmount() != null
-                && payment.getPaymentStatus() == PaymentStatus.REFUNDED
-                ? payment.getRefundAmount()
-                : BigDecimal.ZERO;
+        // FROM THE LEDGER, NOT FROM A COLUMN. This used to read
+        // payment.refundAmount, which holds one refund - so a payment that
+        // had already had 200 of its 500 sent back looked, to a second
+        // refund, exactly like one that had had nothing sent back. Summing
+        // the rows is what makes a second partial refund safe rather than a
+        // way to pay a customer twice.
+        //
+        // Failed refunds are excluded by the query: money that never moved
+        // must not reduce what the shop can still send.
+        BigDecimal alreadyRefunded = refundRepository.committedFor(payment.getId());
+        if (alreadyRefunded == null) {
+            alreadyRefunded = BigDecimal.ZERO;
+        }
 
         BigDecimal remaining = paid.subtract(alreadyRefunded);
+
+        if (remaining.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ConflictException("This order has already been fully refunded.");
+        }
 
         if (requestedAmount == null) {
             // No figure given means the whole of what is left, which is the
@@ -904,6 +938,7 @@ public class PaymentService {
                     // provider's own words, on the wire and in the row, where
                     // the shop can still see it tomorrow.
                     payment.setRefundFailureReason(trimReason(refund.failureReason()));
+                    noteFailureOnLedger(payment, trimReason(refund.failureReason()));
                     auditLogService.log("REFUND_FAILED", "Payment", payment.getId(),
                             "orderId=" + orderId + ", providerState=" + refund.state());
                 }
@@ -1112,6 +1147,7 @@ public class PaymentService {
                 String reason = trimReason(refund.failureReason());
                 if (!java.util.Objects.equals(reason, payment.getRefundFailureReason())) {
                     payment.setRefundFailureReason(reason);
+                    noteFailureOnLedger(payment, reason);
                     paymentRepository.save(payment);
                     auditLogService.log("REFUND_FAILED", "Payment", payment.getId(),
                             "provider reports " + refund.state() + " for refundId="
@@ -1129,15 +1165,127 @@ public class PaymentService {
         }
     }
 
-    /** The one place REFUNDED is set, so it cannot be set without a timestamp. */
+    /**
+     * The one place a refund is marked landed, so it cannot be without a
+     * timestamp.
+     *
+     * SETTLES THE LEDGER ROW FIRST, then re-derives the payment's status from
+     * the ledger. That order matters: the status depends on the sum of what
+     * has landed, so writing the payment before the row would decide
+     * "everything is back" from a total that is one refund short.
+     *
+     * REFUNDED NO LONGER MEANS "a refund happened" - it means the customer
+     * has had all of their money back. A payment with 200 of 500 returned
+     * settles to PARTIALLY_REFUNDED, which is the fact, and which leaves the
+     * remaining 300 refundable. Stamping it REFUNDED, as this did when one
+     * refund was all there could be, would have locked the other 300 away.
+     */
     private void settleRefund(Payment payment, String how) {
-        payment.setPaymentStatus(PaymentStatus.REFUNDED);
-        payment.setRefundedAt(LocalDateTime.now());
+        LocalDateTime landedAt = LocalDateTime.now();
+
+        for (com.gpstore.entity.Refund row : refundRepository.forPayment(payment.getId())) {
+            if (row.getStatus() == com.gpstore.entity.Refund.Status.PENDING) {
+                row.setStatus(com.gpstore.entity.Refund.Status.SUCCEEDED);
+                row.setSettledAt(landedAt);
+                row.setFailureReason(null);
+                refundRepository.save(row);
+            }
+        }
+
+        payment.setRefundedAt(landedAt);
         payment.setRefundFailureReason(null);
         if (payment.getRefundAmount() == null) {
             payment.setRefundAmount(payment.getAmount());
         }
+        payment.setPaymentStatus(statusAfterRefund(payment));
         log.info("Refund settled for paymentId={} via {}", payment.getId(), how);
+    }
+
+    /**
+     * What a payment's status is once the ledger is up to date.
+     *
+     * Full refund is REFUNDED and nothing more can go back. Anything less is
+     * PARTIALLY_REFUNDED, which both states the fact and keeps the remainder
+     * refundable - the two are the same requirement seen from either side.
+     */
+    private PaymentStatus statusAfterRefund(Payment payment) {
+        // NO LEDGER ROWS AT ALL means this payment predates the refunds table
+        // and V41's backfill did not reach it - an intention with no amount,
+        // or a row built directly by a test. The payment's own columns are
+        // then the only record there is, and the answer they gave before the
+        // ledger existed was REFUNDED. Deriving PARTIALLY_REFUNDED from a sum
+        // of zero rows would be reading "no evidence" as "not all of it".
+        if (refundRepository.countByPaymentId(payment.getId()) == 0) {
+            return PaymentStatus.REFUNDED;
+        }
+
+        BigDecimal paid = payment.getAmount();
+        BigDecimal settled = refundRepository.settledFor(payment.getId());
+        if (settled == null) {
+            settled = BigDecimal.ZERO;
+        }
+        if (paid == null || settled.compareTo(paid) >= 0) {
+            return PaymentStatus.REFUNDED;
+        }
+        return PaymentStatus.PARTIALLY_REFUNDED;
+    }
+
+    /**
+     * Copies the provider's refusal onto the ledger row as well as the payment.
+     *
+     * The row stays PENDING on purpose, exactly as the payment does: a refund
+     * the provider refused has not moved money, but the shop still owes it,
+     * so the amount must stay reserved against the payment and the row must
+     * stay in the reconciliation's sights. Marking it FAILED here would
+     * release the amount and let a second refund be sent for money the shop
+     * is already trying to return.
+     */
+    private void noteFailureOnLedger(Payment payment, String reason) {
+        for (com.gpstore.entity.Refund row : refundRepository.forPayment(payment.getId())) {
+            if (row.getStatus() == com.gpstore.entity.Refund.Status.PENDING
+                    && !java.util.Objects.equals(reason, row.getFailureReason())) {
+                row.setFailureReason(reason);
+                refundRepository.save(row);
+            }
+        }
+    }
+
+    /** Everything on this payment that has gone back or is on its way. */
+    private BigDecimal committedTotal(Payment payment) {
+        BigDecimal committed = refundRepository.committedFor(payment.getId());
+        return committed == null ? BigDecimal.ZERO : committed;
+    }
+
+    /**
+     * Opens the next refund on a payment.
+     *
+     * The sequence number is allocated under the payment row lock the caller
+     * holds; a unique index on (payment_id, sequence_no) is what remains true
+     * if a future path forgets to take it.
+     */
+    private com.gpstore.entity.Refund openRefundRow(Payment payment, BigDecimal amount,
+                                                    com.gpstore.entity.Refund.Channel channel) {
+        int sequence = refundRepository.highestSequenceFor(payment.getId()) + 1;
+
+        // THE SETTLED MARKER BELONGS TO THE REFUND THAT IS CURRENT, and a new
+        // one has not landed. Leaving the previous refund's refundedAt in
+        // place would hide this one from everything that asks "which refunds
+        // are still out?" - the reconciliation sweep and the hourly money
+        // alert both find in-flight refunds with
+        // "refund_id IS NOT NULL AND refunded_at IS NULL". A second refund
+        // that inherited the first one's timestamp would be invisible to
+        // both, which is the worst way for a refund to go missing: silently,
+        // with the shop believing it is watched.
+        payment.setRefundedAt(null);
+
+        com.gpstore.entity.Refund row = new com.gpstore.entity.Refund();
+        row.setPayment(payment);
+        row.setSequenceNo(sequence);
+        row.setAmount(amount);
+        row.setStatus(com.gpstore.entity.Refund.Status.PENDING);
+        row.setChannel(channel);
+        row.setRefundId(refundIdFor(payment, sequence));
+        return refundRepository.save(row);
     }
 
     /**
@@ -1165,6 +1313,25 @@ public class PaymentService {
      */
     public static String refundIdFor(Payment payment) {
         return "gpsr-" + payment.getId();
+    }
+
+    /**
+     * The id for one particular refund on a payment.
+     *
+     * THE FIRST REFUND KEEPS THE OLD FORM, and that is not tidiness - it is
+     * the reason this change cannot cost money. Every refund ever sent to
+     * Cashfree used "gpsr-<paymentId>", and Cashfree deduplicates on it. A
+     * refund that was in flight when the refunds table shipped must, if
+     * retried, carry that same id or the provider will treat the retry as a
+     * new refund and send the customer their money twice. V41's backfill
+     * writes this same form onto the row it creates for each historical
+     * refund, so the two agree.
+     *
+     * Only the second and later refunds on a payment take the suffix.
+     */
+    public static String refundIdFor(Payment payment, int sequence) {
+        String base = refundIdFor(payment);
+        return sequence <= 1 ? base : base + "-" + sequence;
     }
 
     private static String trimReason(String reason) {

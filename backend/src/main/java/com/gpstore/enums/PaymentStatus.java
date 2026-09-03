@@ -9,6 +9,20 @@ public enum PaymentStatus {
     COD_RECEIVED,
     REFUND_PENDING,
     REFUNDED,
+
+    /**
+     * Some of the customer's money has gone back, and some has not.
+     *
+     * WHY THIS HAD TO EXIST. REFUNDED used to mean "a refund happened", which
+     * was the same thing as "all of it came back" only while a payment could
+     * carry one refund. Once a shop can send back 200 of 500 and then another
+     * 100 later, stamping the first one REFUNDED would both misreport the
+     * order and lock the remaining 300 away - the refund path refuses to
+     * refund a payment it believes is already refunded.
+     *
+     * Terminal for nothing: more can still go back, up to what is left.
+     */
+    PARTIALLY_REFUNDED,
     CANCELLED,
 
     /**
