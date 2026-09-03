@@ -181,6 +181,19 @@ class _KpiGrid extends ConsumerWidget {
           deltaPercent: _deltaOrNull(data.previousRevenue, data.revenueChangePercent),
           comparisonLabel: 'vs previous ${data.periodDays} days',
         ),
+        // Revenue above is GROSS - the full total of every order, including
+        // ones the shop has since refunded part of. This is what it kept.
+        // Drawn only when the server reports it, so an older backend simply
+        // shows one card fewer rather than claiming the shop kept nothing.
+        if (data.netRevenue != null)
+          AdminKpiCard(
+            icon: Icons.savings_outlined,
+            label: 'Kept after refunds',
+            value: AdminFormat.rupees(data.netRevenue!),
+            deltaPercent: _deltaOrNull(
+                data.previousNetRevenue, data.netRevenueChangePercent),
+            comparisonLabel: 'vs previous ${data.periodDays} days',
+          ),
         AdminKpiCard(
           icon: Icons.receipt_long_outlined,
           label: 'Orders',

@@ -125,6 +125,20 @@ class _SalesSummarySection extends ConsumerWidget {
                 summary.previousRevenue, summary.revenueChangePercent),
             comparisonLabel: 'vs previous ${summary.periodDays} days',
           ),
+          // WHAT THE SHOP KEPT, beside what it sold. Revenue above is gross:
+          // it counts the full total of an order the shop may have refunded
+          // half of. Both are shown because "what did we sell" and "what did
+          // we keep" are different questions, and only showing the first is
+          // how a shopkeeper reads a good week off money they handed back.
+          if (summary.netRevenue != null)
+            AdminKpiCard(
+              icon: Icons.savings_outlined,
+              label: 'Kept after refunds',
+              value: AdminFormat.rupees(summary.netRevenue!),
+              deltaPercent: _deltaOrNull(
+                  summary.previousNetRevenue, summary.netRevenueChangePercent),
+              comparisonLabel: 'vs previous ${summary.periodDays} days',
+            ),
           AdminKpiCard(
             icon: Icons.receipt_long_outlined,
             label: 'Orders',

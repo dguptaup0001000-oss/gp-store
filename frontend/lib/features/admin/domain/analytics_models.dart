@@ -26,6 +26,21 @@ class SalesSummary with _$SalesSummary {
     @Default(0) int previousOrderCount,
     @Default(0.0) double revenueChangePercent,
     @Default(0.0) double orderCountChangePercent,
+
+    // NULLABLE, NOT DEFAULTED TO ZERO - unlike the comparison fields above,
+    // and for the opposite reason. A missing percentage defaulting to zero
+    // degrades to "no badge shown", which is honest. A missing NET REVENUE
+    // defaulting to zero would render as "you kept ₹0", which is a lie in
+    // the more alarming direction, on the screen a shopkeeper checks to see
+    // whether the week went well. Null means "this server does not report
+    // it" and the card is simply not drawn.
+    double? refunded,
+    double? netRevenue,
+    // The BASELINE, not the figure - only ever used to decide whether a
+    // comparison is meaningful, so zero degrades to "no badge" exactly as
+    // previousRevenue does.
+    @Default(0.0) double previousNetRevenue,
+    @Default(0.0) double netRevenueChangePercent,
   }) = _SalesSummary;
 
   factory SalesSummary.fromJson(Map<String, dynamic> json) => _$SalesSummaryFromJson(json);
