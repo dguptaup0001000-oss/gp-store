@@ -128,13 +128,20 @@ class ProductImagePipelineTest {
     @DisplayName("A live product with no photograph is on the backfill's worklist")
     void liveProductWithoutImageIsFound() {
         Category category = newCategory();
-        newProduct(category, null);
+        ProductVariant mine = newProduct(category, null);
 
+        // BY ID, not by dereferencing every row. anySatisfy runs the lambda
+        // against each element until one passes, so walking
+        // getProduct().getCategory().getId() over a shared worklist throws
+        // NullPointerException - not an assertion failure - the moment any
+        // other test has an unfinished product in the table. That is a fault
+        // in this assertion, not in the code under test: the query is correct
+        // and the test still goes red.
         assertThat(variantRepository.findVariantsWithoutRealImages())
                 .as("a shop's own products are not test data, and they are exactly "
                         + "the ones that need photographs")
-                .anySatisfy(v -> assertThat(v.getProduct().getCategory().getId())
-                        .isEqualTo(category.getId()));
+                .extracting(ProductVariant::getId)
+                .contains(mine.getId());
     }
 
     @Test
@@ -144,26 +151,26 @@ class ProductImagePipelineTest {
         // The exact shape found in production: a text-rendering service asked
         // to draw the product's own name on a coloured square. It resolves,
         // returns 200, and is not a photograph of anything.
-        newProduct(category, "https://placehold.co/400x400/FFE9C7/8A4B08/png?text=Gemini%0AVanaspati");
+        ProductVariant mine = newProduct(category, "https://placehold.co/400x400/FFE9C7/8A4B08/png?text=Gemini%0AVanaspati");
 
         assertThat(variantRepository.findVariantsWithoutRealImages())
                 .as("a URL that renders the product's name is a picture of some words - "
                         + "every check that only asks 'is there a URL' is answered yes "
                         + "while the customer sees no product")
-                .anySatisfy(v -> assertThat(v.getProduct().getCategory().getId())
-                        .isEqualTo(category.getId()));
+                .extracting(ProductVariant::getId)
+                .contains(mine.getId());
     }
 
     @Test
     @DisplayName("A real photograph is NOT on the worklist")
     void realImageIsLeftAlone() {
         Category category = newCategory();
-        newProduct(category, IMAGE);
+        ProductVariant mine = newProduct(category, IMAGE);
 
         assertThat(variantRepository.findVariantsWithoutRealImages())
                 .as("re-running the backfill must not replace photographs it already found")
-                .noneSatisfy(v -> assertThat(v.getProduct().getCategory().getId())
-                        .isEqualTo(category.getId()));
+                .extracting(ProductVariant::getId)
+                .doesNotContain(mine.getId());
     }
 
     private Category newCategory() {
@@ -174,7 +181,15 @@ class ProductImagePipelineTest {
         return categoryRepository.save(category);
     }
 
-    private void newProduct(Category category, String imageUrl) {
+    /**
+     * Returns the variant it created, so a test can name its OWN row.
+     *
+     * The worklist query returns the whole catalogue's missing photographs,
+     * including rows other tests are part-way through writing. Identifying
+     * this test's product by variant id rather than by walking every result's
+     * category keeps the assertion about the thing the test actually created.
+     */
+    private ProductVariant newProduct(Category category, String imageUrl) {
         Product product = new Product();
         product.setName("Image Pipeline Product " + System.nanoTime());
         product.setBrand("PipelineBrand");
@@ -193,6 +208,6 @@ class ProductImagePipelineTest {
         variant.setAvailable(true);
         variant.setActive(true);
         variant.setDisplayOrder(0);
-        variantRepository.save(variant);
+        return variantRepository.save(variant);
     }
 }

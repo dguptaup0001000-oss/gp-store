@@ -371,6 +371,24 @@ public class SecurityConfig {
                 .requestMatchers("/api/audit-logs/**").hasAuthority(AdminPermission.AUDIT_VIEW.authority())
                 .requestMatchers("/api/analytics/**").hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
                 .requestMatchers("/api/cart-items/**").hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
+                // ORDER LINES: READING IS NOT WRITING.
+                //
+                // This was one rule for the whole path on ORDERS_VIEW - a
+                // READ permission - and POST /api/order-items adds a priced
+                // line to an order. SUPPORT and DELIVERY_MANAGER hold
+                // ORDERS_VIEW and not ORDERS_MANAGE, so either could attach a
+                // line to any order in the shop. Proved with real tokens
+                // against a real port before this line existed: both got 200
+                // and a persisted row.
+                //
+                // The write now needs the manage permission, and the service
+                // prices the line itself rather than believing the body.
+                .requestMatchers(HttpMethod.POST, "/api/order-items", "/api/order-items/**")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.PUT, "/api/order-items/**")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.DELETE, "/api/order-items/**")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
                 .requestMatchers("/api/order-items/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
                 .requestMatchers(HttpMethod.GET, "/api/wishlists").hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
                 .requestMatchers(HttpMethod.POST, "/api/customers").hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())

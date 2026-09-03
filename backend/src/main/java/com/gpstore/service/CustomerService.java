@@ -62,6 +62,38 @@ public class CustomerService {
      * AuthService.register() - fixed here so it's not possible to accidentally
      * store a plaintext password no matter which path creates the account.
      */
+    /**
+     * The admin "add a customer" path, with the role decided here.
+     *
+     * WHY THIS EXISTS RATHER THAN saveCustomer(entity). The controller used
+     * to bind a Customer straight from the request body, and saveCustomer
+     * only forced the role to CUSTOMER when it arrived null - so a body
+     * saying "role":"SUPER_ADMIN" was saved as one, with a password the same
+     * request chose. CUSTOMERS_MANAGE, which MANAGER holds, was therefore a
+     * route to the highest role in the system.
+     *
+     * The role is not a parameter here. Staff accounts are made by changing
+     * an existing account's role deliberately, which is a different act with
+     * its own audit trail - not a side effect of adding a phone-order
+     * customer.
+     *
+     * The id is not a parameter either, so this can only ever INSERT. The old
+     * shape could update: save() on an entity carrying an id rewrites that
+     * row, which turned "create a customer" into "overwrite that account".
+     */
+    public Customer createCustomerForAdmin(String fullName, String email,
+                                           String mobileNumber, String password) {
+        Customer customer = new Customer();
+        customer.setFullName(fullName);
+        customer.setEmail(email == null || email.isBlank() ? null : email.trim());
+        customer.setMobileNumber(mobileNumber);
+        customer.setPassword(password);
+        customer.setRole(Role.CUSTOMER);
+        customer.setActive(true);
+        customer.setEnabled(true);
+        return saveCustomer(customer);
+    }
+
     public Customer saveCustomer(Customer customer) {
         customerRepository.findByEmail(customer.getEmail()).ifPresent(existing -> {
             throw new ConflictException("An account with this email already exists");
@@ -75,6 +107,14 @@ public class CustomerService {
             customer.setPassword(passwordEncoder.encode(customer.getPassword()));
         } else {
             customer.setPassword(null);
+        }
+
+        // NEVER AN UPDATE. save() on an entity carrying an id rewrites that
+        // row, so an id arriving from anywhere would turn a create into an
+        // overwrite of whichever account it named. Belt and braces: the
+        // request object has no id field either.
+        if (customer.getId() != null) {
+            throw new BadRequestException("A new customer cannot be created with an id.");
         }
 
         if (customer.getRole() == null) {
