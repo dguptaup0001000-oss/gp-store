@@ -49,8 +49,9 @@ class AdminCustomerDetailScreen extends ConsumerWidget {
               hapticize(() => ref.invalidate(adminCustomerDetailProvider(customerId))),
         ),
         data: (detail) => RefreshIndicator(
-          onRefresh: () async =>
-              ref.invalidate(adminCustomerDetailProvider(customerId)),
+          onRefresh: () async {
+            ref.invalidate(adminCustomerDetailProvider(customerId));
+          },
           child: ListView(
             padding: const EdgeInsets.all(AdminSpacing.lg),
             children: [
@@ -601,7 +602,7 @@ class _EngagementCard extends StatelessWidget {
               const SizedBox(width: AdminSpacing.sm),
               const Expanded(
                 child: Text(
-                  'Reported by the customer’s own app and capped, so treat '
+                  "Reported by the customer's own app and capped, so treat "
                   'it as a rough impression rather than a measurement.',
                   style: AdminText.caption,
                 ),
