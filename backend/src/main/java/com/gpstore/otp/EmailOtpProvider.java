@@ -118,9 +118,32 @@ public class EmailOtpProvider implements OtpProvider {
                 mailSender.send(message);
             } catch (Exception ex) {
                 forget(destination, purpose);
-                log.info("OTP_SEND_FAILURE dest={} purpose={} provider=email",
-                        EmailIdentities.mask(destination), purpose);
-                throw new OtpProviderException("Unable to send OTP right now. Please try again.");
+                // THE CAUSE IS LOGGED, and it did not used to be.
+                //
+                // This catch discarded `ex` completely. When SMTP refused the
+                // send in production - a wrong app password, port 587 blocked
+                // by the host, Gmail rejecting the From address, an expired
+                // certificate - the customer saw "Unable to send OTP right
+                // now" and the server log said only OTP_SEND_FAILURE with no
+                // reason at all. Login and password reset were both broken
+                // and the one place that knew why had thrown it away.
+                //
+                // WARN, not INFO: nobody can sign in with an OTP while this
+                // is happening, so it belongs where somebody will see it.
+                //
+                // The exception, not just its message: the useful part of a
+                // MailAuthenticationException is usually the SMTP server's
+                // own response, and that lives in the cause chain. It carries
+                // no OTP - the code is not in the exception - and no
+                // password, since JavaMail does not echo credentials back.
+                log.warn("OTP_SEND_FAILURE dest={} purpose={} provider=email",
+                        EmailIdentities.mask(destination), purpose, ex);
+                // Chained, the same way Msg91OtpProvider already does it, so
+                // anything that catches this upstream can still reach the
+                // real cause. The customer-facing message is unchanged and
+                // stays deliberately generic.
+                throw new OtpProviderException(
+                        "Unable to send OTP right now. Please try again.", ex);
             }
         }
         log.info("OTP_SEND_SUCCESS dest={} purpose={} provider=email",

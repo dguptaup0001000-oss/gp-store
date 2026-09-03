@@ -105,7 +105,7 @@ public class ProductionSecretsGuard {
                 && (PlaceholderValues.isBlankOrPlaceholder(smtpHost)
                         || PlaceholderValues.isBlankOrPlaceholder(otpEmailFrom))) {
             log.error("OTP_CHANNEL is EMAIL but SMTP is not configured. Email OTP login "
-                    + "will fail until SMTP_HOST and OTP_EMAIL_FROM are set. Password login still works.");
+                    + "will fail until SMTP_HOST and SMTP_FROM are set. Password login still works.");
         }
     }
 

@@ -20,8 +20,12 @@ public class OpsStatusController {
 
     private final OpsStatusService opsStatusService;
     private final TlsCertificateProbe tlsCertificateProbe;
+    private final com.gpstore.otp.OtpConfigurationStatus otpStatus;
 
-    public OpsStatusController(OpsStatusService opsStatusService, TlsCertificateProbe tlsCertificateProbe) {
+    public OpsStatusController(OpsStatusService opsStatusService,
+                               TlsCertificateProbe tlsCertificateProbe,
+                               com.gpstore.otp.OtpConfigurationStatus otpStatus) {
+        this.otpStatus = otpStatus;
         this.opsStatusService = opsStatusService;
         this.tlsCertificateProbe = tlsCertificateProbe;
     }
@@ -33,6 +37,11 @@ public class OpsStatusController {
         body.put("redis", opsStatusService.redisStatus());
         body.put("disk", opsStatusService.diskStatus());
         body.put("tls", tlsCertificateProbe.probe());
+        // WHY OTP IS AN OPS READING. When it is misconfigured, every login
+        // and every password reset fails with a message that deliberately
+        // says nothing, and the only explanation is one WARN line on the
+        // server. This is the screen the shopkeeper can actually reach.
+        body.put("otp", otpStatus.status());
         return body;
     }
 
