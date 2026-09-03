@@ -376,6 +376,15 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/customers").hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
                 .requestMatchers("/api/customers/email/**", "/api/customers/mobile/**").hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
                 .requestMatchers(HttpMethod.GET, "/api/customers").hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
+                // THE WHOLE FILE ON ONE PERSON: name, phone, every saved
+                // address, what is in their basket, what they have spent.
+                // Without this line it falls through to anyRequest()
+                // .authenticated(), which means ANY signed-in customer could
+                // read ANY other customer's home address by changing a number
+                // in a URL. Staff only, and the same permission that already
+                // means "may look at customers".
+                .requestMatchers(HttpMethod.GET, "/api/customers/*/detail")
+                    .hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
                 // Without this, any authenticated customer could deactivate
                 // (or reactivate) ANY other customer's account.
                 .requestMatchers(HttpMethod.PUT, "/api/customers/*/active").hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())

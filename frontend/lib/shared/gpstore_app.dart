@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/lifecycle/app_session_tracker.dart';
 import '../core/lifecycle/session_refresh.dart';
 import '../core/notifications/push_notification_providers.dart';
 import '../core/theme/app_theme.dart';
@@ -27,6 +28,7 @@ class GpstoreApp extends ConsumerWidget {
     this.onForegroundExtras,
     this.onAdminSession,
     this.onStaleResume,
+    this.onSessionEnded,
     this.theme,
   });
 
@@ -51,6 +53,12 @@ class GpstoreApp extends ConsumerWidget {
 
   /// Customer invalidates cart + offers after a long background. Admin omits.
   final void Function(WidgetRef ref)? onStaleResume;
+
+  /// Customer reports how long the app was open. Admin and worker pass null,
+  /// so staff phones are never timed - it is a shop metric about shoppers,
+  /// and timing your own employees is a different thing that nobody asked
+  /// for. See docs/PLAY_STORE_DECLARATIONS.md.
+  final void Function(WidgetRef ref, int seconds)? onSessionEnded;
 
   void _showForegroundBanner(RemoteMessage message) {
     final title = message.notification?.title;
@@ -98,14 +106,17 @@ class GpstoreApp extends ConsumerWidget {
       });
     }
 
-    return SessionRefresh(
-      onStaleResume: onStaleResume,
-      child: MaterialApp.router(
-        title: title,
-        debugShowCheckedModeBanner: false,
-        theme: theme ?? AppTheme.light,
-        routerConfig: router,
-        scaffoldMessengerKey: scaffoldMessengerKey,
+    return AppSessionTracker(
+      onSessionEnded: onSessionEnded,
+      child: SessionRefresh(
+        onStaleResume: onStaleResume,
+        child: MaterialApp.router(
+          title: title,
+          debugShowCheckedModeBanner: false,
+          theme: theme ?? AppTheme.light,
+          routerConfig: router,
+          scaffoldMessengerKey: scaffoldMessengerKey,
+        ),
       ),
     );
   }

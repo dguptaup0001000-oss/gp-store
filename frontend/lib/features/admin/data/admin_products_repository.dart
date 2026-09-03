@@ -5,6 +5,7 @@ import '../../../core/images/image_upload_service.dart';
 import '../../products/domain/product_models.dart';
 import '../domain/admin_coupon_models.dart';
 import '../domain/admin_customer_model.dart';
+import '../domain/admin_customer_detail_model.dart';
 import '../domain/admin_payment_model.dart';
 import '../domain/presence_model.dart';
 import '../domain/admin_review_model.dart';
@@ -589,6 +590,17 @@ class AdminProductsRepository {
           .toList(),
       totalPages: data['totalPages'] as int,
     );
+  }
+
+  /// The whole file on one customer, in a single round trip.
+  ///
+  /// Staff-only on the backend (CUSTOMERS_VIEW). Stitching this together
+  /// client-side from the customer, address, cart, wishlist and order
+  /// endpoints would give a shop counter five chances to half-load the
+  /// screen; one call is either right or absent.
+  Future<AdminCustomerDetail> getCustomerDetail(int customerId) async {
+    final response = await apiClient.dio.get('/api/customers/$customerId/detail');
+    return AdminCustomerDetail.fromJson(response.data as Map<String, dynamic>);
   }
 
   /// password is genuinely optional - e.g. a phone-order customer who'll

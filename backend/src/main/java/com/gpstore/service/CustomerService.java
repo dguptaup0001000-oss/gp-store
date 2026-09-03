@@ -31,6 +31,7 @@ public class CustomerService {
     private final NotificationRepository notificationRepository;
     private final PushNotificationService pushNotificationService;
     private final CustomerAccountStatusService accountStatusService;
+    private final com.gpstore.repository.CustomerAppSessionRepository appSessionRepository;
 
     public CustomerService(
             CustomerRepository customerRepository,
@@ -41,7 +42,8 @@ public class CustomerService {
             WishlistRepository wishlistRepository,
             NotificationRepository notificationRepository,
             PushNotificationService pushNotificationService,
-            CustomerAccountStatusService accountStatusService) {
+            CustomerAccountStatusService accountStatusService,
+            com.gpstore.repository.CustomerAppSessionRepository appSessionRepository) {
         this.customerRepository = customerRepository;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
@@ -51,6 +53,7 @@ public class CustomerService {
         this.wishlistRepository = wishlistRepository;
         this.notificationRepository = notificationRepository;
         this.accountStatusService = accountStatusService;
+        this.appSessionRepository = appSessionRepository;
     }
 
     /**
@@ -282,6 +285,13 @@ public class CustomerService {
         wishlistRepository.deleteByCustomerIdBulk(customerId);
         addressRepository.deleteByCustomerIdBulk(customerId);
         cartRepository.findByCustomerId(customerId).ifPresent(cartRepository::delete);
+        // The usage history goes too. Deleting an account anonymises the
+        // customer row rather than removing it, so anything keyed on the id
+        // that is not explicitly deleted here simply survives - and "how long
+        // this person spent in our app" surviving a deletion request is
+        // exactly the thing Play's requirement, and our own declaration in
+        // docs/PLAY_STORE_DECLARATIONS.md sec. 8, say must not happen.
+        appSessionRepository.deleteByCustomerIdBulk(customerId);
 
         customer.setFullName("Deleted User");
         customer.setMobileNumber(null);

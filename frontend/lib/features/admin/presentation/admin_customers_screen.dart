@@ -5,7 +5,7 @@ import '../../../admin/design/admin_components.dart';
 import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/admin_customer_model.dart';
-import 'admin_customer_orders_screen.dart';
+import 'admin_customer_detail_screen.dart';
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
 
@@ -297,7 +297,7 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
             child: InkWell(
               onTap: hapticize(() => Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => AdminCustomerOrdersScreen(customerId: customer.id, customerName: customer.fullName),
+                  builder: (_) => AdminCustomerDetailScreen(customerId: customer.id, customerName: customer.fullName),
                 ),
               )),
               child: Column(
@@ -325,7 +325,7 @@ class _CustomerTileState extends ConsumerState<_CustomerTile> {
                     ),
                   const Padding(
                     padding: EdgeInsets.only(top: 4),
-                    child: Text('Tap to view order history', style: TextStyle(fontSize: 10, color: AdminColors.textSecondary)),
+                    child: Text('Tap for full details', style: TextStyle(fontSize: 10, color: AdminColors.textSecondary)),
                   ),
                 ],
               ),
