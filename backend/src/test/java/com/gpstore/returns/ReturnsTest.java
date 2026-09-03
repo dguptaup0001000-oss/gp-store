@@ -256,6 +256,92 @@ class ReturnsTest {
     }
 
     @Test
+    @DisplayName("two admins approving at the same instant refund once")
+    void simultaneousApprovalsRefundOnce() throws Exception {
+        Fixture f = delivered();
+        stubRefund(f.payment(), GatewayRefund.State.SUCCEEDED);
+
+        Long variantId = f.cheap().getProductVariant().getId();
+        int stockBefore = inventoryService.getByProductVariant(variantId).getStock();
+
+        OrderReturn request = returnService.request(f.customer().getId(), f.order().getId(),
+                Map.of(f.cheap().getId(), 2), null);
+
+        // THE RACE decidedOnce CANNOT REACH. That test approves twice in
+        // sequence, so the first transaction has already committed and the
+        // second reads a decided row from the table. It proves the status
+        // check; it never touches the row lock, because the two calls never
+        // overlap.
+        //
+        // Here they overlap deliberately: both threads are held at a barrier
+        // and released together, so both enter approve() while the return is
+        // still REQUESTED. Only SELECT ... FOR UPDATE makes the loser wait
+        // and re-read. Without it both would compute 100.00, both would put
+        // two units back, and the shop would send the money twice.
+        int racers = 2;
+        java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(racers);
+        java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger approved = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger conflicted = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.List<Throwable> unexpected =
+                java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+        java.util.concurrent.ExecutorService pool =
+                java.util.concurrent.Executors.newFixedThreadPool(racers);
+        try {
+            for (int i = 0; i < racers; i++) {
+                pool.submit(() -> {
+                    ready.countDown();
+                    try {
+                        go.await();
+                        returnService.approve(request.getId(), null);
+                        approved.incrementAndGet();
+                    } catch (ConflictException expected) {
+                        // The loser of the race. Exactly one thread must land here.
+                        conflicted.incrementAndGet();
+                    } catch (Throwable other) {
+                        unexpected.add(other);
+                    }
+                    return null;
+                });
+            }
+            assertTrue(ready.await(30, java.util.concurrent.TimeUnit.SECONDS), "racers failed to arm");
+            go.countDown();
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS),
+                    "the approvals deadlocked");
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertTrue(unexpected.isEmpty(), "unexpected failure in the race: " + unexpected);
+        assertEquals(1, approved.get(), "exactly one approval may succeed");
+        assertEquals(1, conflicted.get(), "the loser must be told the return was already decided");
+
+        // THE THREE THINGS THAT COST REAL MONEY, each checked on its own,
+        // because a lock can hold for one and leak for another.
+
+        // 1. One refund row, for the right amount. 2 x 50.00.
+        java.util.List<com.gpstore.entity.Refund> refunds =
+                refundRepository.forPayment(f.payment().getId());
+        assertEquals(1, refunds.size(), "one approval, one refund row: " + refunds);
+        assertEquals(0, new BigDecimal("100.00").compareTo(refunds.get(0).getAmount()),
+                "refunded " + refunds.get(0).getAmount() + " for a 100.00 return");
+
+        // 2. The provider was asked exactly once. A second call with a fresh
+        //    refund id is money out of the shop's account that no row records.
+        verify(gateway, times(1)).requestRefund(any());
+
+        // 3. Two units came back, not four. Double-restored stock is stock
+        //    the shop promises and cannot deliver.
+        assertEquals(stockBefore + 2, inventoryService.getByProductVariant(variantId).getStock(),
+                "stock was restored twice");
+
+        assertEquals(OrderReturn.Status.APPROVED,
+                returnRepository.findById(request.getId()).orElseThrow().getStatus());
+    }
+
+    @Test
     @DisplayName("a customer can cancel their own request, and only their own")
     void cancelIsOwnerOnly() {
         Fixture f = delivered();
