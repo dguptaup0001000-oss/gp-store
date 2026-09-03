@@ -15,43 +15,50 @@ import '../../support/test_api_client.dart';
 void main() {
   setUp(setUpFakeSecureStorage);
 
-  /// Bodies the reporter actually posted.
-  late List<Map<String, dynamic>> posted;
-  late FakeHttpClientAdapter adapter;
-
-  FakeHttpClientAdapter acceptingAdapter() {
-    final a = FakeHttpClientAdapter();
-    a.on('POST', '/api/client/crash-reports', (options) {
+  /// A fresh adapter and a fresh list, PER TEST, and that is the whole point.
+  ///
+  /// These started as two shared variables reset in setUp, and CI caught what
+  /// that hides: the reporter drains its queue asynchronously, so posts still
+  /// in flight when a test ends land in whatever list the closure points at
+  /// next - which was the following test's. The crash-loop test above leaked
+  /// into the truncation test below it, which then failed on `single` with
+  /// "Too many elements" while the code under test was perfectly correct.
+  ///
+  /// Giving each test its own pair makes that impossible rather than
+  /// unlikely: a late arrival lands in a list nobody reads again.
+  ({FakeHttpClientAdapter adapter, List<Map<String, dynamic>> posted})
+      accepting() {
+    final posted = <Map<String, dynamic>>[];
+    final adapter = FakeHttpClientAdapter();
+    adapter.on('POST', '/api/client/crash-reports', (options) {
       posted.add(Map<String, dynamic>.from(options.data as Map));
       return const FakeResponse({}, statusCode: 202);
     });
-    return a;
+    return (adapter: adapter, posted: posted);
   }
 
-  setUp(() {
-    posted = [];
-    adapter = acceptingAdapter();
-  });
-
   test('a crash before the client exists is not lost', () async {
+    final t = accepting();
     final reporter = BackendCrashReporter(buildSha: 'abc1234');
 
     // THE STARTUP CRASH, which is the one worth having and the one that
     // happens before there is a widget tree to hand over a client.
     reporter.recordFatal(StateError('died on startup'), StackTrace.current);
-    expect(posted, isEmpty, reason: 'nothing can be sent with no client yet');
+    expect(t.posted, isEmpty, reason: 'nothing can be sent with no client yet');
 
-    reporter.attach(buildTestApiClient(adapter));
+    reporter.attach(buildTestApiClient(t.adapter));
     await pumpEventQueue();
 
-    expect(posted, hasLength(1));
-    expect(posted.single['message'], contains('died on startup'));
-    expect(posted.single['fatal'], isTrue);
-    expect(posted.single['buildSha'], 'abc1234');
+    expect(t.posted, hasLength(1));
+    expect(t.posted.single['message'], contains('died on startup'));
+    expect(t.posted.single['fatal'], isTrue);
+    expect(t.posted.single['buildSha'], 'abc1234');
   });
 
   test('it never says who is reporting - the token does', () async {
-    final reporter = BackendCrashReporter()..attach(buildTestApiClient(adapter));
+    final t = accepting();
+    final reporter =
+        BackendCrashReporter()..attach(buildTestApiClient(t.adapter));
 
     reporter.recordFatal(Exception('boom'), StackTrace.current);
     await pumpEventQueue();
@@ -59,13 +66,15 @@ void main() {
     // The backend derives the app and the reporter from the token. Sending
     // any of these would be sending something it is right to ignore - and a
     // field the client fills in is a field somebody can forge.
-    expect(posted.single.containsKey('app'), isFalse);
-    expect(posted.single.containsKey('customerId'), isFalse);
-    expect(posted.single.containsKey('workerId'), isFalse);
+    expect(t.posted.single.containsKey('app'), isFalse);
+    expect(t.posted.single.containsKey('customerId'), isFalse);
+    expect(t.posted.single.containsKey('workerId'), isFalse);
   });
 
   test('a framework error is reported, and not as fatal', () async {
-    final reporter = BackendCrashReporter()..attach(buildTestApiClient(adapter));
+    final t = accepting();
+    final reporter =
+        BackendCrashReporter()..attach(buildTestApiClient(t.adapter));
 
     reporter.recordFlutterError(FlutterErrorDetails(
       exception: Exception('bad build'),
@@ -73,7 +82,7 @@ void main() {
     ));
     await pumpEventQueue();
 
-    expect(posted.single['fatal'], isFalse,
+    expect(t.posted.single['fatal'], isFalse,
         reason: 'the framework caught it and the app kept running');
   });
 
@@ -97,6 +106,7 @@ void main() {
   });
 
   test('a crash loop cannot queue without limit', () async {
+    final t = accepting();
     final reporter = BackendCrashReporter();
 
     // No client attached, so nothing drains and the queue is all there is.
@@ -104,30 +114,34 @@ void main() {
       reporter.recordFatal(Exception('loop $i'), StackTrace.current);
     }
 
-    reporter.attach(buildTestApiClient(adapter));
+    reporter.attach(buildTestApiClient(t.adapter));
     await pumpEventQueue();
 
-    expect(posted.length, lessThanOrEqualTo(5),
+    expect(t.posted.length, lessThanOrEqualTo(5),
         reason: 'an app dying every frame must not buffer without bound');
   });
 
   test('an enormous stack is clipped before it goes near mobile data',
       () async {
-    final reporter = BackendCrashReporter()..attach(buildTestApiClient(adapter));
+    final t = accepting();
+    final reporter =
+        BackendCrashReporter()..attach(buildTestApiClient(t.adapter));
 
     reporter.recordFatal(Exception('deep'), StackTrace.fromString('x' * 50000));
     await pumpEventQueue();
 
-    expect((posted.single['stack'] as String).length, lessThanOrEqualTo(8000));
+    expect((t.posted.single['stack'] as String).length, lessThanOrEqualTo(8000));
   });
 
   test('reporting can be turned off', () async {
-    final reporter = BackendCrashReporter()..attach(buildTestApiClient(adapter));
+    final t = accepting();
+    final reporter =
+        BackendCrashReporter()..attach(buildTestApiClient(t.adapter));
     await reporter.setEnabled(false);
 
     reporter.recordFatal(Exception('boom'), StackTrace.current);
     await pumpEventQueue();
 
-    expect(posted, isEmpty);
+    expect(t.posted, isEmpty);
   });
 }
