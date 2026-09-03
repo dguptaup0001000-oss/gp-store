@@ -68,10 +68,22 @@ public class CustomerController {
         return java.util.Map.of("recordedSeconds", recorded);
     }
 
-    // Admin only (enforced in SecurityConfig) - e.g. creating an account for a phone order.
+    /**
+     * Admin only (enforced in SecurityConfig) - e.g. an account for a phone order.
+     *
+     * TAKES A REQUEST OBJECT, NOT THE ENTITY. Binding the Customer entity
+     * straight from the body let the caller choose the new account's ROLE
+     * (a MANAGER could mint a SUPER_ADMIN and then log in as it) and its ID
+     * (save() on an entity with an id is an UPDATE, so it overwrote whichever
+     * account was named - an administrator's included). Neither field exists
+     * on AdminCreateCustomerRequest, so neither can arrive.
+     */
     @PostMapping
-    public Customer createCustomer(@RequestBody Customer customer) {
-        return customerService.saveCustomer(customer);
+    public Customer createCustomer(
+            @Valid @RequestBody com.gpstore.dto.request.AdminCreateCustomerRequest request) {
+        return customerService.createCustomerForAdmin(
+                request.getFullName(), request.getEmail(),
+                request.getMobileNumber(), request.getPassword());
     }
 
     // Admin only (enforced in SecurityConfig).
