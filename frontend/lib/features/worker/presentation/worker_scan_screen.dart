@@ -126,7 +126,48 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
   /// server refuses order numbers for exactly that reason.
   Future<void> _typeCode() async {
     final controller = TextEditingController();
-    final code = await showDialog<String>(
+    String? code;
+    try {
+      code = await _askForCode(controller);
+    } finally {
+      // A controller that outlives its dialog is a leak, and this screen can
+      // be opened and dismissed many times in a shift at a packing bench.
+      controller.dispose();
+    }
+
+    final typed = code?.trim() ?? '';
+    if (typed.isEmpty || !mounted) return;
+
+    setState(() => _submitting = true);
+    // Same as a scan from here on. The camera is stopped because a successful
+    // claim leaves this screen showing an outcome, not a live preview.
+    try {
+      await _controller.stop();
+    } catch (_) {}
+
+    ScanOutcome outcome;
+    try {
+      outcome = await widget.repository.packScan(
+        qrToken: typed,
+        clientRequestId: _newRequestId(),
+      );
+    } catch (e) {
+      outcome = ScanOutcome(
+        accepted: false,
+        outcome: 'ERROR',
+        message: extractErrorMessage(e),
+      );
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _submitting = false;
+      _result = outcome;
+    });
+  }
+
+  Future<String?> _askForCode(TextEditingController controller) {
+    return showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Type the code on the label'),
@@ -170,36 +211,6 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
         ],
       ),
     );
-
-    final typed = code?.trim() ?? '';
-    if (typed.isEmpty || !mounted) return;
-
-    setState(() => _submitting = true);
-    // Same as a scan from here on. The camera is stopped because a successful
-    // claim leaves this screen showing an outcome, not a live preview.
-    try {
-      await _controller.stop();
-    } catch (_) {}
-
-    ScanOutcome outcome;
-    try {
-      outcome = await widget.repository.packScan(
-        qrToken: typed,
-        clientRequestId: _newRequestId(),
-      );
-    } catch (e) {
-      outcome = ScanOutcome(
-        accepted: false,
-        outcome: 'ERROR',
-        message: extractErrorMessage(e),
-      );
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _submitting = false;
-      _result = outcome;
-    });
   }
 
   Future<void> _toggleTorch() async {
