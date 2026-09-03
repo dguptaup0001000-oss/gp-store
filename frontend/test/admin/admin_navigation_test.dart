@@ -54,6 +54,11 @@ void main() {
       'Packing List',
       'Store Hours',
       'Delivery Workers',
+      // Items customers have sent back, waiting on a decision. Behind
+      // ordersView: seeing the queue is an operations question, while the
+      // approve button inside it is gated on the refund permission by the
+      // backend, so a staff member who may look cannot pay.
+      'Returns',
     };
 
     final labels = AdminNav.all.map((d) => d.label).toSet();
