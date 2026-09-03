@@ -292,6 +292,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return Bucket.SEARCH;
         }
 
+        // THE ONLY ENDPOINT THAT SPENDS SOMEBODY ELSE'S QUOTA. Every call here
+        // may reach OpenStreetMap, whose fair-use policy we are guests under.
+        // The geocoder has its own global one-a-second gate, so a flood is
+        // already cheap for them - this keeps it cheap for us too. SEARCH
+        // because it fails OPEN: a convenience pre-fill must never be the
+        // reason somebody cannot save an address.
+        if (path.equals("/api/addresses/reverse-geocode")) {
+            return Bucket.SEARCH;
+        }
+
         if (path.equals("/api/orders/place")
                 || path.equals("/api/orders/checkout-preview")
                 || path.equals("/api/payments")

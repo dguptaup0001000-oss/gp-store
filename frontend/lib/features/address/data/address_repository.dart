@@ -29,6 +29,31 @@ class AddressRepository {
   /// Fails with a clear, real reason (not a generic error) if this address
   /// is still referenced by a past order - see AddressService.deleteAddress
   /// on the backend for why that's a hard constraint, not just a soft rule.
+  /// What the dropped pin probably means, for pre-filling the form.
+  ///
+  /// A SUGGESTION, and treated as one everywhere: the customer can overwrite
+  /// every field it fills. An empty map is a normal answer - the geocoder may
+  /// be unreachable, rate-limited, or simply have nothing for a village lane -
+  /// and the form then behaves exactly as it does today.
+  ///
+  /// Never throws upward for that case. A failed convenience must not become
+  /// an error banner on the screen where somebody is trying to save an address.
+  Future<Map<String, String>> reverseGeocode({
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      final response = await apiClient.dio.get(
+        '/api/addresses/reverse-geocode',
+        queryParameters: {'latitude': latitude, 'longitude': longitude},
+      );
+      final data = (response.data as Map?) ?? const {};
+      return data.map((key, value) => MapEntry('$key', '$value'));
+    } catch (_) {
+      return const {};
+    }
+  }
+
   Future<void> deleteAddress(int addressId) async {
     await apiClient.dio.delete('/api/addresses/$addressId');
   }

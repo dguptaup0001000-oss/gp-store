@@ -147,6 +147,23 @@ private PaymentStatus paymentStatus;
     @Column(name = "qr_token", length = 64)
     private String qrToken;
 
+    /**
+     * The same label, in characters a person can read out loud.
+     *
+     * For the worker whose camera is cracked, filthy, or simply refuses to
+     * focus in a dark storeroom - which is often enough that "scan it" is not
+     * a complete answer.
+     *
+     * IT IS NOT THE ORDER NUMBER, and that distinction is the whole design.
+     * Order numbers are sequential, printed on the invoice and visible to the
+     * customer; if typing one claimed an order then any worker could claim
+     * orders they had never touched. This is random, like the QR token beside
+     * it, and consumed by the same {@link #qrTokenUsedAt} flag - because both
+     * name one printed label, and a label is claimed once.
+     */
+    @Column(name = "pack_code", length = 16)
+    private String packCode;
+
     @Column(name = "qr_token_issued_at")
     private LocalDateTime qrTokenIssuedAt;
 
@@ -442,6 +459,14 @@ private PaymentStatus paymentStatus;
 
     public void setDeliveryPricingNotes(String deliveryPricingNotes) {
         this.deliveryPricingNotes = deliveryPricingNotes;
+    }
+
+    public String getPackCode() {
+        return packCode;
+    }
+
+    public void setPackCode(String packCode) {
+        this.packCode = packCode;
     }
 
     public String getQrToken() {

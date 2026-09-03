@@ -212,6 +212,26 @@ public class WorkerController {
     }
 
     /**
+     * Mints the packing label for one order: a QR token to scan, and a short
+     * code to type when the camera will not.
+     *
+     * ADMIN ONLY, and that restriction is the feature rather than a detail
+     * around it. SecurityConfig pins this path to DELIVERY_MANAGE, above the
+     * rule that lets a delivery worker reach the rest of /api/worker. If a
+     * worker could mint a label they could mint their own credential and
+     * claim any order in the shop without ever touching the carton - which
+     * would make both the QR and the typed code decorative.
+     *
+     * RE-ISSUING IS THE RECOVERY PATH for a smudged sticker or a carton that
+     * went in the bin wearing its label. It invalidates whatever was printed
+     * before, because the old strings simply stop matching.
+     */
+    @PostMapping("/orders/{orderId}/label")
+    public Map<String, Object> issueLabel(@PathVariable Long orderId) {
+        return scanService.issueLabel(orderId);
+    }
+
+    /**
      * AVAILABLE, ON_DELIVERY or OFFLINE - derived, never stored.
      *
      * A third status column would be a third thing to keep in step with

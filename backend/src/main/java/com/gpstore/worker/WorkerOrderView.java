@@ -83,7 +83,13 @@ public record WorkerOrderView(
         String packedBy) {
 
     /** One line on the packing list. */
-    public record Line(String name, String pack, int quantity) {
+    /**
+     * @param imageUrl a freshly signed delivery URL, or null when the product
+     *                 has no photo. NEVER a stored URL: signed links expire
+     *                 within the hour, so persisting one would leave a worker
+     *                 looking at a broken image exactly when they need it.
+     */
+    public record Line(String name, String pack, int quantity, String imageUrl) {
     }
 
     public static WorkerOrderView of(Order order,
@@ -114,7 +120,7 @@ public record WorkerOrderView(
                         pack = trimNumber(variant.getQuantity()) + " " + variant.getUnit();
                     }
                 }
-                lines.add(new Line(name, pack, item.getQuantity()));
+                lines.add(new Line(name, pack, item.getQuantity(), packingPhoto(variant)));
                 count += item.getQuantity();
             }
         }
@@ -220,6 +226,32 @@ public record WorkerOrderView(
     }
 
     /** 500.0 reads as 500; 0.5 stays 0.5. Nobody writes "500.0 g" on a packet. */
+    /**
+     * The picture a worker recognises the packet by.
+     *
+     * WHY THIS EARNS ITS PLACE ON THE WIRE. A worker walking the shelves reads
+     * "Aachi Chilli Powder 500 g" slower than they recognise the packet, and
+     * two masalas from the same brand sit side by side looking nothing alike.
+     * The photo is what turns a list into something you can work from with one
+     * hand.
+     *
+     * The photo lives on the VARIANT, not the product, and that is the right
+     * place for it here: the variant is the actual pack on the shelf, so a
+     * 500 g pouch and a 1 kg box of the same masala do not share one picture.
+     * Null when the variant has no photo, which the app lays out around rather
+     * than leaving a hole.
+     */
+    private static String packingPhoto(ProductVariant variant) {
+        if (variant == null) {
+            return null;
+        }
+        String ref = variant.getImageUrl();
+        if (ref == null || ref.isBlank()) {
+            return null;
+        }
+        return com.gpstore.upload.CatalogImageDelivery.forClient(ref);
+    }
+
     private static String trimNumber(Double value) {
         if (value == null) {
             return "";

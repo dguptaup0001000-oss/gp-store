@@ -20,13 +20,39 @@ public class AddressController {
     private final CustomerService customerService;
     private final CurrentUser currentUser;
     private final DeliveryEstimateService deliveryEstimateService;
+    private final com.gpstore.geo.ReverseGeocoder reverseGeocoder;
 
     public AddressController(AddressService addressService, CustomerService customerService,
-                              CurrentUser currentUser, DeliveryEstimateService deliveryEstimateService) {
+                              CurrentUser currentUser, DeliveryEstimateService deliveryEstimateService,
+                              com.gpstore.geo.ReverseGeocoder reverseGeocoder) {
         this.addressService = addressService;
         this.customerService = customerService;
         this.currentUser = currentUser;
         this.deliveryEstimateService = deliveryEstimateService;
+        this.reverseGeocoder = reverseGeocoder;
+    }
+
+    /**
+     * What the dropped pin probably means, so the customer edits instead of types.
+     *
+     * A SUGGESTION AND NOTHING MORE. Nothing here is saved, nothing here
+     * decides a delivery fee - the fee is computed server-side from the
+     * coordinates whatever the customer eventually writes in these boxes. It
+     * exists so that "Location captured" is followed by a form that is already
+     * mostly right, which in a village is the difference between an address
+     * that finds the house and one nobody bothered to finish.
+     *
+     * ALWAYS 200, even when we could not ask. An empty object means "type it
+     * yourself", which is precisely what the customer does today, and turning
+     * a third party's bad afternoon into an error banner on our checkout would
+     * be our bug, not theirs.
+     */
+    @GetMapping("/reverse-geocode")
+    public java.util.Map<String, String> reverseGeocode(
+            @RequestParam double latitude,
+            @RequestParam double longitude) {
+        return reverseGeocoder.suggest(latitude, longitude)
+                .orElseGet(java.util.Map::of);
     }
 
     // Creates an address for the logged-in customer (ownership is never taken from the client).

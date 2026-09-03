@@ -25,6 +25,21 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      */
     java.util.Optional<com.gpstore.entity.Order> findByQrToken(String qrToken);
 
+    /** Uniqueness check when a new pack code is minted. */
+    java.util.Optional<com.gpstore.entity.Order> findByPackCode(String packCode);
+
+    /**
+     * Row-locking lookup for the typed half of the label.
+     *
+     * Locks for the same reason findByQrTokenForUpdate does: two workers can
+     * claim one carton in the same second, and an unlocked read lets both see
+     * an unused label. One of them has to lose, in the database rather than in
+     * the app.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from Order o where o.packCode = :packCode")
+    Optional<Order> findByPackCodeForUpdate(@Param("packCode") String packCode);
+
     /**
      * Pack-scan lock. Two workers scanning the same label at the same
      * instant must serialize here so the second one sees {@code qrTokenUsedAt}
