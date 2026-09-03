@@ -242,9 +242,16 @@ class WorkerOrder {
 /// One line on the packing list: what it is, what size, how many.
 class WorkerOrderLine {
   const WorkerOrderLine(
-      {required this.name, this.pack, required this.quantity});
+      {required this.name, this.pack, required this.quantity, this.imageUrl});
 
   final String name;
+
+  /// The packet's photo, so a worker RECOGNISES it instead of reading it.
+  ///
+  /// Null when the variant has no picture, which the packing list lays out
+  /// around rather than leaving a gap. Never cached to disk or persisted: the
+  /// backend signs these on the way out and they expire within the hour.
+  final String? imageUrl;
 
   /// "500 g", "1 kg" - what is printed on the packet, which is how a worker
   /// tells two shelf-neighbours apart.
@@ -256,6 +263,7 @@ class WorkerOrderLine {
         name: (json['name'] ?? 'Item') as String,
         pack: json['pack'] as String?,
         quantity: (json['quantity'] as num?)?.toInt() ?? 0,
+        imageUrl: json['imageUrl'] as String?,
       );
 }
 

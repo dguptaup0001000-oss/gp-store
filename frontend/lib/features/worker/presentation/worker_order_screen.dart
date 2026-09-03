@@ -349,6 +349,17 @@ class _PackingLine extends StatelessWidget {
             width: 46,
             child: Text('${line.quantity}x', style: theme.textTheme.titleLarge),
           ),
+
+          // THE PACKET, NOT ITS NAME. Walking a shelf, a worker recognises a
+          // pouch far faster than they read "Aachi Chilli Powder 500 g" - and
+          // two masalas from one brand sit side by side looking nothing alike.
+          //
+          // A FIXED BOX WHETHER OR NOT THERE IS A PHOTO, so the names stay on
+          // one vertical line down the list. A list that jogs left and right
+          // as images appear is harder to read than one with no images at all.
+          _PackingPhoto(url: line.imageUrl),
+          const SizedBox(width: 12),
+
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -362,6 +373,56 @@ class _PackingLine extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The product photo on a packing line, and what stands in when there is none.
+///
+/// EVERY FAILURE ENDS IN THE SAME GREY BOX. A signed image URL can expire
+/// mid-shift, the storeroom's signal can drop, the variant may simply have no
+/// picture - and none of those are worth showing a worker a broken-image icon
+/// or a spinner that never resolves. The box keeps its place in the row and
+/// the name beside it still says what to pick.
+class _PackingPhoto extends StatelessWidget {
+  const _PackingPhoto({required this.url});
+
+  final String? url;
+
+  static const double _size = 52;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final placeholder = Container(
+      width: _size,
+      height: _size,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Icon(Icons.inventory_2_outlined,
+          size: 24, color: theme.colorScheme.outline),
+    );
+
+    final source = url;
+    if (source == null || source.isEmpty) {
+      return placeholder;
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(
+        source,
+        width: _size,
+        height: _size,
+        fit: BoxFit.cover,
+        // No spinner. A packing list that fills with turning circles on a
+        // storeroom connection reads worse than one that fills in quietly.
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : placeholder,
+        errorBuilder: (context, error, stack) => placeholder,
       ),
     );
   }

@@ -62,6 +62,24 @@ public class WorkerScanService {
     private static final int TOKEN_BYTES = 24;
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    /** No O/0, no I/1/L - the pairs people confuse on a smudged sticker. */
+    private static final String PACK_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+    private static final int PACK_CODE_LENGTH = 8;
+
+    /**
+     * How many wrong codes a worker may type before the shop is told.
+     *
+     * TYPING IS A BRUTE-FORCE SURFACE THAT SCANNING IS NOT. A camera can only
+     * offer what is physically in front of it; a keyboard can offer anything.
+     * Without a ceiling, the code path would be the weakest way into an order
+     * rather than an equal one.
+     *
+     * Ten in an hour is far above honest fumbling - a worker reading a real
+     * sticker gets it in one or two - and far below the millions a guess would
+     * need against a 6.6e11 space.
+     */
+    private static final int MAX_WRONG_CODES_PER_HOUR = 10;
+
     /**
      * The states a packed-order scan makes sense from.
      *
@@ -162,6 +180,7 @@ public class WorkerScanService {
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
 
         order.setQrToken(token);
+        order.setPackCode(freshPackCode());
         order.setQrTokenIssuedAt(LocalDateTime.now());
         // A reprint un-uses the token. Without this, reprinting a label for an
         // order whose scan was recorded in error would produce a sticker that
@@ -170,9 +189,84 @@ public class WorkerScanService {
         orderRepository.save(order);
 
         auditLogService.log("ORDER_QR_ISSUED", "Order", orderId,
-                "QR token issued for packing label. Any previously printed label for this order "
-                        + "no longer scans.");
+                "QR token and pack code issued for packing label. Any previously printed label "
+                        + "for this order no longer scans and its code no longer works.");
         return token;
+    }
+
+    /**
+     * Both halves of the label, for the bench that prints it.
+     *
+     * Returned together because they are one credential presented two ways,
+     * and a label carrying only one of them is a label that fails the moment
+     * the camera does.
+     */
+    @Transactional
+    public java.util.Map<String, Object> issueLabel(Long orderId) {
+        String token = issueToken(orderId);
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
+        java.util.Map<String, Object> label = new java.util.HashMap<>();
+        label.put("orderNumber", order.getOrderNumber());
+        label.put("qrToken", token);
+        label.put("packCode", order.getPackCode());
+        return label;
+    }
+
+    /**
+     * The typeable half of the label.
+     *
+     * NO O/0 AND NO I/1/L. Those are the pairs people actually confuse
+     * reading a smudged sticker in a dark storeroom, and a code that is
+     * ambiguous to read is a code that produces failed attempts - which this
+     * design then counts against the worker as if they were guessing.
+     *
+     * Eight characters from thirty symbols is about 6.6e11 combinations. That
+     * matters less than the attempt limit in the entry path, but a code short
+     * enough to brute force would make that limit the only defence rather
+     * than the second one.
+     *
+     * COLLISION IS HANDLED BY RETRYING, not by hoping. The unique index means
+     * a collision would otherwise surface as a failed insert at the packing
+     * bench, which is the worst possible moment.
+     */
+    private String freshPackCode() {
+        for (int attempt = 0; attempt < 5; attempt++) {
+            StringBuilder code = new StringBuilder(PACK_CODE_LENGTH);
+            for (int i = 0; i < PACK_CODE_LENGTH; i++) {
+                code.append(PACK_CODE_ALPHABET.charAt(RANDOM.nextInt(PACK_CODE_ALPHABET.length())));
+            }
+            String candidate = code.toString();
+            if (orderRepository.findByPackCode(candidate).isEmpty()) {
+                return candidate;
+            }
+        }
+        // Five collisions in a row against a 6.6e11 space is not bad luck, it
+        // is a broken random source. Refusing to print a label beats printing
+        // one that might name somebody else's order.
+        throw new IllegalStateException("Could not generate a unique pack code.");
+    }
+
+    /**
+     * What a worker typed, turned into what is stored.
+     *
+     * People type what they see, and what they see is grouped and lowercase
+     * on some keyboards: "k7m4-p2qx", "K7M4 P2QX". All of those are the same
+     * label. Normalising here rather than asking the worker to be careful is
+     * the difference between a code that works and one that gets blamed on
+     * the app.
+     */
+    static String normalisePackCode(String typed) {
+        if (typed == null) {
+            return null;
+        }
+        StringBuilder cleaned = new StringBuilder(typed.length());
+        for (char c : typed.toUpperCase(java.util.Locale.ROOT).toCharArray()) {
+            if (Character.isLetterOrDigit(c)) {
+                cleaned.append(c);
+            }
+        }
+        return cleaned.length() == 0 ? null : cleaned.toString();
     }
 
     // ------------------------------------------------------------------- scan
@@ -214,14 +308,42 @@ public class WorkerScanService {
                     "This worker account is not active. Ask an administrator.");
         }
 
-        // ---- The token names the order. Nothing else does. --------------
+        // ---- The label names the order. Nothing else does. --------------
         // FOR UPDATE: two workers can scan the same carton in the same
         // second. An unlocked read lets both see qrTokenUsedAt == null and
         // both write packedByPartner. The second then wins silently.
+        //
+        // TWO WAYS TO PRESENT THE SAME LABEL. The scanned token and the typed
+        // code are both random and both consumed by the same flag, so which
+        // one a worker used changes nothing about what they are allowed to do.
+        // The order number is deliberately NOT one of them - it is sequential
+        // and printed on the customer's invoice, so accepting it would let a
+        // worker claim an order they had never held.
         Optional<Order> found = orderRepository.findByQrTokenForUpdate(qrToken);
+        boolean typed = false;
+
         if (found.isEmpty()) {
+            String code = normalisePackCode(qrToken);
+            if (code != null) {
+                found = orderRepository.findByPackCodeForUpdate(code);
+                typed = found.isPresent();
+            }
+        }
+
+        if (found.isEmpty()) {
+            // COUNTED, because a keyboard can offer anything and a camera
+            // cannot. A worker fumbling a smudged sticker is normal; a run of
+            // wrong codes is somebody walking the space, and the shop should
+            // find that in the scan history rather than never.
+            long wrongLately = scanRepository.countRejectionsSince(
+                    worker.getId(), "UNKNOWN_TOKEN", LocalDateTime.now().minusHours(1));
+            if (wrongLately >= MAX_WRONG_CODES_PER_HOUR) {
+                return reject(null, worker, clientRequestId, "TOO_MANY_WRONG_CODES",
+                        "Too many wrong codes. Ask an administrator to check the label "
+                                + "or reprint it.");
+            }
             return reject(null, worker, clientRequestId, "UNKNOWN_TOKEN",
-                    "This code is not a valid GP-STORE order label.");
+                    "That code does not match any GP-STORE order label.");
         }
         Order order = found.get();
 

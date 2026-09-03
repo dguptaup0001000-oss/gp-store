@@ -36,4 +36,19 @@ public interface OrderScanEventRepository extends JpaRepository<OrderScanEvent, 
     @Query("select count(e) from OrderScanEvent e where e.partnerId = :partnerId "
             + "and e.outcome = 'ACCEPTED' and e.action = 'PACKED' and e.scannedAt >= :from")
     long countAcceptedPacksSince(@Param("partnerId") Long partnerId, @Param("from") LocalDateTime from);
+
+    /**
+     * How many times this worker has been told no for one reason, lately.
+     *
+     * Exists for the typed pack code. A camera can only offer what is
+     * physically in front of it; a keyboard can offer anything, so the typed
+     * path needs a ceiling that the scanned path never did. Counting the
+     * rejections already recorded means the guard costs no new table and
+     * leaves the evidence where an administrator already looks.
+     */
+    @Query("select count(e) from OrderScanEvent e where e.partnerId = :partnerId "
+            + "and e.outcome = :outcome and e.scannedAt >= :from")
+    long countRejectionsSince(@Param("partnerId") Long partnerId,
+                              @Param("outcome") String outcome,
+                              @Param("from") LocalDateTime from);
 }

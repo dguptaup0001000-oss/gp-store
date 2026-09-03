@@ -23,6 +23,7 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
   late final TextEditingController _houseNoController;
   late final TextEditingController _areaController;
   late final TextEditingController _landmarkController;
+  late final TextEditingController _directionsController;
   late final TextEditingController _cityController;
   late final TextEditingController _stateController;
   late final TextEditingController _pincodeController;
@@ -30,6 +31,7 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
   double? _latitude;
   double? _longitude;
   bool _isFetchingLocation = false;
+  bool _isPrefilling = false;
   bool _isSaving = false;
 
   bool get _isEditing => widget.existingAddress != null;
@@ -43,6 +45,8 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
     _houseNoController = TextEditingController(text: a?.houseNo ?? '');
     _areaController = TextEditingController(text: a?.area ?? '');
     _landmarkController = TextEditingController(text: a?.landmark ?? '');
+    _directionsController =
+        TextEditingController(text: a?.deliveryInstructions ?? '');
     _cityController = TextEditingController(text: a?.city ?? '');
     _stateController = TextEditingController(text: a?.state ?? '');
     _pincodeController = TextEditingController(text: a?.pincode ?? '');
@@ -60,6 +64,7 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
     _houseNoController.dispose();
     _areaController.dispose();
     _landmarkController.dispose();
+    _directionsController.dispose();
     _cityController.dispose();
     _stateController.dispose();
     _pincodeController.dispose();
@@ -99,12 +104,59 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
         _latitude = position.latitude;
         _longitude = position.longitude;
       });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location captured')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location captured')));
+
+      // FILL THE FORM FROM THE PIN, so the customer edits instead of types.
+      //
+      // Deliberately AFTER the pin is already saved to state and the
+      // confirmation shown: the capture has succeeded whatever the geocoder
+      // does next, and a customer must never be left waiting on somebody
+      // else's server to find out whether their location worked.
+      await _prefillFromPin(position.latitude, position.longitude);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
     } finally {
       if (mounted) setState(() => _isFetchingLocation = false);
+    }
+  }
+
+  /// Pre-fills the empty boxes from the pin. Never overwrites typing.
+  ///
+  /// ONLY WHAT IS BLANK. Someone who has already written their area does not
+  /// want it replaced by a geocoder's guess - and in a village the geocoder is
+  /// often the one that is wrong. This is why the customer's own words always
+  /// win, including the words they wrote before pressing the button.
+  ///
+  /// SILENT WHEN IT FINDS NOTHING. An empty answer is normal for a lane with
+  /// no name, and telling somebody "we could not look up your address" about a
+  /// convenience they did not ask for would be noise.
+  Future<void> _prefillFromPin(double latitude, double longitude) async {
+    setState(() => _isPrefilling = true);
+    try {
+      final suggestion = await ref
+          .read(addressRepositoryProvider)
+          .reverseGeocode(latitude: latitude, longitude: longitude);
+      if (!mounted || suggestion.isEmpty) return;
+
+      void fillIfEmpty(TextEditingController controller, String? value) {
+        if (value == null || value.trim().isEmpty) return;
+        if (controller.text.trim().isNotEmpty) return;
+        controller.text = value.trim();
+      }
+
+      fillIfEmpty(_areaController, suggestion['area'] ?? suggestion['street']);
+      fillIfEmpty(_cityController, suggestion['city']);
+      fillIfEmpty(_stateController, suggestion['state']);
+      fillIfEmpty(_pincodeController, suggestion['pincode']);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Filled in what we could - please check and correct it'),
+      ));
+    } finally {
+      if (mounted) setState(() => _isPrefilling = false);
     }
   }
 
@@ -127,6 +179,9 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
       houseNo: _houseNoController.text.trim(),
       area: _areaController.text.trim(),
       landmark: _landmarkController.text.trim().isEmpty ? null : _landmarkController.text.trim(),
+      deliveryInstructions: _directionsController.text.trim().isEmpty
+          ? null
+          : _directionsController.text.trim(),
       city: _cityController.text.trim(),
       state: _stateController.text.trim(),
       pincode: _pincodeController.text.trim(),
@@ -180,7 +235,9 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
                 Text(
                   _latitude == null
                       ? 'Required. We use your pin to check we deliver to this address. Typing the address is not enough.'
-                      : 'Pin saved. Checkout can calculate delivery from this location.',
+                      : _isPrefilling
+                          ? 'Pin saved. Filling in the address from your location...'
+                          : 'Pin saved. Checkout can calculate delivery from this location.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 16),
@@ -192,6 +249,38 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
                 _field(_cityController, 'City'),
                 _field(_stateController, 'State'),
                 _field(_pincodeController, 'Pincode', keyboardType: TextInputType.number),
+
+                // THE FIELD THAT ACTUALLY FINDS THE HOUSE.
+                //
+                // House numbers are decorative across most of the delivery
+                // area; a landmark and a turn are not. Written in whatever
+                // words the customer uses, because a rider reads "hanuman
+                // mandir ke piche 2 gali chhod ke green colour ki house" and
+                // arrives, while a correctly formatted address with no
+                // landmark leaves them phoning from the road.
+                //
+                // Multi-line and unformatted on purpose. Any attempt to
+                // structure this would push people back into the boxes above,
+                // which is the thing that does not work here.
+                const SizedBox(height: 4),
+                TextFormField(
+                  controller: _directionsController,
+                  maxLines: 3,
+                  minLines: 2,
+                  maxLength: 300,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'How to reach your house (optional)',
+                    hintText:
+                        'e.g. hanuman mandir ke piche, 2 gali chhod ke green '
+                        'colour ka ghar',
+                    helperText: 'Write it the way you would tell a friend. '
+                        'The delivery worker sees this.',
+                    helperMaxLines: 2,
+                    alignLabelWithHint: true,
+                  ),
+                ),
+
                 const SizedBox(height: 24),
                 FilledButton(
                   onPressed: _isSaving ? null : _save,

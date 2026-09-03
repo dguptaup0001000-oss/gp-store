@@ -292,6 +292,14 @@ public class SecurityConfig {
                 // a delivery worker, who must not be able to edit the roster
                 // they appear on.
                 .requestMatchers("/api/admin/workers/**").hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
+                // MINTING A LABEL IS AN ADMIN ACT, and this rule has to sit
+                // above the general worker rule below or the more permissive
+                // one would swallow it. A delivery worker who could issue a
+                // label could issue their own credential and claim any order
+                // without touching the carton, which would make both the QR
+                // token and the typed pack code decorative.
+                .requestMatchers(HttpMethod.POST, "/api/worker/orders/*/label")
+                    .hasAuthority(AdminPermission.DELIVERY_MANAGE.authority())
                 .requestMatchers("/api/worker/**").hasAnyAuthority(AdminPermission.DELIVERY_MANAGE.authority(), "ROLE_DELIVERY_BOY")
                 .requestMatchers("/api/orders/admin/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
                 .requestMatchers("/api/orders/customer/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())

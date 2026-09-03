@@ -112,6 +112,107 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
     });
   }
 
+  /// The way in when the camera will not oblige.
+  ///
+  /// WHY THIS EXISTS. A cracked lens, a filthy one, a dark storeroom, or a
+  /// phone that simply refuses to focus - and until now the app's answer was
+  /// "ask an administrator to record the order for you", which is a worker
+  /// standing at a bench unable to do their job.
+  ///
+  /// WHAT IS TYPED IS NOT THE ORDER NUMBER. It is the short random code
+  /// printed beside the QR on the same label, and the difference matters:
+  /// order numbers are sequential and printed on the customer's invoice, so
+  /// accepting one would let any worker claim an order they never held. The
+  /// server refuses order numbers for exactly that reason.
+  Future<void> _typeCode() async {
+    final controller = TextEditingController();
+    String? code;
+    try {
+      code = await _askForCode(controller);
+    } finally {
+      // A controller that outlives its dialog is a leak, and this screen can
+      // be opened and dismissed many times in a shift at a packing bench.
+      controller.dispose();
+    }
+
+    final typed = code?.trim() ?? '';
+    if (typed.isEmpty || !mounted) return;
+
+    setState(() => _submitting = true);
+    // Same as a scan from here on. The camera is stopped because a successful
+    // claim leaves this screen showing an outcome, not a live preview.
+    try {
+      await _controller.stop();
+    } catch (_) {}
+
+    ScanOutcome outcome;
+    try {
+      outcome = await widget.repository.packScan(
+        qrToken: typed,
+        clientRequestId: _newRequestId(),
+      );
+    } catch (e) {
+      outcome = ScanOutcome(
+        accepted: false,
+        outcome: 'ERROR',
+        message: extractErrorMessage(e),
+      );
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _submitting = false;
+      _result = outcome;
+    });
+  }
+
+  Future<String?> _askForCode(TextEditingController controller) {
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Type the code on the label'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'The 8-character code printed next to the QR square. '
+              'Dashes and spaces do not matter.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              // characters, not the number pad: the code is letters AND
+              // digits, and a worker sent to the wrong keyboard types the
+              // wrong thing and then blames the label.
+              textCapitalization: TextCapitalization.characters,
+              autocorrect: false,
+              enableSuggestions: false,
+              style: const TextStyle(
+                  fontSize: 24, letterSpacing: 4, fontFamily: 'monospace'),
+              decoration: const InputDecoration(
+                hintText: 'K7M4P2QX',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (value) => Navigator.of(context).pop(value),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('CANCEL'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('CLAIM ORDER'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _toggleTorch() async {
     try {
       await _controller.toggleTorch();
@@ -137,7 +238,20 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan order QR')),
+      appBar: AppBar(
+        title: const Text('Scan order QR'),
+        actions: [
+          // IN THE BAR, NOT BURIED. A worker whose camera is failing is
+          // already having a bad minute; making them discover this behind a
+          // menu would be the same dead end with extra steps.
+          if (_result == null)
+            TextButton.icon(
+              onPressed: _submitting ? null : _typeCode,
+              icon: const Icon(Icons.keyboard),
+              label: const Text('TYPE CODE'),
+            ),
+        ],
+      ),
       body: SafeArea(
         child: _result == null ? _camera() : _outcomeView(_result!),
       ),
@@ -158,7 +272,8 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
           // Three parameters, not two: mobile_scanner 5.2.3's
           // MobileScannerErrorBuilder is (BuildContext, MobileScannerException,
           // Widget?). The child is the placeholder we have no use for.
-          errorBuilder: (context, error, child) => _CameraProblem(error: error),
+          errorBuilder: (context, error, child) =>
+              _CameraProblem(error: error, onTypeCode: _typeCode),
         ),
 
         // A plain square, not an animated laser. On a cheap phone every
@@ -312,10 +427,16 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
 ///
 /// Names the fault and where to fix it. "Permission denied" is actionable
 /// only if the worker is told it is a phone setting rather than a broken app.
+/// What a worker sees when the camera will not start.
+///
+/// IT NOW OFFERS A WAY FORWARD. Every branch here used to end in "ask an
+/// administrator", which meant a worker with a broken lens could not claim an
+/// order at all - the exact dead end that made typing the code necessary.
 class _CameraProblem extends StatelessWidget {
-  const _CameraProblem({required this.error});
+  const _CameraProblem({required this.error, required this.onTypeCode});
 
   final MobileScannerException error;
+  final VoidCallback onTypeCode;
 
   String get _explanation {
     switch (error.errorCode) {
@@ -323,11 +444,11 @@ class _CameraProblem extends StatelessWidget {
         return 'Camera permission was refused. Enable Camera for this app in '
             'Settings > Apps > GP-Store Worker, then come back and scan.';
       case MobileScannerErrorCode.unsupported:
-        return 'This phone cannot open its camera for scanning. Ask an '
-            'administrator to record the order for you.';
+        return 'This phone cannot open its camera for scanning. Type the code '
+            'printed next to the QR square instead.';
       default:
-        return 'The camera could not be started. Close the app fully and open '
-            'it again; if it keeps happening, tell an administrator.';
+        return 'The camera could not be started. Type the code printed next to '
+            'the QR square, or close the app fully and open it again.';
     }
   }
 
@@ -348,6 +469,18 @@ class _CameraProblem extends StatelessWidget {
                 _explanation,
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white, fontSize: 16),
+              ),
+              const SizedBox(height: 24),
+              // Big, because this is now the only way this worker gets the
+              // order onto their phone.
+              SizedBox(
+                height: 56,
+                child: FilledButton.icon(
+                  onPressed: onTypeCode,
+                  icon: const Icon(Icons.keyboard),
+                  label: const Text('TYPE THE CODE INSTEAD',
+                      style: TextStyle(fontSize: 16)),
+                ),
               ),
             ],
           ),

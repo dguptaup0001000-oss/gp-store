@@ -290,6 +290,13 @@ class _AdminOrderItemTile extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
+          // THE PACKET, so whoever is filling the bag recognises it rather
+          // than reading it. Same reasoning as the worker's packing list: two
+          // masalas from one brand read almost identically and look nothing
+          // alike. Fixed width whether or not there is a photo, so the names
+          // stay on one line down the list.
+          _ItemPhoto(url: item.imageUrl),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(item.productName ?? 'Product', style: const TextStyle(fontSize: 13)),
           ),
@@ -297,6 +304,52 @@ class _AdminOrderItemTile extends StatelessWidget {
           const SizedBox(width: 12),
           Text('₹${item.totalPrice.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w600)),
         ],
+      ),
+    );
+  }
+}
+
+/// A product thumbnail on the admin order screen, and its stand-in.
+///
+/// Every failure lands on the same grey box: a signed URL that expired, a
+/// dropped connection, a variant with no picture. None of those deserve a
+/// broken-image glyph on a screen somebody is using to pack an order.
+class _ItemPhoto extends StatelessWidget {
+  const _ItemPhoto({required this.url});
+
+  final String? url;
+
+  static const double _size = 40;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final placeholder = Container(
+      width: _size,
+      height: _size,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Icon(Icons.inventory_2_outlined,
+          size: 18, color: theme.colorScheme.outline),
+    );
+
+    final source = url;
+    if (source == null || source.isEmpty) {
+      return placeholder;
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Image.network(
+        source,
+        width: _size,
+        height: _size,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : placeholder,
+        errorBuilder: (context, error, stack) => placeholder,
       ),
     );
   }
