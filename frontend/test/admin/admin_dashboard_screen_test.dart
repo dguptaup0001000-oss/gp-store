@@ -94,6 +94,41 @@ void main() {
     expect(find.text('312'), findsOneWidget);
   });
 
+  testWidgets('what the shop kept is shown beside what it sold', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(host(
+      withSummary: summary.copyWith(
+        refunded: 5000,
+        netRevenue: 140000,
+        previousNetRevenue: 118000,
+        netRevenueChangePercent: 18.6,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // Gross stays gross - the shop sold 1,45,000 - and the new card says
+    // what survived the refunds.
+    expect(find.text('₹1,45,000'), findsOneWidget);
+    expect(find.text('₹1,40,000'), findsOneWidget);
+    expect(find.text('Kept after refunds'), findsOneWidget);
+  });
+
+  testWidgets('a server that does not report it shows one card fewer, not zero',
+      (tester) async {
+    // THE FAILURE THIS PREVENTS. netRevenue defaulting to 0.0 like the
+    // comparison fields would render "₹0" under "Kept after refunds" on the
+    // screen a shopkeeper opens to see whether the week went well. An APK
+    // can be newer than the backend it is talking to, so this is a real
+    // state, not a hypothetical one.
+    tall(tester);
+    await tester.pumpWidget(host());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Kept after refunds'), findsNothing);
+    expect(find.text('₹0'), findsNothing);
+    expect(find.text('₹1,45,000'), findsOneWidget);
+  });
+
   testWidgets('a failing sales query costs one panel, not the dashboard',
       (tester) async {
     tall(tester);

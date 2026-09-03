@@ -40,16 +40,19 @@ public class AnalyticsService {
     private final ProductRepository productRepository;
     private final ProductVariantRepository productVariantRepository;
     private final InventoryRepository inventoryRepository;
+    private final com.gpstore.repository.RefundRepository refundRepository;
 
     public AnalyticsService(OrderRepository orderRepository, OrderItemRepository orderItemRepository,
                              ProductRepository productRepository,
                              ProductVariantRepository productVariantRepository,
-                             InventoryRepository inventoryRepository) {
+                             InventoryRepository inventoryRepository,
+                             com.gpstore.repository.RefundRepository refundRepository) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.productRepository = productRepository;
         this.productVariantRepository = productVariantRepository;
         this.inventoryRepository = inventoryRepository;
+        this.refundRepository = refundRepository;
     }
 
     /**
@@ -64,9 +67,23 @@ public class AnalyticsService {
      * against the 30 days before it - not against a calendar month, which
      * would compare 30 days with 28 in February and report a fake decline.
      *
+     * <p>REVENUE IS GROSS; netRevenue IS WHAT THE SHOP KEPT. Until refunds
+     * actually worked this distinction was theoretical - almost nothing was
+     * ever sent back, so the two agreed. They do not agree any more: a shop
+     * can refund part of an order, refund it again later, or take goods back
+     * through a return, and a dashboard reporting the full order total for an
+     * order it refunded 300 of is telling a shopkeeper they earned money they
+     * gave away. Both numbers are returned rather than one replacing the
+     * other, because "what did we sell" and "what did we keep" are different
+     * questions and a shop needs both.
+     *
      * <p>The original five keys are unchanged. Existing clients keep
-     * deserialising; the delta fields are additive.
+     * deserialising; the delta and refund fields are additive.
      */
+    private static BigDecimal orZero(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
     public Map<String, Object> getSalesSummary(int days) {
         int window = clampDays(days);
         LocalDateTime to = LocalDateTime.now();
@@ -87,6 +104,17 @@ public class AnalyticsService {
         BigDecimal previousRevenue = orderRepository.sumRevenueBetween(previousFrom, previousTo);
         long previousOrderCount = orderRepository.countOrdersBetween(previousFrom, previousTo);
 
+        BigDecimal refunded = orZero(refundRepository.settledForOrdersBetween(from, to));
+        BigDecimal previousRefunded =
+                orZero(refundRepository.settledForOrdersBetween(previousFrom, previousTo));
+
+        BigDecimal netRevenue = revenue.subtract(refunded);
+        BigDecimal previousNetRevenue = previousRevenue.subtract(previousRefunded);
+
+        // AVERAGE ORDER VALUE STAYS GROSS, deliberately. It answers "how big
+        // is a typical basket", which is about what customers put in it -
+        // dividing net revenue by order count would quietly turn it into
+        // "average kept per order", a different number under the same name.
         BigDecimal averageOrderValue = orderCount == 0
                 ? BigDecimal.ZERO
                 : revenue.divide(BigDecimal.valueOf(orderCount), 2, RoundingMode.HALF_UP);
@@ -102,6 +130,11 @@ public class AnalyticsService {
         summary.put("revenueChangePercent", percentChange(previousRevenue, revenue));
         summary.put("orderCountChangePercent",
                 percentChange(BigDecimal.valueOf(previousOrderCount), BigDecimal.valueOf(orderCount)));
+        summary.put("refunded", refunded);
+        summary.put("netRevenue", netRevenue);
+        summary.put("previousRefunded", previousRefunded);
+        summary.put("previousNetRevenue", previousNetRevenue);
+        summary.put("netRevenueChangePercent", percentChange(previousNetRevenue, netRevenue));
         return summary;
     }
 

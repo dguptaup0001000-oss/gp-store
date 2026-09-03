@@ -84,4 +84,38 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
     List<Refund> awaitingProvider(@Param("olderThan") LocalDateTime olderThan, Pageable pageable);
 
     long countByPaymentId(Long paymentId);
+
+    /**
+     * What was sent back against orders placed in a period.
+     *
+     * ATTRIBUTED BY THE ORDER'S DATE, NOT THE REFUND'S. "What did I make last
+     * week" is a question about last week's TRADE, so a refund belongs to the
+     * week of the sale it undoes - otherwise a refund settling on Monday
+     * would reduce this week's takings for goods sold a fortnight ago, and
+     * neither week's figure would describe anything a shopkeeper recognises.
+     *
+     * The honest consequence, which the admin screen states rather than
+     * hides: a refund granted later DOES change what a past week earned. That
+     * is a fact about the trade, not a bug in the arithmetic.
+     *
+     * SUCCEEDED ONLY. A refund in flight has not left the bank yet and one
+     * the provider refused never will; counting either as money gone would
+     * understate what the shop actually holds.
+     *
+     * The CANCELLED exclusion mirrors sumRevenueBetween exactly. A cancelled
+     * order contributes no revenue, so its refund must not be subtracted from
+     * revenue it never added - that would push the total NEGATIVE for a week
+     * whose only activity was a cancellation.
+     */
+    @Query("""
+           select coalesce(sum(r.amount), 0)
+           from Refund r
+           join r.payment p
+           join p.order o
+           where r.status = com.gpstore.entity.Refund$Status.SUCCEEDED
+             and o.orderDate >= :from and o.orderDate <= :to
+             and o.orderStatus <> com.gpstore.enums.OrderStatus.CANCELLED
+           """)
+    BigDecimal settledForOrdersBetween(@Param("from") LocalDateTime from,
+                                       @Param("to") LocalDateTime to);
 }
