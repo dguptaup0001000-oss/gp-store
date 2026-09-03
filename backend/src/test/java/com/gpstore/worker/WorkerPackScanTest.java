@@ -264,13 +264,32 @@ class WorkerPackScanTest {
         assertTrue(a.length() >= 24, "a short token is a guessable token; was " + a.length());
 
         // The brief is explicit that the label must not carry customer data.
-        // Anything derived from the order would leak by construction, so the
-        // test is that NOTHING recognisable appears in it.
+        // Anything derived from the order would leak by construction.
+        //
+        // ONLY LONG VALUES ARE CHECKED BY SUBSTRING, and that is the fix rather
+        // than a weakening. This asserted contains() on the order id and on
+        // "250" too, and a random 32-character base62 token contains any given
+        // two- or three-character run often enough that CI eventually catches
+        // one: the failing token was owsd1Bkf5xhLz42dxWGzh3k3Cw7HkYiD against
+        // order id 42, matching inside "z42d". Nothing was leaking; the test
+        // was rejecting randomness for looking like data.
+        //
+        // The order number and the mobile number stay: both are long enough
+        // that a chance match is not a real possibility.
         String lowered = a.toLowerCase();
         assertFalse(lowered.contains(order.getOrderNumber().toLowerCase()), a);
         assertFalse(lowered.contains(shopper.getMobileNumber()), a);
-        assertFalse(lowered.contains(String.valueOf(order.getId())), a);
-        assertFalse(lowered.contains("250"), "the order total must not appear in the label: " + a);
+
+        // What the short values were really asking - is this token DERIVED
+        // from the order - is answered directly instead, and far more
+        // strongly: ask the same order for tokens repeatedly and they must
+        // all differ. Anything encoding the id or the total would repeat.
+        java.util.Set<String> repeated = new java.util.HashSet<>();
+        for (int i = 0; i < 20; i++) {
+            repeated.add(issue(order));
+        }
+        assertEquals(20, repeated.size(),
+                "a token that repeats for one order is derived from it, not random");
     }
 
     // ------------------------------------------------------- the happy path
