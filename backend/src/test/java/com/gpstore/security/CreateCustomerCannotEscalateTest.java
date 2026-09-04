@@ -34,6 +34,15 @@ import static org.junit.jupiter.api.Assertions.*;
  * writes to its database.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        // This class registers accounts over HTTP, and so do several others
+        // now. CI runs them from one IP against a 20/min auth bucket, so the
+        // class that happens to run last gets 429 and fails for a reason that
+        // has nothing to do with what it tests. Same override, and same
+        // reasoning, as AccessDeniedStatusTest and OrderLinesAreNotViewOnlyTest.
+        // The PRODUCTION default is untouched - this is a property on this
+        // test context only.
+        "rate-limit.auth-per-minute=250",
+        "rate-limit.mutation-per-minute=250",
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",

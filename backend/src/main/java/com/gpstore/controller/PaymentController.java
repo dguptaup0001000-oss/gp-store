@@ -1,5 +1,6 @@
 package com.gpstore.controller;
 
+import com.gpstore.security.AdminPermission;
 import com.gpstore.dto.request.InitiatePaymentRequest;
 import com.gpstore.dto.response.PaymentInitiationResponse;
 import com.gpstore.entity.Payment;
@@ -140,7 +141,7 @@ public class PaymentController {
     // Admin or delivery partner (enforced in SecurityConfig).
     @PutMapping("/order/{orderId}/cod/complete")
     public com.gpstore.dto.response.PaymentResponse completeCodPayment(@PathVariable Long orderId) {
-        boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
+        boolean isAdmin = currentUser.has(AdminPermission.PAYMENTS_MANAGE);
         return paymentService.completeCodPayment(orderId, currentUser.get().getWorkerId(), isAdmin);
     }
 

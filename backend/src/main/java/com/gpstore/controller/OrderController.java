@@ -1,5 +1,6 @@
 package com.gpstore.controller;
 
+import com.gpstore.security.AdminPermission;
 import com.gpstore.enums.OrderStatus;
 
 import com.gpstore.dto.OrderResponse;
@@ -104,7 +105,7 @@ public class OrderController {
     // the ownership check) - they need this to actually manage/fulfill orders.
     @GetMapping("/{orderId}")
     public com.gpstore.dto.response.OrderDetailResponse getOrderDetail(@PathVariable Long orderId) {
-        boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
+        boolean isAdmin = currentUser.has(AdminPermission.ORDERS_VIEW);
         return orderService.getOwnedOrderDetail(orderId, currentUser.customerId(), isAdmin);
     }
 
@@ -117,7 +118,7 @@ public class OrderController {
     // Customers may cancel only their own order; admins may cancel any order.
     @PutMapping("/{orderId}/cancel")
     public com.gpstore.dto.response.OrderDetailResponse cancelOrder(@PathVariable Long orderId) {
-        boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
+        boolean isAdmin = currentUser.has(AdminPermission.ORDERS_MANAGE);
         return orderService.cancelOrder(orderId, currentUser.customerId(), isAdmin);
     }
 }
