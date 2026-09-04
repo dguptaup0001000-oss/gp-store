@@ -263,18 +263,26 @@ public class R2ObjectStorageService {
     }
 
     public List<SignedUploadResponse> signBatch(List<SignUploadRequest> items) {
-        requireBatchSize(items == null ? 0 : items.size());
-        List<SignedUploadResponse> signed = new ArrayList<>(items.size());
-        for (SignUploadRequest item : items) {
+        // Normalise BEFORE the size check rather than inside it. The old form
+        // passed `items == null ? 0 : items.size()` and then dereferenced
+        // `items` on the next line, correct only because requireBatchSize
+        // always throws on 0 - a guarantee that lives in another method and
+        // that a reader (and a static analyser) has to go and confirm.
+        List<SignUploadRequest> batch = items == null ? List.of() : items;
+        requireBatchSize(batch.size());
+        List<SignedUploadResponse> signed = new ArrayList<>(batch.size());
+        for (SignUploadRequest item : batch) {
             signed.add(sign(item));
         }
         return signed;
     }
 
     public List<ConfirmedUploadResponse> confirmBatch(List<String> objectKeys) {
-        requireBatchSize(objectKeys == null ? 0 : objectKeys.size());
-        List<ConfirmedUploadResponse> confirmed = new ArrayList<>(objectKeys.size());
-        for (String key : objectKeys) {
+        // Same normalise-then-check shape as signBatch above.
+        List<String> batch = objectKeys == null ? List.of() : objectKeys;
+        requireBatchSize(batch.size());
+        List<ConfirmedUploadResponse> confirmed = new ArrayList<>(batch.size());
+        for (String key : batch) {
             confirmed.add(confirm(key));
         }
         return confirmed;

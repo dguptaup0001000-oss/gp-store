@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WHAT FAILS THE BUILD.
+
+  This is an INCLUDE filter: SpotBugs reports only what matches here, so the
+  build gate is exactly these categories and nothing else.
+
+  WHY IT IS SCOPED RATHER THAN "everything". A full run on this codebase
+  reports 332 findings, and 306 of them are EI_EXPOSE_REP / EI_EXPOSE_REP2 -
+  "may expose internal representation by returning a reference to a mutable
+  object". That pattern is endemic to JPA entities, whose whole job is to hand
+  out references to mutable state, and to the java.time and BigDecimal fields
+  the entities carry. Gating on the full set would fail every build on day one
+  and the gate would be switched off within a week. A gate that is always red
+  is the same as no gate.
+
+  WHY THESE THREE CATEGORIES. They are the ones that describe code that does
+  not do what it says. The bug that prompted this file was
+  EC_UNRELATED_TYPES - a String compared to an enum with .equals(), always
+  false, which meant every delivery rider was told to collect nothing on a
+  cash-on-delivery order. Three passes of manual review read past it; it is
+  CORRECTNESS, so this gate would have stopped it at the build.
+
+  WHAT IS DELIBERATELY NOT GATED, and why it is not simply laziness:
+
+    STYLE (15)        - 10 of them are RV_RETURN_VALUE_IGNORED_NO_SIDE_EFFECT
+                        on deliberate Hibernate lazy-proxy initialisation
+                        (calling a getter to force the proxy open while the
+                        session still is, before the entity detaches and is
+                        used after commit). SpotBugs cannot see that the proxy
+                        initialisation IS the side effect, so it is wrong
+                        about these, and gating on STYLE would make the fix be
+                        "stop initialising the proxy" - a real bug traded for
+                        a clean report.
+    BAD_PRACTICE (6)  - all CT_CONSTRUCTOR_THROW, on services that validate
+                        their configuration in the constructor. Failing fast
+                        at startup on a missing JWT secret is the behaviour we
+                        want, not a defect to design away.
+    PERFORMANCE (3)   - BX_UNBOXING_IMMEDIATELY_REBOXED. Real, and worth about
+                        nothing on a request path that also talks to Postgres.
+    MALICIOUS_CODE    - the 306 above.
+
+  These stay VISIBLE: `mvn com.github.spotbugs:spotbugs-maven-plugin:spotbugs`
+  from the command line has no include filter and still reports all 332, so
+  the wider set can be triaged deliberately. This file only decides what is
+  allowed to break a build.
+
+  RAISING THE BAR LATER is a matter of deleting an exclusion here once the
+  matching findings are at zero - not of rewriting the pipeline.
+-->
+<FindBugsFilter>
+
+    <!-- Code that cannot do what it appears to do: always-false comparisons,
+         null dereferences on a reachable path, ignored return values that
+         genuinely have no effect, format-string mismatches. -->
+    <Match>
+        <Bug category="CORRECTNESS"/>
+    </Match>
+
+    <!-- Races and lock mistakes. Zero of these today, and the cost of a
+         regression here is the kind of bug that only shows up under real
+         load with real money moving. -->
+    <Match>
+        <Bug category="MT_CORRECTNESS"/>
+    </Match>
+
+    <!-- Injection and friends. Zero today. -->
+    <Match>
+        <Bug category="SECURITY"/>
+    </Match>
+
+</FindBugsFilter>

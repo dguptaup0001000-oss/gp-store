@@ -118,6 +118,34 @@ class R2ObjectStorageServiceTest {
         assertThrows(BadRequestException.class, () -> r2.confirmBatch(List.of()));
     }
 
+    /**
+     * A MISSING body, not an empty one, and the two arrive differently: an
+     * absent JSON array deserialises to null, so `null` is what these methods
+     * actually see when a client sends nothing at all.
+     *
+     * Both methods already handled it - `requireBatchSize(x == null ? 0 : ...)`
+     * throws on 0 before the dereference below can happen - but nothing pinned
+     * that, and the shape was fragile: the null-safety lived in a separate
+     * method, so the guarantee was one careless edit away from a
+     * NullPointerException reaching the controller as a 500 instead of the 400
+     * the caller deserves. SpotBugs flagged exactly that as
+     * NP_NULL_ON_SOME_PATH, and it was right to.
+     *
+     * These two cases are what let the code be rewritten to normalise first
+     * and check second without taking the behaviour on trust.
+     */
+    @Test
+    void batchSignRejectsNullRatherThanThrowingNullPointer() {
+        R2ObjectStorageService r2 = new R2ObjectStorageService("", "", "", "", "", "");
+        assertThrows(BadRequestException.class, () -> r2.signBatch(null));
+    }
+
+    @Test
+    void batchConfirmRejectsNullRatherThanThrowingNullPointer() {
+        R2ObjectStorageService r2 = new R2ObjectStorageService("", "", "", "", "", "");
+        assertThrows(BadRequestException.class, () -> r2.confirmBatch(null));
+    }
+
     @Test
     void batchOfTwentyPassesTheSizeGateThenFailsClosedWithoutR2() {
         R2ObjectStorageService r2 = new R2ObjectStorageService("", "", "", "", "", "");
