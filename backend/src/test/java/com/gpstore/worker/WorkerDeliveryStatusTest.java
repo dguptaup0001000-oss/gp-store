@@ -313,6 +313,40 @@ class WorkerDeliveryStatusTest {
     }
 
     @Test
+    @DisplayName("marking a COD order delivered settles the cash automatically")
+    void deliveringACodOrderSettlesIt() {
+        Payment payment = new Payment();
+        payment.setOrder(delivery.getOrder());
+        payment.setPaymentMethod(PaymentMethod.COD);
+        payment.setPaymentStatus(PaymentStatus.COD_PENDING);
+        payment.setAmount(delivery.getOrder().getTotalAmount());
+        payment.setActive(true);
+        paymentRepository.save(payment);
+
+        // WHY THIS EXISTS. Walking a delivery to DELIVERED is supposed to
+        // close the COD payment with it, and nothing tested that it does -
+        // the neighbouring tests all cover who may do it, not that it
+        // happens.
+        //
+        // It is guarded by PaymentMethod.COD.name().equals(...), which looks
+        // like the always-false String-versus-enum comparison that made
+        // WorkerOrderView tell riders to collect zero. It is NOT: this call
+        // returns a PaymentResponse DTO whose fields really are Strings, so
+        // the comparison is String to String and correct. This test is what
+        // keeps it that way - if that DTO ever exposes the enum instead, the
+        // guard goes silently false and only this assertion notices.
+        // The real path a rider walks, one step at a time - the state machine
+        // refuses ASSIGNED straight to OUT_FOR_DELIVERY, correctly.
+        for (String step : new String[]{"PACKED", "PICKED_UP", "OUT_FOR_DELIVERY", "DELIVERED"}) {
+            deliveryService.updateDeliveryStatus(delivery.getId(), step, sessionOf(worker), false);
+        }
+
+        assertEquals(PaymentStatus.COD_RECEIVED,
+                paymentRepository.findByOrderId(delivery.getOrder().getId()).orElseThrow().getPaymentStatus(),
+                "a delivered cash order was left owing the shop its own money");
+    }
+
+    @Test
     @DisplayName("authorisation is checked before the transition rule")
     void ownershipOutranksTheStateMachine() {
         // A stranger sending an ILLEGAL transition must be told not-found, not
