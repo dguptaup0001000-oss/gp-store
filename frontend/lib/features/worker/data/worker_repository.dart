@@ -76,6 +76,44 @@ class WorkerRepository {
     );
   }
 
+  /// Records that the money for a cash-on-delivery order actually arrived,
+  /// and how it was made up.
+  ///
+  /// NOT QUEUED WHEN OFFLINE, for the same reason as a status change and
+  /// more so: this is a claim about money. Replaying it an hour later could
+  /// settle an order that was cancelled in between, and a shop's books are
+  /// the last place to put a guess. It succeeds against the server or it
+  /// fails visibly and the worker taps again with signal.
+  ///
+  /// The two amounts must add up to what is owed. The SERVER decides what is
+  /// owed and refuses a split that does not reconcile - this app only reports
+  /// how the money arrived, never how much.
+  Future<void> recordCodCollection({
+    required int orderId,
+    required double cashAmount,
+    required double upiAmount,
+  }) async {
+    await apiClient.dio.put(
+      '/api/payments/order/$orderId/cod/complete',
+      data: {'cashAmount': cashAmount, 'upiAmount': upiAmount},
+    );
+  }
+
+  /// The rider's 1-10 read on one delivery.
+  ///
+  /// Never shown to the customer. Optional everywhere it appears, so a rider
+  /// in a hurry is never blocked by it - a rating nobody had time to think
+  /// about is worse than no rating.
+  Future<void> rateCustomer({
+    required int orderId,
+    required int score,
+  }) async {
+    await apiClient.dio.post(
+      '/api/worker/orders/$orderId/customer-rating',
+      data: {'score': score},
+    );
+  }
+
   /// Reports where the phone is.
   ///
   /// Fire-and-forget by design: a dropped position is replaced by the next
