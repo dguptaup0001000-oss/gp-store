@@ -1349,7 +1349,20 @@ public class PaymentService {
         return completeCodPayment(orderId, null, true, null, null);
     }
 
-    /** Settle without recording a split - the automatic path from delivery. */
+    /**
+     * Settle without recording a split - the automatic path from delivery.
+     *
+     * @Transactional HERE TOO, and it is not decoration. This delegates with
+     * `this.`, which is self-invocation: it does not go back through the
+     * Spring proxy, so the five-argument method's own @Transactional never
+     * applies. Without one here the pessimistic lock in lockOrderThenPayment
+     * runs outside a transaction and throws InvalidDataAccessApiUsageException
+     * BEFORE the ownership check can refuse - turning "another worker cannot
+     * collect this COD" from a clean refusal into a 500.
+     * WorkerDeliveryStatusTest.anotherWorkerCannotCompleteCod caught exactly
+     * that when this overload was first added without it.
+     */
+    @Transactional
     public com.gpstore.dto.response.PaymentResponse completeCodPayment(
             Long orderId, Long callerWorkerId, boolean isAdmin) {
         return completeCodPayment(orderId, callerWorkerId, isAdmin, null, null);
