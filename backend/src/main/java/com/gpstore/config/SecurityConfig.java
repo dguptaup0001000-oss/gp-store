@@ -367,6 +367,26 @@ public class SecurityConfig {
                 // /api/invoices/** admin-only rule below, same ordering
                 // reason used throughout this file.
                 .requestMatchers(HttpMethod.GET, "/api/invoices/my-order/**").authenticated()
+                // WRITES NEED ORDERS_MANAGE. The single catch-all below used to
+                // cover POST /api/invoices and PUT /api/invoices/{id}/cancel as
+                // well as the reads, so SUPPORT - "Changes nothing else" in
+                // RolePermissions - and DELIVERY_MANAGER could cancel the
+                // shop's own record of a sale. An invoice is a tax document.
+                //
+                // Third time this exact shape has been found: /api/order-items,
+                // then /api/cart-items, now here. One matcher with no
+                // HttpMethod, a *_VIEW permission, and write endpoints
+                // underneath it.
+                .requestMatchers(HttpMethod.POST, "/api/invoices", "/api/invoices/**")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.PUT, "/api/invoices/**")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.PATCH, "/api/invoices/**")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.DELETE, "/api/invoices/**")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                // Reads stay on ORDERS_VIEW: "what was I charged" is the most
+                // ordinary support question there is.
                 .requestMatchers("/api/invoices/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
                 .requestMatchers("/api/audit-logs/**").hasAuthority(AdminPermission.AUDIT_VIEW.authority())
                 .requestMatchers("/api/analytics/**").hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())

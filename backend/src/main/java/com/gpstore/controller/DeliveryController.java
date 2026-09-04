@@ -1,5 +1,6 @@
 package com.gpstore.controller;
 
+import com.gpstore.security.AdminPermission;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.DeliveryService;
 
@@ -57,13 +58,13 @@ public class DeliveryController {
 
     @GetMapping("/{id}")
     public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryById(@PathVariable Long id) {
-        boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
+        boolean isAdmin = currentUser.has(AdminPermission.DELIVERY_VIEW);
         return deliveryService.getDeliveryById(id, currentUser.get().getWorkerId(), isAdmin);
     }
 
     @GetMapping("/order/{orderId}")
     public Optional<com.gpstore.dto.response.DeliveryResponse> getDeliveryByOrderId(@PathVariable Long orderId) {
-        boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
+        boolean isAdmin = currentUser.has(AdminPermission.DELIVERY_VIEW);
         return deliveryService.getDeliveryByOrderId(orderId, currentUser.get().getWorkerId(), isAdmin);
     }
 
@@ -87,7 +88,10 @@ public class DeliveryController {
             @PathVariable Long id,
             @RequestParam String status) {
 
-        boolean isAdmin = "ADMIN".equals(currentUser.get().getRole());
+        // DELIVERY_MANAGE, not DELIVERY_VIEW: this writes. A read role
+        // reaching here falls to the worker branch and is refused, which is
+        // what SecurityConfig intends for every other delivery write.
+        boolean isAdmin = currentUser.has(AdminPermission.DELIVERY_MANAGE);
         // A worker session carries the roster id; an admin carries none and
         // does not need one, because isAdmin skips the ownership lookup.
         return deliveryService.updateDeliveryStatus(
