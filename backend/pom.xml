@@ -302,9 +302,28 @@
             </plugin>
 
             <!-- Static analysis - catches real bug patterns (null derefs, resource
-                 leaks, etc.) at build time. Runs fully locally, unlike SonarCloud
-                 which needs an external account/token - appropriate for now.
-                 Run manually with: mvn com.github.spotbugs:spotbugs-maven-plugin:check -->
+                 leaks, always-false comparisons) at build time. Runs fully
+                 locally, unlike SonarCloud which needs an external account and
+                 token.
+
+                 THE TRIAGE THIS WAS WAITING ON HAS HAPPENED. This plugin sat
+                 here configured and unbound for months with a comment saying
+                 it would be bound "until that triage happens" - so it only
+                 ever ran when somebody thought to run it, which nobody did.
+                 The first real run found EC_UNRELATED_TYPES in
+                 WorkerOrderView: a String compared to an enum, always false,
+                 which meant every rider was told to collect nothing on a
+                 cash-on-delivery order. It had never worked, and three passes
+                 of manual review had read straight past it.
+
+                 All 332 findings were then categorised (see spotbugs-gate.xml
+                 for the breakdown and the reasoning) and the gate below is
+                 scoped to the categories that are at ZERO today, so it starts
+                 green and any new finding in them is a genuine regression.
+
+                 Bound to `verify`, which is what CI runs (./mvnw -B clean
+                 verify) - so a plain `mvn test` loop stays fast locally and
+                 nothing reaches main without passing it. -->
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
                 <artifactId>spotbugs-maven-plugin</artifactId>
@@ -312,11 +331,28 @@
                 <configuration>
                     <effort>Max</effort>
                     <threshold>Medium</threshold>
-                    <!-- Not bound to a build phase by default - a first run on
-                         an existing large codebase can surface a lot of noise
-                         to triage. Run it deliberately (command above) rather
-                         than blocking every build until that triage happens. -->
+                    <!-- PLUGIN level, not execution level, and that is load
+                         bearing. The `check` goal FORKS the `spotbugs`
+                         analysis goal, and the forked goal does not inherit
+                         execution-level configuration - a filter set only on
+                         the execution below is silently ignored, the analysis
+                         runs unfiltered, and the gate then fails on all 330
+                         findings including the 306 entity-getter ones. That
+                         was the first thing tried here; it does not work.
+
+                         To see the unfiltered set, override this:
+                           -Dspotbugs.includeFilterFile=spotbugs-all.xml -->
+                    <includeFilterFile>spotbugs-gate.xml</includeFilterFile>
                 </configuration>
+                <executions>
+                    <execution>
+                        <id>correctness-gate</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
 
         </plugins>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  THE TRIAGE FILTER: an empty <Match/> matches every bug, so this include
+  filter includes everything.
+
+  It exists because the build gate (spotbugs-gate.xml) has to sit at PLUGIN
+  level rather than on the execution - the `check` goal forks the `spotbugs`
+  analysis goal, and the fork does not inherit execution-level configuration,
+  so a filter set only on the execution is silently ignored and the gate ends
+  up evaluating all 330 findings. Putting the gate at plugin level fixes that
+  but means a plain command-line run would also be filtered.
+
+  So: to see everything, point the plugin at this file instead.
+
+      ./mvnw com.github.spotbugs:spotbugs-maven-plugin:spotbugs \
+             -Dspotbugs.includeFilterFile=spotbugs-all.xml
+      ./mvnw com.github.spotbugs:spotbugs-maven-plugin:gui
+
+  The narrow filter decides what breaks a build. It does not decide what a
+  person is allowed to look at.
+-->
+<FindBugsFilter>
+    <Match/>
+</FindBugsFilter>
