@@ -22,6 +22,9 @@ public interface ProductVariantRepository
      */
     Optional<ProductVariant> findBySku(String sku);
 
+    /** Barcode uniqueness, checked by the bulk importer before it writes. */
+    Optional<ProductVariant> findByBarcode(String barcode);
+
     /**
      * One variant with its product already loaded.
      *

@@ -226,6 +226,30 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- Bulk catalogue import. A shopkeeper with 10,000 products cannot
+             type them in one at a time, and the two formats they actually
+             have are a spreadsheet export and a CSV.
+
+             commons-csv rather than splitting on commas: a product called
+             "Haldiram's Bhujia, 200 g" contains a comma, a description
+             contains quotes, and an Excel export contains embedded newlines
+             inside quoted cells. Hand-rolled splitting corrupts exactly the
+             rows a shopkeeper is least likely to notice.
+
+             poi-ooxml reads .xlsx directly, because telling a shop to
+             "save as CSV first" is where the encoding of a rupee sign and a
+             Hindi product name goes wrong. -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-csv</artifactId>
+            <version>1.11.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.3.0</version>
+        </dependency>
+
     </dependencies>
 
     <build>
