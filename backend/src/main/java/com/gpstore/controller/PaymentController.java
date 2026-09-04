@@ -140,9 +140,19 @@ public class PaymentController {
 
     // Admin or delivery partner (enforced in SecurityConfig).
     @PutMapping("/order/{orderId}/cod/complete")
-    public com.gpstore.dto.response.PaymentResponse completeCodPayment(@PathVariable Long orderId) {
+    public com.gpstore.dto.response.PaymentResponse completeCodPayment(
+            @PathVariable Long orderId,
+            @RequestBody(required = false) com.gpstore.dto.request.CodCollectionRequest collection) {
         boolean isAdmin = currentUser.has(AdminPermission.PAYMENTS_MANAGE);
-        return paymentService.completeCodPayment(orderId, currentUser.get().getWorkerId(), isAdmin);
+        // BODY OPTIONAL, and that is deliberate. Older worker builds call this
+        // with no body, and the delivery flow settles COD with no split at
+        // all. Requiring one would break both and leave money showing as
+        // outstanding on delivered orders - the exact problem this feature is
+        // here to fix.
+        return paymentService.completeCodPayment(
+                orderId, currentUser.get().getWorkerId(), isAdmin,
+                collection == null ? null : collection.getCashAmount(),
+                collection == null ? null : collection.getUpiAmount());
     }
 
     // Admin only (enforced in SecurityConfig) - confirms a UPI payment

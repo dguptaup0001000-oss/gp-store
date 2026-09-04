@@ -43,6 +43,15 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
 
   String? _error;
 
+  /// True while the collection is being sent. Separate from [_sending], which
+  /// names a delivery status - these two can never be in flight together and
+  /// each disables the other's buttons.
+  bool _savingPayment = false;
+
+  /// The score already sent for this stop, or null. Kept so the row shows
+  /// what was chosen instead of resetting and inviting a second tap.
+  int? _rating;
+
   @override
   void initState() {
     super.initState();
@@ -166,6 +175,69 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
     }
   }
 
+  /// Records that the money arrived, and how it was made up.
+  ///
+  /// Amounts are handled in PAISE as whole numbers, then converted once at
+  /// the end. Doing the arithmetic in rupees as doubles is how a 1500 + 1063
+  /// split arrives at the server as 2562.9999999999995 and gets refused for
+  /// not reconciling - a rider would see "must add up to 2563.00" while
+  /// looking at two numbers that plainly do.
+  Future<void> _recordPayment(num due) async {
+    if (_savingPayment || _sending != null) return;
+
+    final duePaise = (due * 100).round();
+    final cashPaise = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _CollectPaymentSheet(duePaise: duePaise),
+    );
+    if (cashPaise == null || !mounted) return;
+
+    setState(() {
+      _savingPayment = true;
+      _error = null;
+    });
+
+    try {
+      await widget.repository.recordCodCollection(
+        orderId: _order.orderId,
+        cashAmount: cashPaise / 100,
+        upiAmount: (duePaise - cashPaise) / 100,
+      );
+
+      // RE-READ, same reasoning as a status change. The server decides
+      // whether anything is still to collect; once it is settled this screen
+      // stops showing the cash card at all, which is the confirmation.
+      final refreshed = await widget.repository.order(_order.orderId);
+      if (!mounted) return;
+      setState(() => _order = refreshed);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = extractErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _savingPayment = false);
+    }
+  }
+
+  /// The rider's read on this stop. Optional, and never shown to the customer.
+  Future<void> _rate(int score) async {
+    if (_savingPayment || _sending != null) return;
+    final previous = _rating;
+    setState(() => _rating = score);
+    try {
+      await widget.repository.rateCustomer(orderId: _order.orderId, score: score);
+    } catch (e) {
+      if (!mounted) return;
+      // Put the row back how it was. A rating that silently failed would be
+      // worse than none: the rider believes the shop knows something it does
+      // not.
+      setState(() {
+        _rating = previous;
+        _error = extractErrorMessage(e);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -203,6 +275,28 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
                   const SizedBox(height: 4),
                   Text(formatRupees(collect),
                       style: theme.textTheme.headlineLarge),
+                  const SizedBox(height: 12),
+                  // THE BUTTON THIS WHOLE FEATURE EXISTS FOR. Without it the
+                  // only way a COD order got settled was the rider remembering
+                  // to mark the delivery delivered, and an order closed from
+                  // the admin screen instead sat as "COD PENDING" forever.
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: FilledButton.icon(
+                      onPressed: _savingPayment || _sending != null
+                          ? null
+                          : () => _recordPayment(collect),
+                      icon: _savingPayment
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.check_circle_outline),
+                      label: const Text('PAYMENT RECEIVED',
+                          style: TextStyle(fontSize: 17)),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -299,6 +393,51 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
               ),
               const SizedBox(height: 10),
             ],
+
+          // ---- the rider's read on this stop -------------------------
+          //
+          // OPTIONAL, AND SAID SO. A rider holding a carton in the rain must
+          // never be blocked by this, and a score somebody tapped to get past
+          // a screen is worse than no score at all.
+          //
+          // The line about the customer never seeing it is for the RIDER, not
+          // for compliance: someone who thinks the customer might read it
+          // rates everyone an 8.
+          const SizedBox(height: 28),
+          Text('Rate this stop', style: theme.textTheme.titleLarge),
+          const SizedBox(height: 2),
+          Text(
+            'Optional. Only the shop sees this - the customer never does.',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.outline),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var score = 1; score <= 10; score++)
+                SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: _rating == score
+                      ? FilledButton(
+                          style: FilledButton.styleFrom(
+                              padding: EdgeInsets.zero),
+                          onPressed: () => _rate(score),
+                          child: Text('$score',
+                              style: const TextStyle(fontSize: 17)),
+                        )
+                      : OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                              padding: EdgeInsets.zero),
+                          onPressed: () => _rate(score),
+                          child: Text('$score',
+                              style: const TextStyle(fontSize: 17)),
+                        ),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -423,6 +562,153 @@ class _PackingPhoto extends StatelessWidget {
         loadingBuilder: (context, child, progress) =>
             progress == null ? child : placeholder,
         errorBuilder: (context, error, stack) => placeholder,
+      ),
+    );
+  }
+}
+
+
+/// Recording how a cash-on-delivery payment arrived.
+///
+/// THREE TAPS FOR THE COMMON CASE. Almost every stop is all cash or all UPI,
+/// and those are one button each - a rider standing at a door should not have
+/// to type an amount they already know. The split is there because it
+/// genuinely happens, not because it is common, so it stays behind a third
+/// button rather than in front of the other two.
+///
+/// Everything is in PAISE as whole numbers. The caller does the same, so the
+/// two amounts always add up to the penny and the server never refuses a
+/// split that a rider can see is correct.
+class _CollectPaymentSheet extends StatefulWidget {
+  const _CollectPaymentSheet({required this.duePaise});
+
+  final int duePaise;
+
+  @override
+  State<_CollectPaymentSheet> createState() => _CollectPaymentSheetState();
+}
+
+class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
+  final _cashController = TextEditingController();
+  bool _splitting = false;
+  String? _problem;
+
+  @override
+  void dispose() {
+    _cashController.dispose();
+    super.dispose();
+  }
+
+  void _confirmSplit() {
+    final typed = double.tryParse(_cashController.text.trim());
+    if (typed == null) {
+      setState(() => _problem = 'Enter how much came in cash.');
+      return;
+    }
+    final cashPaise = (typed * 100).round();
+    if (cashPaise < 0 || cashPaise > widget.duePaise) {
+      setState(() => _problem =
+          'Cash must be between 0 and ${formatRupees(widget.duePaise / 100)}.');
+      return;
+    }
+    Navigator.of(context).pop(cashPaise);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final due = widget.duePaise / 100;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          16, 20, 16, MediaQuery.of(context).viewInsets.bottom + 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('How did ${formatRupees(due)} arrive?',
+              style: theme.textTheme.titleLarge),
+          const SizedBox(height: 16),
+          if (!_splitting) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(widget.duePaise),
+                icon: const Icon(Icons.payments_outlined),
+                label: const Text('ALL CASH', style: TextStyle(fontSize: 17)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(0),
+                icon: const Icon(Icons.qr_code_2),
+                label: const Text('ALL UPI / QR',
+                    style: TextStyle(fontSize: 17)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: OutlinedButton(
+                onPressed: () => setState(() => _splitting = true),
+                child: const Text('PART CASH, PART UPI',
+                    style: TextStyle(fontSize: 17)),
+              ),
+            ),
+          ] else ...[
+            TextField(
+              controller: _cashController,
+              autofocus: true,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Cash taken',
+                prefixText: '₹ ',
+                border: OutlineInputBorder(),
+              ),
+              // setState ON EVERY KEYSTROKE, not only to clear an error. The
+              // "By UPI / QR" line below is computed from this field, and
+              // without a rebuild it would sit at the old number while the
+              // rider types - showing them a split that is not the one they
+              // are about to send.
+              onChanged: (_) => setState(() => _problem = null),
+            ),
+            const SizedBox(height: 8),
+            // THE REST IS COMPUTED, never typed. Two typed amounts is two
+            // chances to make them not add up, and the rider would be the one
+            // holding a refusal at somebody's door.
+            Builder(builder: (context) {
+              final typed = double.tryParse(_cashController.text.trim()) ?? 0;
+              final rest = due - typed;
+              return Text(
+                rest >= 0
+                    ? 'By UPI / QR: ${formatRupees(rest)}'
+                    : 'That is more than the amount due.',
+                style: theme.textTheme.bodyLarge,
+              );
+            }),
+            if (_problem != null) ...[
+              const SizedBox(height: 8),
+              Text(_problem!,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.error)),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: FilledButton(
+                onPressed: _confirmSplit,
+                child: const Text('CONFIRM', style: TextStyle(fontSize: 17)),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

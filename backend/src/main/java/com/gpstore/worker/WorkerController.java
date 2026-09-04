@@ -65,6 +65,7 @@ public class WorkerController {
     private final DeliveryRepository deliveryRepository;
     private final OrderRepository orderRepository;
     private final com.gpstore.service.DeliveryService deliveryService;
+    private final com.gpstore.repository.CustomerDeliveryRatingRepository ratingRepository;
     private final CurrentUser currentUser;
 
     public WorkerController(WorkerScanService scanService,
@@ -73,6 +74,7 @@ public class WorkerController {
                             DeliveryRepository deliveryRepository,
                             OrderRepository orderRepository,
                             com.gpstore.service.DeliveryService deliveryService,
+                            com.gpstore.repository.CustomerDeliveryRatingRepository ratingRepository,
                             CurrentUser currentUser) {
         this.scanService = scanService;
         this.partnerRepository = partnerRepository;
@@ -80,6 +82,7 @@ public class WorkerController {
         this.deliveryRepository = deliveryRepository;
         this.orderRepository = orderRepository;
         this.deliveryService = deliveryService;
+        this.ratingRepository = ratingRepository;
         this.currentUser = currentUser;
     }
 
@@ -175,6 +178,21 @@ public class WorkerController {
         // worker app already holds - the scan result and the active-task row -
         // carries the id. Looking up by number would need a new index on a
         // column nothing else queries by.
+        return scanService.viewOf(requireOwnOrder(orderId, worker));
+    }
+
+    /**
+     * The one place that decides whether an order is this worker's business.
+     *
+     * Extracted rather than copied because the rating endpoint below needs
+     * exactly this rule, and a second hand-written copy is how the two drift
+     * apart - one of them gets a fix and the other quietly keeps letting a
+     * stranger through.
+     *
+     * A stranger's order reads as not-found, the same as a missing one, so
+     * order ids cannot be probed for existence.
+     */
+    private Order requireOwnOrder(Long orderId, DeliveryPartner worker) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
@@ -190,8 +208,50 @@ public class WorkerController {
         if (!packedByThisWorker && !assignedToThisWorker) {
             throw new ResourceNotFoundException("Order not found");
         }
+        return order;
+    }
 
-        return scanService.viewOf(order);
+    /** A rider's 1-10 read on one delivery. Optional, and admin-eyes-only. */
+    public record CustomerRatingRequest(
+            @jakarta.validation.constraints.NotNull(message = "Give a score from 1 to 10.")
+            @jakarta.validation.constraints.Min(value = 1, message = "The lowest score is 1.")
+            @jakarta.validation.constraints.Max(value = 10, message = "The highest score is 10.")
+            Integer score) {
+    }
+
+    /**
+     * Rate the customer on a delivery this worker actually did.
+     *
+     * NEVER VISIBLE TO THE CUSTOMER, and nothing in the app reads it back to
+     * them. It is written here and read only on the admin's customer screen.
+     *
+     * One rating per order, enforced by a unique index rather than only by
+     * this check, because two taps on a slow connection are a race and a
+     * lost-update here would quietly skew a customer's average.
+     */
+    @PostMapping("/orders/{orderId}/customer-rating")
+    @Transactional
+    public com.gpstore.entity.CustomerDeliveryRating rateCustomer(
+            @PathVariable Long orderId,
+            @Valid @RequestBody CustomerRatingRequest request) {
+
+        DeliveryPartner worker = requireWorker();
+        Order order = requireOwnOrder(orderId, worker);
+
+        if (order.getCustomer() == null) {
+            throw new com.gpstore.exception.BadRequestException(
+                    "This order has no customer to rate.");
+        }
+
+        com.gpstore.entity.CustomerDeliveryRating rating = ratingRepository
+                .findByOrderId(orderId)
+                .orElseGet(com.gpstore.entity.CustomerDeliveryRating::new);
+
+        rating.setOrderId(orderId);
+        rating.setCustomerId(order.getCustomer().getId());
+        rating.setPartnerId(worker.getId());
+        rating.setScore(request.score());
+        return ratingRepository.save(rating);
     }
 
     /**
