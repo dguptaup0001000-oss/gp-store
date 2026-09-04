@@ -370,6 +370,32 @@ public class SecurityConfig {
                 .requestMatchers("/api/invoices/**").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
                 .requestMatchers("/api/audit-logs/**").hasAuthority(AdminPermission.AUDIT_VIEW.authority())
                 .requestMatchers("/api/analytics/**").hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
+                // CARTS: READING IS NOT WRITING - the same fix as order lines
+                // below, one resource over, and missed when that one was made.
+                //
+                // This was one rule for the whole path on CUSTOMERS_VIEW, a
+                // READ permission held by SUPPORT, DELIVERY_MANAGER and
+                // ORDER_MANAGER. Under it sat POST /api/cart-items (a CartItem
+                // bound straight from the body), DELETE /api/cart-items/{id},
+                // and DELETE /api/cart-items/cart/{id} - which empties a whole
+                // basket. Proved with real tokens before this line was written:
+                // a SUPPORT account got 200 OK and wrote cart row 8421, and
+                // both SUPPORT and DELIVERY_MANAGER cleared a cart.
+                //
+                // RolePermissions describes SUPPORT as "Changes nothing else"
+                // and DELIVERY_MANAGER as running dispatch. Neither should be
+                // able to touch a shopper's basket while they are shopping.
+                //
+                // Reads stay on CUSTOMERS_VIEW: answering "what is in their
+                // cart" is exactly why a support agent can reach this at all.
+                .requestMatchers(HttpMethod.POST, "/api/cart-items", "/api/cart-items/**")
+                    .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.PUT, "/api/cart-items/**")
+                    .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.PATCH, "/api/cart-items/**")
+                    .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.DELETE, "/api/cart-items/**")
+                    .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
                 .requestMatchers("/api/cart-items/**").hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
                 // ORDER LINES: READING IS NOT WRITING.
                 //
