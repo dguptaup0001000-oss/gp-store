@@ -81,6 +81,19 @@ public class ProductService {
     @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles", "trending", "frequentlyBought"}, allEntries = true)
     @Transactional
     public ProductResponse saveProduct(Product product) {
+        // NEVER AN UPDATE. save() on an entity carrying an id rewrites that
+        // row, so an id arriving in the request body turns a create into an
+        // overwrite of whichever product it named - renaming it, rebranding
+        // it, or deactivating it - and answers 200 as though a create had
+        // succeeded. The controller binds the raw Product entity, so the id
+        // is bindable whether or not any client sends one.
+        //
+        // Identical guard, and identical reasoning, to CustomerService: the
+        // customer path was fixed for exactly this and products were missed.
+        if (product.getId() != null) {
+            throw new BadRequestException("A new product cannot be created with an id.");
+        }
+
         resolveCategory(product);
         applyModel3dUrl(product, product.getModel3dUrl(), true);
         // forAdmin: only an ADMIN can reach POST /api/products, and the reply
