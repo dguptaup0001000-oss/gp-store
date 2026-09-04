@@ -125,10 +125,27 @@ public record WorkerOrderView(
             }
         }
 
+        // ENUM TO ENUM, and the previous version could never be true.
+        //
+        // It read PaymentMethod.COD.name().equals(payment.getPaymentMethod()) -
+        // a String compared against the PaymentMethod enum the getter actually
+        // returns. String.equals(Object) against an enum is always false. It
+        // compiles, it reads exactly like a correct comparison, and it meant
+        // `cod` was permanently false, so amountToCollect below was
+        // permanently zero.
+        //
+        // The rider was handed a cash-on-delivery order and told to take
+        // nothing. Every COD delivery, since this view was written - and the
+        // doc comment at the top of this file calls amountToCollect the whole
+        // point of it.
+        //
+        // == rather than equals(): on enums it is the reference comparison
+        // that cannot silently compare across types, so the compiler rejects
+        // this class of mistake instead of the runtime swallowing it.
         boolean cod = payment != null
-                && com.gpstore.enums.PaymentMethod.COD.name().equals(payment.getPaymentMethod());
+                && com.gpstore.enums.PaymentMethod.COD == payment.getPaymentMethod();
         boolean settled = payment != null
-                && com.gpstore.enums.PaymentStatus.SUCCESS.name().equals(payment.getPaymentStatus());
+                && com.gpstore.enums.PaymentStatus.SUCCESS == payment.getPaymentStatus();
 
         BigDecimal toCollect = cod && !settled && order.getTotalAmount() != null
                 ? order.getTotalAmount()
