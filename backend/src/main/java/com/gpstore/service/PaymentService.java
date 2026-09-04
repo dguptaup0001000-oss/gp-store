@@ -1346,12 +1346,34 @@ public class PaymentService {
      */
     @Transactional
     public com.gpstore.dto.response.PaymentResponse completeCodPayment(Long orderId) {
-        return completeCodPayment(orderId, null, true);
+        return completeCodPayment(orderId, null, true, null, null);
     }
 
-    @Transactional
+    /** Settle without recording a split - the automatic path from delivery. */
     public com.gpstore.dto.response.PaymentResponse completeCodPayment(
             Long orderId, Long callerWorkerId, boolean isAdmin) {
+        return completeCodPayment(orderId, callerWorkerId, isAdmin, null, null);
+    }
+
+    /**
+     * Settle a cash-on-delivery order, optionally recording how the money
+     * actually arrived.
+     *
+     * cashAmount/upiAmount are what the RIDER reports handing over, and they
+     * must add up to the amount already stored on the payment. The phone
+     * never says what is owed - only how the settled amount was made up - so
+     * a tampered app can misreport the split but cannot change the total or
+     * settle an order for less than it costs.
+     *
+     * Both null means "not recorded", which is the automatic path taken when
+     * a delivery is simply marked delivered. That stays legal on purpose: a
+     * rider who forgets the button should not leave the shop's books showing
+     * money outstanding on a delivered order.
+     */
+    @Transactional
+    public com.gpstore.dto.response.PaymentResponse completeCodPayment(
+            Long orderId, Long callerWorkerId, boolean isAdmin,
+            java.math.BigDecimal cashAmount, java.math.BigDecimal upiAmount) {
 
         Payment payment = lockOrderThenPayment(orderId);
         assertCallerMayCompleteCod(orderId, callerWorkerId, isAdmin);
@@ -1364,13 +1386,38 @@ public class PaymentService {
             throw new ConflictException("COD payment is not pending");
         }
 
+        if (cashAmount != null || upiAmount != null) {
+            java.math.BigDecimal cash =
+                    cashAmount == null ? java.math.BigDecimal.ZERO : cashAmount;
+            java.math.BigDecimal upi =
+                    upiAmount == null ? java.math.BigDecimal.ZERO : upiAmount;
+
+            if (cash.signum() < 0 || upi.signum() < 0) {
+                throw new BadRequestException("A collected amount cannot be negative.");
+            }
+            // MUST RECONCILE. A split that does not add up to the amount due
+            // is worse than no split at all: it looks like a precise record
+            // and silently puts a wrong number into the day's cash count.
+            if (cash.add(upi).compareTo(payment.getAmount()) != 0) {
+                throw new BadRequestException(
+                        "Cash and UPI must add up to the amount due ("
+                                + payment.getAmount() + ").");
+            }
+            payment.setCodCashAmount(cash);
+            payment.setCodUpiAmount(upi);
+        }
+
         payment.setPaymentStatus(PaymentStatus.COD_RECEIVED);
         payment.setPaymentDate(LocalDateTime.now());
+        payment.setCodCollectedByPartnerId(callerWorkerId);
+        payment.setCodCollectedAt(LocalDateTime.now());
 
         Payment saved = paymentRepository.save(payment);
         advanceOrderIfStillPending(saved.getOrder());
         auditLogService.log("COD_PAYMENT_COLLECTED", "Payment", saved.getId(),
-                "orderId=" + orderId + ", amount=" + saved.getAmount());
+                "orderId=" + orderId + ", amount=" + saved.getAmount()
+                        + ", cash=" + saved.getCodCashAmount()
+                        + ", upi=" + saved.getCodUpiAmount());
         return com.gpstore.dto.response.PaymentResponse.from(saved);
     }
 

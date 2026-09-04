@@ -27,6 +27,11 @@ public class PaymentResponse {
     private final BigDecimal refundAmount;
     private final LocalDateTime refundedAt;
     private final String refundFailureReason;
+    // How a cash-on-delivery order was actually settled. Null means the split
+    // was never recorded (settled automatically, or before this existed) -
+    // which a screen must show as "not recorded", never as zero.
+    private final java.math.BigDecimal codCashAmount;
+    private final java.math.BigDecimal codUpiAmount;
 
     public PaymentResponse(Long id, Long orderId, String orderNumber, String customerName, BigDecimal amount,
                             String paymentMethod, String paymentStatus, String transactionId,
@@ -46,6 +51,36 @@ public class PaymentResponse {
         this.refundAmount = refundAmount;
         this.refundedAt = refundedAt;
         this.refundFailureReason = refundFailureReason;
+        this.codCashAmount = null;
+        this.codUpiAmount = null;
+    }
+
+    /**
+     * Kept as a separate constructor rather than extra parameters on the one
+     * above: that signature has other callers, and widening it would make
+     * every one of them pass two nulls to say nothing.
+     */
+    public PaymentResponse(Long id, Long orderId, String orderNumber, String customerName, BigDecimal amount,
+                            String paymentMethod, String paymentStatus, String transactionId,
+                            LocalDateTime paymentDate,
+                            String refundChannel, BigDecimal refundAmount,
+                            LocalDateTime refundedAt, String refundFailureReason,
+                            java.math.BigDecimal codCashAmount, java.math.BigDecimal codUpiAmount) {
+        this.id = id;
+        this.orderId = orderId;
+        this.orderNumber = orderNumber;
+        this.customerName = customerName;
+        this.amount = amount;
+        this.paymentMethod = paymentMethod;
+        this.paymentStatus = paymentStatus;
+        this.transactionId = transactionId;
+        this.paymentDate = paymentDate;
+        this.refundChannel = refundChannel;
+        this.refundAmount = refundAmount;
+        this.refundedAt = refundedAt;
+        this.refundFailureReason = refundFailureReason;
+        this.codCashAmount = codCashAmount;
+        this.codUpiAmount = codUpiAmount;
     }
 
     public static PaymentResponse from(Payment payment) {
@@ -65,9 +100,14 @@ public class PaymentResponse {
                 payment.getRefundChannel() != null ? payment.getRefundChannel().name() : null,
                 payment.getRefundAmount(),
                 payment.getRefundedAt(),
-                payment.getRefundFailureReason()
+                payment.getRefundFailureReason(),
+                payment.getCodCashAmount(),
+                payment.getCodUpiAmount()
         );
     }
+
+    public java.math.BigDecimal getCodCashAmount() { return codCashAmount; }
+    public java.math.BigDecimal getCodUpiAmount() { return codUpiAmount; }
 
     public Long getId() { return id; }
     public Long getOrderId() { return orderId; }

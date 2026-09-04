@@ -144,8 +144,50 @@ private PaymentStatus paymentStatus;
 
     public enum RefundChannel { CASH, GATEWAY }
 
+    /**
+     * WHAT THE RIDER ACTUALLY TOOK AT THE DOOR, split by how it arrived.
+     *
+     * A customer settling a cash-on-delivery order may hand over part in
+     * notes and scan the shop's QR for the rest. One "method" column cannot
+     * record that, and rounding it to whichever half was larger would put a
+     * wrong number straight into the shop's cash reconciliation.
+     *
+     * BOTH NULL is a real and correct state: an order settled before this
+     * existed, or settled automatically when its delivery was marked
+     * delivered, has no split recorded. Null means "not recorded", never
+     * zero - a shopkeeper reading a 0 would think no cash came in.
+     */
+    @Column(name = "cod_cash_amount", precision = 12, scale = 2)
+    private BigDecimal codCashAmount;
+
+    @Column(name = "cod_upi_amount", precision = 12, scale = 2)
+    private BigDecimal codUpiAmount;
+
+    /**
+     * Who took it. A plain id rather than a relation, deliberately: this is
+     * an accounting record and it must outlive the rider leaving the roster,
+     * the same way a delivered order's address outlives the customer account.
+     */
+    @Column(name = "cod_collected_by_partner_id")
+    private Long codCollectedByPartnerId;
+
+    @Column(name = "cod_collected_at")
+    private LocalDateTime codCollectedAt;
+
     public Payment() {
     }
+
+    public BigDecimal getCodCashAmount() { return codCashAmount; }
+    public void setCodCashAmount(BigDecimal codCashAmount) { this.codCashAmount = codCashAmount; }
+
+    public BigDecimal getCodUpiAmount() { return codUpiAmount; }
+    public void setCodUpiAmount(BigDecimal codUpiAmount) { this.codUpiAmount = codUpiAmount; }
+
+    public Long getCodCollectedByPartnerId() { return codCollectedByPartnerId; }
+    public void setCodCollectedByPartnerId(Long id) { this.codCollectedByPartnerId = id; }
+
+    public LocalDateTime getCodCollectedAt() { return codCollectedAt; }
+    public void setCodCollectedAt(LocalDateTime codCollectedAt) { this.codCollectedAt = codCollectedAt; }
 
     public String getRefundId() { return refundId; }
     public void setRefundId(String refundId) { this.refundId = refundId; }
