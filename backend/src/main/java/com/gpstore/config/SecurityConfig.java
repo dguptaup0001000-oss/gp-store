@@ -24,6 +24,7 @@ public class SecurityConfig {
 
     private final JwtFilter jwtFilter;
     private final RateLimitFilter rateLimitFilter;
+    private final com.gpstore.platform.CatalogDefinitionAuthorization catalogDefinition;
 
     // Comma-separated allowed origins. No default of "*" - that would be
     // wide open. Set this explicitly per environment (your Flutter web build's
@@ -31,7 +32,9 @@ public class SecurityConfig {
     @Value("${cors.allowed-origins:http://localhost:3000}")
     private String allowedOrigins;
 
-    public SecurityConfig(JwtFilter jwtFilter, RateLimitFilter rateLimitFilter) {
+    public SecurityConfig(JwtFilter jwtFilter, RateLimitFilter rateLimitFilter,
+                          com.gpstore.platform.CatalogDefinitionAuthorization catalogDefinition) {
+        this.catalogDefinition = catalogDefinition;
         this.jwtFilter = jwtFilter;
         this.rateLimitFilter = rateLimitFilter;
     }
@@ -231,9 +234,26 @@ public class SecurityConfig {
 
                 // Admin-only: catalog and inventory management, cross-customer views,
                 // payment/order status mutation, delivery operations
-                .requestMatchers(HttpMethod.POST, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
-                .requestMatchers(HttpMethod.PUT, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
-                .requestMatchers(HttpMethod.DELETE, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                // THE PLATFORM SURFACE. Merchants, shop lifecycle, and looking
+                // into any shop - the only routes whose scope spans merchants.
+                // Above everything else so nothing below can widen it.
+                .requestMatchers("/api/platform/**").hasAuthority(AdminPermission.PLATFORM_ADMIN.authority())
+
+                // A SHOPKEEPER'S OWN SHOP: their profile, their price list,
+                // their staff. Shop-scoped by TenantContextFilter, so "their
+                // own" is enforced by the tenant filter rather than by a path.
+                .requestMatchers("/api/shop/listings/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers("/api/shop/**").hasAuthority(AdminPermission.CATALOG_VIEW.authority())
+
+                // WRITING THE SHARED CATALOGUE, which is not the same act as
+                // pricing a shelf - see CatalogDefinitionAuthorization. Under
+                // one shop this is exactly CATALOG_MANAGE and nothing changes;
+                // under a marketplace it narrows to the platform, because one
+                // merchant renaming a product renames it for every merchant
+                // selling it.
+                .requestMatchers(HttpMethod.POST, "/api/products/**", "/api/categories/**", "/api/product-variants/**").access(catalogDefinition)
+                .requestMatchers(HttpMethod.PUT, "/api/products/**", "/api/categories/**", "/api/product-variants/**").access(catalogDefinition)
+                .requestMatchers(HttpMethod.DELETE, "/api/products/**", "/api/categories/**", "/api/product-variants/**").access(catalogDefinition)
                 .requestMatchers("/api/inventory/**").hasAuthority(AdminPermission.INVENTORY_MANAGE.authority())
                 .requestMatchers("/api/uploads/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
                 .requestMatchers("/api/orders").hasAuthority(AdminPermission.ORDERS_VIEW.authority())

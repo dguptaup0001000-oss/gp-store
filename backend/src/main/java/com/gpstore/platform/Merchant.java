@@ -73,6 +73,17 @@ public class Merchant {
     @Column(name = "is_demo", nullable = false)
     private Boolean isDemo = Boolean.FALSE;
 
+    /**
+     * The account that answers for this business.
+     *
+     * Used to decide who may change the merchant's own record, and to give a
+     * new shop's staff list a first member without anybody typing one in.
+     * Nullable: the platform can create a merchant before its owner has an
+     * account, which is how onboarding actually starts.
+     */
+    @Column(name = "owner_customer_id")
+    private Long ownerCustomerId;
+
     @Column(nullable = false)
     private Boolean active = Boolean.TRUE;
 
@@ -138,4 +149,8 @@ public class Merchant {
 
     public LocalDateTime getDeletedAt() { return deletedAt; }
     public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
+
+    public Long getOwnerCustomerId() { return ownerCustomerId; }
+
+    public void setOwnerCustomerId(Long ownerCustomerId) { this.ownerCustomerId = ownerCustomerId; }
 }

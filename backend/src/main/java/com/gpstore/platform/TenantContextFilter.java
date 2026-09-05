@@ -37,6 +37,9 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(TenantContextFilter.class);
 
+    /** How a merchant with more than one shop says which one they are working in. */
+    public static final String SHOP_HEADER = "X-Shop-Id";
+
     private final TenantResolver resolver;
 
     public TenantContextFilter(TenantResolver resolver) {
@@ -66,7 +69,7 @@ public class TenantContextFilter extends OncePerRequestFilter {
         }
 
         try {
-            TenantContext.set(resolver.resolve());
+            TenantContext.set(resolver.select(requestedShopId(request)));
         } catch (RuntimeException cannotResolve) {
             // No shop id in the message. Whether a given shop exists is not
             // something an unauthenticated caller should be able to learn
@@ -105,6 +108,32 @@ public class TenantContextFilter extends OncePerRequestFilter {
         return path.startsWith("/api/health")
                 || path.startsWith("/api/version")
                 || path.startsWith("/actuator");
+    }
+
+    /**
+     * The shop a caller asked to act for, if any.
+     *
+     * THIS IS THE ONE THING THE FILTER READS FROM THE REQUEST, and it is a
+     * SELECTION rather than an identity: TenantResolver.select verifies it
+     * against the shops the credential already permits and refuses anything
+     * else. A merchant with three kiranas needs a shop switcher; what they
+     * must not have is a way to name a fourth.
+     *
+     * AN UNREADABLE VALUE IS REFUSED, not ignored. Nothing in the shipped apps
+     * sends this header, so a value that is present and not a number came from
+     * somebody probing - and "ignore what you do not understand" is how a
+     * parser difference becomes an authorization bypass.
+     */
+    private static Long requestedShopId(HttpServletRequest request) {
+        String raw = request.getHeader(SHOP_HEADER);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(raw.trim());
+        } catch (NumberFormatException notANumber) {
+            throw new IllegalStateException("Unreadable " + SHOP_HEADER + " header.");
+        }
     }
 
     /**

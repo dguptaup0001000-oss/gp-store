@@ -48,6 +48,24 @@ public enum Role {
     DELIVERY_MANAGER,
 
     /** Answers the phone: sees enough to explain an order, moderates reviews. */
-    SUPPORT
+    SUPPORT,
+
+    /**
+     * Runs the MARKETPLACE, not a shop.
+     *
+     * <p>DELIBERATELY NOT A WIDER ADMIN. The obvious shortcut - let ADMIN mean
+     * "can do anything, including across shops" - is what turns every
+     * shopkeeper into a platform operator the day a second merchant signs up,
+     * because every existing staff account is an ADMIN. This role is the other
+     * axis: it governs merchants, shop lifecycle and the shared catalogue, and
+     * it is the only role whose scope spans shops.
+     *
+     * <p>It is also NARROWER than ADMIN inside any one shop. A platform
+     * administrator can read an order to settle a dispute; they cannot advance
+     * it, refund it, or edit that shop's rider roster. Running the market is
+     * not the same job as running a shop, and §103 is explicit that the shops
+     * stay independent.
+     */
+    PLATFORM_ADMIN
 
 }

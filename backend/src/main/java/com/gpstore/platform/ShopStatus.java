@@ -36,4 +36,41 @@ public enum ShopStatus {
     public boolean canAcceptOrders() {
         return this == ACTIVE;
     }
+
+    /** Shut for good. Records retained (§91), but there is no way back. */
+    public boolean isTerminal() {
+        return this == CLOSED;
+    }
+
+    /**
+     * Which statuses this one may move to.
+     *
+     * PAUSED AND SUSPENDED ARE BOTH REVERSIBLE AND ARE NOT THE SAME THING.
+     * PAUSED is the shopkeeper's own choice - a holiday, a renovation.
+     * SUSPENDED is the platform stopping them. A shop must not be able to
+     * clear its own suspension by pausing and unpausing, so SUSPENDED goes
+     * only to ACTIVE or CLOSED, and the authorization for that move belongs to
+     * the platform (see ShopLifecycleService).
+     */
+    public java.util.Set<ShopStatus> allowedNext() {
+        return switch (this) {
+            case DRAFT -> java.util.EnumSet.of(ACTIVE, CLOSED);
+            case ACTIVE -> java.util.EnumSet.of(PAUSED, SUSPENDED, CLOSED);
+            case PAUSED -> java.util.EnumSet.of(ACTIVE, SUSPENDED, CLOSED);
+            case SUSPENDED -> java.util.EnumSet.of(ACTIVE, CLOSED);
+            case CLOSED -> java.util.EnumSet.noneOf(ShopStatus.class);
+        };
+    }
+
+    public boolean canMoveTo(ShopStatus next) {
+        return next != null && allowedNext().contains(next);
+    }
+
+    /** Whether a shopkeeper may make this move themselves, without the platform. */
+    public boolean isMerchantChoice(ShopStatus next) {
+        // Pausing and reopening are the shop's own business. Suspending,
+        // un-suspending and closing are not - a shop that could clear its own
+        // suspension would make suspension meaningless.
+        return (this == ACTIVE && next == PAUSED) || (this == PAUSED && next == ACTIVE);
+    }
 }

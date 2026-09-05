@@ -88,7 +88,21 @@ class ShopScopeIsNotOptionalTest {
      * and under SINGLE_SHOP the number it returns today is correct.
      */
     private static final Set<String> REVIEWED_NATIVE_QUERIES = Set.of(
-            "OrderRepository.revenueByDayBetween");
+            "OrderRepository.revenueByDayBetween",
+
+            // THE TWO QUERIES THAT MUST NOT BE FILTERED, and the only ones.
+            // They answer "which shops may this person work in", which is the
+            // question the scope itself is derived from - running them under a
+            // shop scope would narrow the answer to the shop being determined,
+            // and a merchant with two kiranas would only ever see the one they
+            // were already in. Native is how that is made explicit rather than
+            // accidental.
+            //
+            // Neither reads anything a caller sent: the account id comes from
+            // the verified token and the rows come from the database. Neither
+            // returns a row, only shop ids the credential already permits.
+            "ShopStaffRepository.shopIdsFor",
+            "ShopStaffRepository.defaultShopIdFor");
 
     /**
      * Bulk JPQL updates and deletes against shop-owned entities that have been read.

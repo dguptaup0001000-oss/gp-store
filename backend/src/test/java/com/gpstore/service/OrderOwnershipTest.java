@@ -91,7 +91,9 @@ class OrderOwnershipTest {
                 false,
                 // Same again for the shop's price list: nothing here prices a
                 // basket.
-                org.mockito.Mockito.mock(com.gpstore.catalog.shop.ShopCatalog.class));
+                org.mockito.Mockito.mock(com.gpstore.catalog.shop.ShopCatalog.class),
+                // Nor a shop's trading status: nothing here places an order.
+                org.mockito.Mockito.mock(com.gpstore.platform.ShopTradingGate.class));
     }
 
     private Order orderOwnedBy(Long ownerId) {

@@ -107,6 +107,43 @@ class TheTenantNeverComesFromTheRequestTest {
     }
 
     @Test
+    @WithStaff
+    @DisplayName("selecting a shop can narrow, and can never grant")
+    void selectionNarrowsButNeverGrants() {
+        // §78 draws the line here rather than at "no shop id ever". A merchant
+        // with three kiranas needs a shop switcher; what they must not have is
+        // a way to name a fourth. So selection is a SEPARATE, differently
+        // named method from resolution - resolve() still reads nothing but the
+        // credential - and everything it accepts has to already be permitted.
+        Long mine = shopOneId();
+
+        assertEquals(mine, resolver.select(mine).requireShopId(),
+                "naming the shop you are already in is a no-op, which is what a shop switcher "
+                        + "does when there is one shop to switch to");
+        assertEquals(mine, resolver.select(null).requireShopId(),
+                "naming nothing falls back to the credential's own answer");
+
+        assertThrows(RuntimeException.class, () -> resolver.select(999_999_999L),
+                "a shop id nobody granted must be refused outright, not ignored - a switcher "
+                        + "that quietly showed the wrong shop's orders would be worse than an error");
+    }
+
+    @Test
+    @WithStaff
+    @DisplayName("a header naming another shop is refused by the filter, not honoured")
+    void theShopHeaderIsCheckedRatherThanTrusted() throws Exception {
+        // The header exists so a merchant can switch between their OWN shops.
+        // Pointed at one they have no membership of, the request must fail.
+        int status = mockMvc.perform(get("/api/store/status")
+                        .header(TenantContextFilter.SHOP_HEADER, "999999999"))
+                .andReturn().getResponse().getStatus();
+
+        assertEquals(403, status,
+                "an unpermitted shop id in a header must stop the request; ignoring it is how a "
+                        + "parser difference becomes an authorization bypass");
+    }
+
+    @Test
     @DisplayName("resolution is repeatable - it does not drift between calls in one request")
     void resolutionIsStable() {
         TenantScope first = resolver.resolve();

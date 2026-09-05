@@ -61,6 +61,7 @@ public class OrderService {
     private final InvoiceService invoiceService;
     private final TaxService taxService;
     private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
+    private final com.gpstore.platform.ShopTradingGate shopTradingGate;
     private final com.gpstore.repository.DeliveryRepository deliveryRepository;
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
@@ -106,7 +107,8 @@ public class OrderService {
             com.gpstore.store.DeliveryScheduleService deliveryScheduleService,
             @org.springframework.beans.factory.annotation.Value("${orders.require-idempotency-key:true}")
             boolean requireIdempotencyKey,
-            com.gpstore.catalog.shop.ShopCatalog shopCatalog) {
+            com.gpstore.catalog.shop.ShopCatalog shopCatalog,
+            com.gpstore.platform.ShopTradingGate shopTradingGate) {
 
         this.repository = repository;
         this.deliveryScheduleService = deliveryScheduleService;
@@ -133,6 +135,7 @@ public class OrderService {
         this.paymentService = paymentService;
         this.requireIdempotencyKey = requireIdempotencyKey;
         this.shopCatalog = shopCatalog;
+        this.shopTradingGate = shopTradingGate;
     }
 
 
@@ -309,6 +312,13 @@ public class OrderService {
         if (request == null) {
             throw new BadRequestException("Request cannot be null");
         }
+
+        // Can this storefront trade at all? Suspended by the platform, closed
+        // for good, or under a merchant who has been removed - none of those
+        // may take a customer's money, whatever the shop's own open/closed
+        // switch says. See ShopTradingGate for why the two are separate
+        // questions.
+        shopTradingGate.requireCanAcceptOrders();
 
         if (requireIdempotencyKey && (idempotencyKey == null || idempotencyKey.isBlank())) {
             throw new BadRequestException(

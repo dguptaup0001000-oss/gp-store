@@ -598,3 +598,75 @@ restored.
 | **Multi-shop carts** | A basket spanning two shops must split into an order group and N shop orders (§16). Checkout today refuses a line the current shop does not list, which is correct but is not the split | Slice 6 |
 | **Raw SQL bypasses the stamp** | `@PrePersist` cannot see a `JdbcTemplate` insert. No production code does one into a shop-owned table (verified); test fixtures do, which is how unowned rows appear in the test database | — (guarded by `ShopScopeIsNotOptionalTest`) |
 | **`ShopCatalog`'s catalogue fallback** | Under `SINGLE_SHOP` only, an unlisted-but-priced variant is still sold at the catalogue price, with a warning logged. There is no fallback under a marketplace | — (deliberate) |
+
+---
+
+# Slice 3 — identity: who you are decides which shop you are in
+
+## The authorization model
+
+| Axis | Who | What it grants |
+|---|---|---|
+| **Shop** | `ADMIN`, `SUPER_ADMIN`, `MANAGER`, `INVENTORY_MANAGER`, `ORDER_MANAGER`, `DELIVERY_MANAGER`, `SUPPORT` | Everything inside the shops they are on the staff list of. Never more than one shop at a time |
+| **Platform** | `PLATFORM_ADMIN` | Merchants, shop lifecycle, the shared catalogue, cross-shop reporting. **Narrower than ADMIN inside any one shop** — it can read an order to settle a dispute, not advance it, refund it, or touch the roster |
+| **Deployment** | `SYSTEM_ADMIN` permission (ADMIN/SUPER_ADMIN only) | Actuator, API docs, bulk seeding. A third job again, and not the platform's |
+
+**The single most dangerous line in the design, and the bug it fixes.** Slice 1a resolved
+a platform-wide scope from `SYSTEM_ADMIN` — which *every existing shop owner holds*,
+because `ADMIN` was mapped to the whole permission set with `EnumSet.allOf`. The first
+multi-shop deployment would have handed every shopkeeper a scope spanning every merchant.
+The fix is two-part: a distinct `PLATFORM_ADMIN` permission that only the platform role
+holds, and `EVERY_SHOP_PERMISSION` written as a **subtraction** rather than `allOf`, so
+adding a permission never silently grants it to shop roles. Both are pinned by test.
+
+## Staff shop identity
+
+`shop_staff (shop_id, customer_id, is_default, active)` — one row per (shop, account). A
+merchant with three kiranas has three rows.
+
+**The shop is read from the database on every request, never carried in the token.** Same
+decision this codebase already made for permissions: `JwtFilter` derives authorities from
+the live account row so a demotion applies immediately. A shop claim inside a JWT has the
+identical hole — move a manager between shops and their existing token keeps working
+against the old one until it expires. `MarketplaceIdentityTest` moves somebody mid-session
+and asserts the change lands on the next call.
+
+**Selection, not identity.** A merchant with several shops needs a switcher, so
+`X-Shop-Id` is honoured — but `TenantResolver.select()` verifies it against the staff
+list and refuses anything else with a 403. `resolve()` keeps its original signature and
+still reads nothing but the credential; the narrowing is a separate, differently named
+method so the two can never be confused.
+
+## Lifecycle
+
+Closed transition tables on `MerchantStatus` and `ShopStatus` — not "any to any", which
+is a free-text field wearing an enum's clothes. Every move needs a reason and is audited
+(§21). `REMOVED` and `REJECTED` are terminal; a re-application is a new record.
+Suspending a merchant follows through to their shops. Nothing is ever deleted (§91).
+
+**A shop may pause and reopen itself; it may not lift its own suspension or close for
+good.** Enforced in `ShopLifecycleService.transitionAsMerchant`, so the rule holds
+whatever route reaches it.
+
+## Catalogue writes
+
+| Act | Permission | Route |
+|---|---|---|
+| What a product **is** — name, pack size, category, photo | `CATALOG_DEFINE` (platform), or `CATALOG_MANAGE` **under SINGLE_SHOP only** | `/api/products`, `/api/categories`, `/api/product-variants` |
+| What **this shop** charges, stocks, lists | `CATALOG_MANAGE`, shop-scoped | `/api/shop/listings/**` |
+
+`CatalogDefinitionAuthorization` is an `AuthorizationManager` on the route rather than a
+check in a service, so a service reachable from two places cannot be reached through the
+unguarded one — and because SecurityConfig cannot express a mode-dependent rule any other
+way. Under one merchant the shopkeeper **is** the platform, so nothing about catalogue
+editing changes for the shop trading today.
+
+## Still not protected
+
+| Gap | Why | Closes in |
+|---|---|---|
+| **Customers cannot resolve a shop under `MULTI_SHOP_*`** | A customer is on no staff list, so `TenantResolver` refuses them — a clean 403, not a leak, but customer-facing traffic in a marketplace needs shop selection by location or by the shop being browsed | Slice 6 |
+| **Multi-shop carts** | A basket spanning two shops must split into an order group and N shop orders (§16) | Slice 6 |
+| **A shop cannot manage its own staff** | Adding staff is platform-level for now: "who may work here" is the hinge the whole isolation model turns on, and a shop that could add an account could add somebody else's | Slice 7 |
+| **Bulk catalogue import** | Creates products as well as listings, so under a marketplace it stays behind `SYSTEM_ADMIN` rather than being split | Slice 7 |
+| **Riders are not yet shop-selectable** | `delivery_partners.shop_id` scopes them, and a worker token carries `workerId` rather than a customer id, so a rider working for two shops has no way to say which | Slice 7 |

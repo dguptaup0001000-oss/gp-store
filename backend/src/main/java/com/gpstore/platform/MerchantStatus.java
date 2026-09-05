@@ -47,4 +47,41 @@ public enum MerchantStatus {
     public boolean canTrade() {
         return this == ACTIVE;
     }
+
+    /** No coming back from these. A re-application is a new merchant record. */
+    public boolean isTerminal() {
+        return this == REJECTED || this == REMOVED;
+    }
+
+    /**
+     * Which statuses this one may move to.
+     *
+     * WRITTEN OUT RATHER THAN "ANY TO ANY". A lifecycle where every status can
+     * become every other is not a lifecycle, it is a free-text field with an
+     * enum's clothes on: nothing stops a REMOVED merchant being quietly set
+     * back to ACTIVE, and nothing records that APPROVED was ever reached.
+     *
+     * SUSPENDED GOES BACK TO ACTIVE on purpose (see the note on SUSPENDED). A
+     * suspension that could only be undone by re-onboarding would cost a
+     * shopkeeper their entire history over a fixable problem.
+     */
+    public java.util.Set<MerchantStatus> allowedNext() {
+        return switch (this) {
+            case APPLICATION -> java.util.EnumSet.of(PENDING_REVIEW, REJECTED, REMOVED);
+            case PENDING_REVIEW -> java.util.EnumSet.of(
+                    VERIFICATION_REQUIRED, APPROVED, REJECTED, REMOVED);
+            case VERIFICATION_REQUIRED -> java.util.EnumSet.of(
+                    PENDING_REVIEW, APPROVED, REJECTED, REMOVED);
+            case APPROVED -> java.util.EnumSet.of(ACTIVE, SUSPENDED, REMOVED);
+            case ACTIVE -> java.util.EnumSet.of(SUSPENDED, REMOVED);
+            case SUSPENDED -> java.util.EnumSet.of(ACTIVE, REMOVED);
+            // Terminal. A rejected applicant who re-applies gets a new record,
+            // so the first decision and its reason stay readable.
+            case REJECTED, REMOVED -> java.util.EnumSet.noneOf(MerchantStatus.class);
+        };
+    }
+
+    public boolean canMoveTo(MerchantStatus next) {
+        return next != null && allowedNext().contains(next);
+    }
 }

@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class CorsOriginParsingTest {
 
     private List<String> originsFor(String configured) {
-        SecurityConfig config = new SecurityConfig(null, null);
+        SecurityConfig config = new SecurityConfig(null, null, null);
         ReflectionTestUtils.setField(config, "allowedOrigins", configured);
 
         UrlBasedCorsConfigurationSource source =
@@ -79,7 +79,7 @@ class CorsOriginParsingTest {
     @Test
     @DisplayName("no wildcard is ever produced, and credentials stay enabled")
     void wildcardIsNeverIntroduced() {
-        SecurityConfig config = new SecurityConfig(null, null);
+        SecurityConfig config = new SecurityConfig(null, null, null);
         ReflectionTestUtils.setField(config, "allowedOrigins", "https://a.com, https://b.com");
 
         UrlBasedCorsConfigurationSource source =

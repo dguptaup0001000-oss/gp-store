@@ -42,6 +42,11 @@ public final class TenantDefaults {
         resolvedSingleShopId = null;
     }
 
+    /** Which mode the installed defaults describe. For tests that change it and put it back. */
+    public static PlatformMode installedMode() {
+        return mode;
+    }
+
     /** Test seam: put the holder back to the state a fresh JVM starts in. */
     public static void reset() {
         mode = PlatformMode.SINGLE_SHOP;

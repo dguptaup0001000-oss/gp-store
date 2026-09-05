@@ -53,16 +53,43 @@ void main() {
       expect(AdminRoles.all.toSet(), expectedStaff);
     });
 
-    test('ADMIN holds every permission here too', () {
-      // The backend guarantees this (RolePermissions maps ADMIN to the
-      // complete set). If the client disagreed, an existing admin would open
-      // the console and find menu items missing.
+    test('ADMIN holds every shop permission here too', () {
+      // The backend guarantees this (RolePermissions maps ADMIN to every
+      // permission a SHOP role can hold). If the client disagreed, an
+      // existing admin would open the console and find menu items missing.
+      //
+      // NOT "every permission in the enum". PLATFORM_ADMIN and CATALOG_DEFINE
+      // belong to the marketplace operator, and a shopkeeper holding either
+      // would be a shopkeeper with a scope spanning every other merchant.
       expect(rolePermissionsJava.readAsStringSync(),
-          contains('Role.ADMIN, EVERYTHING'));
-      expect(AdminRoles.permissionsFor(AdminRoles.admin),
-          AdminPermission.values.toSet());
-      expect(AdminRoles.permissionsFor(AdminRoles.superAdmin),
-          AdminPermission.values.toSet());
+          contains('Role.ADMIN, EVERY_SHOP_PERMISSION'));
+
+      final shopPermissions = AdminPermission.values
+          .where((p) =>
+              p != AdminPermission.platformAdmin &&
+              p != AdminPermission.catalogDefine)
+          .toSet();
+      expect(AdminRoles.permissionsFor(AdminRoles.admin), shopPermissions);
+      expect(AdminRoles.permissionsFor(AdminRoles.superAdmin), shopPermissions);
+    });
+
+    test('a shop role never holds a platform permission', () {
+      // The client mirror of the backend's most dangerous line. If this ever
+      // passes for a shop role, the admin console is offering a shopkeeper a
+      // screen that acts on every merchant on the platform.
+      for (final role in AdminRoles.all) {
+        final isPlatform = role == AdminRoles.platformAdmin;
+        expect(
+          AdminRoles.permissionsFor(role).contains(AdminPermission.platformAdmin),
+          isPlatform,
+          reason: role,
+        );
+        expect(
+          AdminRoles.permissionsFor(role).contains(AdminPermission.catalogDefine),
+          isPlatform,
+          reason: role,
+        );
+      }
     });
   });
 
