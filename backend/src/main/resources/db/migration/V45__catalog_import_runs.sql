@@ -27,7 +27,15 @@ CREATE TABLE IF NOT EXISTS catalog_import_runs (
     -- if the bytes differ. Without this, "947 valid, 22 errors" describes one
     -- file and the commit applies another - the single most dangerous thing
     -- a bulk importer can do.
-    file_sha256       CHAR(64)     NOT NULL,
+    -- VARCHAR, NOT CHAR(64), and the difference is not cosmetic. The entity
+    -- maps a String, which Hibernate expects as varchar; CHAR comes back as
+    -- bpchar and ddl-auto=validate refuses to start:
+    --   "found [bpchar (Types#CHAR)], but expecting [varchar(64)]".
+    -- The local bootstrap never caught it because ddl-auto=update creates the
+    -- table from the ENTITY and leaves this CREATE TABLE IF NOT EXISTS a
+    -- no-op - so the SQL below had never actually run anywhere until CI
+    -- rehearsed it against a database that did not already have the table.
+    file_sha256       VARCHAR(64)  NOT NULL,
 
     total_rows        INTEGER      NOT NULL DEFAULT 0,
     valid_rows        INTEGER      NOT NULL DEFAULT 0,
