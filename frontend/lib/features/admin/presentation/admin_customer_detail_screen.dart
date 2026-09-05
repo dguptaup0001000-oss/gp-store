@@ -65,6 +65,8 @@ class AdminCustomerDetailScreen extends ConsumerWidget {
               const SizedBox(height: AdminSpacing.md),
               _WishlistCard(wishlist: detail.wishlist),
               const SizedBox(height: AdminSpacing.md),
+              _ConductCard(conduct: detail.conduct),
+              const SizedBox(height: AdminSpacing.md),
               _EngagementCard(engagement: detail.engagement),
               const SizedBox(height: AdminSpacing.xl),
             ],
@@ -554,6 +556,124 @@ class _WishlistCard extends StatelessWidget {
               ],
             ),
     );
+  }
+}
+
+// --- Delivery conduct -----------------------------------------------------
+
+/// How riders have found this customer at the door.
+///
+/// THE READ SIDE OF A FEATURE THAT ONLY HAD A WRITE SIDE. Riders have been
+/// scoring deliveries out of ten since the collection screen shipped and the
+/// rows have been landing in the database ever since - but nothing read them
+/// back, so the shopkeeper this was built for could not see one of them.
+///
+/// NEVER RATED IS NOT A BAD RATING. Zero is the worst score there is, so an
+/// unrated customer gets a sentence rather than a number; showing 0/10 would
+/// put somebody at the bottom of the shop's list for having done nothing.
+class _ConductCard extends StatelessWidget {
+  const _ConductCard({required this.conduct});
+
+  final CustomerConduct conduct;
+
+  @override
+  Widget build(BuildContext context) {
+    return AdminSectionCard(
+      title: 'How deliveries went',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!conduct.hasRatings)
+            const Text(
+              'No rider has rated a delivery to this customer yet.',
+              style: AdminText.bodyMuted,
+            )
+          else ...[
+            Row(
+              children: [
+                _Stat(
+                  label: 'Average',
+                  value: '${conduct.averageScore!.toStringAsFixed(1)} / 10',
+                ),
+                _Stat(
+                  label: 'Rated deliveries',
+                  value: '${conduct.ratedDeliveries}',
+                ),
+              ],
+            ),
+            if (conduct.recent.isNotEmpty) ...[
+              const SizedBox(height: AdminSpacing.md),
+              // Newest first, so a customer who was difficult once and fine
+              // since does not read as difficult.
+              for (final line in conduct.recent)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AdminSpacing.sm),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 34,
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _scoreBackground(line.score),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '${line.score}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                            color: _scoreForeground(line.score),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AdminSpacing.sm),
+                      Expanded(
+                        child: Text('Order #${line.orderId}',
+                            style: AdminText.body),
+                      ),
+                      Text(_date(line.ratedAt), style: AdminText.caption),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+          const SizedBox(height: AdminSpacing.md),
+          // Says out loud what this number is. One rider's judgement on one
+          // day at one doorstep - useful for warning the next rider, not a
+          // record to refuse somebody service on.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.info_outline,
+                  size: 14, color: AdminColors.textMuted),
+              const SizedBox(width: AdminSpacing.sm),
+              const Expanded(
+                child: Text(
+                  "One rider's judgement of one delivery. Useful for warning "
+                  'the next rider; not a reason on its own to refuse someone.',
+                  style: AdminText.caption,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Only the ends are coloured. A 6 and a 7 are the same information, and
+  // painting every score would turn an ordinary delivery into a verdict.
+  static Color _scoreBackground(int score) {
+    if (score <= 3) return AdminColors.dangerBg;
+    if (score >= 8) return AdminColors.successBg;
+    return AdminColors.border;
+  }
+
+  static Color _scoreForeground(int score) {
+    if (score <= 3) return AdminColors.danger;
+    if (score >= 8) return AdminColors.success;
+    return AdminColors.textSecondary;
   }
 }
 
