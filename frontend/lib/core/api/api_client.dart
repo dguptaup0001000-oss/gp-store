@@ -148,6 +148,7 @@ class ApiClient {
         final retryOptions = error.requestOptions;
         retryOptions.headers['Authorization'] = 'Bearer $newAccessToken';
         retryOptions.extra[_refreshedKey] = true;
+        _refreshBodyForRetry(retryOptions);
         try {
           final retryResponse = await _dio.fetch(retryOptions);
           handler.resolve(retryResponse);
@@ -172,6 +173,30 @@ class ApiClient {
     handler.next(_mapToApiException(error));
   }
 
+  /// Makes a body safe to send a second time.
+  ///
+  /// BOTH RETRY PATHS REUSE THE ORIGINAL RequestOptions, and for a multipart
+  /// upload that body is single-use: dio's MultipartFile throws
+  /// StateError('already been finalized') once its bytes have been streamed.
+  /// A JSON Map can be serialised any number of times, which is why this only
+  /// ever mattered once the app started uploading files.
+  ///
+  /// FormData.clone() rebuilds each part from its data builder, so a file made
+  /// with MultipartFile.fromBytes clones correctly even after it has been
+  /// sent - which is exactly the case dio documents clone() for. A file made
+  /// from a consumed Stream cannot be replayed by anyone, so if cloning
+  /// refuses, the original is left alone and the request fails as it did
+  /// before rather than failing in a new way here.
+  static void _refreshBodyForRetry(RequestOptions options) {
+    final data = options.data;
+    if (data is! FormData) return;
+    try {
+      options.data = data.clone();
+    } catch (_) {
+      // Unreplayable body. Leave it; the retry will fail on its own terms.
+    }
+  }
+
   /// Retries the request if the policy allows, and reports whether it did.
   ///
   /// The attempt count rides on the RequestOptions' own extra map, so it
@@ -187,6 +212,7 @@ class ApiClient {
     await Future<void>.delayed(_retryPolicy.delayFor(attempt, error: error));
 
     options.extra[_attemptKey] = attempt;
+    _refreshBodyForRetry(options);
     try {
       handler.resolve(await _dio.fetch(options));
     } on DioException catch (retryError) {

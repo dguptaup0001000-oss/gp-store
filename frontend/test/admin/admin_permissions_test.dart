@@ -189,6 +189,33 @@ void main() {
       );
     });
 
+    test('bulk catalogue import is owner-only, not a catalogue role', () {
+      // One upload can rewrite every price in the shop. SecurityConfig gates
+      // /api/admin/catalog/** on SYSTEM_ADMIN, so listing this any wider would
+      // only show a catalogue role a link that returns 403.
+      final import =
+          AdminNav.all.firstWhere((d) => d.label == 'Import Catalogue');
+      expect(import.requires, AdminPermission.systemAdmin);
+
+      expect(
+        AdminNav.isVisible(
+            import, AdminRoles.permissionsFor(AdminRoles.admin)),
+        isTrue,
+      );
+      for (final role in [
+        AdminRoles.manager,
+        AdminRoles.inventoryManager,
+        AdminRoles.orderManager,
+        AdminRoles.support,
+      ]) {
+        expect(
+          AdminNav.isVisible(import, AdminRoles.permissionsFor(role)),
+          isFalse,
+          reason: role,
+        );
+      }
+    });
+
     test('a destination a role cannot use is not visible to it', () {
       final inventory =
           AdminNav.all.firstWhere((d) => d.label == 'Inventory');

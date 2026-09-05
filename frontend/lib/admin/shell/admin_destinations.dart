@@ -5,6 +5,7 @@ import '../auth/admin_permissions.dart';
 import '../../features/admin/presentation/admin_analytics_screen.dart';
 import '../../features/admin/presentation/admin_audit_log_screen.dart';
 import '../../features/admin/presentation/admin_broadcast_screen.dart';
+import '../../features/admin/presentation/admin_catalog_import_screen.dart';
 import '../../features/admin/presentation/admin_category_list_screen.dart';
 import '../../features/admin/presentation/admin_coupon_list_screen.dart';
 import '../../features/admin/presentation/admin_customers_screen.dart';
@@ -194,6 +195,18 @@ class AdminNav {
           description: 'Stock levels, restock, low-stock alerts',
           builder: _inventory,
         ),
+        // SYSTEM_ADMIN, not catalogManage, and deliberately so: one upload can
+        // rewrite every price in the shop, and SecurityConfig gates
+        // /api/admin/catalog/** on SYSTEM_ADMIN. Listing it any wider here
+        // would only show an INVENTORY_MANAGER a link that returns 403.
+        AdminDestination(
+          id: 'catalog-import',
+          requires: AdminPermission.systemAdmin,
+          label: 'Import Catalogue',
+          icon: Icons.upload_file_outlined,
+          description: 'Load products from a spreadsheet',
+          builder: _catalogImport,
+        ),
         AdminDestination(
           id: 'coupons',
           requires: AdminPermission.couponsManage,
@@ -359,6 +372,8 @@ class AdminNav {
       const AdminProductListScreen();
   static Widget _categories(BuildContext context) =>
       const AdminCategoryListScreen();
+  static Widget _catalogImport(BuildContext context) =>
+      const AdminCatalogImportScreen();
   static Widget _inventory(BuildContext context) => const AdminInventoryScreen();
   static Widget _coupons(BuildContext context) => const AdminCouponListScreen();
   static Widget _workers(BuildContext context) => const AdminWorkersScreen();
