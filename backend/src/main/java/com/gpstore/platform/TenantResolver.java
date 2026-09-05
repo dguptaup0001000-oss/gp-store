@@ -35,16 +35,19 @@ public class TenantResolver {
     private final ShopMembership membership;
     private final ShopDiscovery discovery;
     private final CustomerShopPreference customerShops;
+    private final com.gpstore.repository.DeliveryPartnerRepository riders;
 
     public TenantResolver(PlatformProperties platform, CurrentUser currentUser,
                           ShopRepository shops, ShopMembership membership,
-                          ShopDiscovery discovery, CustomerShopPreference customerShops) {
+                          ShopDiscovery discovery, CustomerShopPreference customerShops,
+                          com.gpstore.repository.DeliveryPartnerRepository riders) {
         this.platform = platform;
         this.currentUser = currentUser;
         this.shops = shops;
         this.membership = membership;
         this.discovery = discovery;
         this.customerShops = customerShops;
+        this.riders = riders;
     }
 
     /**
@@ -71,6 +74,28 @@ public class TenantResolver {
         // existed, with nothing in any log to show for it.
         if (currentUser.has(AdminPermission.PLATFORM_ADMIN)) {
             return TenantScope.platform();
+        }
+
+        // A RIDER'S SHOP IS ON THEIR ROSTER ROW.
+        //
+        // A worker session carries a workerId and no customer id at all -
+        // their credentials live on delivery_partners, not on customers - so
+        // the staff list has nothing to say about them. The roster row already
+        // carries the shop they were hired by (V46), and that is the answer.
+        //
+        // Read live, like everything else here: a rider moved between shops,
+        // or taken off the roster, stops working there on the next request
+        // rather than when their shift token expires.
+        Long workerId = currentWorkerIdOrNull();
+        if (workerId != null) {
+            Long riderShop = riders.findById(workerId)
+                    .map(com.gpstore.entity.DeliveryPartner::getShopId)
+                    .orElse(null);
+            if (riderShop != null) {
+                return TenantScope.ofShop(riderShop);
+            }
+            throw new IllegalStateException(
+                    "This rider is not on any shop's roster, so there is no shop to work in.");
         }
 
         // Staff work in the shops they are on the staff list of. Read from
@@ -189,6 +214,15 @@ public class TenantResolver {
 
         throw new IllegalStateException(
                 "This account is not on the staff of the shop it asked to act for.");
+    }
+
+    /** The signed-in rider, or null when this is not a worker session. */
+    private Long currentWorkerIdOrNull() {
+        try {
+            return currentUser.get().getWorkerId();
+        } catch (RuntimeException noCredential) {
+            return null;
+        }
     }
 
     /** The signed-in account, or null when there is no credential at all. */

@@ -53,6 +53,16 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findByCustomerId(Long customerId);
 
     /**
+     * Every shop's order under one checkout.
+     *
+     * Ordered by shop so a customer's screen does not reshuffle between
+     * refreshes. Shop-filtered like every other query here - which means a
+     * shopkeeper opening a group sees only their own half, and the customer
+     * who placed it reads it through CustomerOwnedRead.
+     */
+    List<Order> findByOrderGroupIdOrderByShopIdAsc(Long orderGroupId);
+
+    /**
      * Locks the order row for the duration of the transaction. cancelOrder
      * and updateOrderStatus both used to be a plain read-check-write: read
      * the current status, validate the transition, write the new status and

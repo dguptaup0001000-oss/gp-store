@@ -745,3 +745,118 @@ carries that exemption with all three alternative protections named.
 | **Delivery is per shop, not pooled** | Two shops means two riders and two fees. Correct today; a marketplace may later want one rider collecting from several | Later |
 | **Cart lines are not re-priced when a shop delists** | Checkout refuses an unlisted item, so nobody is overcharged — but the customer finds out at checkout rather than in the basket | Slice 7 |
 | **A customer with no serviceable address gets a 403** | Fail-closed and correct, but the app needs a "no shop delivers here yet" screen rather than an error | Frontend |
+
+---
+
+# Slice 7 — the surfaces the split made necessary
+
+Slice 6 made a checkout into several orders. Nothing the customer, the rider or the
+shopkeeper touches knew that yet. This slice is the surfaces, and the three bugs that
+only appear once a basket can span shops.
+
+## The checkout, as one thing
+
+```
+GET  /api/orders/groups              every checkout this customer has made
+GET  /api/orders/groups/{id}         one checkout, per shop: status, payment, fee, total
+PUT  /api/orders/groups/{id}/cancel  cancel each shop's order that can still be cancelled
+```
+
+**The group is a view, not a second order.** Cancelling a group is `OrderService.cancelOrder`
+called once per shop order — the same routine, with the same inventory restore, refund
+obligation, notification and audit, that a single cancellation has always used. Nothing is
+re-implemented, so a group cancel cannot drift from cancelling the same orders one at a time.
+
+**The answer is per shop, because the truth is.** One kirana may still be packing while the
+other's rider is at the door. Refusing to cancel anything because one shop has dispatched
+would leave the customer paying for the half they could have stopped; cancelling everything
+regardless would cancel an order physically on its way. Each shop answers for itself and the
+response says which did what and why.
+
+**`cancelWholeCheckout` is deliberately not `@Transactional`, and that is the whole reason it
+works.** `cancelOrder` is transactional. Wrapping the loop makes every call join one
+transaction — so the first shop that refuses marks the *shared* transaction rollback-only and
+the cancellations that had already succeeded are silently undone at commit. The customer
+would be told two shops were cancelled and find that neither was. Without the wrapper each
+shop's cancellation commits on its own, which is the independent-lifecycle requirement stated
+plainly rather than a convenience.
+
+**A group has no `shop_id`, so the filter has nothing to say about it.** What stops one
+customer opening another's checkout is the row naming its customer, compared against the id
+on the token; the reads are wrapped in `CustomerOwnedRead` for the same reason `getMyOrders`
+is. A guessed id answers **404, not 403** — a 403 confirms the checkout exists.
+
+## Discovery, before there is a scope
+
+```
+GET /api/marketplace/shops?lat&lng   shops that will deliver there, nearest first
+GET /api/marketplace/shops/{id}      one storefront
+GET /api/marketplace/mode            which platform mode this deployment runs in
+```
+
+Public, and **platform-scoped by name** in `TenantContextFilter` — it has to be, because a
+customer choosing a shop does not have one yet. It is the only public surface that spans
+shops, and it exposes exactly what a shopfront sign does: name, address, whether it is open,
+whether it delivers to you. A shop that is not browsable, or is suspended, is **absent from
+the list and 404 on its own id** — not 403, for the same reason as above. No coordinates
+means an empty list rather than every shop, the same fail-closed rule as everywhere else.
+
+## A rider's shop is on their roster row
+
+A worker session carries a `workerId` and no customer id at all — rider credentials live on
+`delivery_partners`, not on `customers` — so the staff list had nothing to say about them
+and resolution refused them. The roster row already carries the shop that hired them (V46),
+and that is now the answer. Read live, like every other resolution here: a rider moved
+between shops, or taken off the roster, stops working there on the next request rather than
+when their shift token expires. A rider on nobody's roster gets no scope at all.
+
+## A shop hires its own staff
+
+```
+POST   /api/shop/staff              add an account to this shop's roster
+DELETE /api/shop/staff/{customerId} take them off it
+```
+
+Both gated on `CUSTOMERS_MANAGE`, and neither takes a shop id — the shop is the caller's.
+
+**"Who may work here" is the hinge the isolation model turns on**, because a staff row is
+what gives an account a scope. So `addToOwnShop` is narrower than the platform's `grant`:
+the account must be a real staff account (a customer added to a roster would silently gain a
+shop scope they never applied for), must not already work at a *different* shop (otherwise a
+merchant attaches themselves to a competitor's roster and shop-switching does the rest), and
+can never be a platform administrator (their scope spans the marketplace and a shop must not
+be able to reach for it). The owner cannot be removed. Anything wider stays with the
+platform.
+
+## The basket, once a basket can span shops
+
+**Every line was being read in one shop's scope.** The split made baskets multi-shop before
+the basket screen knew, so a two-shop basket showed one shop's lines correctly and drew the
+other shop's as out of stock at a stale price. Lines are now grouped by their own
+`cart_items.shop_id` and each group read inside `ShopScopeSwitch.within(shopId, …)` — one
+query per **shop**, not per line, so a single-shop basket costs exactly what it always did.
+
+**Delisting is not running out.** A shop can drop a line it still has units of; the listing
+row stays, so a re-listing keeps the shop's own price rather than resetting to the
+catalogue's. A basket that checked only for a price would go on offering something checkout
+will refuse. `ShelfLine` now carries the listing's `available` and `active` flags and
+`isOrderableHere()` decides — the customer sees it in the basket rather than after choosing
+an address and a payment method.
+
+## What the mutation checks proved
+
+Removing the group ownership comparison, removing the hiring limits, and reading the whole
+basket in one shop's scope each turned tests red — 3 failures in `MarketplaceSurfaceTest`,
+2 in `ShopStaffAndRidersTest`. Every protection above is load-bearing.
+
+## Still not protected
+
+| Gap | Why | Closes in |
+|---|---|---|
+| **Payment is per shop order** | Decision W1 — each merchant collects directly — so a two-shop checkout is two payments. Correct for the model chosen; the group holds the relationship between them but there is no single "pay for everything" flow | Needs W2 |
+| **Delivery is per shop, not pooled** | Two shops means two riders and two fees | Later |
+| **Order numbering is per shop** | Two shops can issue the same-looking number on the same day; the group number disambiguates but decision W3 is still open | Needs W3 |
+| **A rider serves exactly one shop** | The roster row carries one `shop_id`. A shared rider pool needs decision W4 | Needs W4 |
+| **Refund deadline policy** | A group cancel produces per-shop refund obligations, each on that shop's own clock. No policy has been chosen for how long a customer has | Open decision |
+| **No admin surface for the group** | Shopkeepers see their own order and always did. Nobody sees the whole checkout except the customer | Slice 8 |
+| **Flutter is unchanged** | Every endpoint here is backend-only and CI-verified; no Dart consumes the group, the marketplace list, or the delisted-line flag yet | Frontend slice |

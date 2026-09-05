@@ -62,16 +62,35 @@ public interface ShopProductVariantRepository extends JpaRepository<ShopProductV
      * join are filtered to the shop in scope - proved by
      * CrossTenantShopCatalogTest rather than assumed.
      */
-    @Query("select i.productVariant.id as variantId, i.stock as stock, s.sellingPrice as price "
+    @Query("select i.productVariant.id as variantId, i.stock as stock, s.sellingPrice as price, "
+            + "s.available as listed, s.active as activeListing "
             + "from Inventory i "
             + "left join ShopProductVariant s on s.productVariantId = i.productVariant.id "
             + "where i.productVariant.id in :variantIds")
     List<ShelfLine> findShelfLines(@Param("variantIds") Collection<Long> variantIds);
 
-    /** One basket line's stock and price. A null price means this shop does not list it. */
+    /**
+     * One basket line's stock and price at one shop.
+     *
+     * THE FLAGS MATTER AS MUCH AS THE PRICE. A shop can delist an item it
+     * still has a row and units for - the row stays, so that a re-listing
+     * keeps the shop's own price rather than resetting to the catalogue's -
+     * and a basket that read only the price would go on offering something
+     * checkout will refuse.
+     */
     interface ShelfLine {
         Long getVariantId();
         Integer getStock();
         java.math.BigDecimal getPrice();
+        Boolean getListed();
+        Boolean getActiveListing();
+
+        /** Whether this shop will actually sell it right now. */
+        default boolean isOrderableHere() {
+            return Boolean.TRUE.equals(getListed())
+                    && Boolean.TRUE.equals(getActiveListing())
+                    && getPrice() != null
+                    && getPrice().signum() > 0;
+        }
     }
 }

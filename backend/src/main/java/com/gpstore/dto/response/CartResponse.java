@@ -38,14 +38,28 @@ public class CartResponse {
         return from(cart, stockByVariantId, Map.of());
     }
 
+    /** Kept for callers that do not know which lines are still listed. */
+    public static CartResponse from(Cart cart, Map<Long, Integer> stockByVariantId,
+                                    Map<Long, BigDecimal> shopPriceByVariantId) {
+        return from(cart, stockByVariantId, shopPriceByVariantId, null);
+    }
+
     /**
      * @param stockByVariantId live inventory for the customer's cart. A
      *                         missing key means "do not apply a stock gate"
      *                         (admin listings). A present value is compared
      *                         to the line quantity.
      */
+    /**
+     * @param stillListedVariantIds the lines whose shop still sells them. Null
+     *                              means "the caller did not check", which is
+     *                              not the same as "none" - a caller with no
+     *                              listing information must not turn a whole
+     *                              basket grey.
+     */
     public static CartResponse from(Cart cart, Map<Long, Integer> stockByVariantId,
-                                    Map<Long, BigDecimal> shopPriceByVariantId) {
+                                    Map<Long, BigDecimal> shopPriceByVariantId,
+                                    java.util.Set<Long> stillListedVariantIds) {
         if (cart == null) {
             return new CartResponse(null, List.of(), BigDecimal.ZERO, 0);
         }
@@ -53,7 +67,7 @@ public class CartResponse {
         Map<Long, Integer> stock = stockByVariantId == null ? Map.of() : stockByVariantId;
         Map<Long, BigDecimal> prices = shopPriceByVariantId == null ? Map.of() : shopPriceByVariantId;
         List<CartItemResponse> items = cart.getItems().stream()
-                .map(item -> CartItemResponse.from(item, stock, prices))
+                .map(item -> CartItemResponse.from(item, stock, prices, stillListedVariantIds))
                 .toList();
 
         // Derived live from the mapped lines so a catalog price change
@@ -110,6 +124,12 @@ public class CartResponse {
 
         static CartItemResponse from(CartItem item, Map<Long, Integer> stockByVariantId,
                                      Map<Long, BigDecimal> shopPriceByVariantId) {
+            return from(item, stockByVariantId, shopPriceByVariantId, null);
+        }
+
+        static CartItemResponse from(CartItem item, Map<Long, Integer> stockByVariantId,
+                                     Map<Long, BigDecimal> shopPriceByVariantId,
+                                     java.util.Set<Long> stillListedVariantIds) {
             var variant = item.getProductVariant();
             var product = variant != null ? variant.getProduct() : null;
 
@@ -128,6 +148,15 @@ public class CartResponse {
             if (isAvailable && variant.getId() != null && stockByVariantId.containsKey(variant.getId())) {
                 Integer stock = stockByVariantId.get(variant.getId());
                 isAvailable = stock != null && stock >= item.getQuantity();
+            }
+
+            // AND WHETHER THE SHOP STILL SELLS IT AT ALL. Delisting is not the
+            // same as running out: a shop can drop a line it still has units
+            // of, and checkout refuses that line. Showing it here is what
+            // stops the customer meeting that refusal after they have chosen
+            // an address and a payment method.
+            if (isAvailable && stillListedVariantIds != null && variant.getId() != null) {
+                isAvailable = stillListedVariantIds.contains(variant.getId());
             }
 
             // WHAT THIS SHOP CHARGES, then what the line was saved at, then the

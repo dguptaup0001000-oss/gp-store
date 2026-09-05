@@ -149,6 +149,12 @@ public class TenantContextFilter extends OncePerRequestFilter {
     private static boolean spansEveryShop(HttpServletRequest request) {
         String path = request.getServletPath();
         return path.startsWith("/api/auth/")
-                || path.startsWith("/api/payments/webhooks/");
+                || path.startsWith("/api/payments/webhooks/")
+                // FINDING A SHOP CANNOT REQUIRE HAVING ONE. A customer who
+                // has just installed the app has no shop yet, and asking them
+                // to have one before they may ask which shops exist is a 403
+                // on the first screen. These routes read shops and nothing
+                // shop-owned - see MarketplaceController.
+                || path.startsWith("/api/marketplace/");
     }
 }

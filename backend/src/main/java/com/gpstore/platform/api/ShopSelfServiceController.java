@@ -38,10 +38,21 @@ public class ShopSelfServiceController {
     private final ShopProductVariantRepository listings;
     private final ShopStaffRepository staff;
     private final CurrentUser currentUser;
+    private final ShopMembership membership;
+    private final MerchantRepository merchants;
+    private final com.gpstore.repository.CustomerRepository customers;
+    private final com.gpstore.service.AuditLogService auditLog;
 
     public ShopSelfServiceController(ShopRepository shops, ShopLifecycleService shopLifecycle,
                                      ShopProductVariantRepository listings,
-                                     ShopStaffRepository staff, CurrentUser currentUser) {
+                                     ShopStaffRepository staff, CurrentUser currentUser,
+                                     ShopMembership membership, MerchantRepository merchants,
+                                     com.gpstore.repository.CustomerRepository customers,
+                                     com.gpstore.service.AuditLogService auditLog) {
+        this.membership = membership;
+        this.merchants = merchants;
+        this.customers = customers;
+        this.auditLog = auditLog;
         this.shops = shops;
         this.shopLifecycle = shopLifecycle;
         this.listings = listings;
@@ -183,6 +194,58 @@ public class ShopSelfServiceController {
                 .map(s -> new StaffView(s.getCustomerId(), s.getIsDefault(), s.getActive()))
                 .toList();
     }
+
+    /**
+     * Adds somebody to THIS shop's staff.
+     *
+     * NO SHOP ID IN THE PATH, like everything else here - the shop is the one
+     * the credential resolved to, so a shopkeeper cannot add staff to a
+     * competitor's roster by changing a number. The limits on WHO may be added
+     * are in ShopMembership.addToOwnShop, where they belong: they are the same
+     * limits whatever route reaches them.
+     *
+     * CUSTOMERS_MANAGE, not CATALOG_MANAGE. Hiring is a people decision, and
+     * the role that stocks the shelves has no business making it.
+     */
+    @PostMapping("/staff")
+    public StaffView addStaff(@RequestBody AddStaffRequest request) {
+        requirePermission(AdminPermission.CUSTOMERS_MANAGE);
+        Long shopId = TenantContext.require().requireShopId();
+        ShopStaff added = membership.addToOwnShop(shopId, request.customerId(),
+                accountId -> customers.findById(accountId)
+                        .map(c -> c.getRole() == null ? null : c.getRole().name())
+                        .orElse(null));
+        auditLog.log("SHOP_STAFF_ADDED", "ShopStaff", added.getId(),
+                "shop=" + shopId + ", account=" + request.customerId());
+        return new StaffView(added.getCustomerId(), added.getIsDefault(), added.getActive());
+    }
+
+    /**
+     * Takes somebody off this shop's staff.
+     *
+     * DEACTIVATES RATHER THAN DELETES (§91) - who worked here and when is part
+     * of the record behind every order they touched. And a shop cannot remove
+     * the merchant's own owner, because an owner who could be removed by their
+     * own manager is a shop that can be locked away from the person
+     * answerable for it.
+     */
+    @DeleteMapping("/staff/{customerId}")
+    public void removeStaff(@PathVariable Long customerId) {
+        requirePermission(AdminPermission.CUSTOMERS_MANAGE);
+        Shop shop = currentShop();
+        Long owner = merchants.findById(shop.getMerchantId())
+                .map(com.gpstore.platform.Merchant::getOwnerCustomerId)
+                .orElse(null);
+        if (customerId != null && customerId.equals(owner)) {
+            throw new com.gpstore.exception.ConflictException(
+                    "The merchant's owner cannot be removed from their own shop's staff.");
+        }
+        membership.revoke(shop.getId(), customerId);
+        auditLog.log("SHOP_STAFF_REMOVED", "ShopStaff", shop.getId(),
+                "account=" + customerId);
+    }
+
+    public record AddStaffRequest(Long customerId) {}
 
     private Shop currentShop() {
         Long shopId = TenantContext.require().requireShopId();

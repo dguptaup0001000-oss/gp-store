@@ -32,6 +32,7 @@ public class CartService {
     private final InventoryRepository inventoryRepository;
     private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
     private final com.gpstore.catalog.shop.ShopProductVariantRepository shopListings;
+    private final com.gpstore.platform.ShopScopeSwitch shopScopeSwitch;
 
     public CartService(
             CartRepository cartRepository,
@@ -40,7 +41,8 @@ public class CartService {
             CartItemRepository cartItemRepository,
             InventoryRepository inventoryRepository,
             com.gpstore.catalog.shop.ShopCatalog shopCatalog,
-            com.gpstore.catalog.shop.ShopProductVariantRepository shopListings) {
+            com.gpstore.catalog.shop.ShopProductVariantRepository shopListings,
+            com.gpstore.platform.ShopScopeSwitch shopScopeSwitch) {
 
         this.cartRepository = cartRepository;
         this.customerRepository = customerRepository;
@@ -49,6 +51,7 @@ public class CartService {
         this.inventoryRepository = inventoryRepository;
         this.shopCatalog = shopCatalog;
         this.shopListings = shopListings;
+        this.shopScopeSwitch = shopScopeSwitch;
     }
 
     public Cart saveCart(Cart cart) {
@@ -340,31 +343,66 @@ public class CartService {
         if (cart == null) {
             return com.gpstore.dto.response.CartResponse.from(null);
         }
+        // EACH LINE ASKED OF ITS OWN SHOP.
+        //
+        // A basket spans shops, and stock and price do not: reading the whole
+        // basket in whichever shop's scope the request arrived with answered
+        // for that shop's lines and drew every other shop's as out of stock at
+        // a stale price. That is a bug this slice found in the one it followed
+        // - the split made baskets multi-shop before the basket screen knew.
+        //
+        // One query per SHOP, not per line, so a basket from one shop pays
+        // exactly what it always paid.
+        java.util.Map<Long, java.util.LinkedHashSet<Long>> variantsByShop =
+                new java.util.LinkedHashMap<>();
         java.util.LinkedHashSet<Long> variantIds = new java.util.LinkedHashSet<>();
         for (CartItem item : cart.getItems()) {
             if (item.getProductVariant() == null || item.getProductVariant().getId() == null) {
                 continue;
             }
             variantIds.add(item.getProductVariant().getId());
-        }
-        java.util.Map<Long, Integer> stock = new java.util.HashMap<>();
-        java.util.Map<Long, BigDecimal> shopPrices = new java.util.HashMap<>();
-        if (!variantIds.isEmpty()) {
-            // ONE query for stock AND this shop's price - see
-            // ShopProductVariantRepository.findShelfLines on why they are
-            // fetched together rather than in two round trips.
-            for (var line : shopListings.findShelfLines(variantIds)) {
-                stock.put(line.getVariantId(), line.getStock() == null ? 0 : line.getStock());
-                if (line.getPrice() != null) {
-                    shopPrices.put(line.getVariantId(), line.getPrice());
-                }
-            }
-            for (Long variantId : variantIds) {
-                stock.putIfAbsent(variantId, 0);
+            if (item.getShopId() != null) {
+                variantsByShop
+                        .computeIfAbsent(item.getShopId(), shop -> new java.util.LinkedHashSet<>())
+                        .add(item.getProductVariant().getId());
             }
         }
 
-        return com.gpstore.dto.response.CartResponse.from(cart, stock, shopPrices);
+        java.util.Map<Long, Integer> stock = new java.util.HashMap<>();
+        java.util.Map<Long, BigDecimal> shopPrices = new java.util.HashMap<>();
+        java.util.Set<Long> stillListed = new java.util.HashSet<>();
+        for (var shopBasket : variantsByShop.entrySet()) {
+            // ONE query for stock AND that shop's price - see
+            // ShopProductVariantRepository.findShelfLines on why they are
+            // fetched together rather than in two round trips.
+            shopScopeSwitch.within(shopBasket.getKey(), () -> {
+                for (var line : shopListings.findShelfLines(shopBasket.getValue())) {
+                    stock.put(line.getVariantId(), line.getStock() == null ? 0 : line.getStock());
+                    if (line.getPrice() != null) {
+                        shopPrices.put(line.getVariantId(), line.getPrice());
+                    }
+                    // LISTED IS NOT THE SAME AS HAVING A ROW. A shop that
+                    // delists an item keeps its row - so a re-listing keeps
+                    // the shop's own price - and a basket that checked only
+                    // for a price would go on offering it.
+                    if (line.isOrderableHere()) {
+                        stillListed.add(line.getVariantId());
+                    }
+                }
+                return null;
+            });
+        }
+        for (Long variantId : variantIds) {
+            stock.putIfAbsent(variantId, 0);
+        }
+
+        // A LINE ITS SHOP NO LONGER LISTS IS SHOWN AS UNAVAILABLE, in the
+        // basket rather than at checkout. Checkout already refuses it - nobody
+        // is overcharged - but finding out at the last step, after choosing an
+        // address and a payment method, is the surprise the availability flag
+        // exists to prevent.
+        return com.gpstore.dto.response.CartResponse.from(
+                cart, stock, shopPrices, java.util.Set.copyOf(stillListed));
     }
 
     private void requireStockFor(Long variantId, int quantity, String productName) {

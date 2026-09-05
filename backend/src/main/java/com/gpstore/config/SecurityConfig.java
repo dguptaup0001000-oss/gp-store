@@ -234,6 +234,13 @@ public class SecurityConfig {
 
                 // Admin-only: catalog and inventory management, cross-customer views,
                 // payment/order status mutation, delivery operations
+                // THE SHOP WINDOW. Which storefronts exist and which of them
+                // will deliver to a given point - the one thing a customer's
+                // app needs before it has a shop at all. Public for the same
+                // reason the product catalogue is: refusing it would mean an
+                // app that cannot show anybody anything until they sign in.
+                .requestMatchers(HttpMethod.GET, "/api/marketplace/**").permitAll()
+
                 // THE PLATFORM SURFACE. Merchants, shop lifecycle, and looking
                 // into any shop - the only routes whose scope spans merchants.
                 // Above everything else so nothing below can widen it.

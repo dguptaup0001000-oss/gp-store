@@ -102,6 +102,57 @@ public class ShopMembership {
                 .orElse(false);
     }
 
+    /**
+     * A shop adding somebody to its OWN staff, within the limits the platform
+     * sets.
+     *
+     * WHY THIS IS NOT JUST grant(). "Who may work here" is the hinge the whole
+     * isolation model turns on: a staff row is what gives an account a tenant
+     * scope, so a shop that could add any account could hand itself a person
+     * who already works for a competitor - or, worse, add a competitor's owner
+     * and read nothing while giving that owner a second shop to select.
+     *
+     * THE LIMITS, and each is here because of what it prevents:
+     *
+     *   the account must not already be staff of a DIFFERENT shop - otherwise
+     *   one merchant can attach themselves to another's roster by getting
+     *   their own account added, and shop-switching does the rest;
+     *
+     *   the account must be a real, active staff account - a customer added to
+     *   a roster would silently gain a shop scope they never applied for;
+     *
+     *   and a platform administrator can never be added, because their scope
+     *   spans the marketplace and a shop must not be able to reach for it.
+     *
+     * Anything wider than this stays with the platform (PlatformMerchantController).
+     */
+    @Transactional
+    public ShopStaff addToOwnShop(Long shopId, Long customerId,
+                                  java.util.function.Function<Long, String> roleOf) {
+        if (shopId == null || customerId == null) {
+            throw new com.gpstore.exception.BadRequestException("A shop and an account are required.");
+        }
+        String role = roleOf.apply(customerId);
+        if (role == null) {
+            throw new com.gpstore.exception.ResourceNotFoundException("That account does not exist.");
+        }
+        if (com.gpstore.entity.Role.PLATFORM_ADMIN.name().equals(role)) {
+            throw new com.gpstore.exception.ConflictException(
+                    "A platform administrator cannot be added to a shop's staff.");
+        }
+        if (com.gpstore.security.RolePermissions.forRoleName(role).isEmpty()) {
+            throw new com.gpstore.exception.ConflictException(
+                    "That account is not a staff account, so it cannot be given a shop to work in.");
+        }
+        for (Long existing : shopIdsFor(customerId)) {
+            if (!existing.equals(shopId)) {
+                throw new com.gpstore.exception.ConflictException(
+                        "That account already works at another shop.");
+            }
+        }
+        return grant(shopId, customerId, true);
+    }
+
     /** Adds an account to a shop's staff, idempotently. */
     @Transactional
     public ShopStaff grant(Long shopId, Long customerId, boolean asDefault) {
