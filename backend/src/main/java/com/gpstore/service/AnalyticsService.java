@@ -162,7 +162,13 @@ public class AnalyticsService {
         LocalDateTime from = firstDay.atStartOfDay();
 
         Map<LocalDate, Object[]> byDay = new HashMap<>();
-        for (Object[] row : orderRepository.revenueByDayBetween(from, to)) {
+        // The shop comes from the scope on this thread, never from the
+        // request - see TenantResolver. Platform-wide callers pass null and
+        // get the whole market, which is the one legitimate cross-shop read.
+        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+        Long shopId = scope == null ? null : scope.shopId();
+
+        for (Object[] row : orderRepository.revenueByDayBetween(from, to, shopId)) {
             LocalDate day = toLocalDate(row[0]);
             if (day != null) {
                 byDay.put(day, row);

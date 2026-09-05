@@ -29,19 +29,25 @@ public class CartService {
     private final ProductVariantRepository productVariantRepository;
     private final CartItemRepository cartItemRepository;
     private final InventoryRepository inventoryRepository;
+    private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
+    private final com.gpstore.catalog.shop.ShopProductVariantRepository shopListings;
 
     public CartService(
             CartRepository cartRepository,
             CustomerRepository customerRepository,
             ProductVariantRepository productVariantRepository,
             CartItemRepository cartItemRepository,
-            InventoryRepository inventoryRepository) {
+            InventoryRepository inventoryRepository,
+            com.gpstore.catalog.shop.ShopCatalog shopCatalog,
+            com.gpstore.catalog.shop.ShopProductVariantRepository shopListings) {
 
         this.cartRepository = cartRepository;
         this.customerRepository = customerRepository;
         this.productVariantRepository = productVariantRepository;
         this.cartItemRepository = cartItemRepository;
         this.inventoryRepository = inventoryRepository;
+        this.shopCatalog = shopCatalog;
+        this.shopListings = shopListings;
     }
 
     public Cart saveCart(Cart cart) {
@@ -179,6 +185,15 @@ public class CartService {
                             + " is currently unavailable");
         }
 
+        // WHAT THIS SHOP CHARGES, not what the catalogue suggests. The
+        // catalogue row is the price a shop starts from; the shop's own
+        // listing is the price a customer pays, and a shop that does not list
+        // the item does not sell it at all. Under one shop the two are equal
+        // by construction, so nothing about this changes today.
+        BigDecimal unitPrice = shopCatalog.priceOf(variant).orElseThrow(() -> new ConflictException(
+                (variant.getProduct() != null ? variant.getProduct().getName() : "This item")
+                        + " is currently unavailable"));
+
         // ---- THE CRITICAL SECTION STARTS HERE ----------------------------
         //
         // Locked for the rest of this transaction (see
@@ -213,16 +228,16 @@ public class CartService {
 
         if (existingItem != null) {
             existingItem.setQuantity(nextQuantity);
-            existingItem.setPrice(variant.getSellingPrice());
-            existingItem.setTotalPrice(variant.getSellingPrice().multiply(BigDecimal.valueOf(nextQuantity)));
+            existingItem.setPrice(unitPrice);
+            existingItem.setTotalPrice(unitPrice.multiply(BigDecimal.valueOf(nextQuantity)));
             cartItemRepository.save(existingItem);
         } else {
             CartItem cartItem = new CartItem();
             cartItem.setCart(cart);
             cartItem.setProductVariant(variant);
             cartItem.setQuantity(quantity);
-            cartItem.setPrice(variant.getSellingPrice());
-            cartItem.setTotalPrice(variant.getSellingPrice().multiply(BigDecimal.valueOf(quantity)));
+            cartItem.setPrice(unitPrice);
+            cartItem.setTotalPrice(unitPrice.multiply(BigDecimal.valueOf(quantity)));
             cartItemRepository.save(cartItem);
             cart.getItems().add(cartItem);
         }
@@ -258,9 +273,7 @@ public class CartService {
             var variant = item.getProductVariant();
             requireStockFor(variant.getId(), newQuantity, variant.getProduct() != null
                     ? variant.getProduct().getName() : "This item");
-            if (variant.getSellingPrice() != null) {
-                item.setPrice(variant.getSellingPrice());
-            }
+            shopCatalog.priceOf(variant).ifPresent(item::setPrice);
             item.setQuantity(newQuantity);
             item.setTotalPrice(item.getPrice().multiply(BigDecimal.valueOf(newQuantity)));
             cartItemRepository.save(item);
@@ -317,17 +330,23 @@ public class CartService {
             variantIds.add(item.getProductVariant().getId());
         }
         java.util.Map<Long, Integer> stock = new java.util.HashMap<>();
+        java.util.Map<Long, BigDecimal> shopPrices = new java.util.HashMap<>();
         if (!variantIds.isEmpty()) {
-            for (Object[] row : inventoryRepository.findStockByProductVariantIds(variantIds)) {
-                Long variantId = (Long) row[0];
-                Integer qty = row[1] instanceof Number n ? n.intValue() : 0;
-                stock.put(variantId, qty);
+            // ONE query for stock AND this shop's price - see
+            // ShopProductVariantRepository.findShelfLines on why they are
+            // fetched together rather than in two round trips.
+            for (var line : shopListings.findShelfLines(variantIds)) {
+                stock.put(line.getVariantId(), line.getStock() == null ? 0 : line.getStock());
+                if (line.getPrice() != null) {
+                    shopPrices.put(line.getVariantId(), line.getPrice());
+                }
             }
             for (Long variantId : variantIds) {
                 stock.putIfAbsent(variantId, 0);
             }
         }
-        return com.gpstore.dto.response.CartResponse.from(cart, stock);
+
+        return com.gpstore.dto.response.CartResponse.from(cart, stock, shopPrices);
     }
 
     private void requireStockFor(Long variantId, int quantity, String productName) {

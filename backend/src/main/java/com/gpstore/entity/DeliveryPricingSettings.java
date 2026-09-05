@@ -1,5 +1,10 @@
 package com.gpstore.entity;
 
+import com.gpstore.platform.ShopOwned;
+import com.gpstore.platform.ShopScopeFilter;
+import com.gpstore.platform.TenantEntityListener;
+import org.hibernate.annotations.Filter;
+
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -26,7 +31,9 @@ import java.time.LocalDateTime;
 @Getter
 @Setter
 @NoArgsConstructor
-public class DeliveryPricingSettings implements java.io.Serializable {
+@Filter(name = ShopScopeFilter.NAME, condition = ShopScopeFilter.CONDITION)
+@EntityListeners(TenantEntityListener.class)
+public class DeliveryPricingSettings implements java.io.Serializable, ShopOwned {
 
     /**
      * Serializable because this is cached, and the cache is Redis with JDK
@@ -38,10 +45,44 @@ public class DeliveryPricingSettings implements java.io.Serializable {
      */
     private static final long serialVersionUID = 1L;
 
+    /**
+     * NOT A SINGLETON ANY MORE. This used to be a row pinned to id 1 by a
+     * database CHECK, because there was one shop and therefore one answer to
+     * "are you taking orders" and "what do you charge to deliver". There is
+     * now one row per shop (V49), the id is handed out by the database, and
+     * the row is found by the shop in scope rather than by a constant.
+     *
+     * The constant survives only so that a caller written against the old
+     * shape fails to compile rather than silently reading shop #1's settings.
+     *
+     * @deprecated look the row up by shop - see the service that owns it.
+     */
+    @Deprecated(forRemoval = true)
     public static final long SINGLETON_ID = 1L;
 
     @Id
-    private Long id = SINGLETON_ID;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    /**
+     * Whose settings these are.
+     *
+     * Stamped on insert and filtered on read by the Slice 1 machinery, like
+     * every other shop-owned row - which is what makes one merchant unable to
+     * read or change another's delivery pricing.
+     */
+    @Column(name = "shop_id")
+    private Long shopId;
+
+    @Override
+    public Long getShopId() {
+        return shopId;
+    }
+
+    @Override
+    public void setShopId(Long shopId) {
+        this.shopId = shopId;
+    }
 
     // EVERY COLUMN NAME IS EXPLICIT, and that is not style. Hibernate's
     // naming strategy turns distanceTier1Charge into "distance_tier1charge" -

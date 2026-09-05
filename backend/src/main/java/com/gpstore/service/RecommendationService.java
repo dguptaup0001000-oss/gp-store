@@ -32,9 +32,14 @@ public class RecommendationService {
     private final OrderItemRepository orderItemRepository;
     private final ProductRepository productRepository;
 
-    public RecommendationService(OrderItemRepository orderItemRepository, ProductRepository productRepository) {
+    private final com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue;
+
+    public RecommendationService(OrderItemRepository orderItemRepository,
+                                 ProductRepository productRepository,
+                                 com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue) {
         this.orderItemRepository = orderItemRepository;
         this.productRepository = productRepository;
+        this.shopPricedCatalogue = shopPricedCatalogue;
     }
 
     /** "Customers who bought this also bought..." - ranked by real co-purchase count, not guessed. */
@@ -184,7 +189,7 @@ public class RecommendationService {
             // something the shop has deliberately withdrawn. Caching these
             // made that stick for the whole TTL rather than one request.
             if (product != null && Boolean.TRUE.equals(product.getActive())) {
-                results.add(ProductResponse.from(product));
+                results.add(ProductResponse.from(product, shopPricedCatalogue.termsFor(product)));
             }
         }
         return results;

@@ -88,7 +88,10 @@ class OrderOwnershipTest {
                 deliveryScheduleServiceUnused,
                 // requireIdempotencyKey: these tests cover cancellation and
                 // ownership, never the checkout entry point that reads it.
-                false);
+                false,
+                // Same again for the shop's price list: nothing here prices a
+                // basket.
+                org.mockito.Mockito.mock(com.gpstore.catalog.shop.ShopCatalog.class));
     }
 
     private Order orderOwnedBy(Long ownerId) {

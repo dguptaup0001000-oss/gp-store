@@ -18,7 +18,8 @@ class DeliveryFeeServiceTest {
     // base=15 up to 2km, then 3/km beyond, free-delivery factor K=3 - the
     // exact rule you specified.
     private final DeliveryFeeService service =
-            new DeliveryFeeService("15", "2", "3", "3");
+            new DeliveryFeeService("15", "2", "3", "3",
+                    org.mockito.Mockito.mock(com.gpstore.catalog.shop.ShopCatalog.class));
 
     @Test
     void feeIsFlatBaseChargeWithinFreeDistance() {

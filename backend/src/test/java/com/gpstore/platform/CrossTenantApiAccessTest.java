@@ -111,7 +111,7 @@ class CrossTenantApiAccessTest {
 
         jdbc.update("""
                 INSERT INTO delivery_partners (name, mobile, available, active, shop_id)
-                VALUES (?, ?, true, true, ?)
+                VALUES (?, ?, false, true, ?)
                 """, "Other shop rider " + tag,
                 "8" + (100000000 + (int) (Math.random() * 899999999)), shopB);
         otherShopsRiderId = jdbc.queryForObject(
@@ -144,6 +144,32 @@ class CrossTenantApiAccessTest {
      */
     @AfterEach
     void removeTheFixture() {
+        // RETRIED, because some of what this deletes is written AFTER the
+        // request that caused it returns: confirming an order queues a
+        // notification through AfterCommitExecutor, which lands on another
+        // thread once the transaction commits. In an isolated run the delete
+        // always wins that race; in a full suite it does not, and the failure
+        // is a foreign key violation in teardown rather than anything about
+        // the test.
+        for (int attempt = 1; ; attempt++) {
+            try {
+                deleteFixtureRows();
+                return;
+            } catch (org.springframework.dao.DataIntegrityViolationException stillReferenced) {
+                if (attempt == 5) {
+                    throw stillReferenced;
+                }
+                try {
+                    Thread.sleep(200L * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw stillReferenced;
+                }
+            }
+        }
+    }
+
+    private void deleteFixtureRows() {
         jdbc.update("DELETE FROM notifications WHERE order_id in (?, ?)", ourOrderId, otherShopsOrderId);
         jdbc.update("DELETE FROM order_scan_events WHERE order_id in (?, ?)", ourOrderId, otherShopsOrderId);
         jdbc.update("DELETE FROM invoices WHERE order_id in (?, ?)", ourOrderId, otherShopsOrderId);
@@ -151,6 +177,8 @@ class CrossTenantApiAccessTest {
         jdbc.update("DELETE FROM payments WHERE order_id in (?, ?)", ourOrderId, otherShopsOrderId);
         jdbc.update("DELETE FROM inventory WHERE id in (?, ?)", ourStockRowId, otherShopsStockRowId);
         jdbc.update("DELETE FROM coupons WHERE id = ?", otherShopsCouponId);
+        jdbc.update("DELETE FROM deliveries WHERE batch_id in "
+                + "(SELECT id FROM delivery_batches WHERE delivery_partner_id = ?)", otherShopsRiderId);
         jdbc.update("DELETE FROM delivery_batches WHERE delivery_partner_id = ?", otherShopsRiderId);
         jdbc.update("UPDATE orders SET assigned_worker_partner_id = null, packed_by_partner_id = null "
                 + "WHERE assigned_worker_partner_id = ? or packed_by_partner_id = ?",

@@ -127,10 +127,19 @@ class InventoryLockOrderingTest {
                 "A no-op restore must not lock inventory rows it will not touch");
     }
 
+    /**
+     * Restoration now names the SHOP as well as the variant.
+     *
+     * It runs from the payment-expiry sweep, which spans shops and has no
+     * filter enabled, so the shop is read off the order being restored rather
+     * than left to whichever row the query found first. The two-argument
+     * overload is what the restore path calls; the ordering invariant this
+     * test exists for is unchanged.
+     */
     private List<Long> lockedVariantIdsInCallOrder() {
         ArgumentCaptor<Long> captor = ArgumentCaptor.forClass(Long.class);
         Mockito.verify(inventoryService, Mockito.atLeast(0))
-                .getByProductVariantForUpdate(captor.capture());
+                .getByProductVariantForUpdate(captor.capture(), Mockito.any());
         return captor.getAllValues();
     }
 

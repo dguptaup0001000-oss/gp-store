@@ -197,17 +197,32 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      * absent here; the service fills them with zero so the chart has no
      * holes.
      */
+    /**
+     * THE SHOP PREDICATE IS WRITTEN BY HAND, because this query is native.
+     *
+     * Hibernate's filter rewrites JPQL and HQL; it does not touch a native
+     * statement, so without the clause below this would total EVERY shop's
+     * takings into one line on one shop's dashboard. The value is not a
+     * parameter a caller chooses: AnalyticsService reads it from the tenant
+     * scope on the thread, which came from the credential.
+     *
+     * A NULL shopId means platform-wide, which is a real answer for a
+     * marketplace operator looking at the whole market - and is what a
+     * single-shop deployment's scheduled reporting already does.
+     */
     @Query(value = "select date_trunc('day', o.order_date) as day, "
             + "coalesce(sum(o.total_amount), 0) as revenue, "
             + "count(*) as orders "
             + "from orders o "
             + "where o.order_date >= :from and o.order_date <= :to "
             + "and o.order_status <> 'CANCELLED' "
+            + "and (cast(:shopId as bigint) is null or o.shop_id = :shopId) "
             + "group by date_trunc('day', o.order_date) "
             + "order by 1",
             nativeQuery = true)
     List<Object[]> revenueByDayBetween(@Param("from") LocalDateTime from,
-                                       @Param("to") LocalDateTime to);
+                                       @Param("to") LocalDateTime to,
+                                       @Param("shopId") Long shopId);
 
     /** Order count grouped by current status - the "what's in the pipeline right now" view. */
     @Query("select o.orderStatus as status, count(o) as cnt from Order o group by o.orderStatus")

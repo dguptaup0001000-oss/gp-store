@@ -137,6 +137,22 @@ public class InventoryService {
     }
 
     /**
+     * The same lock, for a named shop.
+     *
+     * For work that runs outside a shop's request - the payment-expiry sweep
+     * restoring an abandoned order's stock - where the filter is off and the
+     * shop has to be stated. The caller reads it off the order, never off a
+     * request.
+     */
+    public Inventory getByProductVariantForUpdate(Long productVariantId, Long shopId) {
+        if (shopId == null) {
+            return getByProductVariantForUpdate(productVariantId);
+        }
+        return repository.findByProductVariantIdAndShopIdForUpdate(productVariantId, shopId)
+                .orElse(null);
+    }
+
+    /**
      * Concurrency-safe stock decrement. The UPDATE itself is the lock:
      * {@code stock = stock - n WHERE stock >= n} either matches one row or
      * none. Two buyers of the last unit cannot both succeed. Throws
@@ -147,7 +163,11 @@ public class InventoryService {
         if (quantity <= 0) {
             throw new BadRequestException("Purchase quantity must be positive");
         }
-        int updated = repository.decrementIfAvailable(productVariantId, quantity);
+        // The shop comes from the scope on this thread. A purchase always
+        // belongs to exactly one shop, so there is no sensible unscoped
+        // answer here - and guessing one would decrement a stranger's stock.
+        Long shopId = com.gpstore.platform.TenantDefaults.shopIdForCurrentWork(Inventory.class);
+        int updated = repository.decrementIfAvailable(productVariantId, quantity, shopId);
         if (updated == 0) {
             Inventory inventory = repository.findByProductVariantId(productVariantId).orElse(null);
             if (inventory == null) {

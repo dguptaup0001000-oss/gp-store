@@ -67,15 +67,14 @@ class ShopScopeIsNotOptionalTest {
     /**
      * Shop-owned tables whose entity is deliberately not filtered yet.
      *
-     * Both are single-row settings tables loaded by findById(SINGLETON_ID), and
-     * a Hibernate filter does not apply to a load by primary key. Making them
-     * per-shop is not a matter of tagging the class - the singleton itself has
-     * to become one row per shop. Named here so the gap is a decision with an
-     * owner rather than something this test failed to notice; the entry comes
-     * out in the slice that splits them.
+     * EMPTY, and it has to stay that way to mean anything. It held
+     * store_operations_settings and delivery_pricing_settings while they were
+     * single-row tables loaded by findById(SINGLETON_ID) - a load by primary
+     * key that no filter can see. V49 gave each of them one row per shop and
+     * the services now find them by shop, so the exemption is gone rather than
+     * grandfathered.
      */
-    private static final Set<String> SETTINGS_SINGLETONS_NOT_YET_SPLIT =
-            Set.of("store_operations_settings", "delivery_pricing_settings");
+    private static final Set<String> SETTINGS_SINGLETONS_NOT_YET_SPLIT = Set.of();
 
     /**
      * Native queries that touch a shop-owned table and have been read.
@@ -100,10 +99,9 @@ class ShopScopeIsNotOptionalTest {
      * fails this test until somebody has done the same.
      */
     private static final Set<String> REVIEWED_BULK_STATEMENTS = Set.of(
-            // Keyed by the product variant's own id. Inventory is one row per
-            // variant today, so there is exactly one row this can reach and it
-            // is the right one; the shop predicate arrives when stock becomes
-            // per shop-product, in the slice that introduces shop offerings.
+            // Now carries "and i.shopId = :shopId", read off the tenant scope
+            // rather than off a caller. Listed because a bulk update is still
+            // invisible to the filter, so the clause has to survive edits.
             "InventoryRepository.decrementIfAvailable",
 
             // Deletes ADDRESSES, not orders - Order appears only inside a "not

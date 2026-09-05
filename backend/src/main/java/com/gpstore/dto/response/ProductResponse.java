@@ -248,7 +248,12 @@ public class ProductResponse implements Serializable {
      * site that picks the wrong one should be obvious in review.
      */
     public static ProductResponse forAdmin(Product product) {
-        ProductResponse base = from(product);
+        return forAdmin(product, java.util.Map.of());
+    }
+
+    public static ProductResponse forAdmin(Product product,
+            java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings) {
+        ProductResponse base = from(product, listings);
         if (base == null) return null;
         return base.withPrivacy(product.getIsPrivateProduct(), product.getCustomerDisplayName());
     }
@@ -263,13 +268,25 @@ public class ProductResponse implements Serializable {
     public String getCustomerDisplayName() { return customerDisplayName; }
 
     public static ProductResponse from(Product product) {
+        return from(product, java.util.Map.of());
+    }
+
+    /**
+     * @param listings this shop's terms for each variant, keyed by variant id.
+     *                 Empty means "no shop context" and the catalogue defaults
+     *                 stand - see VariantResponse.from.
+     */
+    public static ProductResponse from(Product product,
+            java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings) {
         if (product == null) {
             return null;
         }
+        java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> shopTerms =
+                listings == null ? java.util.Map.of() : listings;
         List<VariantResponse> variants = product.getVariants() == null
                 ? List.of()
                 : product.getVariants().stream()
-                        .map(VariantResponse::from)
+                        .map(v -> VariantResponse.from(v, shopTerms.get(v.getId())))
                         .collect(Collectors.toList());
 
         return new ProductResponse(
@@ -303,7 +320,19 @@ public class ProductResponse implements Serializable {
      * the product still loads the full variant list.
      */
     public static ProductResponse fromCard(Product product) {
-        ProductResponse full = from(product);
+        return fromCard(product, java.util.Map.of());
+    }
+
+    /**
+     * The card, priced by this shop.
+     *
+     * The listings are applied BEFORE the cheapest-size pick, not after: which
+     * pack is cheapest is a question about this shop's prices, and answering it
+     * from the catalogue would put the wrong size on the card.
+     */
+    public static ProductResponse fromCard(Product product,
+            java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings) {
+        ProductResponse full = from(product, listings);
         if (full == null) {
             return null;
         }

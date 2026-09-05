@@ -84,13 +84,18 @@ public class StoreOperationsService {
         if (acceptance == null) {
             throw new BadRequestException("An order acceptance state is required: AUTO, ON or OFF.");
         }
+        // BY SHOP, NOT BY A CONSTANT ID. These settings used to be one row for
+        // the whole deployment; they are now one row per shop, found by the
+        // shop the credential resolved to. Nothing here reads a shop id from
+        // the request.
+        Long shopId = com.gpstore.platform.TenantDefaults
+                .shopIdForCurrentWork(StoreOperationsSettings.class);
         StoreOperationsSettings settings = settingsRepository
-                .findById(StoreOperationsSettings.SINGLETON_ID)
+                .findByShopId(shopId)
                 .orElseGet(StoreOperationsSettings::new);
 
         StoreOrderAcceptance previous = settings.acceptanceOrDefault();
 
-        settings.setId(StoreOperationsSettings.SINGLETON_ID);
         settings.setOrderAcceptance(acceptance);
         if (message != null) {
             String trimmed = message.trim();
@@ -104,7 +109,7 @@ public class StoreOperationsService {
         auditLogService.log(
                 "STORE_ORDER_ACCEPTANCE_CHANGED",
                 "StoreOperationsSettings",
-                StoreOperationsSettings.SINGLETON_ID,
+                saved.getId(),
                 "acceptance: " + previous + " -> " + acceptance
                         + (saved.getClosureMessage() == null ? "" : ", message: " + saved.getClosureMessage()));
 

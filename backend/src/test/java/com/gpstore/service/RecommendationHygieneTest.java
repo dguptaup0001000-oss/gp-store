@@ -127,11 +127,26 @@ class RecommendationHygieneTest {
 
         var cache = cacheManager.getCache("trending");
         assertNotNull(cache, "the trending cache must be configured");
-        // Spring's SimpleKeyGenerator wraps multiple @Cacheable arguments in a
-        // SimpleKey - NOT a List, which is what this asserted first time and
-        // is why it failed while the caching worked perfectly.
-        assertNotNull(cache.get(new org.springframework.cache.interceptor.SimpleKey(7, 10)),
-                "a trending result must be cached, keyed on its own arguments");
+
+        // THE KEY CARRIES THE SHOP, and asserting the exact key is the point.
+        // Every catalogue cache is keyed on its arguments alone by default,
+        // which was correct while there was one price list and is a
+        // cross-shop leak the moment there is more than one: the first shop
+        // to ask fills the entry and every other shop is served its answer
+        // with no query run. CacheConfig.keyGenerator prefixes the scope, so
+        // the key below names the namespace as well as the arguments. This
+        // call runs with no tenant scope on the thread, which is its own
+        // namespace - not any shop's.
+        //
+        // Spring wraps multiple @Cacheable arguments in a SimpleKey - NOT a
+        // List, which is what this asserted first time and is why it failed
+        // while the caching worked perfectly.
+        assertNotNull(cache.get(new org.springframework.cache.interceptor.SimpleKey("unscoped", 7, 10)),
+                "a trending result must be cached, keyed on the shop it was computed for "
+                        + "as well as on its own arguments");
+        assertNull(cache.get(new org.springframework.cache.interceptor.SimpleKey(7, 10)),
+                "the shop-free key must miss - if it hits, the namespace is not in the key and "
+                        + "one shop's catalogue is being served to another");
     }
 
     private void clearCaches() {

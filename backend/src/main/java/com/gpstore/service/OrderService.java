@@ -60,6 +60,7 @@ public class OrderService {
     private final AuditLogService auditLogService;
     private final InvoiceService invoiceService;
     private final TaxService taxService;
+    private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
     private final com.gpstore.repository.DeliveryRepository deliveryRepository;
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
@@ -104,7 +105,8 @@ public class OrderService {
             @org.springframework.context.annotation.Lazy PaymentService paymentService,
             com.gpstore.store.DeliveryScheduleService deliveryScheduleService,
             @org.springframework.beans.factory.annotation.Value("${orders.require-idempotency-key:true}")
-            boolean requireIdempotencyKey) {
+            boolean requireIdempotencyKey,
+            com.gpstore.catalog.shop.ShopCatalog shopCatalog) {
 
         this.repository = repository;
         this.deliveryScheduleService = deliveryScheduleService;
@@ -130,6 +132,7 @@ public class OrderService {
         this.outboxEventRepository = outboxEventRepository;
         this.paymentService = paymentService;
         this.requireIdempotencyKey = requireIdempotencyKey;
+        this.shopCatalog = shopCatalog;
     }
 
 
@@ -196,6 +199,12 @@ public class OrderService {
             throw new BadRequestException("Cart is empty");
         }
 
+        // One query for every line's shop price, rather than one per line.
+        java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings =
+                shopCatalog.listingsFor(cartItems.stream()
+                        .map(i -> i.getProductVariant() == null ? null : i.getProductVariant().getId())
+                        .toList());
+
         BigDecimal subtotal = BigDecimal.ZERO;
         for (CartItem item : cartItems) {
             // Same check as placeOrder - surfaced here too so the customer
@@ -211,8 +220,8 @@ public class OrderService {
                                 + " is no longer available - please remove it from your cart.");
             }
 
-            subtotal = subtotal.add(
-                    item.getProductVariant().getSellingPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+            subtotal = subtotal.add(shopPriceOf(variant, listings)
+                    .multiply(BigDecimal.valueOf(item.getQuantity())));
         }
 
         BigDecimal discountAmount = BigDecimal.ZERO;
@@ -592,13 +601,20 @@ public class OrderService {
 
         order.setActive(true);
 
+        // THE PRICE CHARGED IS THIS SHOP'S PRICE. Read once for the whole
+        // basket and reused for the order lines below, so the total and the
+        // lines cannot disagree - the two used to read the same catalogue
+        // field, and now read the same map.
+        java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings =
+                shopCatalog.listingsFor(cartItems.stream()
+                        .map(i -> i.getProductVariant() == null ? null : i.getProductVariant().getId())
+                        .toList());
+
         BigDecimal totalAmount = BigDecimal.ZERO;
 
         for (CartItem item : cartItems) {
-            totalAmount = totalAmount.add(
-                    item.getProductVariant()
-                            .getSellingPrice()
-                            .multiply(BigDecimal.valueOf(item.getQuantity())));
+            totalAmount = totalAmount.add(shopPriceOf(item.getProductVariant(), listings)
+                    .multiply(BigDecimal.valueOf(item.getQuantity())));
         }
 
         // Coupon is validated and redeemed (usage count incremented, under a row
@@ -664,9 +680,9 @@ public class OrderService {
             orderItem.setOrder(order);
             orderItem.setProductVariant(item.getProductVariant());
             orderItem.setQuantity(item.getQuantity());
-            orderItem.setPrice(item.getProductVariant().getSellingPrice());
-            orderItem.setTotalPrice(item.getProductVariant().getSellingPrice()
-                    .multiply(BigDecimal.valueOf(item.getQuantity())));
+            BigDecimal linePrice = shopPriceOf(item.getProductVariant(), listings);
+            orderItem.setPrice(linePrice);
+            orderItem.setTotalPrice(linePrice.multiply(BigDecimal.valueOf(item.getQuantity())));
             orderItem.setGstRate(taxService.resolveGstRate(item.getProductVariant()));
             orderItem.setActive(true);
 
@@ -1549,7 +1565,15 @@ public class OrderService {
             if (item.getProductVariant() == null) {
                 continue;
             }
-            Inventory inventory = inventoryService.getByProductVariantForUpdate(item.getProductVariant().getId());
+            // THE ORDER'S OWN SHOP, read off the row we are restoring.
+            //
+            // This runs from the payment-expiry sweep, which spans shops and
+            // therefore has no filter enabled on its session - so the
+            // unqualified lookup would have been free to lock and credit
+            // whichever shop's stock row it found first. The shop is not a
+            // parameter anybody sends; it is a column on the order.
+            Inventory inventory = inventoryService.getByProductVariantForUpdate(
+                    item.getProductVariant().getId(), order.getShopId());
             if (inventory == null || item.getQuantity() == null) {
                 continue;
             }
@@ -1584,5 +1608,21 @@ public class OrderService {
     private static String truncate(String value, int max) {
         if (value == null) return null;
         return value.length() <= max ? value : value.substring(0, max - 3) + "...";
+    }
+
+    /**
+     * What this shop charges for one line, from listings already loaded.
+     *
+     * REFUSES RATHER THAN GUESSES. A cart line whose item this shop does not
+     * list is not something to price from the catalogue and charge for - it is
+     * an item the customer cannot buy here, and saying so is the only answer
+     * that cannot overcharge or undercharge somebody. Under one shop every
+     * priced variant is listed, so this never fires today.
+     */
+    private BigDecimal shopPriceOf(com.gpstore.entity.ProductVariant variant,
+                                   java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings) {
+        return shopCatalog.priceOf(variant, listings).orElseThrow(() -> new ConflictException(
+                (variant != null && variant.getProduct() != null ? variant.getProduct().getName() : "An item")
+                        + " is no longer available - please remove it from your cart."));
     }
 }

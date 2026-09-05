@@ -31,15 +31,19 @@ public class ProductService {
 
     private final com.gpstore.repository.CategoryRepository categoryRepository;
 
+    private final com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue;
+
     public ProductService(
             ProductRepository productRepository,
             ProductBrowseRepository productBrowseRepository,
             com.gpstore.repository.ProductImageRepository productImageRepository,
-            com.gpstore.repository.CategoryRepository categoryRepository) {
+            com.gpstore.repository.CategoryRepository categoryRepository,
+            com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue) {
         this.productRepository = productRepository;
         this.productImageRepository = productImageRepository;
         this.productBrowseRepository = productBrowseRepository;
         this.categoryRepository = categoryRepository;
+        this.shopPricedCatalogue = shopPricedCatalogue;
     }
 
     /**
@@ -100,7 +104,8 @@ public class ProductService {
         // has to show them the privacy settings they just set - a
         // customer-shaped response would silently drop them and make the
         // toggle look like it had not saved.
-        return ProductResponse.forAdmin(productRepository.save(product));
+        Product savedProduct = productRepository.save(product);
+        return ProductResponse.forAdmin(savedProduct, shopPricedCatalogue.termsFor(savedProduct));
     }
 
     // A public, unauthenticated GET endpoint backs each of the three methods
@@ -125,7 +130,7 @@ public class ProductService {
     public List<ProductResponse> getAllForAdmin() {
         return productRepository
                 .findAllByOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, ADMIN_UNPAGINATED_CAP))
-                .map(ProductResponse::forAdmin)
+                .map(p -> ProductResponse.forAdmin(p, shopPricedCatalogue.termsFor(p)))
                 .toList();
     }
 
@@ -136,7 +141,7 @@ public class ProductService {
         return productRepository
                 .findByNameContainingIgnoreCase(keyword, org.springframework.data.domain.PageRequest.of(0, ADMIN_UNPAGINATED_CAP))
                 .stream()
-                .map(ProductResponse::fromCard)
+                .map(p -> ProductResponse.fromCard(p, shopPricedCatalogue.termsFor(p)))
                 .toList();
     }
 
@@ -330,11 +335,18 @@ public class ProductService {
             byId.put(product.getId(), product);
         }
 
+        // One lookup for this shop's price on every variant on the page, in the
+        // same spirit as the batch above: a twenty-product grid is one query,
+        // not one per size. The prices are this shop's, and the cache entry
+        // they end up in is keyed by shop (see CacheConfig.keyGenerator).
+        Map<Long, com.gpstore.catalog.shop.ShopProductVariant> shopTerms =
+                shopPricedCatalogue.termsFor(byId.values());
+
         List<ProductResponse> content = new ArrayList<>(orderedIds.size());
         for (Long id : orderedIds) {
             Product product = byId.get(id);
             if (product != null) {
-                content.add(ProductResponse.fromCard(product));
+                content.add(ProductResponse.fromCard(product, shopTerms));
             }
         }
         return content;
@@ -397,7 +409,7 @@ public class ProductService {
             return null;
         }
 
-        ProductResponse product = ProductResponse.from(entity);
+        ProductResponse product = ProductResponse.from(entity, shopPricedCatalogue.termsFor(entity));
 
         // The 3D model, like the gallery below, is attached ONLY here.
         // ProductResponse.from deliberately leaves it null so that no list
@@ -495,7 +507,8 @@ public class ProductService {
         // Empty string clears it. A javascript: or http:// URL is refused.
         applyModel3dUrl(existing, updated.getModel3dUrl(), false);
 
-        return ProductResponse.forAdmin(productRepository.save(existing));
+        Product savedExisting = productRepository.save(existing);
+        return ProductResponse.forAdmin(savedExisting, shopPricedCatalogue.termsFor(savedExisting));
     }
 
     private static void applyModel3dUrl(Product product, String url, boolean always) {

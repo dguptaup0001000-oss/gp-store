@@ -219,7 +219,9 @@ public class DeliveryScheduleService {
      */
     @Transactional(readOnly = true)
     public StoreOperationsSettings settings() {
-        return settingsRepository.findById(StoreOperationsSettings.SINGLETON_ID)
+        return settingsRepository
+                .findByShopId(com.gpstore.platform.TenantDefaults
+                        .shopIdForCurrentWork(StoreOperationsSettings.class))
                 .orElseGet(StoreOperationsSettings::new);
     }
 

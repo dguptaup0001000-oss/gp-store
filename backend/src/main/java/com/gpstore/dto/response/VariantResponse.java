@@ -86,6 +86,22 @@ public class VariantResponse implements Serializable {
     }
 
     public static VariantResponse from(ProductVariant variant) {
+        return from(variant, null);
+    }
+
+    /**
+     * The catalogue's description of the item, at THIS shop's price.
+     *
+     * WHAT COMES FROM WHERE. Everything a customer identifies the item by -
+     * pack size, unit, photo - is the catalogue's, shared by every shop that
+     * sells it. Everything commercial - the price, whether it is listed, the
+     * printed MRP if this shop's pack differs - comes from the shop's own
+     * listing. A null listing means the caller had no shop context (an admin
+     * catalogue screen, a platform-wide report), and the catalogue's own
+     * defaults stand.
+     */
+    public static VariantResponse from(ProductVariant variant,
+                                       com.gpstore.catalog.shop.ShopProductVariant listing) {
         if (variant == null) {
             return null;
         }
@@ -96,10 +112,15 @@ public class VariantResponse implements Serializable {
                 variant.getImageUrl() == null
                         ? null
                         : com.gpstore.upload.CatalogImageDelivery.forClient(variant.getImageUrl()),
-                variant.getAvailable(),
-                variant.getMrp(),
-                variant.getSellingPrice(),
-                variant.getDisplayOrder()
+                // Boolean.valueOf, not the bare boolean: a ternary with a
+                // primitive on one arm unboxes the other, so writing
+                // isOrderable() here would NPE on any catalogue variant whose
+                // available flag is null. Caught by RecommendationHygieneTest.
+                listing != null ? Boolean.valueOf(listing.isOrderable()) : variant.getAvailable(),
+                listing != null && listing.getMrp() != null ? listing.getMrp() : variant.getMrp(),
+                listing != null ? listing.getSellingPrice() : variant.getSellingPrice(),
+                listing != null && listing.getDisplayOrder() != null
+                        ? listing.getDisplayOrder() : variant.getDisplayOrder()
         );
     }
 

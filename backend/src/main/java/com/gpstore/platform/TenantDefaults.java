@@ -95,6 +95,18 @@ public final class TenantDefaults {
      * @param declared   whatever the entity already carried
      * @param entityType only for the message when there is no answer
      */
+    /**
+     * The shop the work on this thread belongs to.
+     *
+     * Same rule as {@link #shopIdForNewRow}, for code that needs to READ one
+     * shop's row rather than write one - the per-shop settings tables, which
+     * are found by shop rather than by a filtered query because a load by
+     * primary key is not filtered.
+     */
+    public static Long shopIdForCurrentWork(Class<?> forWhat) {
+        return shopIdForNewRow(null, forWhat);
+    }
+
     public static Long shopIdForNewRow(Long declared, Class<?> entityType) {
         TenantScope scope = TenantContext.current();
         if (scope != null && scope.isSingleShop()) {

@@ -38,21 +38,9 @@ ALTER TABLE catalog_import_runs       ALTER COLUMN shop_id DROP DEFAULT;
 ALTER TABLE order_scan_events         ALTER COLUMN shop_id DROP DEFAULT;
 ALTER TABLE customer_delivery_ratings ALTER COLUMN shop_id DROP DEFAULT;
 
--- An index per shop-owned table, because every read is now "... and shop_id = ?".
--- A marketplace where each shop's query scans every shop's rows gets slower for
--- everybody with each merchant that joins, which is the opposite of the point.
-CREATE INDEX IF NOT EXISTS idx_orders_shop                    ON orders (shop_id);
-CREATE INDEX IF NOT EXISTS idx_payments_shop                  ON payments (shop_id);
-CREATE INDEX IF NOT EXISTS idx_deliveries_shop                ON deliveries (shop_id);
-CREATE INDEX IF NOT EXISTS idx_delivery_batches_shop          ON delivery_batches (shop_id);
-CREATE INDEX IF NOT EXISTS idx_delivery_partners_shop         ON delivery_partners (shop_id);
-CREATE INDEX IF NOT EXISTS idx_invoices_shop                  ON invoices (shop_id);
-CREATE INDEX IF NOT EXISTS idx_order_returns_shop             ON order_returns (shop_id);
-CREATE INDEX IF NOT EXISTS idx_coupons_shop                   ON coupons (shop_id);
-CREATE INDEX IF NOT EXISTS idx_inventory_shop                 ON inventory (shop_id);
-CREATE INDEX IF NOT EXISTS idx_catalog_import_runs_shop       ON catalog_import_runs (shop_id);
-CREATE INDEX IF NOT EXISTS idx_order_scan_events_shop         ON order_scan_events (shop_id);
-CREATE INDEX IF NOT EXISTS idx_customer_delivery_ratings_shop ON customer_delivery_ratings (shop_id);
+-- NO INDEXES HERE. V46 already created one per shop-owned table
+-- (idx_orders_shop_id and friends). A second index on the same column under a
+-- different name costs a write on every insert and buys nothing.
 
 -- VERIFY (§92: a command that returned 0 is not the same as data that is right).
 DO $$

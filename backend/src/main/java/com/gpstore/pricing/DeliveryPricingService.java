@@ -40,13 +40,16 @@ public class DeliveryPricingService {
 
     private final DeliveryPricingSettingsRepository settingsRepository;
     private final DeliveryEstimateService estimateService;
+    private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
     private final DeliveryPricingService self;
 
     public DeliveryPricingService(DeliveryPricingSettingsRepository settingsRepository,
                                   DeliveryEstimateService estimateService,
+                                  com.gpstore.catalog.shop.ShopCatalog shopCatalog,
                                   @org.springframework.context.annotation.Lazy DeliveryPricingService self) {
         this.settingsRepository = settingsRepository;
         this.estimateService = estimateService;
+        this.shopCatalog = shopCatalog;
         this.self = self;
     }
 
@@ -73,8 +76,12 @@ public class DeliveryPricingService {
     @Transactional
     public DeliveryPricingSettings settings() {
         try {
+            // Per shop (V49). The @Cacheable key carries the shop too - see
+            // CacheConfig.keyGenerator - so one shop's delivery pricing can
+            // never be served to another out of the cache.
             DeliveryPricingSettings found = settingsRepository
-                    .findById(DeliveryPricingSettings.SINGLETON_ID)
+                    .findByShopId(com.gpstore.platform.TenantDefaults
+                            .shopIdForCurrentWork(DeliveryPricingSettings.class))
                     .orElse(null);
             if (found != null) {
                 found.normalise();
@@ -97,7 +104,18 @@ public class DeliveryPricingService {
     @CacheEvict(value = "deliveryPricingSettings", allEntries = true)
     @Transactional
     public DeliveryPricingSettings save(DeliveryPricingSettings incoming, String who) {
-        incoming.setId(DeliveryPricingSettings.SINGLETON_ID);
+        // Edits this shop's row, or creates it. The id comes from the row that
+        // is already there rather than from the request body: without this an
+        // admin could post an id and rewrite ANOTHER shop's delivery pricing,
+        // which is the same id-manipulation attack the rest of Slice 1 closes -
+        // and a body-supplied id would slip past the read filter because a
+        // save() by id is not a query.
+        Long shopId = com.gpstore.platform.TenantDefaults
+                .shopIdForCurrentWork(DeliveryPricingSettings.class);
+        incoming.setId(settingsRepository.findByShopId(shopId)
+                .map(DeliveryPricingSettings::getId)
+                .orElse(null));
+        incoming.setShopId(shopId);
         incoming.normalise();
         incoming.setUpdatedAt(LocalDateTime.now());
         incoming.setUpdatedBy(who);
@@ -201,13 +219,22 @@ public class DeliveryPricingService {
         BigDecimal total = BigDecimal.ZERO;
         List<String> missing = new ArrayList<>();
 
+        // The shop's own price and cost, not the catalogue's - free delivery is
+        // paid for out of the margin this shop actually made.
+        java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings =
+                shopCatalog.listingsFor(lines.stream()
+                        .map(l -> l.variant() == null ? null : l.variant().getId())
+                        .toList());
+
         for (OrderWeightCalculator.Line line : lines) {
             ProductVariant v = line.variant();
             if (v == null || line.quantity() <= 0) {
                 continue;
             }
-            BigDecimal selling = v.getSellingPrice();
-            BigDecimal cost = v.getCostPrice();
+            com.gpstore.catalog.shop.ShopProductVariant listing = listings.get(v.getId());
+            BigDecimal selling = listing != null ? listing.getSellingPrice() : v.getSellingPrice();
+            BigDecimal cost = listing != null && listing.getCostPrice() != null
+                    ? listing.getCostPrice() : v.getCostPrice();
 
             if (selling == null || cost == null) {
                 String label = v.getSku() != null && !v.getSku().isBlank()

@@ -49,6 +49,7 @@ public class CatalogImportService {
     private final ProductRepository products;
     private final ProductVariantRepository variants;
     private final InventoryRepository inventories;
+    private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
     private final ProductImageRepository images;
     private final CategoryRepository categories;
 
@@ -57,7 +58,8 @@ public class CatalogImportService {
                                 CatalogImportProblemRepository problems,
                                 ProductRepository products, ProductVariantRepository variants,
                                 InventoryRepository inventories, ProductImageRepository images,
-                                CategoryRepository categories) {
+                                CategoryRepository categories,
+                                com.gpstore.catalog.shop.ShopCatalog shopCatalog) {
         this.reader = reader;
         this.validator = validator;
         this.runs = runs;
@@ -67,6 +69,7 @@ public class CatalogImportService {
         this.inventories = inventories;
         this.images = images;
         this.categories = categories;
+        this.shopCatalog = shopCatalog;
     }
 
     public record ImportSummary(
@@ -240,6 +243,12 @@ public class CatalogImportService {
             variant.setGstRateOverride((BigDecimal) values.get(ImportColumn.GST_RATE));
         }
         ProductVariant savedVariant = variants.save(variant);
+
+        // An imported row is a price THIS shop is setting, so the shop's own
+        // listing moves with the catalogue row. Without this an import would
+        // update the catalogue default and leave the shelf showing the old
+        // price - the sheet applied to the wrong table.
+        shopCatalog.list(savedVariant);
 
         // ---- stock --------------------------------------------------------
         if (values.containsKey(ImportColumn.STOCK)

@@ -521,3 +521,80 @@ merchant exists — and added a `shop_id` index to each of those tables.
 
 `ShopScopeIsNotOptionalTest` asserts each of these by name, so an entry that is quietly
 fixed or quietly added fails the build rather than sitting in a document.
+
+---
+
+# Slices 4 and 5 — the shop-product architecture, and the five named gaps
+
+*Written after the code, from the test results.*
+
+## The product model
+
+```
+products / product_variants          ONE row per real-world item, shared.
+        |                            Identity, pack size, barcode, photo, GST class.
+        |
+shop_product_variants                ONE row per (shop, variant).
+        |                            Whether this shop sells it, at what price,
+        |                            at what cost, listed or not, its shelf order.
+        |
+inventory                            ONE row per (shop, variant).
+                                     How many units this shop has right now.
+```
+
+**The catalogue is not copied per shop.** Two kiranas selling Aashirvaad atta 5 kg point
+at the same `product_variants` row. Adding Shop N adds rows — never tables, never code,
+never a branch on which shop this is. `CrossTenantShopCatalogTest.shopNAddsNoCode`
+creates a third shop through the identical call the first two used and asserts the other
+two are unaffected.
+
+**Price and stock are keyed alike but stored apart, on purpose.** They have opposite
+write patterns: a price is edited by a person, occasionally; stock is decremented under a
+row lock on every checkout. One row would put a price edit in contention with live orders.
+
+**`product_variants.selling_price` did not become dead weight** — it is now the
+*catalogue default*, the terms a shop starts from when it begins stocking an item. That
+is what makes onboarding Shop N one INSERT rather than a data-entry exercise.
+
+### What changed on the money path
+
+Every price a customer sees or is charged now reads the shop's own listing: add-to-cart,
+cart display, checkout preview, the order total, each order line, the admin's manual
+order line, and both free-delivery profit calculations. Under `SINGLE_SHOP` the listing
+and the catalogue default are equal by construction — V48 backfilled them, every write
+path maintains both, and `ShopCatalogReconciliation` re-lists anything a new code path
+misses at startup — so nothing a customer sees changes today.
+
+### The cache was a cross-shop leak, and is the part that would have been missed
+
+Ten catalogue caches were keyed on their method arguments alone — `getAllProducts(page,
+size)`, `productDetail(id)`, `trending(days, limit)`. The moment a price is per-shop, the
+first shop to ask for page 1 fills the entry and **every other shop is served its prices,
+with no query run and nothing in any log**. The Hibernate filter cannot help: the query
+never happens. `CacheConfig.keyGenerator` now prefixes every key with the tenant scope,
+and `RecommendationHygieneTest` asserts the shop-free key *misses*.
+
+## The five gaps from the Slice 1 report, closed
+
+| Gap | What it is now |
+|---|---|
+| `revenueByDayBetween` | Takes a `shopId` written into the native SQL by hand, read off the tenant scope by `AnalyticsService`. `getSalesSeries` has no shop parameter — asserted by reflection, so one cannot be added quietly |
+| `decrementIfAvailable` | Carries `and i.shopId = :shopId`, from the scope. Without it, one customer buying one packet took a unit off **every** merchant stocking that variant |
+| `store_operations_settings` | One row per shop (V49). The `CHECK (id = 1)` is gone, the id is database-generated, and the services find the row by shop |
+| `delivery_pricing_settings` | The same — and `save()` no longer takes the id from the request body, which was an id-manipulation route into another shop's pricing that no filter could see |
+| Payment webhooks | Given `TenantScope.platform()` **explicitly** rather than left unscoped. Identical reads, but an unscoped thread anywhere else is now a bug rather than a maybe |
+
+One more found while doing it: the inventory restore in the payment-expiry sweep looked
+up stock by variant alone, from a thread with no filter — free to lock and credit
+whichever shop's row it found first. It now reads the shop off the **order** being
+restored.
+
+## What is still not protected
+
+| Gap | Why | Closes in |
+|---|---|---|
+| **The central catalogue is writable by any shop admin** | `products` and `product_variants` have no `shop_id` by design (§10), so a merchant editing a product's name or the catalogue default price changes it for every shop that sells it. Under one shop this is simply "the shopkeeper edits their catalogue" | Slice 3 — catalogue writes become platform-admin or moderated |
+| **Staff tokens carry no shop claim** | Under `MULTI_SHOP_*`, `TenantResolver` refuses any credential that is not `SYSTEM_ADMIN`. Deliberate: inventing a shop for an unscoped token invents an authorization | Slice 3 |
+| **Multi-shop carts** | A basket spanning two shops must split into an order group and N shop orders (§16). Checkout today refuses a line the current shop does not list, which is correct but is not the split | Slice 6 |
+| **Raw SQL bypasses the stamp** | `@PrePersist` cannot see a `JdbcTemplate` insert. No production code does one into a shop-owned table (verified); test fixtures do, which is how unowned rows appear in the test database | — (guarded by `ShopScopeIsNotOptionalTest`) |
+| **`ShopCatalog`'s catalogue fallback** | Under `SINGLE_SHOP` only, an unlisted-but-priced variant is still sold at the catalogue price, with a warning logged. There is no fallback under a marketplace | — (deliberate) |

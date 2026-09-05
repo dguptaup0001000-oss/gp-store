@@ -30,7 +30,12 @@ public class CartResponse {
     }
 
     public static CartResponse from(Cart cart) {
-        return from(cart, Map.of());
+        return from(cart, Map.of(), Map.of());
+    }
+
+    /** Kept for callers with no shop price list - the line's own stored price stands. */
+    public static CartResponse from(Cart cart, Map<Long, Integer> stockByVariantId) {
+        return from(cart, stockByVariantId, Map.of());
     }
 
     /**
@@ -39,14 +44,16 @@ public class CartResponse {
      *                         (admin listings). A present value is compared
      *                         to the line quantity.
      */
-    public static CartResponse from(Cart cart, Map<Long, Integer> stockByVariantId) {
+    public static CartResponse from(Cart cart, Map<Long, Integer> stockByVariantId,
+                                    Map<Long, BigDecimal> shopPriceByVariantId) {
         if (cart == null) {
             return new CartResponse(null, List.of(), BigDecimal.ZERO, 0);
         }
 
         Map<Long, Integer> stock = stockByVariantId == null ? Map.of() : stockByVariantId;
+        Map<Long, BigDecimal> prices = shopPriceByVariantId == null ? Map.of() : shopPriceByVariantId;
         List<CartItemResponse> items = cart.getItems().stream()
-                .map(item -> CartItemResponse.from(item, stock))
+                .map(item -> CartItemResponse.from(item, stock, prices))
                 .toList();
 
         // Derived live from the mapped lines so a catalog price change
@@ -98,10 +105,11 @@ public class CartResponse {
         }
 
         static CartItemResponse from(CartItem item) {
-            return from(item, Map.of());
+            return from(item, Map.of(), Map.of());
         }
 
-        static CartItemResponse from(CartItem item, Map<Long, Integer> stockByVariantId) {
+        static CartItemResponse from(CartItem item, Map<Long, Integer> stockByVariantId,
+                                     Map<Long, BigDecimal> shopPriceByVariantId) {
             var variant = item.getProductVariant();
             var product = variant != null ? variant.getProduct() : null;
 
@@ -122,9 +130,16 @@ public class CartResponse {
                 isAvailable = stock != null && stock >= item.getQuantity();
             }
 
-            BigDecimal unitPrice = variant != null && variant.getSellingPrice() != null
-                    ? variant.getSellingPrice()
-                    : item.getPrice();
+            // WHAT THIS SHOP CHARGES, then what the line was saved at, then the
+            // catalogue default. The shop's own price wins because it is the
+            // one checkout will use, and a cart that shows a different number
+            // from the one charged is the worst of the three failures here.
+            BigDecimal shopPrice = variant == null ? null : shopPriceByVariantId.get(variant.getId());
+            BigDecimal unitPrice = shopPrice != null
+                    ? shopPrice
+                    : (variant != null && variant.getSellingPrice() != null
+                            ? variant.getSellingPrice()
+                            : item.getPrice());
             BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(item.getQuantity()));
 
             return new CartItemResponse(

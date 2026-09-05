@@ -47,6 +47,24 @@ public class TenantContextFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
+        if (spansEveryShop(request)) {
+            // NAMED, NOT ABSENT. These requests legitimately touch rows from
+            // any shop - a Cashfree webhook arrives with a signature and no
+            // session, and must be able to find the payment it is about
+            // whoever sold it. Leaving the scope unset would have the same
+            // effect today and say nothing; TenantScope.platform() says it,
+            // and makes an unscoped thread anywhere else a bug rather than a
+            // maybe.
+            TenantContext.runWithin(TenantScope.platform(), () -> {
+                try {
+                    chain.doFilter(request, response);
+                } catch (IOException | ServletException failed) {
+                    throw new IllegalStateException(failed);
+                }
+            });
+            return;
+        }
+
         try {
             TenantContext.set(resolver.resolve());
         } catch (RuntimeException cannotResolve) {
@@ -80,10 +98,28 @@ public class TenantContextFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getServletPath();
+        // Liveness only. These must answer while the database is unreachable,
+        // so they cannot depend on a shop row existing - a database problem
+        // reading as a dead process is how a deploy script kills a healthy
+        // instance.
         return path.startsWith("/api/health")
                 || path.startsWith("/api/version")
-                || path.startsWith("/actuator")
-                || path.startsWith("/api/auth/")
+                || path.startsWith("/actuator");
+    }
+
+    /**
+     * Requests that belong to no single shop and must not be scoped to one.
+     *
+     * Auth runs before there is a credential to resolve a shop from, and the
+     * payment webhook arrives from Cashfree with a signature instead of a
+     * session. Both are given the platform scope explicitly rather than left
+     * unscoped: the reads they do are identical either way, and the write
+     * path is not - a row inserted with no scope under a marketplace now
+     * fails loudly instead of landing in whichever shop the default named.
+     */
+    private static boolean spansEveryShop(HttpServletRequest request) {
+        String path = request.getServletPath();
+        return path.startsWith("/api/auth/")
                 || path.startsWith("/api/payments/webhooks/");
     }
 }
