@@ -991,3 +991,128 @@ clauses were kept — cheap, and still true if Order ever stopped being shop-own
 | **Payments are per shop order** | Two shops means two payments, by design (W1). The group holds the relationship; there is no single "pay for everything" | Needs W2 |
 | **No merchant-level roll-up** | A merchant with three shops reads three statements. The data supports summing them; nothing asks yet | Later |
 | **Flutter is unchanged** | Every endpoint in Slices 7 and 8 is backend-only and CI-verified; no Dart consumes earnings, open work, or the market overview | Frontend slice |
+
+---
+
+# Slice 9 — the map, the rider, and the order that ties them
+
+**Decision W4 is taken: riders are per shop.** There is no shared pool. Each shop
+has its own delivery workers; a worker belongs to exactly one shop unless a
+platform-level delivery service is deliberately introduced later. This slice
+makes the geography agree with that, and closes the chain the decision implies:
+
+```
+shop-scoped territory  →  shop-scoped rider  →  that shop's order
+```
+
+Every link had a way of leaking, and they are three different kinds of leak.
+
+## The map (V52)
+
+`delivery_zones`, `delivery_subzones` and `subzone_backup_partners` had no shop
+at all. Two kiranas 400 metres apart would have shared one map — and whichever
+shopkeeper drew it would have been deciding where a competitor's boundaries lay,
+and therefore which rider went to a competitor's customer.
+
+All three are now shop-owned: filtered, stamped, backfilled to Shop #1.
+
+**Territory codes became unique per shop, not globally.** Every kirana drawing a
+map for the first time calls its first zone Z1, and both are right. A global
+unique index would have meant the second merchant onto the platform could not
+name their own territories — not a constraint anybody chose, just a leftover from
+there being one shop.
+
+## The cache
+
+`TerritoryResolver` held **one** map in memory for the whole process. Under one
+shop that was exactly right. Under a marketplace it is the same silent shape the
+catalogue caches had before Slice 4: the first shop to resolve an address fills
+the map, and every other shop is answered from it with no query run — except that
+this one does not merely show wrong data, it picks the rider for somebody else's
+order.
+
+It is now one snapshot per shop, keyed from the scope on the thread, with the
+platform scope keyed separately. `invalidate()` clears every shop's, because a
+platform-level change can move more than one map and a stale one here is very
+hard to see.
+
+## The pairing
+
+A subzone names a rider. Both rows can be perfectly readable while pairing them
+is exactly what W4 forbids — and a row-level filter cannot see a pairing. So the
+rule is stated, in both places it can be broken:
+
+- `TerritoryAdminService.requireSameShop` on the territory's own rider **and** on
+  the standing-backup list, which is the second door into the same decision;
+- `DeliveryService.assignDelivery` refuses a rider whose shop is not the order's,
+  which is the one check that still holds under platform-scoped work where the
+  filter is off.
+
+Both answer `CrossShopAccessException`, which the caller sees as **not found**.
+
+## The order's territory
+
+This is the part with a real architectural choice in it. An address is a
+**customer's** row and spans every shop they buy from — but `addresses.subzone_id`
+holds one value. A house genuinely sits in Shop A's Z7B *and* Shop B's Z3.
+
+So dispatch stopped reading the stamp and now asks
+`TerritoryResolver.territoryForDelivery(address)`, which answers in **this shop's**
+map:
+
+1. the stamp, if it belongs to this shop — preferred rather than recomputed
+   because an administrator may have **pinned** it, and the block whose only gate
+   opens into the next territory is knowledge no polygon has;
+2. otherwise this shop's own map, from the coordinates. A pin is an instruction
+   about the map it was made on; it says nothing about a different shop's.
+
+Three callers moved onto it: automatic dispatch, hand assignment, and the worker
+app's pack-scan **authorisation** — which decides whether a rider may take a
+carton, and was asking a possibly-foreign map.
+
+## The outage this nearly shipped
+
+Making subzones shop-owned turned three innocuous `left join fetch a.subzone`
+queries in `AddressRepository` into a trap: a customer whose address was stamped
+in Shop A's territory, listing their addresses while shopping at Shop B, would
+have had Shop A's row loaded into Shop B's scope and `@PostLoad` would have
+refused it. **The customer could not read their own address list.**
+
+The fetch joins are gone — nothing needs the eager subzone now that
+`territoryForDelivery` answers through a filtered query — and a test asserts the
+customer can still list their addresses from either shop. This is the failure mode
+isolation work produces when done carelessly, and it is worth naming: locking a
+customer out of their own data is not a boundary, it is an outage.
+
+## A behaviour change to the existing shop, stated
+
+Before this slice, an order's territory was whatever `addresses.subzone_id` held.
+An address saved before the map was drawn had none, and dispatched as FALLBACK for
+ever. That could not survive W4 — a second shop would have no stamp for any
+address, so every one of its orders would fall back — so the resolver falls
+through to the shop's own map.
+
+**The effect on Shop #1**: an unstamped address inside a drawn outline is now
+dispatched to its real territory instead of to whoever is least loaded. A rider
+who knows the streets rather than one who does not. Strictly better, but
+different, so §12 says it gets named — and it is pinned by two tests, one for the
+new resolution and one confirming a point in no territory still resolves to
+nothing and fails closed.
+
+## Commission: still nothing (W2)
+
+W2 remains undecided, so this slice adds no commission field, no settlement
+arithmetic, and no merchant deduction. The architecture stays extensible — a
+delivery has a shop, a shop has a merchant, and every figure needed to compute a
+fee is already grouped per shop — without pretending a model has been chosen.
+
+## Still not protected
+
+| Gap | Why | Closes in |
+|---|---|---|
+| **No commission arithmetic anywhere** | W2 open. Not implemented, deliberately | Needs W2 |
+| **`addresses.subzone_id` is one shop's stamp** | Harmless now that dispatch resolves per shop, but it is still a per-shop value in a shared row. A join table would make the intent explicit | Later, if it ever confuses anyone |
+| **`AddressService` stamps in whatever scope the customer was browsing** | Under multi-shop it records one shop's answer. Nothing depends on it any more, so it is a hint rather than a fact | Later |
+| **A shop with no map falls back for every order** | Correct and fail-closed, but a newly onboarded merchant delivers with no local knowledge until somebody draws outlines | Onboarding |
+| **Delivery is still per shop order** | Two shops means two riders and two fees, which W4 confirms is the intended model rather than a gap | By decision |
+| **Flutter is unchanged** | Slices 7, 8 and 9 are backend-only and CI-verified | Frontend slice |

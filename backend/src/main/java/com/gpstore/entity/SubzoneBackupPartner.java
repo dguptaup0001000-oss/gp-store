@@ -1,6 +1,10 @@
 package com.gpstore.entity;
 
+import com.gpstore.platform.ShopOwned;
+import com.gpstore.platform.ShopScopeFilter;
+import com.gpstore.platform.TenantEntityListener;
 import jakarta.persistence.*;
+import org.hibernate.annotations.Filter;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -19,7 +23,22 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-public class SubzoneBackupPartner {
+@Filter(name = ShopScopeFilter.NAME, condition = ShopScopeFilter.CONDITION)
+@EntityListeners(TenantEntityListener.class)
+public class SubzoneBackupPartner implements ShopOwned {
+
+    /**
+     * WHOSE ARRANGEMENT THIS IS (W4).
+     *
+     * A named backup is "when Z7B's rider is off, ask Ramesh" - a standing
+     * agreement inside one shop's roster. Filtered here rather than left to
+     * the subzone's filter, because this row is the ROOT of its own queries
+     * and Hibernate's filter does not follow a join to reach the subzone's.
+     */
+    @Column(name = "shop_id")
+    private Long shopId;
+
+
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

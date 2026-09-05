@@ -24,6 +24,20 @@ public class CrossShopAccessException extends RuntimeException {
         this.entityType = entityType;
     }
 
+    /**
+     * A crossing caught by a rule rather than by the entity listener.
+     *
+     * The listener catches a row LOADED across the boundary. This one is for a
+     * relationship refused across it - a rider assigned to another shop's
+     * order (W4), where both rows are legitimately readable and pairing them
+     * is what is wrong. Same exception on purpose: the caller is told the same
+     * "not found", for the same reason.
+     */
+    public CrossShopAccessException(String message) {
+        super(message);
+        this.entityType = null;
+    }
+
     public Class<?> getEntityType() {
         return entityType;
     }

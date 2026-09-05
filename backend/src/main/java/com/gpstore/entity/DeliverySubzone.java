@@ -1,6 +1,10 @@
 package com.gpstore.entity;
 
+import com.gpstore.platform.ShopOwned;
+import com.gpstore.platform.ShopScopeFilter;
+import com.gpstore.platform.TenantEntityListener;
 import jakarta.persistence.*;
+import org.hibernate.annotations.Filter;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -32,7 +36,22 @@ import java.util.List;
 @Getter
 @Setter
 @NoArgsConstructor
-public class DeliverySubzone {
+@Filter(name = ShopScopeFilter.NAME, condition = ShopScopeFilter.CONDITION)
+@EntityListeners(TenantEntityListener.class)
+public class DeliverySubzone implements ShopOwned {
+
+    /**
+     * WHOSE MAP THIS IS (W4). See DeliveryZone.shopId.
+     *
+     * The subzone is the row that matters most here, because it is the one
+     * carrying a rider. A territory whose primary rider works for a different
+     * shop is one merchant dispatching another merchant's staff, which is what
+     * this column plus TerritoryAdminService's check together prevent.
+     */
+    @Column(name = "shop_id")
+    private Long shopId;
+
+
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

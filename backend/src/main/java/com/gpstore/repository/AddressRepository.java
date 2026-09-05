@@ -8,31 +8,39 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface AddressRepository extends JpaRepository<Address, Long> {
 
     /**
-     * The fetch join on subzone is here so server-side callers can read
-     * address.getSubzone() after the transaction has closed.
+     * THE SUBZONE IS NO LONGER FETCHED HERE, and removing it fixed an outage
+     * rather than saving a join.
      *
-     * It is NOT what keeps the response serialisable - Address.subzone is
-     * @JsonIgnore, so no client ever sees it (see the comment on that field
-     * for why a customer's phone should not be receiving a delivery
-     * partner's phone number). What it prevents is the other half of the
-     * same problem: with open-session-in-view off (see
-     * spring.jpa.open-in-view) a lazy read from dispatch or admin code
-     * outside a transaction is an exception rather than a silent extra query.
+     * These three queries used to carry "left join fetch a.subzone" so
+     * server-side callers could read address.getSubzone() outside a
+     * transaction, with open-session-in-view off. Slice 9 made
+     * delivery_subzones shop-owned, and that turned the same fetch into a
+     * trap: an address is a CUSTOMER's row and spans every shop they buy
+     * from, but addresses.subzone_id holds one value. So a customer whose
+     * address was stamped in Shop A's map, listing their addresses while
+     * shopping at Shop B, would have had a shop-owned row from Shop A loaded
+     * into Shop B's scope - and TenantEntityListener's @PostLoad would refuse
+     * it and fail the request. The customer could not read their own address
+     * list.
      *
-     * A @ManyToOne fetch join is safe to paginate - unlike a collection, it
-     * multiplies no rows.
+     * NOTHING NEEDS THE EAGER SUBZONE ANY MORE. The one question dispatch and
+     * the worker app actually ask is "which of THIS SHOP's territories is this
+     * address in", and TerritoryResolver.territoryForDelivery answers it
+     * through a filtered query rather than by traversing this association.
+     * Address.subzone stays as the stamp it always was - and stays LAZY, so
+     * merely loading an address never touches another shop's map.
      */
     @org.springframework.data.jpa.repository.Query(
-            "select a from Address a left join fetch a.subzone where a.customer.id = :customerId")
+            "select a from Address a where a.customer.id = :customerId")
     List<Address> findByCustomerId(@org.springframework.data.repository.query.Param("customerId") Long customerId);
 
     @org.springframework.data.jpa.repository.Query(
-            "select a from Address a left join fetch a.subzone where a.id = :id")
+            "select a from Address a where a.id = :id")
     java.util.Optional<Address> findByIdWithSubzone(
             @org.springframework.data.repository.query.Param("id") Long id);
 
     @org.springframework.data.jpa.repository.Query(
-            value = "select a from Address a left join fetch a.subzone",
+            value = "select a from Address a",
             countQuery = "select count(a) from Address a")
     org.springframework.data.domain.Page<Address> findAllWithSubzone(
             org.springframework.data.domain.Pageable pageable);

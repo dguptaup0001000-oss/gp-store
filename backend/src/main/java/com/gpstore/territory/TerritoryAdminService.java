@@ -173,6 +173,7 @@ public class TerritoryAdminService {
     public DeliverySubzone setPrimaryPartner(Long subzoneId, Long partnerId) {
         DeliverySubzone subzone = requireSubzone(subzoneId);
         DeliveryPartner partner = partnerId == null ? null : requirePartner(partnerId);
+        requireSameShop(subzone, partner);
         subzone.setPrimaryPartner(partner);
         DeliverySubzone saved = subzoneRepository.save(subzone);
         resolver.invalidate();
@@ -207,7 +208,9 @@ public class TerritoryAdminService {
             }
             SubzoneBackupPartner backup = new SubzoneBackupPartner();
             backup.setSubzone(subzone);
-            backup.setPartner(requirePartner(partnerId));
+            DeliveryPartner backupPartner = requirePartner(partnerId);
+            requireSameShop(subzone, backupPartner);
+            backup.setPartner(backupPartner);
             backup.setPriority(priority++);
             saved.add(backupRepository.save(backup));
         }
@@ -292,7 +295,14 @@ public class TerritoryAdminService {
                 if (Boolean.TRUE.equals(address.getSubzoneLocked())) {
                     continue;
                 }
-                Long before = address.getSubzone() == null ? null : address.getSubzone().getId();
+                // The stamp as THIS shop sees it. A re-resolve walks this
+                // shop's map; an address stamped in another shop's territory
+                // reads as "not stamped here", which is the truth and is also
+                // the only reading that does not load a competitor's row.
+                Long before = subzoneRepository
+                        .findStampedOnAddressIfInScope(address.getId())
+                        .map(com.gpstore.entity.DeliverySubzone::getId)
+                        .orElse(null);
                 Long after = resolver.resolveSubzoneId(address.getLatitude(), address.getLongitude())
                         .orElse(null);
 
@@ -417,5 +427,31 @@ public class TerritoryAdminService {
     private DeliveryPartner requirePartner(Long id) {
         return partnerRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found: " + id));
+    }
+
+    /**
+     * A territory's rider must work for the shop that drew the territory (W4).
+     *
+     * WHY IT IS STATED HERE and not left to the tenant filter. The filter
+     * already means an administrator can only load their OWN riders and their
+     * OWN subzones, so the two sides are normally the same shop by
+     * construction. But this is the exact pairing decision W4 is about - one
+     * shop, one roster, no shared pool - and pairing two rows that are each
+     * individually readable is not something a row-level filter can see. If
+     * the rule is ever going to be broken it will be broken here, by a change
+     * that looks harmless because both lookups succeeded.
+     *
+     * It also holds when the filter does not: platform-scoped work, a future
+     * console that operates a shop on its behalf, a data repair script.
+     */
+    private void requireSameShop(DeliverySubzone subzone, DeliveryPartner partner) {
+        if (subzone == null || partner == null) {
+            return;
+        }
+        if (subzone.getShopId() != null && partner.getShopId() != null
+                && !subzone.getShopId().equals(partner.getShopId())) {
+            throw new com.gpstore.platform.CrossShopAccessException(
+                    "A territory's rider must work for the shop that drew the territory.");
+        }
     }
 }

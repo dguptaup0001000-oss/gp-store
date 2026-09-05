@@ -39,6 +39,7 @@ public class DeliveryService {
     private final AuditLogService auditLogService;
     private final PaymentService paymentService;
     private final TerritoryDispatchService territoryDispatchService;
+    private final com.gpstore.territory.TerritoryResolver territoryResolver;
     private final com.gpstore.config.AfterCommitExecutor afterCommitExecutor;
     private final int bulkOrderItemThreshold;
 
@@ -53,6 +54,7 @@ public class DeliveryService {
             AuditLogService auditLogService,
             PaymentService paymentService,
             TerritoryDispatchService territoryDispatchService,
+            com.gpstore.territory.TerritoryResolver territoryResolver,
             com.gpstore.config.AfterCommitExecutor afterCommitExecutor,
             @org.springframework.beans.factory.annotation.Value("${delivery.bulk-order-item-threshold}") int bulkOrderItemThreshold) {
 
@@ -66,6 +68,7 @@ public class DeliveryService {
         this.auditLogService = auditLogService;
         this.paymentService = paymentService;
         this.territoryDispatchService = territoryDispatchService;
+        this.territoryResolver = territoryResolver;
         this.afterCommitExecutor = afterCommitExecutor;
         this.bulkOrderItemThreshold = bulkOrderItemThreshold;
     }
@@ -121,7 +124,17 @@ public class DeliveryService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
-        DeliverySubzone subzone = order.getAddress() == null ? null : order.getAddress().getSubzone();
+        // THE TERRITORY IS THIS SHOP'S, resolved rather than read off the
+        // address (W4). One address sits in every shop's map that covers it,
+        // but addresses.subzone_id holds one value - so under a marketplace
+        // the stamp may belong to a shop that has nothing to do with this
+        // order, and traversing it would load another shop's row and fail the
+        // whole dispatch. territoryForDelivery prefers the stamp when it is
+        // ours (which under SINGLE_SHOP it always is, so nothing changes) and
+        // otherwise reads this shop's own map.
+        DeliverySubzone subzone = territoryResolver
+                .territoryForDelivery(order.getAddress())
+                .orElse(null);
         Double lat = order.getAddress() == null ? null : order.getAddress().getLatitude();
         Double lng = order.getAddress() == null ? null : order.getAddress().getLongitude();
 
@@ -216,7 +229,28 @@ public class DeliveryService {
         DeliveryPartner partner = deliveryPartnerRepository.findById(deliveryPartnerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
 
-        DeliverySubzone subzone = order.getAddress() == null ? null : order.getAddress().getSubzone();
+        // W4: A RIDER WORKS FOR ONE SHOP, AND IT MUST BE THIS ORDER'S.
+        //
+        // Saying it here rather than relying on the filter alone. The filter
+        // already makes another shop's rider un-loadable, so in practice the
+        // line above throws first - but "the rider on a shop's order belongs
+        // to that shop" is the rule this slice exists to enforce, and a rule
+        // nothing states is a rule the next refactor can remove without
+        // noticing. It is also the one check that still holds if this method
+        // is ever called from platform-scoped work, where the filter is off.
+        if (partner.getShopId() != null && order.getShopId() != null
+                && !partner.getShopId().equals(order.getShopId())) {
+            throw new com.gpstore.platform.CrossShopAccessException(
+                    "That rider works for a different shop.");
+        }
+
+        // The order's territory in ITS shop's map - not whatever is stamped on
+        // the address, which under a marketplace may be another shop's. Same
+        // resolution autoAssignDelivery uses, so a hand assignment and an
+        // automatic one record the same territory.
+        DeliverySubzone subzone = territoryResolver
+                .territoryForDelivery(order.getAddress())
+                .orElse(null);
 
         // Batching key. A subzone is a row in a table; the old area string was
         // whatever the customer typed, matched with =, so "Sector 12",
