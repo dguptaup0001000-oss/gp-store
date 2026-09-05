@@ -102,6 +102,17 @@ class OrderDetail with _$OrderDetail {
     OrderAddressSummary? address,
     @Default([]) List<OrderItemDetail> items,
     DeliveryTrackingInfo? delivery,
+
+    /// How a cash-on-delivery order was actually settled at the door.
+    ///
+    /// All three are null unless a rider recorded it - which is the ordinary
+    /// state for an order still out, and for one the delivery flow settled
+    /// automatically without anyone saying how the money came in. Nothing
+    /// renders them when they are null; an absent split is not a missing
+    /// value, it is "nobody wrote one down".
+    double? codCashAmount,
+    double? codUpiAmount,
+    String? codCollectedAt,
   }) = _OrderDetail;
 
   const OrderDetail._();
@@ -115,6 +126,13 @@ class OrderDetail with _$OrderDetail {
   /// doesn't show a button that would obviously fail).
   bool get isCancellable =>
       orderStatus != 'DELIVERED' && orderStatus != 'CANCELLED';
+
+  /// Whether a rider wrote down how the money arrived.
+  ///
+  /// Both amounts, not either: the server only ever stores the pair, and a
+  /// half-recorded split would be a number nobody can reconcile a cash count
+  /// against.
+  bool get hasCodSplit => codCashAmount != null && codUpiAmount != null;
 }
 
 extension OrderSummaryPayment on OrderSummary {

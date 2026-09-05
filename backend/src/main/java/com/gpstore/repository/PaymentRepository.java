@@ -12,11 +12,22 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Collection;
 import java.util.Optional;
 
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     Optional<Payment> findByOrderId(Long orderId);
+
+    /**
+     * Every payment for a page of orders, in ONE query.
+     *
+     * The order list has to report the PAYMENT's status rather than the
+     * order's own stale copy of it (see OrderService.toOrderResponse), and
+     * asking per row would put a query behind every line of the admin's
+     * orders screen. Fifty orders is fifty round trips; this is one.
+     */
+    List<Payment> findByOrderIdIn(Collection<Long> orderIds);
 
     /**
      * Row-locking variant, for any path that intends to CHANGE this

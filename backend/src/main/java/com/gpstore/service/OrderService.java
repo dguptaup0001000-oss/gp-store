@@ -35,7 +35,9 @@ import com.gpstore.dto.response.AdminNewOrdersSinceResponse;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -155,14 +157,20 @@ public class OrderService {
 
         var delivery = deliveryRepository.findByOrderId(orderId).orElse(null);
 
+        // The payment row, because the order's own payment_status column is a
+        // second copy written once at checkout and never updated - a COD a
+        // rider settled an hour ago still reads COD_PENDING from it. Passed
+        // for the CUSTOMER's view as well as the shop's: being told to have
+        // cash ready for an order already paid for is the same wrong answer
+        // either way, and the split is the customer's own money.
+        var payment = paymentRepository.findByOrderId(orderId).orElse(null);
+
         // The same endpoint serves a customer looking at their own order and
         // an admin looking at anyone's, and only one of them may see a private
         // product's real name. isAdmin is already established above for the
         // ownership check, so the privacy decision rides on the authorisation
         // that was already made rather than on a second, separate judgement.
-        return isAdmin
-                ? com.gpstore.dto.response.OrderDetailResponse.forStaff(order, delivery)
-                : com.gpstore.dto.response.OrderDetailResponse.from(order, delivery);
+        return com.gpstore.dto.response.OrderDetailResponse.from(order, delivery, isAdmin, payment);
     }
 
     /**
@@ -834,8 +842,8 @@ public class OrderService {
     /** Paginated - a repeat customer's order history has no natural upper bound over the years. */
     public org.springframework.data.domain.Page<OrderResponse> getMyOrders(
             Long customerId, org.springframework.data.domain.Pageable pageable) {
-        return repository.findByCustomerIdOrderByOrderDateDesc(customerId, pageable)
-                .map(order -> toOrderResponse(order, false));
+        return toOrderResponses(
+                repository.findByCustomerIdOrderByOrderDateDesc(customerId, pageable), false);
     }
 
     /**
@@ -846,8 +854,7 @@ public class OrderService {
      */
     public org.springframework.data.domain.Page<OrderResponse> getAllOrdersForAdmin(
             org.springframework.data.domain.Pageable pageable) {
-        return repository.findAllByOrderByOrderDateDesc(pageable)
-                .map(order -> toOrderResponse(order, true));
+        return toOrderResponses(repository.findAllByOrderByOrderDateDesc(pageable), true);
     }
 
     /**
@@ -962,8 +969,8 @@ public class OrderService {
      */
     public org.springframework.data.domain.Page<OrderResponse> getCustomerOrdersForAdmin(
             Long customerId, org.springframework.data.domain.Pageable pageable) {
-        return repository.findByCustomerIdOrderByOrderDateDesc(customerId, pageable)
-                .map(order -> toOrderResponse(order, false));
+        return toOrderResponses(
+                repository.findByCustomerIdOrderByOrderDateDesc(customerId, pageable), false);
     }
 
     /**
@@ -978,7 +985,48 @@ public class OrderService {
         return value == null ? null : value.name();
     }
 
+    /**
+     * Maps a page of orders, reporting each one's PAYMENT status.
+     *
+     * ONE QUERY FOR THE WHOLE PAGE. The order's own payment_status column is
+     * a second copy of the status, written once at checkout and never
+     * updated - twelve places change a Payment's status and none of them
+     * touches the order's copy - so a COD a rider settled an hour ago still
+     * reads COD_PENDING from it. That is the screen the shop uses to know
+     * which deliveries still owe money, so the stale copy is not cosmetic.
+     *
+     * Batched rather than a lookup per row: fifty orders on a page would
+     * otherwise be fifty round trips behind one screen.
+     */
+    private org.springframework.data.domain.Page<OrderResponse> toOrderResponses(
+            org.springframework.data.domain.Page<Order> page, boolean includeCustomerName) {
+
+        List<Long> orderIds = page.getContent().stream().map(Order::getId).toList();
+        Map<Long, PaymentStatus> statuses = new HashMap<>();
+        if (!orderIds.isEmpty()) {
+            for (Payment payment : paymentRepository.findByOrderIdIn(orderIds)) {
+                if (payment.getOrder() != null && payment.getPaymentStatus() != null) {
+                    statuses.put(payment.getOrder().getId(), payment.getPaymentStatus());
+                }
+            }
+        }
+        return page.map(order -> toOrderResponse(order, includeCustomerName, statuses.get(order.getId())));
+    }
+
     private OrderResponse toOrderResponse(Order order, boolean includeCustomerName) {
+        return toOrderResponse(order, includeCustomerName, null);
+    }
+
+    /**
+     * @param paymentStatusOrNull the PAYMENT row's status, when the caller
+     *                            looked it up. Null falls back to the order's
+     *                            own column, which is the only answer there
+     *                            is for an order that has no payment row -
+     *                            they predate payment creation moving into
+     *                            the order transaction.
+     */
+    private OrderResponse toOrderResponse(Order order, boolean includeCustomerName,
+                                          PaymentStatus paymentStatusOrNull) {
         OrderResponse response = new OrderResponse();
 
         response.setOrderId(order.getId());
@@ -1008,7 +1056,9 @@ public class OrderService {
         // pre-payment-tracking order "really" had is not knowable here, and
         // inventing PENDING for a delivered COD order would be a lie the
         // admin screen then shows as fact.
-        response.setPaymentStatus(nameOf(order.getPaymentStatus()));
+        response.setPaymentStatus(paymentStatusOrNull != null
+                ? paymentStatusOrNull.name()
+                : nameOf(order.getPaymentStatus()));
         response.setOrderDate(order.getOrderDate());
 
         if (includeCustomerName) {
@@ -1120,7 +1170,13 @@ public class OrderService {
         // address are still lazy, so rendering the DTO from it would issue
         // one query per item. This is one extra query that removes several.
         Order forResponse = repository.findByIdWithDetails(savedOrder.getId()).orElse(savedOrder);
-        return com.gpstore.dto.response.OrderDetailResponse.from(forResponse, delivery);
+        // The payment row, not the order's own stale copy of the status. This
+        // path CHANGES a payment (marking a COD delivery received, or moving
+        // a cancelled prepaid order to REFUND_PENDING), so returning the
+        // order column here would hand the caller back the status it had
+        // before the very change it just made.
+        return com.gpstore.dto.response.OrderDetailResponse.from(forResponse, delivery, false,
+                paymentRepository.findByOrderId(savedOrder.getId()).orElse(null));
     }
 
     /**
@@ -1267,7 +1323,13 @@ public class OrderService {
         // address are still lazy, so rendering the DTO from it would issue
         // one query per item. This is one extra query that removes several.
         Order forResponse = repository.findByIdWithDetails(savedOrder.getId()).orElse(savedOrder);
-        return com.gpstore.dto.response.OrderDetailResponse.from(forResponse, delivery);
+        // The payment row, not the order's own stale copy of the status. This
+        // path CHANGES a payment (marking a COD delivery received, or moving
+        // a cancelled prepaid order to REFUND_PENDING), so returning the
+        // order column here would hand the caller back the status it had
+        // before the very change it just made.
+        return com.gpstore.dto.response.OrderDetailResponse.from(forResponse, delivery, false,
+                paymentRepository.findByOrderId(savedOrder.getId()).orElse(null));
     }
 
     /**

@@ -166,13 +166,72 @@ class _AdminOrderDetailScreenState extends ConsumerState<AdminOrderDetailScreen>
               ),
             ),
             const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text('Payment: ${order.paymentStatus.replaceAll('_', ' ')}',
-                  style: Theme.of(context).textTheme.bodyMedium),
-            ),
+            _PaymentLine(order: order),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// What the shop is owed, and what came back.
+///
+/// COD_RECEIVED IS THE POINT. The status here used to come from the order's
+/// own payment_status column, written once at checkout and never updated, so
+/// an order whose cash a rider handed in an hour ago still read "COD PENDING"
+/// - on the screen the shop uses to decide who still owes money. It now
+/// reports the payment row.
+///
+/// The split below it renders only when a rider actually recorded one. A
+/// COD settled automatically by the delivery flow has no split, and printing
+/// "cash ₹0" for it would be a number the day's count cannot be reconciled
+/// against.
+class _PaymentLine extends StatelessWidget {
+  const _PaymentLine({required this.order});
+
+  final OrderDetail order;
+
+  @override
+  Widget build(BuildContext context) {
+    final received = order.paymentStatus == 'COD_RECEIVED' ||
+        order.paymentStatus == 'SUCCESS';
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                received ? Icons.check_circle : Icons.schedule,
+                size: 16,
+                color: received ? AdminColors.success : AdminColors.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Payment: ${order.paymentStatus.replaceAll('_', ' ')}',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: received ? FontWeight.w600 : FontWeight.w400,
+                    ),
+              ),
+            ],
+          ),
+          if (order.hasCodSplit) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(left: 22),
+              child: Text(
+                'Collected: \u20b9${order.codCashAmount!.toStringAsFixed(0)} cash'
+                ' + \u20b9${order.codUpiAmount!.toStringAsFixed(0)} by UPI / QR',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: AdminColors.textSecondary),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
