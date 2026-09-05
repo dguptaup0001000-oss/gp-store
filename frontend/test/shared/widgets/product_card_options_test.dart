@@ -129,8 +129,11 @@ void main() {
       ),
     );
 
-    // Twice: the overlay across the photo, and the button's own label.
-    expect(find.text('Sold out'), findsNWidgets(2));
+    // Two different words on purpose: the overlay across the photo says
+    // "Out of stock" (what is true of the shelf) and the button says
+    // "Sold out" (what is true of the control).
+    expect(find.text('Out of stock'), findsOneWidget);
+    expect(find.text('Sold out'), findsOneWidget);
 
     final button = tester.widget<OutlinedButton>(find.byType(OutlinedButton));
     expect(button.onPressed, isNull,
