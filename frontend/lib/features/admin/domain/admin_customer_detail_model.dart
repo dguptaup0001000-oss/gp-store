@@ -19,6 +19,7 @@ class AdminCustomerDetail {
     required this.wishlist,
     required this.orders,
     required this.engagement,
+    required this.conduct,
   });
 
   final int id;
@@ -35,6 +36,7 @@ class AdminCustomerDetail {
   final List<CustomerWishlistLine> wishlist;
   final CustomerOrderStats orders;
   final CustomerEngagement engagement;
+  final CustomerConduct conduct;
 
   factory AdminCustomerDetail.fromJson(Map<String, dynamic> json) {
     final list = json['addresses'] as List? ?? const [];
@@ -60,6 +62,8 @@ class AdminCustomerDetail {
           json['orders'] as Map<String, dynamic>? ?? const {}),
       engagement: CustomerEngagement.fromJson(
           json['engagement'] as Map<String, dynamic>? ?? const {}),
+      conduct: CustomerConduct.fromJson(
+          json['conduct'] as Map<String, dynamic>? ?? const {}),
     );
   }
 }
@@ -230,6 +234,64 @@ class CustomerEngagement {
       totalSeconds: (json['totalSeconds'] as num?)?.toInt() ?? 0,
       sessionCount: (json['sessionCount'] as num?)?.toInt() ?? 0,
       lastSeen: seen == null ? null : DateTime.tryParse(seen),
+    );
+  }
+}
+
+/// How riders have found this customer at the door.
+///
+/// SCORED BY THE PERSON WHO WAS THERE, out of ten, one rating per delivery.
+/// The shop asked for it to know before the van leaves whether an address
+/// means an argument.
+///
+/// [averageScore] is NULL for somebody nobody has rated, and the screen must
+/// keep that distinct from a low score - zero is the worst possible rating,
+/// so rendering "never rated" as zero would put a customer at the bottom of
+/// the list for having done nothing at all. [ratedDeliveries] travels with
+/// the average for the same reason: two ratings is a hunch, not a pattern.
+class CustomerConduct {
+  const CustomerConduct({
+    this.averageScore,
+    required this.ratedDeliveries,
+    required this.recent,
+  });
+
+  final double? averageScore;
+  final int ratedDeliveries;
+  final List<CustomerConductLine> recent;
+
+  /// Whether there is anything to show at all.
+  bool get hasRatings => averageScore != null && ratedDeliveries > 0;
+
+  factory CustomerConduct.fromJson(Map<String, dynamic> json) {
+    final lines = json['recent'] as List? ?? const [];
+    return CustomerConduct(
+      averageScore: (json['averageScore'] as num?)?.toDouble(),
+      ratedDeliveries: (json['ratedDeliveries'] as num?)?.toInt() ?? 0,
+      recent: lines
+          .map((e) => CustomerConductLine.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class CustomerConductLine {
+  const CustomerConductLine({
+    required this.orderId,
+    required this.score,
+    this.ratedAt,
+  });
+
+  final int orderId;
+  final int score;
+  final DateTime? ratedAt;
+
+  factory CustomerConductLine.fromJson(Map<String, dynamic> json) {
+    final at = json['ratedAt'] as String?;
+    return CustomerConductLine(
+      orderId: (json['orderId'] as num?)?.toInt() ?? 0,
+      score: (json['score'] as num?)?.toInt() ?? 0,
+      ratedAt: at == null ? null : DateTime.tryParse(at),
     );
   }
 }

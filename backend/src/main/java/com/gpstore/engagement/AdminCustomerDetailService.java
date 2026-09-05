@@ -42,19 +42,22 @@ public class AdminCustomerDetailService {
     private final WishlistRepository wishlistRepository;
     private final OrderRepository orderRepository;
     private final CustomerAppSessionRepository sessionRepository;
+    private final CustomerDeliveryRatingRepository ratingRepository;
 
     public AdminCustomerDetailService(CustomerRepository customerRepository,
                                       AddressRepository addressRepository,
                                       CartRepository cartRepository,
                                       WishlistRepository wishlistRepository,
                                       OrderRepository orderRepository,
-                                      CustomerAppSessionRepository sessionRepository) {
+                                      CustomerAppSessionRepository sessionRepository,
+                                      CustomerDeliveryRatingRepository ratingRepository) {
         this.customerRepository = customerRepository;
         this.addressRepository = addressRepository;
         this.cartRepository = cartRepository;
         this.wishlistRepository = wishlistRepository;
         this.orderRepository = orderRepository;
         this.sessionRepository = sessionRepository;
+        this.ratingRepository = ratingRepository;
     }
 
     @Transactional(readOnly = true)
@@ -77,7 +80,8 @@ public class AdminCustomerDetailService {
                 cartOf(customerId),
                 wishlistOf(customerId),
                 orderStatsOf(customerId),
-                engagementOf(customerId)
+                engagementOf(customerId),
+                conductOf(customerId)
         );
     }
 
@@ -244,6 +248,39 @@ public class AdminCustomerDetailService {
                 sessionRepository.totalSecondsFor(customerId),
                 sessionRepository.sessionCountFor(customerId),
                 sessionRepository.lastSeenFor(customerId));
+    }
+
+    /**
+     * How riders have found this customer at the door.
+     *
+     * THE READ SIDE OF A FEATURE THAT ONLY HAD A WRITE SIDE. Riders have been
+     * able to score a delivery out of ten since the collection screen shipped,
+     * and the rows have been landing in customer_delivery_ratings ever since -
+     * but nothing anywhere read them, so the shopkeeper this was built for
+     * could not see a single one.
+     *
+     * The average is over EVERY rating; only the list is capped. Showing an
+     * average of the last ten while calling it the customer's score would be
+     * a different number wearing the same label.
+     */
+    private DeliveryConduct conductOf(Long customerId) {
+        CustomerDeliveryRatingRepository.ConductSummary summary =
+                ratingRepository.summaryFor(customerId);
+
+        List<ConductLine> recent = new ArrayList<>();
+        for (CustomerDeliveryRating rating
+                : ratingRepository.findTop10ByCustomerIdOrderByCreatedAtDesc(customerId)) {
+            recent.add(new ConductLine(
+                    rating.getOrderId(), rating.getScore(), rating.getCreatedAt()));
+        }
+
+        // Null average and zero count for somebody nobody has rated - never a
+        // zero score, which reads as the worst possible customer rather than
+        // as "we do not know".
+        return new DeliveryConduct(
+                summary == null ? null : summary.getAverage(),
+                summary == null ? 0L : summary.getTotal(),
+                recent);
     }
 
     // ------------------------------------------------------------- helpers

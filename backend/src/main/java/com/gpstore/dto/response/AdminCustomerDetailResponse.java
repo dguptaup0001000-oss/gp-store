@@ -34,7 +34,8 @@ public record AdminCustomerDetailResponse(
         CartSummary cart,
         List<WishlistLine> wishlist,
         OrderStats orders,
-        Engagement engagement
+        Engagement engagement,
+        DeliveryConduct conduct
 ) {
 
     public record AddressLine(
@@ -100,5 +101,35 @@ public record AdminCustomerDetailResponse(
             long totalSeconds,
             long sessionCount,
             LocalDateTime lastSeen
+    ) {}
+
+    /**
+     * How riders have found this customer at the door.
+     *
+     * SCORED BY THE PERSON WHO WAS THERE, out of ten, one rating per delivery.
+     * It exists because a shop needs to know before the van leaves whether an
+     * address means an argument - the abusive customer, the one who is never
+     * in, the one who refuses at the door after the goods have been carried up
+     * three floors.
+     *
+     * averageScore is NULL, not zero, for a customer nobody has rated. Zero
+     * would read as the worst possible customer, which is the opposite of "we
+     * do not know". The screen must render the two differently.
+     *
+     * A JUDGEMENT BY ONE PERSON ON ONE DAY. Two ratings is a hunch, not a
+     * pattern, so ratedDeliveries is carried alongside the average rather
+     * than hidden behind it - and nothing here should be automated into
+     * refusing somebody service.
+     */
+    public record DeliveryConduct(
+            Double averageScore,
+            long ratedDeliveries,
+            List<ConductLine> recent
+    ) {}
+
+    public record ConductLine(
+            Long orderId,
+            Integer score,
+            LocalDateTime ratedAt
     ) {}
 }
