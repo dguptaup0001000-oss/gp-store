@@ -19,6 +19,7 @@ class ProductCard extends StatefulWidget {
     this.quantityInCart = 0,
     this.onIncrement,
     this.onDecrement,
+    this.onOptionsPressed,
   });
 
   final Product product;
@@ -36,6 +37,18 @@ class ProductCard extends StatefulWidget {
   final int quantityInCart;
   final VoidCallback? onIncrement;
   final VoidCallback? onDecrement;
+
+  /// Opens the size chooser, for a product that comes in more than one pack.
+  ///
+  /// WHEN THIS IS SET THE STEPPER IS NOT SHOWN, and that is the whole design.
+  /// A single +/- on the card can only mean one variant, so on a product with
+  /// three sizes it would either increment whichever one happened to be in
+  /// the cart or, worse, add a size the customer never chose. The button
+  /// keeps saying what is in the basket and reopens the chooser instead, and
+  /// the per-size steppers live in the sheet where each one is labelled.
+  ///
+  /// Null for a single-size product, which behaves exactly as it always has.
+  final VoidCallback? onOptionsPressed;
 
   // Optional and presentational only - if onWishlistToggle is null, no heart
   // icon shows at all. Callers own the actual wishlist state/API calls
@@ -68,14 +81,24 @@ class _ProductCardState extends State<ProductCard> {
     final quantityInCart = widget.quantityInCart;
     final onIncrement = widget.onIncrement;
     final onDecrement = widget.onDecrement;
+    final onOptionsPressed = widget.onOptionsPressed;
+    final hasOptions = onOptionsPressed != null;
 
     final variant = product.primaryVariant;
     final isInStock = variant?.available ?? false;
     final discount = product.discountPercent;
 
-    final packLabel = (variant?.quantity != null && variant?.unit != null)
+    final packSize = (variant?.quantity != null && variant?.unit != null)
         ? '${_formatQuantity(variant!.quantity!)} ${variant.unit}'
         : null;
+
+    // Rides on the line that already exists rather than adding a row. The
+    // card's height is derived arithmetic (see ProductGrid), and a new text
+    // row would clip every grid in the app at larger text scales.
+    final optionsLabel = hasOptions ? '${product.optionCount} options' : null;
+    final packLabel = packSize != null && optionsLabel != null
+        ? '$packSize \u00b7 $optionsLabel'
+        : packSize ?? optionsLabel;
 
     // Built once, placed by whichever density branch below is active, so the
     // two layouts can never drift into behaving differently on the one
@@ -87,7 +110,7 @@ class _ProductCardState extends State<ProductCard> {
     // shopper presses it, nothing happens, and the app looks broken rather
     // than the shelf looking empty. Explicit greys, an explicit grey border
     // and 'Sold out' say what is true. The wishlist heart above stays live.
-    final Widget addControl = quantityInCart > 0 && isInStock
+    final Widget addControl = quantityInCart > 0 && isInStock && !hasOptions
         ? _QuantityStepper(
             quantity: quantityInCart,
             onIncrement: onIncrement,
@@ -97,11 +120,11 @@ class _ProductCardState extends State<ProductCard> {
             // Stronger than the card/wishlist taps - this is the primary
             // "yes, add this" action, so it gets a more deliberate thud
             // instead of a light click.
-            onPressed: !isInStock || onAddPressed == null
+            onPressed: !isInStock || (onOptionsPressed ?? onAddPressed) == null
                 ? null
                 : () {
                     HapticFeedback.mediumImpact();
-                    onAddPressed();
+                    (onOptionsPressed ?? onAddPressed)!();
                   },
             style: OutlinedButton.styleFrom(
               // Teal, not blue: this is a basket action, and the palette
@@ -116,7 +139,14 @@ class _ProductCardState extends State<ProductCard> {
               padding: EdgeInsets.zero,
             ),
             child: Text(
-              isInStock ? 'ADD' : 'Sold out',
+              // "2 IN BAG" rather than a stepper: the count is honest about
+              // the whole product, and the tap goes back to the chooser where
+              // each size has its own control.
+              !isInStock
+                  ? 'Sold out'
+                  : hasOptions && quantityInCart > 0
+                      ? '$quantityInCart IN BAG'
+                      : 'ADD',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
@@ -241,18 +271,28 @@ class _ProductCardState extends State<ProductCard> {
                       Positioned(
                         left: 2,
                         bottom: 2,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.92),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            packLabel,
-                            style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textSecondary,
+                        // right as well as left, so the chip has a WIDTH to
+                        // ellipsis within. Without it "500 ml - 3 options" at
+                        // a 1.3x text scale paints past the edge of the image.
+                        // Align keeps it hugging its text at ordinary sizes.
+                        right: 2,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.92),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              packLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textSecondary,
+                              ),
                             ),
                           ),
                         ),
@@ -330,6 +370,11 @@ class _ProductCardState extends State<ProductCard> {
                   const SizedBox(height: 2),
                   Text(
                     packLabel,
+                    // One line, always. This row is part of the fixed info
+                    // block ProductGrid's aspect ratio is derived from, so a
+                    // label that wrapped would push the price off the card.
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 11),
                   ),
                 ],

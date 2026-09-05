@@ -6,6 +6,7 @@ import '../../features/cart/presentation/cart_providers.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../features/wishlist/presentation/wishlist_providers.dart';
 import 'product_card.dart';
+import 'variant_picker_sheet.dart';
 
 /// ProductCard with cart and wishlist state already wired.
 ///
@@ -32,6 +33,24 @@ class CartAwareProductCard extends ConsumerWidget {
     // wishlist screen, another card showing the same product.
     ref.watch(wishlistControllerProvider);
     final wishlist = ref.read(wishlistControllerProvider.notifier);
+
+    // MORE THAN ONE PACK SIZE CHANGES WHAT THE CARD CAN HONESTLY DO. The card
+    // carries a single variant by design (the server trims the rest so a feed
+    // page stays small), so ADD used to put whichever size the server picked
+    // into the basket without ever telling the customer the others existed.
+    // For these products the button opens the size chooser instead, and the
+    // count it shows is the whole product's - a +/- on the card could only
+    // ever mean one size and would be wrong the moment two are in the basket.
+    if (product.optionCount > 1) {
+      return ProductCard(
+        product: product,
+        onTap: onTap,
+        isWishlisted: wishlist.isWishlisted(product.id),
+        onWishlistToggle: () => wishlist.toggle(product.id),
+        quantityInCart: ref.watch(cartQuantityForProductProvider(product.id)),
+        onOptionsPressed: () => showVariantPicker(context, product),
+      );
+    }
 
     // Only this variant's line, so adding an unrelated product does not
     // rebuild every card on screen.

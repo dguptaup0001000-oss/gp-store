@@ -109,6 +109,25 @@ public class ProductResponse implements Serializable {
     private final String model3dUrl;
 
     /**
+     * HOW MANY PACK SIZES THIS PRODUCT ACTUALLY HAS - not how many are in the
+     * `variants` list above.
+     *
+     * {@link #fromCard} trims a card down to ONE representative variant so a
+     * twenty-product page does not serialise a hundred prices the card never
+     * draws. That trimming also destroyed the only signal a card had that a
+     * product comes in 500 g as well as 1 kg, so the grid silently offered
+     * one size and added it on tap. This integer restores the signal at the
+     * cost of four bytes instead of the whole variant list.
+     *
+     * Integer, not int, and null-tolerant on purpose: entries written into
+     * Redis by a build from before this field existed deserialise with it
+     * absent, and Jackson omits nulls on this DTO, so an older cached card
+     * simply carries no key - which the app reads as "fall back to the
+     * length of the variants list", exactly the behaviour it had before.
+     */
+    private final Integer variantCount;
+
+    /**
      * Kept so existing callers - and existing cached entries - constructed
      * without a gallery keep compiling and behaving identically. Delegates
      * with an empty gallery rather than null.
@@ -142,6 +161,21 @@ public class ProductResponse implements Serializable {
                             String model3dUrl, String subcategory, Boolean bestseller,
                             Boolean featured, Boolean testData,
                             Boolean isPrivateProduct, String customerDisplayName) {
+        // Every caller but fromCard is serialising the whole variant list, so
+        // the count IS the list length. Only the trimmed card response has to
+        // say otherwise, and it uses the constructor below.
+        this(id, name, brand, category, variants, active, images, model3dUrl, subcategory,
+                bestseller, featured, testData, isPrivateProduct, customerDisplayName,
+                variants == null ? 0 : variants.size());
+    }
+
+    public ProductResponse(Long id, String name, String brand, CategoryResponse category,
+                            List<VariantResponse> variants, Boolean active, List<String> images,
+                            String model3dUrl, String subcategory, Boolean bestseller,
+                            Boolean featured, Boolean testData,
+                            Boolean isPrivateProduct, String customerDisplayName,
+                            Integer variantCount) {
+        this.variantCount = variantCount;
         this.isPrivateProduct = isPrivateProduct;
         this.customerDisplayName = customerDisplayName;
         this.id = id;
@@ -285,7 +319,14 @@ public class ProductResponse implements Serializable {
         return new ProductResponse(
                 full.getId(), full.getName(), full.getBrand(), full.getCategory(),
                 List.of(pick), full.getActive(), full.getImages(), full.getModel3dUrl(),
-                full.getSubcategory(), full.getBestseller(), full.getFeatured(), full.getTestData());
+                full.getSubcategory(), full.getBestseller(), full.getFeatured(), full.getTestData(),
+                // Not a customer-facing admin field, so both stay null here.
+                null, null,
+                // THE COUNT SURVIVES THE TRIM. Without this the card would
+                // report one size for a product that has five, and the app
+                // would go on adding the cheapest one without ever offering
+                // the others.
+                variants.size());
     }
 
     public Long getId() { return id; }
@@ -305,4 +346,10 @@ public class ProductResponse implements Serializable {
 
     /** Null unless this came from the product detail endpoint AND the product has a model. */
     public String getModel3dUrl() { return model3dUrl; }
+
+    /**
+     * How many pack sizes the product has, or null on a cached entry written
+     * before this field existed. Never smaller than the `variants` list.
+     */
+    public Integer getVariantCount() { return variantCount; }
 }
