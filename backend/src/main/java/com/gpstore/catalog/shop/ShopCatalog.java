@@ -103,6 +103,36 @@ public class ShopCatalog {
         return catalogueFallback(variant);
     }
 
+    /**
+     * Listings for one NAMED shop, whatever scope the thread is in.
+     *
+     * FOR CHECKOUT, WHICH VISITS SEVERAL SHOPS IN ONE TRANSACTION. The
+     * Hibernate filter is enabled when a persistence session is opened, so it
+     * cannot change part-way through a transaction - which means a checkout
+     * that splits a basket across shops cannot lean on it to price each half.
+     * Naming the shop is the honest alternative, and it is the same pattern
+     * Slice 5 used for the background paths.
+     *
+     * THE SHOP ID IS NOT A CALLER'S OPINION. It comes off the cart line, which
+     * CartService stamped from the shop that add-to-cart resolved to.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, ShopProductVariant> listingsForShop(Long shopId, Collection<Long> productVariantIds) {
+        if (shopId == null || productVariantIds == null || productVariantIds.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> ids = new LinkedHashSet<>(productVariantIds);
+        ids.remove(null);
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, ShopProductVariant> byVariant = new HashMap<>();
+        for (ShopProductVariant listing : listings.findByShopIdAndProductVariantIdIn(shopId, ids)) {
+            byVariant.put(listing.getProductVariantId(), listing);
+        }
+        return byVariant;
+    }
+
     /** As {@link #priceOf}, for a listing already loaded in bulk. */
     public Optional<BigDecimal> priceOf(ProductVariant variant, Map<Long, ShopProductVariant> loaded) {
         if (variant == null) {

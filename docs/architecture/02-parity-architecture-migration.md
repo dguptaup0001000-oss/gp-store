@@ -670,3 +670,78 @@ editing changes for the shop trading today.
 | **A shop cannot manage its own staff** | Adding staff is platform-level for now: "who may work here" is the hinge the whole isolation model turns on, and a shop that could add an account could add somebody else's | Slice 7 |
 | **Bulk catalogue import** | Creates products as well as listings, so under a marketplace it stays behind `SYSTEM_ADMIN` rather than being split | Slice 7 |
 | **Riders are not yet shop-selectable** | `delivery_partners.shop_id` scopes them, and a worker token carries `workerId` rather than a customer id, so a rider working for two shops has no way to say which | Slice 7 |
+
+---
+
+# Slice 6 — a customer finds a shop, and a basket becomes several orders
+
+## Customer shop resolution
+
+A customer is on nobody's staff list, so Slice 3's resolution refused them — correct for a
+shopkeeper, and applied to the people the marketplace exists for it meant nobody could
+shop on it. A customer's shop is now:
+
+1. the storefront they explicitly opened (`X-Shop-Id`, checked against what the
+   marketplace shows customers), or
+2. the **nearest shop that will deliver to their address**.
+
+**The radius belongs to the shop.** Each storefront declares how far it will go, and is
+offered only when the customer is inside *its* circle — a kirana that delivers 2 km and
+one that delivers 8 km are both correct. Nearest first, which is the progressive part.
+An address with no pin matches no shop rather than every shop, the same fail-closed rule
+the single shop always applied.
+
+**Browsing is not authorization.** The scope a customer gets is a *shop* scope, so every
+shop-owned query stays filtered to that one shop. And the branch is gated on the account
+being staff of nowhere — without that, a shopkeeper (who is also, technically, someone who
+could browse) could name a competitor's storefront and be given a scope inside it. That
+regression existed for about an hour of this slice and is now pinned by a test.
+
+## The split
+
+```
+cart_items.shop_id   ->   group by shop   ->   order_groups (one)
+                                               orders       (one per shop)
+```
+
+Each shop's order is built by **the same routine that placed the single shop's order
+before this slice**, handed a narrower list of cart lines. There is no per-shop branch
+anywhere: a one-shop basket runs it once and produces the order it always produced.
+
+**Each iteration runs inside that shop's scope**, and `ShopScopeSwitch` re-points the
+Hibernate filter to match. That was the sharp edge: a filter is fixed when the persistence
+session opens, and a multi-shop checkout is *one* transaction — it has to be, or a
+customer's basket could half-succeed — so the second shop's queries came back empty and
+read as "that shop has no stock". Prices and inventory are *also* named explicitly, so the
+two agree.
+
+Per shop: its own prices, its own stock row, its own delivery quote from its own
+coordinates, its own hours and closure message, its own payment. A coupon applies to the
+one shop that issued it — codes are unique within a shop, not across the marketplace.
+
+**`cart_items.shop_id` is data, not a tenant boundary.** Filtering it would mean a customer
+adding something from the second kirana watched the first one's items vanish. What
+protects a cart is what always did — it belongs to a customer — and the column is stamped
+by `CartItem`'s own `@PrePersist`, never sent by a client. `ShopScopeIsNotOptionalTest`
+carries that exemption with all three alternative protections named.
+
+## Two bugs the tests found
+
+- **A new shop had no settings rows**, so the first checkout preview tried to create
+  delivery pricing inside a read-only transaction. Postgres aborts the whole transaction
+  on that, so every later query failed too. Shops now get their settings when they are
+  opened, and the read path returns defaults rather than inserting.
+- **`getMyOrders` would have shown half a basket.** A split checkout is two orders owned by
+  two merchants and one customer; scoped to one shop the customer's own history hides the
+  other half. `CustomerOwnedRead` widens that one read by name, and it is safe only because
+  the query is keyed on the customer id from the token.
+
+## Still not protected
+
+| Gap | Why | Closes in |
+|---|---|---|
+| **One idempotency record per checkout points at the first order** | A replay finds the group through that order. Correct, but a client retrying and reading only `orderId` sees one shop's order — the group is in the same response | Slice 7 |
+| **No group-level cancel** | Each shop order cancels independently, which is the requirement — but a customer wanting to cancel "the whole thing" does it one order at a time | Slice 7 |
+| **Delivery is per shop, not pooled** | Two shops means two riders and two fees. Correct today; a marketplace may later want one rider collecting from several | Later |
+| **Cart lines are not re-priced when a shop delists** | Checkout refuses an unlisted item, so nobody is overcharged — but the customer finds out at checkout rather than in the basket | Slice 7 |
+| **A customer with no serviceable address gets a 403** | Fail-closed and correct, but the app needs a "no shop delivers here yet" screen rather than an error | Frontend |

@@ -50,7 +50,10 @@ class PaginationCapTest {
 
     @BeforeEach
     void setUp() {
-        orderController = new OrderController(orderService, currentUser);
+        orderController = new OrderController(orderService, currentUser,
+                // Customer-owned reads span shops; this test is about the
+                // page-size cap, so the widening is a pass-through.
+                new com.gpstore.platform.CustomerOwnedRead());
         inventoryController = new InventoryController(inventoryService);
         couponController = new CouponController(couponService);
         deliveryPartnerController = new DeliveryPartnerController(deliveryPartnerService, currentUser);

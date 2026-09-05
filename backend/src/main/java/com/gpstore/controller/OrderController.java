@@ -25,10 +25,13 @@ public class OrderController {
 
     private final OrderService orderService;
     private final CurrentUser currentUser;
+    private final com.gpstore.platform.CustomerOwnedRead customerOwnedRead;
 
-    public OrderController(OrderService orderService, CurrentUser currentUser) {
+    public OrderController(OrderService orderService, CurrentUser currentUser,
+                           com.gpstore.platform.CustomerOwnedRead customerOwnedRead) {
         this.orderService = orderService;
         this.currentUser = currentUser;
+        this.customerOwnedRead = customerOwnedRead;
     }
 
     // Place a new order for the logged-in customer.
@@ -78,7 +81,12 @@ public class OrderController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));
-        return orderService.getMyOrders(currentUser.customerId(), pageable);
+        // ACROSS EVERY SHOP THEY HAVE BOUGHT FROM. A basket split between two
+        // kiranas is two orders; scoped to one shop this list would quietly
+        // show half of what the customer bought. Safe because the query is
+        // keyed on the customer id from the token - see CustomerOwnedRead.
+        Long me = currentUser.customerId();
+        return customerOwnedRead.acrossShops(() -> orderService.getMyOrders(me, pageable));
     }
 
     // Admin only (enforced in SecurityConfig): every order in the system, WITH customer name.
@@ -106,7 +114,15 @@ public class OrderController {
     @GetMapping("/{orderId}")
     public com.gpstore.dto.response.OrderDetailResponse getOrderDetail(@PathVariable Long orderId) {
         boolean isAdmin = currentUser.has(AdminPermission.ORDERS_VIEW);
-        return orderService.getOwnedOrderDetail(orderId, currentUser.customerId(), isAdmin);
+        // Same reasoning as the list above, and the ownership check inside
+        // getOwnedOrderDetail is what still stops one customer opening
+        // another's order. An admin's read stays shop-scoped: a shopkeeper
+        // asking for an order id has no business seeing another shop's.
+        Long me = currentUser.customerId();
+        return isAdmin
+                ? orderService.getOwnedOrderDetail(orderId, me, true)
+                : customerOwnedRead.acrossShops(
+                        () -> orderService.getOwnedOrderDetail(orderId, me, false));
     }
 
     // Admin only (enforced in SecurityConfig).

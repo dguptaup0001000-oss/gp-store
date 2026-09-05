@@ -83,6 +83,10 @@ class MerchantShopLifecycleTest {
         }
         jdbc.update("DELETE FROM shop_staff WHERE customer_id = ?", platformAdminId);
         jdbc.update("DELETE FROM customers WHERE id = ?", platformAdminId);
+        jdbc.update("DELETE FROM store_operations_settings WHERE shop_id IN "
+                + "(SELECT id FROM shops WHERE code like ?)", "LIFE-" + tag + "%");
+        jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id IN "
+                + "(SELECT id FROM shops WHERE code like ?)", "LIFE-" + tag + "%");
         jdbc.update("DELETE FROM shops WHERE code like ?", "LIFE-" + tag + "%");
         jdbc.update("DELETE FROM merchants WHERE legal_name like ?", "Lifecycle " + tag + "%");
     }
@@ -165,7 +169,11 @@ class MerchantShopLifecycleTest {
             // Children before parents: merchants.owner_customer_id points at
             // this account, and shop_staff points at both.
             jdbc.update("DELETE FROM shop_staff WHERE customer_id = ?", owner);
-            jdbc.update("DELETE FROM shops WHERE code like ?", "LIFE-" + tag + "%");
+            jdbc.update("DELETE FROM store_operations_settings WHERE shop_id IN "
+                + "(SELECT id FROM shops WHERE code like ?)", "LIFE-" + tag + "%");
+        jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id IN "
+                + "(SELECT id FROM shops WHERE code like ?)", "LIFE-" + tag + "%");
+        jdbc.update("DELETE FROM shops WHERE code like ?", "LIFE-" + tag + "%");
             jdbc.update("DELETE FROM merchants WHERE owner_customer_id = ?", owner);
             jdbc.update("DELETE FROM customers WHERE id = ?", owner);
         }

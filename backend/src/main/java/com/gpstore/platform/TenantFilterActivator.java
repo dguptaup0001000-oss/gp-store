@@ -57,12 +57,16 @@ public class TenantFilterActivator implements BeanPostProcessor {
      * rather than a copy of it.
      */
     public static void applyTo(EntityManager entityManager) {
+        Session session = entityManager.unwrap(Session.class);
         TenantScope scope = TenantContext.current();
         if (scope == null || scope.isPlatform()) {
+            // Work that spans shops. Disabling rather than leaving whatever
+            // was there matters once this can be called on a session that is
+            // already open - see syncCurrentScope.
+            session.disableFilter(ShopScopeFilter.NAME);
             return;
         }
-        entityManager.unwrap(Session.class)
-                .enableFilter(ShopScopeFilter.NAME)
+        session.enableFilter(ShopScopeFilter.NAME)
                 .setParameter(ShopScopeFilter.SHOP_ID_PARAM, scope.requireShopId());
     }
 

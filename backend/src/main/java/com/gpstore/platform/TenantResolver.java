@@ -2,6 +2,8 @@ package com.gpstore.platform;
 
 import com.gpstore.security.AdminPermission;
 import com.gpstore.security.CurrentUser;
+
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -31,13 +33,18 @@ public class TenantResolver {
     private final CurrentUser currentUser;
     private final ShopRepository shops;
     private final ShopMembership membership;
+    private final ShopDiscovery discovery;
+    private final CustomerShopPreference customerShops;
 
     public TenantResolver(PlatformProperties platform, CurrentUser currentUser,
-                          ShopRepository shops, ShopMembership membership) {
+                          ShopRepository shops, ShopMembership membership,
+                          ShopDiscovery discovery, CustomerShopPreference customerShops) {
         this.platform = platform;
         this.currentUser = currentUser;
         this.shops = shops;
         this.membership = membership;
+        this.discovery = discovery;
+        this.customerShops = customerShops;
     }
 
     /**
@@ -93,10 +100,31 @@ public class TenantResolver {
             }
         }
 
+        // A CUSTOMER IS NOT STAFF OF ANYTHING, and must not have to be.
+        //
+        // Requiring a staff membership to resolve a scope was right while the
+        // only people with a scope were shopkeepers; applied to customers it
+        // would mean nobody can shop on the marketplace at all. A customer's
+        // shop is the nearest one that will deliver to their address - the
+        // shop's own radius, nearest first (ShopDiscovery) - or the storefront
+        // they explicitly opened, which arrives through select() and is
+        // checked there like every other selection.
+        //
+        // THIS IS NOT AN AUTHORIZATION. Browsing a storefront is something any
+        // customer may do; the scope it produces lets them read that shop's
+        // prices and stock, which is what a shopfront is. It does not let them
+        // act as the shop - that is ShopMembership, and it is a different
+        // question.
+        Optional<Long> browsing = customerShops.shopForCurrentCustomer();
+        if (browsing.isPresent()) {
+            return TenantScope.ofShop(browsing.get());
+        }
+
         throw new IllegalStateException(
-                "Multi-shop mode is on but this credential belongs to no shop. An account with "
-                        + "no staff membership cannot be resolved to a shop, and picking one for "
-                        + "it would be inventing an authorization nobody granted.");
+                "Multi-shop mode is on and this request names no shop. A staff account with no "
+                        + "membership, or a customer with no serviceable address, cannot be "
+                        + "resolved to one - and picking a shop for them would be inventing an "
+                        + "authorization nobody granted.");
     }
 
     /**
@@ -127,6 +155,26 @@ public class TenantResolver {
 
         Long customerId = currentUserIdOrNull();
         if (customerId != null && membership.permits(customerId, requestedShopId)) {
+            return TenantScope.ofShop(requestedShopId);
+        }
+
+        // A CUSTOMER OPENING A STOREFRONT. Any shop the marketplace shows to
+        // customers may be browsed by any of them, so selecting one is not an
+        // escalation - it is choosing which shop's window to stand in front
+        // of. A shop that is suspended, closed or still a draft is refused,
+        // because it is not on the marketplace to be looked at.
+        //
+        // ONLY FOR SOMEBODY WHO IS NOT STAFF ANYWHERE, and that condition is
+        // the whole security of this branch. Without it a shopkeeper - who is
+        // also, technically, a person who could browse - would be able to
+        // name any shop on the marketplace and be given a scope inside it,
+        // which is precisely the cross-merchant move Slice 3 exists to
+        // prevent. A staff account is restricted to the shops it is staff of,
+        // full stop; if a shopkeeper wants to shop elsewhere, that is a
+        // customer account.
+        boolean isStaffSomewhere =
+                customerId != null && !membership.shopIdsFor(customerId).isEmpty();
+        if (!isStaffSomewhere && discovery.isBrowsableByCustomers(requestedShopId)) {
             return TenantScope.ofShop(requestedShopId);
         }
 

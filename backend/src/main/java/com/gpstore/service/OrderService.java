@@ -62,6 +62,9 @@ public class OrderService {
     private final TaxService taxService;
     private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
     private final com.gpstore.platform.ShopTradingGate shopTradingGate;
+    private final com.gpstore.ordergroup.OrderGroupRepository orderGroupRepository;
+    private final com.gpstore.platform.ShopRepository shopRepository;
+    private final com.gpstore.platform.ShopScopeSwitch shopScopeSwitch;
     private final com.gpstore.repository.DeliveryRepository deliveryRepository;
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
@@ -108,7 +111,10 @@ public class OrderService {
             @org.springframework.beans.factory.annotation.Value("${orders.require-idempotency-key:true}")
             boolean requireIdempotencyKey,
             com.gpstore.catalog.shop.ShopCatalog shopCatalog,
-            com.gpstore.platform.ShopTradingGate shopTradingGate) {
+            com.gpstore.platform.ShopTradingGate shopTradingGate,
+            com.gpstore.ordergroup.OrderGroupRepository orderGroupRepository,
+            com.gpstore.platform.ShopRepository shopRepository,
+            com.gpstore.platform.ShopScopeSwitch shopScopeSwitch) {
 
         this.repository = repository;
         this.deliveryScheduleService = deliveryScheduleService;
@@ -136,6 +142,9 @@ public class OrderService {
         this.requireIdempotencyKey = requireIdempotencyKey;
         this.shopCatalog = shopCatalog;
         this.shopTradingGate = shopTradingGate;
+        this.orderGroupRepository = orderGroupRepository;
+        this.shopRepository = shopRepository;
+        this.shopScopeSwitch = shopScopeSwitch;
     }
 
 
@@ -202,9 +211,79 @@ public class OrderService {
             throw new BadRequestException("Cart is empty");
         }
 
-        // One query for every line's shop price, rather than one per line.
+        // THE PREVIEW IS PER SHOP, AND THEN ADDED UP (§16). A basket spanning
+        // two kiranas is two deliveries, two delivery fees and two shops that
+        // each have to reach the address - so the customer is shown that
+        // breakdown before they commit, rather than one blended number that
+        // hides which half is the expensive one.
+        //
+        // Each shop's half is computed INSIDE that shop's scope, so its
+        // prices, its stock, its delivery pricing settings and its distance
+        // from the address are all its own.
+        java.util.Map<Long, List<CartItem>> byShop = groupByShop(cartItems);
+
+        // Which shop's offer this code is, if any - see shopIssuingCoupon.
+        Long couponShopId = shopIssuingCoupon(couponCode, byShop.keySet());
+        String couponError = null;
+        if (couponCode != null && !couponCode.isBlank() && couponShopId == null) {
+            couponError = "That coupon is not offered by any of the shops in your basket.";
+        }
+
+        List<com.gpstore.dto.response.CheckoutPreviewResponse.ShopBreakdown> perShop =
+                new ArrayList<>();
+        BigDecimal subtotal = BigDecimal.ZERO;
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        BigDecimal effectiveDeliveryFee = BigDecimal.ZERO;
+        boolean deliverable = true;
+        boolean freeDeliveryApplied = false;
+        Integer estimatedMinutes = null;
+
+        for (java.util.Map.Entry<Long, List<CartItem>> shopBasket : byShop.entrySet()) {
+            final Long shopId = shopBasket.getKey();
+            final List<CartItem> shopItems = shopBasket.getValue();
+            final boolean couponHere = shopId.equals(couponShopId);
+            final String code = couponCode;
+
+            var shopPreview = shopScopeSwitch.within(shopId,
+                    () -> previewOneShop(shopId, shopItems, address, couponHere ? code : null));
+
+            perShop.add(shopPreview);
+            subtotal = subtotal.add(shopPreview.subtotal());
+            discountAmount = discountAmount.add(shopPreview.discountAmount());
+            effectiveDeliveryFee = effectiveDeliveryFee.add(shopPreview.deliveryFee());
+            deliverable = deliverable && shopPreview.deliverable();
+            freeDeliveryApplied = freeDeliveryApplied || shopPreview.freeDeliveryApplied();
+            if (shopPreview.estimatedDeliveryMinutes() != null) {
+                // The whole basket is there when the SLOWEST shop has arrived.
+                estimatedMinutes = estimatedMinutes == null
+                        ? shopPreview.estimatedDeliveryMinutes()
+                        : Math.max(estimatedMinutes, shopPreview.estimatedDeliveryMinutes());
+            }
+            if (couponHere && shopPreview.couponError() != null) {
+                couponError = shopPreview.couponError();
+            }
+        }
+
+        BigDecimal estimatedTotal = subtotal.subtract(discountAmount).add(effectiveDeliveryFee);
+
+        return new com.gpstore.dto.response.CheckoutPreviewResponse(
+                subtotal, discountAmount, effectiveDeliveryFee, estimatedTotal,
+                freeDeliveryApplied, deliverable, estimatedMinutes, couponError, perShop);
+    }
+
+    /**
+     * One shop's half of a checkout preview.
+     *
+     * Runs inside that shop's scope, so every number it produces - the prices,
+     * the delivery quote, the distance, the coupon - belongs to that shop.
+     * Under one shop this is the whole preview, computed exactly as it always
+     * was.
+     */
+    private com.gpstore.dto.response.CheckoutPreviewResponse.ShopBreakdown previewOneShop(
+            Long shopId, List<CartItem> cartItems, Address address, String couponCode) {
+
         java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings =
-                shopCatalog.listingsFor(cartItems.stream()
+                shopCatalog.listingsForShop(shopId, cartItems.stream()
                         .map(i -> i.getProductVariant() == null ? null : i.getProductVariant().getId())
                         .toList());
 
@@ -222,13 +301,9 @@ public class OrderService {
                         (variant.getProduct() != null ? variant.getProduct().getName() : "An item")
                                 + " is no longer available - please remove it from your cart.");
             }
-
             subtotal = subtotal.add(shopPriceOf(variant, listings)
                     .multiply(BigDecimal.valueOf(item.getQuantity())));
         }
-
-        BigDecimal discountAmount = BigDecimal.ZERO;
-        String couponError = null;
 
         boolean deliverable = deliveryEstimateService.isWithinServiceableRadius(
                 address.getLatitude(), address.getLongitude());
@@ -236,18 +311,21 @@ public class OrderService {
         BigDecimal deliveryFee = BigDecimal.ZERO;
         boolean freeDeliveryApplied = false;
         Integer estimatedMinutes = null;
+        String couponError = null;
+        BigDecimal discountAmount = BigDecimal.ZERO;
 
         if (deliverable) {
             // ONE CALL, ONE PRICE. The distance tiers, the weight surcharge and
             // the margin subsidy are all decided together in
-            // DeliveryPricingService - the preview and the real order below
-            // both go through it, so the number a customer is shown at
-            // checkout is produced by the same code that charges them.
+            // DeliveryPricingService - the preview and the real order both go
+            // through it, so the number a customer is shown at checkout is
+            // produced by the same code that charges them.
             com.gpstore.pricing.DeliveryQuote quote =
                     deliveryPricingService.quoteForCart(cartItems, address);
             deliveryFee = quote.finalCharge();
             freeDeliveryApplied = quote.freeDelivery();
-            estimatedMinutes = deliveryEstimateService.estimateMinutes(address.getLatitude(), address.getLongitude());
+            estimatedMinutes = deliveryEstimateService.estimateMinutes(
+                    address.getLatitude(), address.getLongitude());
         }
 
         if (couponCode != null && !couponCode.isBlank()) {
@@ -263,14 +341,12 @@ public class OrderService {
             }
         }
 
-        // finalCharge is already zero when delivery is free - the quote applies
-        // the rule, rather than the caller re-deciding it and risking the two
-        // disagreeing. A DELIVERY_FLAT coupon may still reduce a non-zero quote.
-        BigDecimal effectiveDeliveryFee = deliveryFee;
-        BigDecimal estimatedTotal = subtotal.subtract(discountAmount).add(effectiveDeliveryFee);
+        String shopName = shopRepository.findById(shopId)
+                .map(com.gpstore.platform.Shop::getDisplayName).orElse(null);
 
-        return new com.gpstore.dto.response.CheckoutPreviewResponse(
-                subtotal, discountAmount, effectiveDeliveryFee, estimatedTotal,
+        return new com.gpstore.dto.response.CheckoutPreviewResponse.ShopBreakdown(
+                shopId, shopName, cartItems.size(), subtotal, discountAmount, deliveryFee,
+                subtotal.subtract(discountAmount).add(deliveryFee),
                 freeDeliveryApplied, deliverable, estimatedMinutes, couponError);
     }
 
@@ -454,30 +530,22 @@ public class OrderService {
         // the same instant and the same settings read, so they cannot describe
         // three slightly different moments, and checkout costs one closures
         // query rather than three.
-        final com.gpstore.store.StoreStatus storeStatus =
-                deliveryScheduleService.getStoreStatusAt(placedAt);
-
-        if (!storeStatus.acceptingOrders()) {
-            String message = storeStatus.closureReason();
-            throw new ConflictException(
-                    message != null && !message.isBlank()
-                            ? message
-                            : "The shop has paused new orders for the moment. "
-                                    + "You can keep browsing, and your cart will be waiting.");
-        }
+        // WHETHER THE SHOP IS TAKING ORDERS IS ASKED PER SHOP, in the loop
+        // below, against that shop's own hours and its own closure message.
+        // It used to be asked once here, of whichever shop the request
+        // resolved to - which under a marketplace is the wrong shop for every
+        // other half of the basket, and which read the settings a second time
+        // for the shop it was right about.
 
         // Throws if the address doesn't belong to this customer.
         Address address = addressService.getOwnedAddress(request.getAddressId(), customerId);
 
-        // Business rule: one store, not a dark-store network - don't accept an
-        // order we can't realistically deliver. Fails closed if the address has
-        // no coordinates at all, rather than silently accepting an unverified order.
-        if (!deliveryEstimateService.isWithinServiceableRadius(address.getLatitude(), address.getLongitude())) {
-            throw new BadRequestException(
-                    "This address is outside our delivery range (" +
-                            deliveryEstimateService.getMaxDeliveryRadiusKm() + " km). " +
-                            "Please choose a different address or add location coordinates to this one.");
-        }
+        // Serviceability is checked PER SHOP, below, once the basket has been
+        // grouped - see requireShopDelivers. The check that used to be here
+        // asked the same question of one configured store, which under a
+        // marketplace is the wrong store for every shop but one; asking it
+        // twice would also be a second round trip on the checkout path for an
+        // answer already obtained.
 
         if (customer.getCart() == null) {
             throw new BadRequestException("Customer cart not found");
@@ -493,6 +561,294 @@ public class OrderService {
             throw new BadRequestException("Cart is empty");
         }
 
+        // ---------------------------------------------------------------
+        // THE SPLIT (§16).
+        //
+        // One basket becomes one order PER SHOP, under one group. Each shop
+        // packs, prices, delivers and is paid for its own half, and each of
+        // those orders then has its own lifecycle - one can be cancelled or
+        // refunded while the other is out for delivery.
+        //
+        // GROUPED BY THE LINE'S OWN shop_id, which CartService stamped from
+        // the shop the add-to-cart request resolved to. Not by anything in
+        // this request: a shop id a customer could send would be a shop id
+        // that moves an item into another shop's order.
+        //
+        // A SINGLE-SHOP BASKET TAKES EXACTLY THIS PATH and produces exactly
+        // one order, which is the order it always produced. There is no
+        // "if more than one shop" branch anywhere, because a rare branch is
+        // one nobody exercises until the day it matters.
+        // ---------------------------------------------------------------
+        java.util.Map<Long, List<CartItem>> byShop = groupByShop(cartItems);
+
+        // EVERY SHOP IN THE BASKET HAS TO REACH THIS ADDRESS, and each one is
+        // asked separately against its own radius. A basket spanning two
+        // kiranas where only one delivers to the customer is not an order
+        // somebody can fulfil, and finding that out after the money moved
+        // would be finding it out too late.
+        for (Long shopId : byShop.keySet()) {
+            requireShopDelivers(shopId, address);
+        }
+
+        // A COUPON BELONGS TO ONE SHOP, so it comes off one shop's half of the
+        // basket - the shop that issued it. Applying it to every shop would
+        // have the other merchants funding a discount they never offered, and
+        // applying it to whichever shop happened to be first would be worse
+        // still: arbitrary, and different on the next checkout.
+        Long couponShopId = shopIssuingCoupon(request.getCouponCode(), byShop.keySet());
+        if (request.getCouponCode() != null && !request.getCouponCode().isBlank()
+                && couponShopId == null) {
+            throw new BadRequestException(
+                    "That coupon is not offered by any of the shops in your basket.");
+        }
+
+        com.gpstore.ordergroup.OrderGroup group = new com.gpstore.ordergroup.OrderGroup();
+        group.setGroupNumber(OrderNumberGenerator.generateGroupNumber(
+                repository.nextOrderNumberSequenceValue()));
+        group.setCustomerId(customerId);
+        group.setAddressId(address.getId());
+        group.setShopCount(byShop.size());
+        group.setTotalAmount(BigDecimal.ZERO);
+        group = orderGroupRepository.save(group);
+
+        List<ShopOrder> placed = new ArrayList<>();
+        BigDecimal groupTotal = BigDecimal.ZERO;
+
+        for (java.util.Map.Entry<Long, List<CartItem>> shopBasket : byShop.entrySet()) {
+            Long shopId = shopBasket.getKey();
+
+            // EACH SHOP'S ORDER IS BUILT INSIDE THAT SHOP'S SCOPE.
+            //
+            // Not for the read filter - a Hibernate filter is fixed when the
+            // persistence session opens, and a checkout that visits three
+            // shops is one session, which is why the prices and the stock rows
+            // below are named explicitly instead. It is for the WRITE side:
+            // TenantEntityListener stamps every shop-owned row from the scope
+            // on the thread, and the scope this request arrived with is the
+            // shop the customer was browsing. Without this, the second shop's
+            // order, its payment, its delivery and its invoice would all be
+            // stamped with the FIRST shop's id - which is one merchant's order
+            // filed in another merchant's books.
+            //
+            // The instant is the checkout's, so every shop's order carries the
+            // same "placed at". The store status is read per shop: when each
+            // kirana opens, and how long it needs to pack, is its own
+            // business, and a delivery promise borrowed from the shop next
+            // door is a promise nobody made.
+            final com.gpstore.ordergroup.OrderGroup thisGroup = group;
+            final boolean couponHere = couponShopId != null && couponShopId.equals(shopId);
+            ShopOrder shopOrder = shopScopeSwitch.within(shopId,
+                    () -> placeOneShopOrder(request, customer, address, shopBasket.getValue(),
+                            thisGroup, placedAt, requireAcceptingOrders(shopId, placedAt),
+                            couponHere));
+            placed.add(shopOrder);
+            groupTotal = groupTotal.add(shopOrder.order().getTotalAmount());
+        }
+
+        group.setTotalAmount(groupTotal);
+        group = orderGroupRepository.save(group);
+
+        // ONE record per checkout, pointing at the first shop's order.
+        //
+        // The key identifies the CHECKOUT, not one of its orders, so a replay
+        // has to find its way back to the whole group - which it does through
+        // that order's own group id. Storing the group id here as well would
+        // be a second copy of the same fact.
+        if (idempotencyRecord != null) {
+            idempotencyRecord.setOrderId(placed.get(0).order().getId());
+            idempotencyRecordRepository.save(idempotencyRecord);
+        }
+
+        // Cleared ONCE, after every shop's order is built. Clearing it inside
+        // the loop would empty the basket the second shop still has to read.
+        cartItemService.clearCart(cartId);
+
+        return respondWith(group, placed, paymentService.parsePaymentMethod(request.getPaymentMethod()));
+    }
+
+    /**
+     * Refuses a basket containing a shop that will not deliver to this address.
+     *
+     * Asked inside the shop's own scope so the radius and the coordinates are
+     * that shop's - see DeliveryEstimateService.origin. Under one shop this is
+     * the same check, against the same numbers, that checkout has always run.
+     */
+    private void requireShopDelivers(Long shopId, Address address) {
+        boolean deliverable = shopScopeSwitch.within(shopId,
+                () -> deliveryEstimateService.isWithinServiceableRadius(
+                        address.getLatitude(), address.getLongitude()));
+        if (!deliverable) {
+            double radius = shopScopeSwitch.within(shopId,
+                    deliveryEstimateService::getMaxDeliveryRadiusKm);
+            throw new BadRequestException(
+                    "This address is outside our delivery range (" + radius + " km). "
+                            + "Please choose a different address or add location coordinates to this one.");
+        }
+    }
+
+    /**
+     * Which shop in this basket offers that coupon, if any.
+     *
+     * Asked shop by shop, inside each shop's scope, because a coupon code is
+     * unique WITHIN a shop and not across the marketplace - two kiranas may
+     * both run a "DIWALI10", and they are different offers with different
+     * money behind them.
+     */
+    private Long shopIssuingCoupon(String couponCode, java.util.Collection<Long> shopIds) {
+        if (couponCode == null || couponCode.isBlank()) {
+            return null;
+        }
+        for (Long shopId : shopIds) {
+            boolean offered = shopScopeSwitch.within(shopId,
+                    () -> couponService.isOfferedHere(couponCode));
+            if (offered) {
+                return shopId;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * That shop's hours, and a refusal if it is not taking orders.
+     *
+     * ASKED OF EACH SHOP IN THE BASKET. One kirana closing early does not
+     * close the other, and the message a customer sees has to be the words
+     * that shop wrote - "back at 9am" reads very differently from a generic
+     * apology, and from the shop next door's.
+     */
+    private com.gpstore.store.StoreStatus requireAcceptingOrders(Long shopId, java.time.Instant placedAt) {
+        com.gpstore.store.StoreStatus status = storeStatusOf(shopId, placedAt);
+        if (!status.acceptingOrders()) {
+            String message = status.closureReason();
+            throw new ConflictException(
+                    message != null && !message.isBlank()
+                            ? message
+                            : "The shop has paused new orders for the moment. "
+                                    + "You can keep browsing, and your cart will be waiting.");
+        }
+        return status;
+    }
+
+    /**
+     * When that shop opens, and what it can promise.
+     *
+     * READ INSIDE THAT SHOP'S SCOPE, because the schedule and the operations
+     * settings behind it are per shop (V49) and are found by the shop in
+     * scope. Without this every shop's order in a group would inherit the
+     * hours of whichever shop the request happened to resolve to.
+     */
+    private com.gpstore.store.StoreStatus storeStatusOf(Long shopId, java.time.Instant placedAt) {
+        return shopScopeSwitch.within(shopId, () -> deliveryScheduleService.getStoreStatusAt(placedAt));
+    }
+
+    /**
+     * The basket, in shop order.
+     *
+     * SORTED BY SHOP ID, and that is not cosmetic. Two customers checking out
+     * baskets that overlap two shops must take that pair of shops in the same
+     * sequence, for the same reason inventory locks are taken in ascending
+     * variant id - opposite orders deadlock. A LinkedHashMap over a sorted key
+     * set is what makes the sequence deterministic.
+     *
+     * A LINE WITH NO SHOP CANNOT BE CHECKED OUT. V51 backfilled every existing
+     * line and CartService stamps every new one, so this is unreachable - and
+     * it refuses rather than guessing, because guessing would put somebody
+     * else's item into a shop's order.
+     */
+    private static java.util.Map<Long, List<CartItem>> groupByShop(List<CartItem> cartItems) {
+        java.util.Map<Long, List<CartItem>> byShop = new java.util.LinkedHashMap<>();
+        List<CartItem> sorted = cartItems.stream()
+                .sorted(java.util.Comparator.comparing(
+                        item -> item.getShopId() == null ? Long.MIN_VALUE : item.getShopId()))
+                .toList();
+        for (CartItem item : sorted) {
+            if (item.getShopId() == null) {
+                throw new ConflictException(
+                        "An item in your basket is no longer linked to a shop. Please remove and "
+                                + "add it again.");
+            }
+            byShop.computeIfAbsent(item.getShopId(), shop -> new ArrayList<>()).add(item);
+        }
+        return byShop;
+    }
+
+    /**
+     * One order, and the payment created with it.
+     *
+     * A record rather than a bare Order because the response needs the payment
+     * status and the UPI link, and re-reading the payment to get them would be
+     * a query for something this method already had in its hand.
+     */
+    private record ShopOrder(Order order, com.gpstore.entity.Payment payment) {}
+
+    /**
+     * The checkout's answer, shaped so an app that has never heard of groups
+     * still works.
+     *
+     * BACKWARD COMPATIBLE ON PURPOSE. orderId, orderNumber, paymentStatus and
+     * upiPaymentLink still describe ONE order - the first shop's - because
+     * that is what every APK already on a customer's phone reads, and those
+     * builds outnumber anything that knows about this change. The group and
+     * the per-shop breakdown are added beside them, so a single-shop checkout
+     * answers byte-for-byte what it always did.
+     */
+    private PlaceOrderResponse respondWith(com.gpstore.ordergroup.OrderGroup group,
+                                           List<ShopOrder> placed,
+                                           PaymentMethod paymentMethod) {
+        ShopOrder primary = placed.get(0);
+
+        PlaceOrderResponse response = new PlaceOrderResponse();
+        response.setSuccess(true);
+        response.setOrderId(primary.order().getId());
+        response.setOrderNumber(primary.order().getOrderNumber());
+        response.setMessage("Order placed successfully.");
+        response.setPaymentStatus(nameOf(primary.payment().getPaymentStatus()));
+        response.setUpiPaymentLink(paymentService.upiLinkFor(primary.order(), paymentMethod));
+
+        response.setOrderGroupId(group.getId());
+        response.setOrderGroupNumber(group.getGroupNumber());
+        response.setShopOrders(placed.stream()
+                .map(shopOrder -> new PlaceOrderResponse.ShopOrderSummary(
+                        shopOrder.order().getId(),
+                        shopOrder.order().getOrderNumber(),
+                        shopOrder.order().getShopId(),
+                        shopOrder.order().getTotalAmount(),
+                        shopOrder.order().getDeliveryFee(),
+                        nameOf(shopOrder.payment().getPaymentStatus()),
+                        paymentService.upiLinkFor(shopOrder.order(), paymentMethod)))
+                .toList());
+        return response;
+    }
+
+    /**
+     * Builds ONE shop's order out of the lines that came off that shop's shelf.
+     *
+     * THE WHOLE MULTI-SHOP SPLIT IS THE CALLER'S LOOP OVER THIS METHOD. There
+     * is no per-shop code anywhere: the same routine that placed the single
+     * shop's order before Slice 6 places each shop's order now, given a
+     * narrower list of cart lines. A basket from one shop runs it once, and
+     * that is the same order it always produced.
+     */
+    private ShopOrder placeOneShopOrder(PlaceOrderRequest request,
+                                        Customer customer,
+                                        Address address,
+                                        List<CartItem> cartItems,
+                                        com.gpstore.ordergroup.OrderGroup group,
+                                        java.time.Instant placedAt,
+                                        com.gpstore.store.StoreStatus storeStatus,
+                                        boolean applyCoupon) {
+        // Whose half this is, taken off the cart lines themselves. Every line
+        // handed to this method carries the same shop - groupByShop is what
+        // guarantees it - so reading the first is reading all of them.
+        final Long shopId = cartItems.get(0).getShopId();
+
+        // THIS SHOP'S HALF OF THE BASKET, and nothing else. Everything below
+        // reads `cartItems`, which the caller has already narrowed to the
+        // lines that came off this shop's shelf - so the stock it locks, the
+        // prices it charges, the delivery it quotes and the payment it creates
+        // are all that shop's, and nothing below branches on which shop it is.
+        // That is what stops there being one code path per shop.
+        //
         // Deadlock prevention: always acquire inventory locks in the same
         // global order (ascending variant ID), regardless of the order items
         // happened to be added to this particular cart. Without this, two
@@ -529,8 +885,13 @@ public class OrderService {
                                 + " is no longer available - please remove it from your cart.");
             }
 
+            // THIS SHOP'S STOCK ROW, NAMED. Same reason as the prices above:
+            // one transaction visits several shops, and the filter was fixed
+            // when the session opened. Without the shop id, the second shop's
+            // half of a basket would lock and decrement whichever row the
+            // query found first - which is the first shop's.
             Inventory inventory = inventoryService
-                    .getByProductVariantForUpdate(item.getProductVariant().getId());
+                    .getByProductVariantForUpdate(item.getProductVariant().getId(), shopId);
 
             if (inventory == null) {
                 throw new ResourceNotFoundException(
@@ -554,6 +915,12 @@ public class OrderService {
         order.setOrderNumber(OrderNumberGenerator.generate(repository.nextOrderNumberSequenceValue()));
         order.setCustomer(customer);
         order.setAddress(address);
+
+        // WHICH CHECKOUT THIS ORDER CAME FROM. The group is what the customer
+        // thinks they placed; this order is one shop's part of it, and it is
+        // the link that lets a customer see the whole thing while each shop
+        // works only its own.
+        order.setOrderGroupId(group.getId());
 
         // WHERE THIS ORDER GOES, COPIED NOW AND NEVER RE-READ.
         //
@@ -616,7 +983,7 @@ public class OrderService {
         // lines cannot disagree - the two used to read the same catalogue
         // field, and now read the same map.
         java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings =
-                shopCatalog.listingsFor(cartItems.stream()
+                shopCatalog.listingsForShop(shopId, cartItems.stream()
                         .map(i -> i.getProductVariant() == null ? null : i.getProductVariant().getId())
                         .toList());
 
@@ -638,7 +1005,7 @@ public class OrderService {
         boolean freeDeliveryApplied = quote.freeDelivery();
 
         AppliedCoupon applied = AppliedCoupon.none();
-        if (request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
+        if (applyCoupon && request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
             applied = couponService.redeem(request.getCouponCode(), totalAmount, quotedDeliveryFee);
             order.setAppliedCouponCode(request.getCouponCode().toUpperCase());
             order.setDiscountAmount(applied.merchandiseDiscount());
@@ -672,14 +1039,6 @@ public class OrderService {
         }
 
         order = repository.save(order);
-
-        if (idempotencyRecord != null) {
-            // Marks this key as completed, pointing at the real order - any
-            // repeat request with the same key from here on replays this
-            // result instead of running checkout again.
-            idempotencyRecord.setOrderId(order.getId());
-            idempotencyRecordRepository.save(idempotencyRecord);
-        }
 
         List<OrderItem> newOrderItems = new ArrayList<>();
 
@@ -730,9 +1089,6 @@ public class OrderService {
             }
             inventory.setStock(newStock);
         }
-
-        // Clear cart
-        cartItemService.clearCart(cartId);
 
         // Durable record of the post-order work that must not be lost.
         // INSERTed inside THIS transaction on purpose: it commits with the
@@ -835,16 +1191,7 @@ public class OrderService {
         // request thread.
         afterCommitExecutor.runAfterCommit("Post-order side effects", placedOrderId, afterCommitWork);
 
-        PlaceOrderResponse response = new PlaceOrderResponse();
-
-        response.setSuccess(true);
-        response.setOrderId(order.getId());
-        response.setOrderNumber(order.getOrderNumber());
-        response.setMessage("Order placed successfully.");
-        response.setPaymentStatus(nameOf(newPayment.getPaymentStatus()));
-        response.setUpiPaymentLink(paymentService.upiLinkFor(order, paymentMethod));
-
-        return response;
+        return new ShopOrder(order, newPayment);
     }
 
     private PlaceOrderResponse replayAfterIdempotencyRace(Long customerId, String idempotencyKey) {

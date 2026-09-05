@@ -93,7 +93,12 @@ class OrderOwnershipTest {
                 // basket.
                 org.mockito.Mockito.mock(com.gpstore.catalog.shop.ShopCatalog.class),
                 // Nor a shop's trading status: nothing here places an order.
-                org.mockito.Mockito.mock(com.gpstore.platform.ShopTradingGate.class));
+                org.mockito.Mockito.mock(com.gpstore.platform.ShopTradingGate.class),
+                // Nor an order group or a shop lookup: these tests cover
+                // cancellation and ownership, never a checkout.
+                org.mockito.Mockito.mock(com.gpstore.ordergroup.OrderGroupRepository.class),
+                org.mockito.Mockito.mock(com.gpstore.platform.ShopRepository.class),
+                org.mockito.Mockito.mock(com.gpstore.platform.ShopScopeSwitch.class));
     }
 
     private Order orderOwnedBy(Long ownerId) {

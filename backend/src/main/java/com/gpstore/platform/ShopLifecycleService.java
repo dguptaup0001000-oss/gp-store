@@ -33,13 +33,19 @@ public class ShopLifecycleService {
     private final MerchantRepository merchants;
     private final ShopMembership membership;
     private final AuditLogService auditLog;
+    private final com.gpstore.repository.StoreOperationsSettingsRepository storeSettings;
+    private final com.gpstore.repository.DeliveryPricingSettingsRepository pricingSettings;
 
     public ShopLifecycleService(ShopRepository shops, MerchantRepository merchants,
-                                ShopMembership membership, AuditLogService auditLog) {
+                                ShopMembership membership, AuditLogService auditLog,
+                                com.gpstore.repository.StoreOperationsSettingsRepository storeSettings,
+                                com.gpstore.repository.DeliveryPricingSettingsRepository pricingSettings) {
         this.shops = shops;
         this.merchants = merchants;
         this.membership = membership;
         this.auditLog = auditLog;
+        this.storeSettings = storeSettings;
+        this.pricingSettings = pricingSettings;
     }
 
     @Transactional(readOnly = true)
@@ -102,6 +108,26 @@ public class ShopLifecycleService {
         Shop saved = shops.save(shop);
         auditLog.log("SHOP_OPENED", "Shop", saved.getId(),
                 "merchant=" + merchantId + ", code=" + saved.getCode() + ", status=DRAFT");
+
+        // A NEW SHOP IS COMPLETE FROM THE START. Its operating settings and
+        // its delivery pricing are per-shop rows (V49), and a shop without
+        // them is one whose first checkout tries to create them - which, on a
+        // read-only preview, is a 500 rather than a missing row. Created here,
+        // with the defaults, inside the shop's own scope so they are stamped
+        // to it.
+        TenantContext.runWithin(TenantScope.ofShop(saved.getId()), () -> {
+            if (storeSettings.findByShopId(saved.getId()).isEmpty()) {
+                storeSettings.save(new com.gpstore.entity.StoreOperationsSettings());
+            }
+            if (pricingSettings.findByShopId(saved.getId()).isEmpty()) {
+                com.gpstore.entity.DeliveryPricingSettings pricing =
+                        new com.gpstore.entity.DeliveryPricingSettings();
+                pricing.normalise();
+                pricing.setUpdatedBy("created with the shop");
+                pricingSettings.save(pricing);
+            }
+            return null;
+        });
 
         if (merchant.getOwnerCustomerId() != null) {
             membership.grant(saved.getId(), merchant.getOwnerCustomerId(), true);

@@ -90,6 +90,20 @@ public class DeliveryPricingService {
             DeliveryPricingSettings created = new DeliveryPricingSettings();
             created.setUpdatedAt(LocalDateTime.now());
             created.setUpdatedBy("auto-created on first pricing call");
+
+            // NOT ON A READ PATH. The checkout preview quotes delivery inside
+            // a read-only transaction, and an INSERT there does not merely
+            // fail - Postgres aborts the whole transaction, so every query
+            // AFTER it fails too and the customer gets a 500 for a settings
+            // row that was only ever a convenience. A shop with no row yet
+            // gets the built-in defaults for this request; the row is created
+            // when the shop is opened (ShopLifecycleService) or the first time
+            // an admin saves one.
+            if (org.springframework.transaction.support.TransactionSynchronizationManager
+                    .isCurrentTransactionReadOnly()) {
+                created.normalise();
+                return created;
+            }
             return settingsRepository.save(created);
         } catch (Exception e) {
             log.error("Could not read delivery pricing settings; using built-in V1 defaults for "

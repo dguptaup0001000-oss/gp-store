@@ -77,6 +77,33 @@ class ShopScopeIsNotOptionalTest {
     private static final Set<String> SETTINGS_SINGLETONS_NOT_YET_SPLIT = Set.of();
 
     /**
+     * Tables whose shop_id is DATA, not a tenant boundary.
+     *
+     * cart_items is the only one, and filtering it would break the thing it
+     * exists for. A basket spans shops by design (§16): the column records
+     * which shelf each line came off, so checkout can split the basket into
+     * one order per shop. A filter on it would mean a customer adding
+     * something from the second kirana watched the first one's items vanish.
+     *
+     * WHAT PROTECTS IT INSTEAD, and this is the part that has to be true for
+     * the exemption to be honest:
+     *
+     *   the cart belongs to a CUSTOMER, and CartService checks that ownership
+     *   on every read and write - the same check that has always stopped one
+     *   customer emptying another's basket;
+     *
+     *   the shop id is stamped by CartItem's own @PrePersist from the tenant
+     *   scope, never from a request, so it cannot be chosen by a caller;
+     *
+     *   and the order it becomes IS shop-owned, filtered and stamped like
+     *   every other row - so the moment a basket turns into something a
+     *   merchant can see, the boundary is back.
+     *
+     * All three are asserted by MultiShopCheckoutTest.
+     */
+    private static final Set<String> SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY = Set.of("cart_items");
+
+    /**
      * Native queries that touch a shop-owned table and have been read.
      *
      * @Query(nativeQuery = true) goes to the database without Hibernate's
@@ -145,7 +172,9 @@ class ShopScopeIsNotOptionalTest {
 
         List<String> unenforced = new ArrayList<>();
         for (String table : tenantTables) {
-            if (!enforced.contains(table) && !SETTINGS_SINGLETONS_NOT_YET_SPLIT.contains(table)) {
+            if (!enforced.contains(table)
+                    && !SETTINGS_SINGLETONS_NOT_YET_SPLIT.contains(table)
+                    && !SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY.contains(table)) {
                 unenforced.add(table);
             }
         }
@@ -192,6 +221,7 @@ class ShopScopeIsNotOptionalTest {
                 """, String.class);
 
         defaulted.removeIf(SETTINGS_SINGLETONS_NOT_YET_SPLIT::contains);
+        defaulted.removeIf(SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY::contains);
 
         assertTrue(defaulted.isEmpty(),
                 "a shop_id default files a forgotten insert under Shop #1 instead of failing, "

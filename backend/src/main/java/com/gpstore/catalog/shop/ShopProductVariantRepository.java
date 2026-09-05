@@ -25,6 +25,17 @@ public interface ShopProductVariantRepository extends JpaRepository<ShopProductV
 
     List<ShopProductVariant> findByProductVariantIdIn(Collection<Long> productVariantIds);
 
+    /**
+     * One named shop's listings.
+     *
+     * The shop is a predicate here rather than a filter, for checkout - which
+     * visits several shops inside one transaction and therefore inside one
+     * persistence session, where the filter was fixed when the session opened.
+     * Naming it is what makes each half of a split basket read its own prices.
+     */
+    List<ShopProductVariant> findByShopIdAndProductVariantIdIn(
+            Long shopId, Collection<Long> productVariantIds);
+
     Page<ShopProductVariant> findAllByOrderByIdAsc(Pageable pageable);
 
     /** What this shop actually offers - listed, active and priced. */

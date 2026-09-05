@@ -19,4 +19,18 @@ public class OrderNumberGenerator {
         String date = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         return "GP" + date + String.format("%06d", sequenceValue);
     }
+
+    /**
+     * The number for a whole checkout, which may be several shops' orders.
+     *
+     * SAME SEQUENCE, DIFFERENT PREFIX. Sharing the sequence means a group
+     * number can never collide with an order number, and a customer reading
+     * "GPG20260905000123" out to a support agent cannot be mistaken for an
+     * order - which matters most in exactly the conversation where it would:
+     * "I want to cancel GP..." when only one shop's half should be cancelled.
+     */
+    public static String generateGroupNumber(long sequenceValue) {
+        String date = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        return "GPG" + date + String.format("%06d", sequenceValue);
+    }
 }

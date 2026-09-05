@@ -6,6 +6,7 @@ import com.gpstore.entity.CartItem;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
+import com.gpstore.platform.TenantContext;
 
 import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.InventoryRepository;
@@ -226,8 +227,24 @@ public class CartService {
         requireStockFor(variant.getId(), nextQuantity, variant.getProduct() != null
                 ? variant.getProduct().getName() : "This item");
 
+        // WHICH SHELF THIS CAME OFF, from the shop the request resolved to and
+        // from nothing the caller sent. Checkout groups the basket by it, so a
+        // value a client could choose would be a value that moves an item into
+        // another shop's order.
+        //
+        // Null when there is no scope at all - a background job, a test
+        // building a basket directly - and CartItem's own @PrePersist then
+        // applies the same rule every other shop-stamped row gets. Nothing
+        // reaches the database unstamped either way.
+        Long shelfShopId = TenantContext.isSet() && TenantContext.current().isSingleShop()
+                ? TenantContext.current().shopId()
+                : null;
+
         if (existingItem != null) {
             existingItem.setQuantity(nextQuantity);
+            if (shelfShopId != null) {
+                existingItem.setShopId(shelfShopId);
+            }
             existingItem.setPrice(unitPrice);
             existingItem.setTotalPrice(unitPrice.multiply(BigDecimal.valueOf(nextQuantity)));
             cartItemRepository.save(existingItem);
@@ -236,6 +253,7 @@ public class CartService {
             cartItem.setCart(cart);
             cartItem.setProductVariant(variant);
             cartItem.setQuantity(quantity);
+            cartItem.setShopId(shelfShopId);
             cartItem.setPrice(unitPrice);
             cartItem.setTotalPrice(unitPrice.multiply(BigDecimal.valueOf(quantity)));
             cartItemRepository.save(cartItem);

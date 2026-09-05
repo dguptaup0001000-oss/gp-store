@@ -183,6 +183,11 @@ class MarketplaceIdentityTest {
         jdbc.update("DELETE FROM shop_staff WHERE shop_id in (?, ?)", shopB, shopB2);
         jdbc.update("DELETE FROM shop_staff WHERE customer_id in (?, ?, ?)",
                 ownerA, ownerB, platformAdminId);
+        // Opening a shop now creates its settings rows too, so they have to
+        // go with it - an orphan settings row would be a shop's hours with no
+        // shop.
+        jdbc.update("DELETE FROM store_operations_settings WHERE shop_id in (?, ?)", shopB, shopB2);
+        jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id in (?, ?)", shopB, shopB2);
         jdbc.update("DELETE FROM shops WHERE id in (?, ?)", shopB, shopB2);
         jdbc.update("DELETE FROM merchants WHERE id = ?", merchantB);
         jdbc.update("DELETE FROM customers WHERE id in (?, ?, ?)", ownerA, ownerB, platformAdminId);

@@ -27,7 +27,57 @@ public class CartItem {
 
     private BigDecimal totalPrice;
 
+    /**
+     * Which shop's shelf this line came off.
+     *
+     * THE COLUMN THE SPLIT TURNS ON. At checkout the basket is grouped by it,
+     * and each group becomes one shop's order - so a line's shop is decided
+     * once, when it is added, and never re-derived from anything a caller
+     * sends afterwards.
+     *
+     * NOT A TENANT BOUNDARY, and cart_items is deliberately NOT filtered by
+     * it. A cart that could only show one shop's lines is not a multi-shop
+     * cart: the customer would add something from the second kirana and watch
+     * the first one's items vanish. What protects a cart is what always
+     * protected it - it belongs to a customer, and CartService checks that on
+     * every read and write.
+     *
+     * NEVER SENT BY A CLIENT. CartService stamps it from the shop the request
+     * resolved to, which is why changing it in a request body cannot move an
+     * item between shops.
+     */
+    @Column(name = "shop_id")
+    private Long shopId;
+
+    /**
+     * Stamped here rather than in CartService, so EVERY path gets it.
+     *
+     * A service is one place a line can be created; an entity listener is all
+     * of them. The first version of this stamped the shop in addToCart, which
+     * was correct for the app and wrong for every other writer - the checkout
+     * then refused baskets built any other way, which is a rule enforced
+     * against the wrong thing.
+     *
+     * Same rule as every shop-owned row (TenantDefaults): the scope on the
+     * thread if there is one, the single shop if there is only one, and a
+     * refusal in a marketplace with neither.
+     */
+    @PrePersist
+    void stampShop() {
+        if (shopId == null) {
+            shopId = com.gpstore.platform.TenantDefaults.shopIdForNewRow(null, CartItem.class);
+        }
+    }
+
     public CartItem() {
+    }
+
+    public Long getShopId() {
+        return shopId;
+    }
+
+    public void setShopId(Long shopId) {
+        this.shopId = shopId;
     }
 
     public Long getId() {

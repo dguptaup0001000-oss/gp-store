@@ -34,6 +34,26 @@ public class Order implements ShopOwned {
     @Column(name = "shop_id")
     private Long shopId;
 
+    /**
+     * The checkout this order was one shop's part of.
+     *
+     * A PLAIN ID, not a @ManyToOne: the group spans shops and this order does
+     * not, so loading one from the other would drag a cross-shop row into
+     * every order read for no benefit. Null on every order placed before
+     * Slice 6, and inventing a group for those would be inventing a checkout
+     * that never happened.
+     */
+    @Column(name = "order_group_id")
+    private Long orderGroupId;
+
+    public Long getOrderGroupId() {
+        return orderGroupId;
+    }
+
+    public void setOrderGroupId(Long orderGroupId) {
+        this.orderGroupId = orderGroupId;
+    }
+
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
