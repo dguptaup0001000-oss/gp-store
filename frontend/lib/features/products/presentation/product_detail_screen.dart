@@ -61,7 +61,16 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final product = widget.product;
+    // THE PRODUCT PASSED IN CARRIES ONE VARIANT, NOT ALL OF THEM. Browse,
+    // search and feed responses are trimmed to a single representative pack
+    // size (backend ProductResponse.fromCard) so a twenty-product page does
+    // not serialise a hundred prices no card draws. Reading widget.product
+    // here meant "Select size" below was testing a list of length one, so a
+    // product sold in 500 g and 1 kg showed no chooser at all when opened
+    // from a grid - only when opened from somewhere that happened to pass an
+    // untrimmed product. The detail response is the one with every size.
+    final loaded = ref.watch(productDetailProvider(widget.product.id)).valueOrNull;
+    final product = loaded ?? widget.product;
     final variant = _selectedVariant;
     final isInStock = variant?.available ?? false;
 

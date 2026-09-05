@@ -193,6 +193,25 @@ final cartControllerProvider = AsyncNotifierProvider<CartController, CartModel>(
 /// on screen re-scanning the whole cart on every cart change; a family
 /// provider computes it once per variant and only rebuilds the cards whose
 /// own line actually changed.
+/// How many units of a product are in the cart, counting every pack size.
+///
+/// A multi-size product's card shows one number and reopens the size chooser
+/// on tap, so the number has to mean "of this product", not "of the size the
+/// card happens to be showing" - a customer with two 1 kg bags and one 500 g
+/// bag has three, and a card that said one would be wrong twice over.
+///
+/// Keyed on the product so a card only rebuilds when ITS product changes,
+/// which is the same reason cartLineForVariantProvider below is per-variant.
+final cartQuantityForProductProvider = Provider.family<int, int>((ref, productId) {
+  final cart = ref.watch(cartControllerProvider).valueOrNull;
+  if (cart == null) return 0;
+  var total = 0;
+  for (final item in cart.items) {
+    if (item.productId == productId) total += item.quantity;
+  }
+  return total;
+});
+
 final cartLineForVariantProvider = Provider.family<CartItemModel?, int>((ref, variantId) {
   final cart = ref.watch(cartControllerProvider).valueOrNull;
   if (cart == null) return null;

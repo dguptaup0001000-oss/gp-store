@@ -102,6 +102,22 @@ class Product with _$Product {
     /// setting itself up, and a badge saying so on a live listing would do
     /// more harm than the information is worth.
     @Default(false) bool testData,
+
+    /// How many pack sizes this product has - NOT how many are in [variants].
+    ///
+    /// A browse, search or feed card carries exactly ONE variant on purpose
+    /// (see backend ProductResponse.fromCard: a twenty-product page was
+    /// serialising a hundred prices no card draws). That trim also removed
+    /// the only way a card could know the product comes in 500 g as well as
+    /// 1 kg, so the grid quietly added the cheapest pack and never offered
+    /// the rest. This integer restores the signal for four bytes.
+    ///
+    /// Defaults to 0, not 1, so "the server did not say" is distinguishable
+    /// from "one size" - an older backend, or an entry cached before the
+    /// field existed, omits the key entirely. [optionCount] below is what
+    /// the UI should read; it falls back to the variant list's own length,
+    /// which is exactly the behaviour the app had before this field.
+    @Default(0) int variantCount,
   }) = _Product;
 
   const Product._();
@@ -113,6 +129,15 @@ class Product with _$Product {
   /// which an admin form will produce sooner or later and which would
   /// otherwise put a "View in 3D" button on a product with nothing to show.
   bool get has3dModel => model3dUrl != null && model3dUrl!.trim().isNotEmpty;
+
+  /// How many sizes to tell the customer about.
+  ///
+  /// Never smaller than the number of variants actually in hand, so a detail
+  /// response - which carries them all and may predate [variantCount] - is
+  /// still counted correctly, and an older backend that sends no count at all
+  /// degrades to what the app did before rather than claiming "0 options".
+  int get optionCount =>
+      variantCount > variants.length ? variantCount : variants.length;
 
   factory Product.fromJson(Map<String, dynamic> json) => _$ProductFromJson(json);
 
