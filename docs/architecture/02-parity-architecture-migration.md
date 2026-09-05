@@ -84,8 +84,8 @@ is. Nothing below is marked implemented, because nothing is.
 | 17 | Checkout preview (price, ETA, deliverability) | `previewCheckout` | C | Per shop-group preview | **Required** |
 | 18 | Place order (idempotent) | `placeOrder` | C→S | One order group → N shop orders (§16) | **Required** |
 | 19 | COD | `PaymentService` | S | Per shop-order | **Required** |
-| 20 | UPI link | `UpiPaymentService`, `STORE_UPI_ID` | M | Per-merchant payee — blocked on decision W1 | **Blocked** |
-| 21 | Online payment (Cashfree) | `payment/gateway` | P or M | Blocked on decision W1 | **Blocked** |
+| 20 | UPI link | `UpiPaymentService`, `STORE_UPI_ID` | S | Built from the **shop's own VPA** (decision W1) | **Required** |
+| 21 | Online payment (Cashfree) | `payment/gateway` | M | Merchant's own account. UPI+COD first, no credential custody (W1 §3) | **Required** |
 | 22 | Order history | `getMyOrders` | C | Spans shops; grouped | **Required** |
 | 23 | Order detail / tracking | `getOwnedOrderDetail` | C + S | Per shop-order, with shop identity shown | **Required** |
 | 24 | Order cancellation | `cancelOrder` | C + S | Per shop-order | **Required** |
@@ -111,7 +111,7 @@ preserve this depth — none of these may be dropped.
 | 36 | Packing list (morning preparation) | `morning_preparation_screen` | S | Per shop | **Required** |
 | 37 | Store hours / closures | `store_operations_screen`, singleton `id=1` | S | One settings row per shop | **Required** |
 | 38 | Payments: confirm UPI | `admin_payments_screen` | S | Per shop-order | **Required** |
-| 39 | Refunds, full and partial | `refunds`, `PaymentService` | S | Per shop-order; funding depends on W1 | **Blocked** |
+| 39 | Refunds, full and partial | `refunds`, `PaymentService` | S | Platform **tracks the obligation**; the merchant executes it (W1 §2) | **Required** |
 | 40 | Returns queue | `admin_returns_screen` | S | Per shop | **Required** |
 | 41 | Delivery breaches | `admin_delivery_breaches_screen` | S | Per shop | **Required** |
 | 42 | Product list | `admin_product_list_screen` | S | Lists the shop's *offers*, not the catalogue | **Required** |
@@ -145,7 +145,7 @@ preserve this depth — none of these may be dropped.
 | 65 | QR / pack-code scan | `WorkerScanService`, `order_scan_events` | W | Scoped | **Required** |
 | 66 | Delivery status transitions | `DeliveryController` | W | Scoped | **Required** |
 | 67 | GPS foreground reporting | worker app + `delivery_partners` | W | None | No change |
-| 68 | COD collection, cash/UPI split | `completeCodPayment` | W | Scoped; settlement depends on W1 | **Blocked** |
+| 68 | COD collection, cash/UPI split | `completeCodPayment` | W | Mechanics unchanged — it is already the shop's money | Pending |
 | 69 | Customer rating (1–10) | `customer_delivery_ratings` | W + S | Visible to the rating shop; platform aggregate | Pending |
 
 ## Platform / operations features
@@ -351,7 +351,7 @@ Each slice ships independently, keeps CI green, and is reversible on its own.
 | 7 | Search service, geography, serviceability | — | Slice 4 |
 | 8 | Merchant app shop switcher; Platform Admin app | — | Slice 3 |
 | 9 | Demo merchant seeding through the real architecture | — | Slice 6 |
-| 10 | Money routing and settlement | — | **Decision W1** |
+| 10 | Per-shop VPA, refund obligations, invoicing | — | W1 decided; much smaller than planned |
 
 Slice 10 is deliberately last: it is the only slice that touches a live payment path.
 
@@ -406,11 +406,12 @@ at least one full deploy cycle.
 
 # What is NOT decided here
 
-The five questions from the audit remain open, and four features stay **Blocked**
-until W1 is answered:
+W1 is answered (`03-decision-w1-money-model.md`) and no feature is Blocked any more.
+Four questions remain:
 
-1. **Money model** — platform collects and settles, or merchants collect directly?
-2. Commission model
+1. ~~**Money model**~~ — **DECIDED**: merchants collect directly; GP-STORE is the
+   system of record. See `03-decision-w1-money-model.md`.
+2. Commission model — now constrained to invoice / subscription / none
 3. Order numbering: global or per-shop
 4. One rider per shop, or shared
 5. Shop #1's real merchant and shop name
