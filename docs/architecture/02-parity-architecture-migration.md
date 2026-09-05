@@ -417,3 +417,53 @@ Four questions remain:
 5. Shop #1's real merchant and shop name
 
 Slice 0 depends on none of them, which is why it is safe to start.
+
+---
+
+# Slice 1 addendum — why enforcement is NOT `@TenantId`
+
+Hibernate 6 ships `@TenantId`, which is the obvious tool for discriminator
+multi-tenancy: annotate the field, provide a `CurrentTenantIdentifierResolver`, and
+Hibernate adds `shop_id = ?` to every query and sets it on every insert. It was the
+first design considered for Slice 1's enforcement, and it is the wrong one here.
+
+**`@TenantId` has no way to step outside the tenant.** The resolver returns one value
+per session and Hibernate applies it unconditionally. That is exactly right for an
+application where every unit of work belongs to one tenant — and this application has
+several that legitimately do not:
+
+| Work | Why it spans shops |
+|---|---|
+| `OutboxWorker` | drains events for every shop in one pass |
+| Stuck-refund sweep | chases money across the marketplace |
+| Late-delivery flagger | scans all deliveries against their promised times |
+| UPI/online payment expiry | ages out unpaid payments everywhere |
+| R2 staging sweep, backup checks | platform housekeeping |
+| Platform Admin | the whole point of the role |
+
+Under `@TenantId` each of those would silently see one shop's rows. Not fail — *see
+less*, which is the failure mode that gets discovered by a shopkeeper asking why their
+refund was never chased.
+
+**So enforcement uses Hibernate `@Filter`, which can be enabled per session.** A
+request enables it with the resolved shop; platform work does not enable it at all,
+and says so at the call site through `TenantScope.platform()`. The unscoped case
+becomes something a reader can see, rather than something Hibernate does invisibly.
+
+`@Filter` also works without a mapped field — its condition is raw SQL against
+`shop_id` — which means Slice 0's SQL-only columns need no entity changes to be
+enforced.
+
+**Two limits of `@Filter` that Slice 2's leak tests must cover, because the tool will
+not:**
+
+1. **Native queries are not filtered.** `@Query(nativeQuery = true)` bypasses filters
+   entirely. The repository layer has 97 `@Query` methods; every native one needs its
+   predicate written by hand, and a test that proves it.
+2. **`find()` by primary key is not filtered.** Loading an entity by id goes through
+   the persistence context, not a filtered query. Ownership on a by-id load has to be
+   asserted in the service — which is what `getOwnedOrderDetail` already does, and is
+   the pattern to extend.
+
+Neither is a reason to avoid `@Filter`; both are reasons the leak tests are a slice of
+their own rather than an afterthought.
