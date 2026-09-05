@@ -4,6 +4,7 @@ import com.gpstore.entity.Address;
 import com.gpstore.entity.Delivery;
 import com.gpstore.entity.Order;
 import com.gpstore.entity.OrderItem;
+import com.gpstore.entity.Payment;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -32,10 +33,36 @@ public class OrderDetailResponse {
     private final List<OrderItemResponse> items;
     private final DeliveryTrackingInfo delivery;
 
+    /**
+     * How a cash-on-delivery order was actually settled at the door.
+     *
+     * All three are null unless a rider recorded it, which is the ordinary
+     * state for an unsettled order and for one settled automatically by the
+     * delivery flow. They are on the ORDER response, not left in the payments
+     * screen, because the question "did this delivery bring the money back,
+     * and in what form" is asked while looking at the order.
+     */
+    private final BigDecimal codCashAmount;
+    private final BigDecimal codUpiAmount;
+    private final LocalDateTime codCollectedAt;
+
     public OrderDetailResponse(Long orderId, String orderNumber, String orderStatus, String paymentStatus,
                                 LocalDateTime orderDate, BigDecimal totalAmount, BigDecimal discountAmount,
                                 BigDecimal deliveryFee, String appliedCouponCode, AddressSummary address,
                                 List<OrderItemResponse> items, DeliveryTrackingInfo delivery) {
+        this(orderId, orderNumber, orderStatus, paymentStatus, orderDate, totalAmount, discountAmount,
+                deliveryFee, appliedCouponCode, address, items, delivery, null, null, null);
+    }
+
+    public OrderDetailResponse(Long orderId, String orderNumber, String orderStatus, String paymentStatus,
+                                LocalDateTime orderDate, BigDecimal totalAmount, BigDecimal discountAmount,
+                                BigDecimal deliveryFee, String appliedCouponCode, AddressSummary address,
+                                List<OrderItemResponse> items, DeliveryTrackingInfo delivery,
+                                BigDecimal codCashAmount, BigDecimal codUpiAmount,
+                                LocalDateTime codCollectedAt) {
+        this.codCashAmount = codCashAmount;
+        this.codUpiAmount = codUpiAmount;
+        this.codCollectedAt = codCollectedAt;
         this.orderId = orderId;
         this.orderNumber = orderNumber;
         this.orderStatus = orderStatus;
@@ -58,24 +85,50 @@ public class OrderDetailResponse {
      * the harmless mistake. The other way round leaks.
      */
     public static OrderDetailResponse from(Order order, Delivery deliveryOrNull) {
-        return from(order, deliveryOrNull, false);
+        return from(order, deliveryOrNull, false, null);
     }
 
     /** Real product names, for staff who must be able to identify the item. */
     public static OrderDetailResponse forStaff(Order order, Delivery deliveryOrNull) {
-        return from(order, deliveryOrNull, true);
+        return from(order, deliveryOrNull, true, null);
+    }
+
+    /** Staff view that also reports what the payment row actually says. */
+    public static OrderDetailResponse forStaff(Order order, Delivery deliveryOrNull, Payment paymentOrNull) {
+        return from(order, deliveryOrNull, true, paymentOrNull);
     }
 
     public static OrderDetailResponse from(Order order, Delivery deliveryOrNull, boolean forStaff) {
+        return from(order, deliveryOrNull, forStaff, null);
+    }
+
+    /**
+     * @param paymentOrNull the order's payment row, when the caller has it.
+     *
+     * THE PAYMENT IS THE ANSWER, the order's own payment_status column is a
+     * stale second copy. It is written once at checkout and never updated,
+     * so a COD order whose money a rider handed in an hour ago still reads
+     * COD_PENDING from it - which is the screen the shop uses to know which
+     * deliveries still owe money. Passing null keeps the old behaviour for
+     * an order that genuinely has no payment row (they predate payment
+     * creation moving into the order transaction), where the column is the
+     * only answer there is.
+     */
+    public static OrderDetailResponse from(Order order, Delivery deliveryOrNull, boolean forStaff,
+                                            Payment paymentOrNull) {
         List<OrderItemResponse> items = order.getOrderItems() == null
                 ? List.of()
                 : order.getOrderItems().stream().map(i -> OrderItemResponse.from(i, forStaff)).toList();
+
+        String paymentStatus = paymentOrNull != null && paymentOrNull.getPaymentStatus() != null
+                ? paymentOrNull.getPaymentStatus().name()
+                : order.getPaymentStatus() != null ? order.getPaymentStatus().name() : null;
 
         return new OrderDetailResponse(
                 order.getId(),
                 order.getOrderNumber(),
                 order.getOrderStatus() != null ? order.getOrderStatus().name() : null,
-                order.getPaymentStatus() != null ? order.getPaymentStatus().name() : null,
+                paymentStatus,
                 order.getOrderDate(),
                 order.getTotalAmount(),
                 order.getDiscountAmount(),
@@ -83,7 +136,10 @@ public class OrderDetailResponse {
                 order.getAppliedCouponCode(),
                 AddressSummary.from(order.getAddress()),
                 items,
-                deliveryOrNull != null ? DeliveryTrackingInfo.from(deliveryOrNull) : null
+                deliveryOrNull != null ? DeliveryTrackingInfo.from(deliveryOrNull) : null,
+                paymentOrNull == null ? null : paymentOrNull.getCodCashAmount(),
+                paymentOrNull == null ? null : paymentOrNull.getCodUpiAmount(),
+                paymentOrNull == null ? null : paymentOrNull.getCodCollectedAt()
         );
     }
 
@@ -99,6 +155,11 @@ public class OrderDetailResponse {
     public AddressSummary getAddress() { return address; }
     public List<OrderItemResponse> getItems() { return items; }
     public DeliveryTrackingInfo getDelivery() { return delivery; }
+
+    /** Null unless a rider recorded how a COD was settled. */
+    public BigDecimal getCodCashAmount() { return codCashAmount; }
+    public BigDecimal getCodUpiAmount() { return codUpiAmount; }
+    public LocalDateTime getCodCollectedAt() { return codCollectedAt; }
 
     public static class OrderItemResponse {
         /**
