@@ -59,6 +59,10 @@ void main() {
       // approve button inside it is gated on the refund permission by the
       // backend, so a staff member who may look cannot pay.
       'Returns',
+      // Bulk catalogue upload. SYSTEM_ADMIN only, matching SecurityConfig's
+      // gate on /api/admin/catalog/**: one spreadsheet can rewrite every
+      // price in the shop, so it is not opened to the catalogue roles.
+      'Import Catalogue',
     };
 
     final labels = AdminNav.all.map((d) => d.label).toSet();

@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/catalog_import_repository.dart';
+import '../domain/catalog_import_models.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
 import '../../orders/domain/order_models.dart';
@@ -24,6 +26,18 @@ import '../domain/worker_models.dart';
 
 final adminProductsRepositoryProvider = Provider<AdminProductsRepository>((ref) {
   return AdminProductsRepository(apiClient: ref.watch(apiClientProvider));
+});
+
+final catalogImportRepositoryProvider =
+    Provider<CatalogImportRepository>((ref) {
+  return CatalogImportRepository(apiClient: ref.watch(apiClientProvider));
+});
+
+/// Past imports. autoDispose so reopening the screen shows the run that was
+/// just committed rather than a list cached before it existed.
+final catalogImportHistoryProvider =
+    FutureProvider.autoDispose<List<CatalogImportRun>>((ref) {
+  return ref.watch(catalogImportRepositoryProvider).history();
 });
 
 final adminWorkersRepositoryProvider = Provider<AdminWorkersRepository>((ref) {

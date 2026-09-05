@@ -93,6 +93,12 @@ dependencies:
   # sends the image bytes through the backend.
   image_picker: ^1.1.2
 
+  # Choosing a catalogue spreadsheet to import. image_picker cannot do it -
+  # it only offers photos and video, and a shopkeeper's price list is a .csv
+  # or .xlsx. Restricted to those two extensions at the call site so the
+  # picker never offers a file the server would refuse anyway.
+  file_picker: ^8.1.2
+
   # Caches product/category images to disk instead of Image.network's
   # in-memory-only cache, which re-downloads on every screen revisit (cold
   # start, navigating back, pull-to-refresh). At this app's scale that's a
