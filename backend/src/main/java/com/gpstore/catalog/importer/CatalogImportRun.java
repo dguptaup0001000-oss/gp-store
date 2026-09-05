@@ -1,5 +1,10 @@
 package com.gpstore.catalog.importer;
 
+import com.gpstore.platform.ShopOwned;
+import com.gpstore.platform.TenantEntityListener;
+import com.gpstore.platform.ShopScopeFilter;
+import org.hibernate.annotations.Filter;
+
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
@@ -7,7 +12,22 @@ import java.time.LocalDateTime;
 /** One upload: what it was, what it did, and whether it was ever committed. */
 @Entity
 @Table(name = "catalog_import_runs")
-public class CatalogImportRun {
+@Filter(name = ShopScopeFilter.NAME, condition = ShopScopeFilter.CONDITION)
+@EntityListeners(TenantEntityListener.class)
+public class CatalogImportRun implements ShopOwned {
+    // ------------------------------------------------------- which shop
+    //
+    // Written once, at insert time, by TenantEntityListener - never by a
+    // request. Read back through the "shopScope" filter (see the @Filter
+    // above), which Hibernate turns into an extra "and shop_id = ?" on
+    // every query against this table while a shop scope is active.
+    //
+    // Nullable in the column definition only because V46 added it to
+    // tables that already had rows; every row is backfilled and the
+    // migration refuses to complete otherwise.
+    @Column(name = "shop_id")
+    private Long shopId;
+
 
     public enum Mode {
         /** Create products that are new, update those that already exist. */
@@ -100,4 +120,14 @@ public class CatalogImportRun {
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getCommittedAt() { return committedAt; }
     public void setCommittedAt(LocalDateTime committedAt) { this.committedAt = committedAt; }
+
+    @Override
+    public Long getShopId() {
+        return shopId;
+    }
+
+    @Override
+    public void setShopId(Long shopId) {
+        this.shopId = shopId;
+    }
 }

@@ -25,6 +25,22 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.NOT_FOUND, ex.getMessage(), req);
     }
 
+    /**
+     * A shop reached a row belonging to another shop.
+     *
+     * ANSWERED AS 404, DELIBERATELY. "Forbidden" on an id you guessed
+     * confirms that the id exists, which is the whole prize in an
+     * id-manipulation attack: a caller can enumerate a competitor's order
+     * numbers by watching 403 and 404 alternate. "Not found" tells them
+     * nothing at all. The real reason, with the shop ids, is logged.
+     */
+    @ExceptionHandler(com.gpstore.platform.CrossShopAccessException.class)
+    public ResponseEntity<ApiError> handleCrossShop(com.gpstore.platform.CrossShopAccessException ex,
+                                                    HttpServletRequest req) {
+        log.warn("Cross-shop access refused on {}: {}", req.getRequestURI(), ex.getMessage());
+        return build(HttpStatus.NOT_FOUND, "Not found", req);
+    }
+
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<ApiError> handleBadRequest(BadRequestException ex, HttpServletRequest req) {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage(), req);

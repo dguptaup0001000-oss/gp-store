@@ -467,3 +467,57 @@ not:**
 
 Neither is a reason to avoid `@Filter`; both are reasons the leak tests are a slice of
 their own rather than an afterthought.
+
+---
+
+# Slice 1 — what shipped, and what it does not yet cover
+
+*Written after the code, from the test results, not from the plan.*
+
+## The four mechanisms
+
+| | What it does | Where |
+|---|---|---|
+| **Resolution** | Turns a credential into a `TenantScope`, never a request field | `TenantResolver`, `TenantContextFilter` |
+| **Reads** | Hibernate `@Filter` enabled on every session opened inside a shop scope | `TenantFilterActivator`, `@Filter` on 12 entities |
+| **By-id reads** | `@PostLoad` refuses any shop-owned row from another shop | `TenantEntityListener.assertOwnership` |
+| **Writes** | `@PrePersist` stamps the shop from the scope, overriding whatever the object carried | `TenantEntityListener.stampShop` |
+
+**The filter had to be enabled at the `EntityManagerFactory`, not in the servlet
+filter.** `spring.jpa.open-in-view=false`, so the Hibernate session is opened per
+*transaction* — by the time a request reaches `TenantContextFilter` there is no session
+to enable anything on, and by the time there is one the filter has finished. Wrapping
+the factory catches every session the application opens: the transaction manager's, the
+`@PersistenceContext` proxy's, and any opened directly.
+
+**The `@PostLoad` check is the one that stops id manipulation.** A filter rewrites
+queries; `findById` is not a query. The entity listener closes that, and closes
+association traversal with it, which is why "change the id in the URL" answers 404 in
+`CrossTenantApiAccessTest` rather than 200.
+
+**Refusals are 404, never 403.** A 403 on a guessed id confirms the id exists;
+alternating 403 and 404 down a range maps out a competitor's order volume.
+
+## The 12 shop-owned entities
+
+`Order`, `Payment`, `Delivery`, `DeliveryBatch`, `DeliveryPartner`, `Invoice`,
+`OrderReturn`, `Coupon`, `Inventory`, `CatalogImportRun`, `OrderScanEvent`,
+`CustomerDeliveryRating`.
+
+`V47` removed the `shop_id` column defaults V46 had left behind — a default answers
+"which shop" without anyone deciding, and answers it wrongly the moment a second
+merchant exists — and added a `shop_id` index to each of those tables.
+
+## What Slice 1 does NOT cover
+
+| Gap | Why it is open | Closes in |
+|---|---|---|
+| **`store_operations_settings`, `delivery_pricing_settings`** | Single-row settings loaded by `findById(SINGLETON_ID)`; a filter does not apply to a load by primary key. Making them per-shop needs the singleton itself split, not a class annotation. They keep their `shop_id` default until then | Slice 5 |
+| **`OrderRepository.revenueByDayBetween`** | Native SQL, so unfiltered. Under a marketplace it would total every shop's takings into one dashboard line. Correct today under SINGLE_SHOP | Reporting slice |
+| **`InventoryRepository.decrementIfAvailable`** | Bulk JPQL update, which Hibernate does not filter. Safe today because inventory is one row per *variant*, so there is exactly one row it can reach | Slice 4 (shop offerings) |
+| **Products** | The central catalogue has no `shop_id` by design (§10). There is no "Shop A's product" to isolate until `shop_product_variant` exists | Slice 4 |
+| **Payment webhooks** | `TenantContextFilter` skips `/api/payments/webhooks/**` — Cashfree arrives with a signature, not a session. Runs unscoped, which is right today and needs an explicit platform scope under a marketplace | Slice 10 |
+| **Staff tokens carry no shop claim** | Under `MULTI_SHOP_*`, `TenantResolver` refuses any credential that is not `SYSTEM_ADMIN`. Deliberate: inventing a shop for a token nobody scoped is inventing an authorization | Slice 3 |
+
+`ShopScopeIsNotOptionalTest` asserts each of these by name, so an entry that is quietly
+fixed or quietly added fails the build rather than sitting in a document.
