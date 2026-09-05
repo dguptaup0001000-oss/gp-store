@@ -113,6 +113,28 @@ public class CatalogImportController {
     }
 
     /**
+     * The problems from a PAST run, for reading inside the app.
+     *
+     * The CSV below is for somebody at a desk with the spreadsheet open. This
+     * is for the shopkeeper who imported yesterday, is holding a phone, and
+     * wants to know which rows the shop refused - the app has no file-saving
+     * code and adding a storage permission to every install for one admin
+     * screen would be a worse trade than showing the list.
+     *
+     * Bounded at the same 500 as the preview: a sheet where every row is
+     * wrong must not answer with twenty thousand lines nobody can read.
+     */
+    @GetMapping("/{runId}/problems")
+    public List<CatalogImportService.ProblemView> problemsOf(@PathVariable Long runId) {
+        return problems.findByRunIdOrderByRowNumberAsc(runId).stream()
+                .limit(500)
+                .map(p -> new CatalogImportService.ProblemView(
+                        p.getRowNumber(), p.getField(), p.getSeverity().name(),
+                        p.getProblem(), p.getSuggestion()))
+                .toList();
+    }
+
+    /**
      * The failed rows, as a file to open next to the original.
      *
      * CSV rather than JSON because the person fixing this has the spreadsheet
