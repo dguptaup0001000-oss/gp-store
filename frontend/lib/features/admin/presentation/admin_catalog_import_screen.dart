@@ -268,6 +268,78 @@ class _AdminCatalogImportScreenState
   }
 }
 
+/// The rows one past import refused.
+///
+/// The preview shows these at upload time and they vanish with the screen,
+/// leaving a history row that says "3 refused" and no way to learn which
+/// three. Read back into a sheet rather than downloaded as a file: the app
+/// has no file-saving code anywhere, and adding a storage permission to
+/// every customer install for one admin screen is the worse trade.
+void _showPastProblems(BuildContext context, CatalogImportRun run) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    builder: (context) => DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.7,
+      maxChildSize: 0.9,
+      builder: (context, controller) => Consumer(
+        builder: (context, ref, _) {
+          final problems = ref.watch(catalogImportProblemsProvider(run.id));
+          final theme = Theme.of(context);
+
+          return ListView(
+            controller: controller,
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            children: [
+              Text(run.filename, style: theme.textTheme.titleMedium),
+              const SizedBox(height: 2),
+              Text(
+                '${run.errorRows} of ${run.totalRows} rows were refused. '
+                'Row numbers match your spreadsheet - the header is row 1.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.outline),
+              ),
+              const SizedBox(height: 16),
+              // Explicit type argument: the three branches return lists of
+              // three different widget classes, and letting inference pick the
+              // common supertype is not worth the risk in a spread.
+              ...problems.when<List<Widget>>(
+                loading: () => const [
+                  Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                ],
+                // A LIST THAT FAILED SAYS SO. An empty sheet here would read
+                // as "nothing was refused", which is the opposite of true for
+                // a run that only opens because something was.
+                error: (e, _) => [
+                  Text(
+                    "Couldn't load what this import refused: "
+                    '${extractErrorMessage(e)}',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.error),
+                  ),
+                ],
+                data: (rows) => rows.isEmpty
+                    ? [
+                        Text(
+                          'This import kept no record of the refused rows.',
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(color: theme.colorScheme.outline),
+                        ),
+                      ]
+                    : [for (final problem in rows) _ProblemTile(problem: problem)],
+              ),
+            ],
+          );
+        },
+      ),
+    ),
+  );
+}
+
 class _Counts extends StatelessWidget {
   const _Counts({required this.summary});
 
@@ -388,6 +460,15 @@ class _ImportHistory extends ConsumerWidget {
                   '${run.adminEmail != null ? '\nby ${run.adminEmail}' : ''}',
                 ),
                 isThreeLine: run.adminEmail != null,
+                // ONLY A RUN THAT REFUSED SOMETHING OPENS. A chevron on a
+                // clean import would promise a list that turns out to be
+                // empty, which reads as a screen that failed to load.
+                trailing: run.errorRows > 0
+                    ? const Icon(Icons.chevron_right, size: 20)
+                    : null,
+                onTap: run.errorRows > 0
+                    ? () => _showPastProblems(context, run)
+                    : null,
               ),
           ],
         );

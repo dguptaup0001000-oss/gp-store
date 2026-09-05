@@ -47,6 +47,22 @@ class CatalogImportRepository {
         Map<String, dynamic>.from(response.data as Map));
   }
 
+  /// The rows a PAST run refused.
+  ///
+  /// The preview carries these at upload time and they are gone as soon as
+  /// the screen closes, leaving a history row that says "3 refused" and no
+  /// way to find out which three. Read back rather than downloaded: the app
+  /// has no file-saving code, and a storage permission on every customer
+  /// install for one admin screen is the worse trade.
+  Future<List<CatalogImportProblem>> problemsFor(int runId) async {
+    final response = await apiClient.dio.get('$_base/$runId/problems');
+    final rows = (response.data as List<dynamic>?) ?? const [];
+    return rows
+        .map((e) =>
+            CatalogImportProblem.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
   /// Who imported what, newest first.
   Future<List<CatalogImportRun>> history() async {
     final response = await apiClient.dio

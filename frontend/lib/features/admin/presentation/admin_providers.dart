@@ -40,6 +40,13 @@ final catalogImportHistoryProvider =
   return ref.watch(catalogImportRepositoryProvider).history();
 });
 
+/// The rows one past import refused. autoDispose so closing the sheet frees
+/// it rather than keeping every run ever opened in memory.
+final catalogImportProblemsProvider =
+    FutureProvider.autoDispose.family<List<CatalogImportProblem>, int>((ref, runId) {
+  return ref.watch(catalogImportRepositoryProvider).problemsFor(runId);
+});
+
 final adminWorkersRepositoryProvider = Provider<AdminWorkersRepository>((ref) {
   return AdminWorkersRepository(apiClient: ref.watch(apiClientProvider));
 });
