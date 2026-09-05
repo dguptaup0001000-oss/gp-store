@@ -25,9 +25,25 @@ public interface DeliverySubzoneRepository extends JpaRepository<DeliverySubzone
      * selects on a 512 MB instance, which is exactly the kind of quiet N+1
      * that only shows up under load.
      */
+    /*
+     * THE RIDER IS DELIBERATELY NOT FETCHED HERE ANY MORE.
+     *
+     * TerritoryResolver.load(), the only caller, builds a polygon record from
+     * the subzone's id, code, zone and boundary and never looks at the rider.
+     * So the fetch bought nothing - and under a marketplace it would have cost
+     * something real. delivery_partners is shop-owned; delivery_subzones is
+     * not (territories are platform geography today, §88). Fetching a
+     * shop-owned entity from an unfiltered root means TenantEntityListener's
+     * @PostLoad meets a rider belonging to some other shop and refuses the
+     * whole load - so the first subzone handed to a second merchant's rider
+     * would have taken the territory map down for everybody, on a code path
+     * nobody would have thought to look at.
+     *
+     * The zone fetch stays: DeliveryZone has no shop, the resolver reads its
+     * code on every subzone, and without it 26 subzones are 26 extra selects.
+     */
     @Query("select distinct s from DeliverySubzone s "
             + "left join fetch s.zone "
-            + "left join fetch s.primaryPartner "
             + "where s.active = true")
     List<DeliverySubzone> findAllActiveForResolution();
 

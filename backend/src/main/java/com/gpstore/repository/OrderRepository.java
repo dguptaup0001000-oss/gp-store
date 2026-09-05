@@ -261,4 +261,45 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("select o from Order o left join fetch o.customer where o.id > :afterId order by o.id asc")
     List<Order> findNewSince(@Param("afterId") Long afterId, Pageable pageable);
 
+    /**
+     * One row per shop: how the marketplace traded in a window.
+     *
+     * THE PLATFORM ROLL-UP, and the only place a figure is grouped BY shop
+     * rather than restricted TO one.
+     *
+     * WHAT KEEPS THE SHOPS APART HERE IS THE GROUPING, not the parameter.
+     * Order IS shop-owned, so this query is rooted on a filtered entity: under
+     * a shop scope Hibernate narrows it to one row before the group-by ever
+     * runs, which is the same answer that shop's own dashboard gives. A
+     * mis-scoped caller therefore reads their own numbers rather than the
+     * market's - it fails closed. Measured: removing the shopId clause below
+     * changed no test, because the filter had already done the work.
+     *
+     * The parameter stays anyway, and the reason is narrow enough to say
+     * plainly: it is the one thing that would still be true if Order ever
+     * stopped being shop-owned, and it costs a single predicate. It is
+     * redundant today. It is not the protection.
+     *
+     * CANCELLED ORDERS ARE COUNTED BUT NOT BANKED, matching sumRevenueBetween
+     * exactly - a marketplace operator needs to see that a shop is taking
+     * orders and cancelling them, which a query that dropped the rows would
+     * hide completely.
+     */
+    @Query("""
+           select o.shopId as shopId,
+                  count(o) as orderCount,
+                  coalesce(sum(case when o.orderStatus <> com.gpstore.enums.OrderStatus.CANCELLED
+                                    then o.totalAmount else 0 end), 0) as grossSales,
+                  sum(case when o.orderStatus = com.gpstore.enums.OrderStatus.CANCELLED
+                           then 1 else 0 end) as cancelledCount,
+                  max(o.orderDate) as lastOrderAt
+           from Order o
+           where o.orderDate >= :from and o.orderDate <= :to
+             and (:shopId is null or o.shopId = :shopId)
+           group by o.shopId
+           """)
+    List<Object[]> tradingByShopBetween(@Param("from") LocalDateTime from,
+                                        @Param("to") LocalDateTime to,
+                                        @Param("shopId") Long shopId);
+
 }

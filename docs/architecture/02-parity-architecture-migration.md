@@ -860,3 +860,134 @@ basket in one shop's scope each turned tests red — 3 failures in `MarketplaceS
 | **Refund deadline policy** | A group cancel produces per-shop refund obligations, each on that shop's own clock. No policy has been chosen for how long a customer has | Open decision |
 | **No admin surface for the group** | Shopkeepers see their own order and always did. Nobody sees the whole checkout except the customer | Slice 8 |
 | **Flutter is unchanged** | Every endpoint here is backend-only and CI-verified; no Dart consumes the group, the marketplace list, or the delisted-line flag yet | Frontend slice |
+
+---
+
+# Slice 8 — the third blind spot, and the books on both sides of it
+
+This slice set out to build a merchant back office and a platform overview. The
+first thing it did was measure whether the numbers those screens would show were
+already correct. They were not, and the reason is worth stating before anything
+else in this section.
+
+## `@Filter` does not follow a join
+
+Hibernate's `@Filter` restricts the entity a query is **rooted on**. It does not
+restrict an entity the query reaches through an association.
+
+```
+from OrderItem oi where oi.order.orderDate >= :since      <- reads EVERY shop
+from Refund r join r.payment p join p.order o             <- reads EVERY shop
+```
+
+OrderItem has no shop of its own; it belongs to the order that has one. Refund
+belongs to the payment that belongs to the order. Both queries look scoped, both
+compile, and both aggregate the whole marketplace. Nothing in the source says so.
+
+**Measured, not reasoned about.** A probe put 3 units of one product in Shop A
+and 9 in Shop B, then asked each shop for its top products. Both answered 12.
+The refund sum was worse, because its result is *subtracted* from a shop's
+revenue: a brand-new shop's first dashboard reported ₹68,589 of refunds it had
+never issued, against ₹700 of sales.
+
+Four queries carried it: the admin leaderboard, the customer trending list,
+"frequently bought together", and the refund total behind `netRevenue`. Each now
+names its shop, read from `TenantContext.reportingShopId()` — the scope on the
+thread, never a request parameter (§78). Null still means every shop, spelled out
+in the SQL so the widening is visible rather than implied by a missing clause.
+
+**`reportingShopId()` requires a scope rather than defaulting to null.** A
+forgotten scope and a deliberate marketplace report must not look the same. That
+requirement immediately failed twenty existing tests that called the analytics
+and recommendation services with no scope at all — they now say which shop they
+are about, which is what `TenantContextFilter` says on every real request.
+
+## The guard that closes the class
+
+`ShopScopeIsNotOptionalTest` already listed native queries and bulk statements —
+the two places Hibernate is known not to filter. This was the third, and it had
+actually leaked. A new check walks every non-native `@Query`, finds the entity it
+is rooted on, and if that entity is not shop-owned, looks for any association
+path pointing at one. Such a query must either carry a `:shopId` parameter or be
+listed with a reason.
+
+The association names are read off the entity classes rather than typed by hand,
+so an association added to a new entity next month is covered without anyone
+remembering to come back.
+
+It found three more on its first run:
+
+- **`unitsAlreadyClaimedFor`** — listed. Keyed on an order line `ReturnService`
+  has already proved belongs to the order it loaded through the filtered
+  repository; every return item claiming that line hangs off the same order.
+- **`countRecentFrom`** — listed. Counts the reporter's own crashes for a rate
+  limit, keyed on ids from the credential.
+- **`findAllActiveForResolution`** — **fixed, not listed.** It fetch-joined a
+  shop-owned rider onto a platform-level subzone. `TerritoryResolver` never reads
+  the rider, so the fetch bought nothing — and would have cost a great deal: once
+  a subzone pointed at a second merchant's rider, `TenantEntityListener`'s
+  `@PostLoad` would refuse the load and take the territory map down for
+  everybody, on a path nobody would think to look at.
+
+## The shopkeeper's own money
+
+```
+GET /api/shop/earnings?days=N   gross, refunds, net, and how the money arrived
+GET /api/shop/open-work         orders by status, for this shop
+```
+
+**An earnings statement, not a settlement.** Under decision W1 each merchant
+collects directly, so GP-STORE never holds the customer's money and there is
+nothing to settle or pay out. The question a shopkeeper actually has is what came
+in, how much of it is cash a rider is carrying, and how much went back out.
+
+**There is deliberately no commission line.** A zero-valued platform fee would
+look like a decision that has been made; decision W2 is open, and a placeholder
+printed beside real money is worse than an absence.
+
+Two things the statement gets right that a naive version would not: the window is
+taken from the **order's** date rather than the payment's, so a COD order and the
+cash collected for it days later land in the same week and the statement
+reconciles with the revenue figure beside it; and a **refunded payment still
+counts as collected**, because the money did arrive — the refund line is where
+money going back belongs.
+
+## The operator's view of the market
+
+```
+GET /api/platform/overview?days=N   one line per shop, plus marketplace totals
+```
+
+`PERM_PLATFORM_ADMIN`, which no shop ADMIN holds — `RolePermissions` builds every
+shop's set by *subtracting* it, so seniority inside one kirana never becomes
+sight of another's books.
+
+**It fails closed rather than open.** The figures are scoped by the caller's own
+tenant scope, not by the route. If that gate were ever removed, a shopkeeper
+reaching the route resolves to their own shop and reads one line: their own.
+Pinned by a test.
+
+**Keyed by shop rather than pooled.** A single marketplace total would hide
+exactly what an operator needs to see — one shop cancelling everything, another
+taking no orders at all.
+
+## Two mutations that did NOT fail
+
+Both roll-up queries carry a `:shopId` clause. Removing either changed no test,
+and the honest reason is that neither clause is the protection:
+`tradingByShopBetween` is rooted on Order, which **is** shop-owned, so the filter
+narrows it before the group-by runs; and in the refund roll-up the group-by hands
+each shop its own row, so a leaked group is a map entry nobody reads. Both
+clauses were kept — cheap, and still true if Order ever stopped being shop-owned
+— and their comments now say they are redundant rather than implying otherwise.
+
+## Still not protected
+
+| Gap | Why | Closes in |
+|---|---|---|
+| **No commission arithmetic anywhere** | The statement is deliberately fee-free until decision W2 says invoice, subscription, or none | Needs W2 |
+| **Territories are platform-level** | `delivery_zones` and `delivery_subzones` have no `shop_id`, so two merchants in one area share a map. Fine today; a marketplace wants per-shop coverage | Slice 9 (§88/§89) |
+| **A subzone's primary rider is shop-owned** | The fetch that would have crashed is gone, but `TerritoryDispatchService` still reads `getPrimaryPartner()` on paths that will meet another shop's rider once territories are shared | Slice 9 |
+| **Payments are per shop order** | Two shops means two payments, by design (W1). The group holds the relationship; there is no single "pay for everything" | Needs W2 |
+| **No merchant-level roll-up** | A merchant with three shops reads three statements. The data supports summing them; nothing asks yet | Later |
+| **Flutter is unchanged** | Every endpoint in Slices 7 and 8 is backend-only and CI-verified; no Dart consumes earnings, open work, or the market overview | Frontend slice |

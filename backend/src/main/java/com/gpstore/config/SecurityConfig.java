@@ -250,6 +250,17 @@ public class SecurityConfig {
                 // their staff. Shop-scoped by TenantContextFilter, so "their
                 // own" is enforced by the tenant filter rather than by a path.
                 .requestMatchers("/api/shop/listings/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+
+                // THE BACK OFFICE, gated on what it is about rather than on
+                // CATALOG_VIEW below. A delivery manager holds ORDERS_VIEW and
+                // no catalogue permission at all; without these two lines the
+                // path pattern would refuse them the queue of orders they exist
+                // to run, and the refusal would look like a tenancy decision
+                // rather than the accident it is. The controller asks for the
+                // same permission again - see requirePermission there.
+                .requestMatchers("/api/shop/earnings").hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
+                .requestMatchers("/api/shop/open-work").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+
                 .requestMatchers("/api/shop/**").hasAuthority(AdminPermission.CATALOG_VIEW.authority())
 
                 // WRITING THE SHARED CATALOGUE, which is not the same act as

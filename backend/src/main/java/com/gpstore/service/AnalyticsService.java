@@ -104,9 +104,15 @@ public class AnalyticsService {
         BigDecimal previousRevenue = orderRepository.sumRevenueBetween(previousFrom, previousTo);
         long previousOrderCount = orderRepository.countOrdersBetween(previousFrom, previousTo);
 
-        BigDecimal refunded = orZero(refundRepository.settledForOrdersBetween(from, to));
+        // THE SHOP THIS DASHBOARD IS FOR, named explicitly. The refund sum
+        // reaches Order through two joins, and Hibernate filters neither - so
+        // without this a new shop's dashboard subtracted the marketplace's
+        // refunds from its own takings and reported a net loss on its first
+        // day. See RefundRepository.settledForOrdersBetween.
+        Long shopId = com.gpstore.platform.TenantContext.reportingShopId();
+        BigDecimal refunded = orZero(refundRepository.settledForOrdersBetween(from, to, shopId));
         BigDecimal previousRefunded =
-                orZero(refundRepository.settledForOrdersBetween(previousFrom, previousTo));
+                orZero(refundRepository.settledForOrdersBetween(previousFrom, previousTo, shopId));
 
         BigDecimal netRevenue = revenue.subtract(refunded);
         BigDecimal previousNetRevenue = previousRevenue.subtract(previousRefunded);
@@ -165,8 +171,7 @@ public class AnalyticsService {
         // The shop comes from the scope on this thread, never from the
         // request - see TenantResolver. Platform-wide callers pass null and
         // get the whole market, which is the one legitimate cross-shop read.
-        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
-        Long shopId = scope == null ? null : scope.shopId();
+        Long shopId = com.gpstore.platform.TenantContext.reportingShopId();
 
         for (Object[] row : orderRepository.revenueByDayBetween(from, to, shopId)) {
             LocalDate day = toLocalDate(row[0]);
@@ -219,7 +224,8 @@ public class AnalyticsService {
     public List<Map<String, Object>> getTopProducts(int days, int limit) {
         LocalDateTime since = LocalDateTime.now().minusDays(clampDays(days));
         List<Object[]> rows = orderItemRepository.findTopProductsByUnits(
-                since, PageRequest.of(0, Math.max(1, limit)));
+                since, com.gpstore.platform.TenantContext.reportingShopId(),
+                PageRequest.of(0, Math.max(1, limit)));
 
         List<Long> productIds = new ArrayList<>(rows.size());
         for (Object[] row : rows) {

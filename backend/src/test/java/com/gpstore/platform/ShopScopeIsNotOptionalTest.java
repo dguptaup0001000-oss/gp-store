@@ -151,6 +151,67 @@ class ShopScopeIsNotOptionalTest {
             // read of orders here would delete MORE, not less.
             "AddressRepository.deleteUnreferencedByCustomerIdBulk");
 
+    /**
+     * JPQL rooted on an UNFILTERED entity that reaches a shop-owned one
+     * through an association, and has been read.
+     *
+     * THE THIRD BLIND SPOT, and the one that had actually leaked.
+     * {@code @Filter} restricts the entity a query is ROOTED on. It does not
+     * follow a join. So {@code from OrderItem oi where oi.order.orderDate >=
+     * :since} looks scoped, compiles, and aggregates every shop in the
+     * marketplace - OrderItem has no shop of its own, and Order's filter is
+     * never consulted because Order is not the root.
+     *
+     * That is not a theory. A probe put 3 units in Shop A and 9 in Shop B;
+     * both shops' "top products" reported 12. The refund sum was worse: it
+     * reaches Order through two joins, and its result is SUBTRACTED from one
+     * shop's revenue, so a brand-new shop's first dashboard reported the
+     * marketplace's refunds against its own takings and showed a net loss.
+     *
+     * A query escapes this list by naming its shop - the test looks for a
+     * shopId parameter. Everything else is here with a reason, and a new one
+     * fails until somebody writes one.
+     */
+    private static final Set<String> REVIEWED_JOIN_REACHING_QUERIES = Set.of(
+            // KEYED ON A PAYMENT THE CALLER ALREADY HOLDS. Every caller is
+            // PaymentService, and each passes payment.getId() from a Payment
+            // it loaded through the filtered PaymentRepository - which is
+            // where TenantEntityListener's @PostLoad would already have
+            // refused a payment belonging to another shop. The id cannot be a
+            // foreign one by the time it reaches here, and
+            // CrossTenantDataIsolationTest pins that by trying.
+            "RefundRepository.committedFor",
+            "RefundRepository.settledFor",
+            "RefundRepository.highestSequenceFor",
+            "RefundRepository.forPayment",
+
+            // CUSTOMER-OWNED, AND DELIBERATELY WIDER THAN ONE SHOP. A
+            // customer's own purchase history and their own notifications
+            // span every shop they have bought from - that is what a split
+            // checkout produces (§16). Both are keyed on the customer id from
+            // the verified token, which is the protection; narrowing them to
+            // one shop would show a customer half their own history. Same
+            // reasoning as CustomerOwnedRead.
+            "OrderItemRepository.findByCustomerIdWithProductFetched",
+            "NotificationRepository.findByCustomerIdOrderBySentAtDesc",
+
+            // KEYED ON AN ORDER LINE ALREADY PROVED TO BE ON THIS ORDER.
+            // ReturnService loads the order through the filtered
+            // OrderRepository, then refuses any line whose getOrder() is not
+            // that order - so by the time this id arrives it belongs to a
+            // shop-owned order in scope. Every return item claiming that line
+            // hangs off the same order, so the sum cannot span shops even in
+            // principle. Getting it wrong would over-count and REFUSE a
+            // legitimate return, never approve a foreign one.
+            "OrderReturnRepository.unitsAlreadyClaimedFor",
+
+            // COUNTS THE REPORTER'S OWN CRASHES, for a rate limit. The
+            // customer id and worker id both come from the verified
+            // credential, never from the body, and a worker belongs to
+            // exactly one shop - so the count is single-shop by construction.
+            // It returns a number, not a row.
+            "ClientCrashReportRepository.countRecentFrom");
+
     @Test
     @DisplayName("every table with a shop_id has an entity that is filtered and stamped")
     void aTenantColumnWithoutEnforcementIsNotAllowed() {
@@ -294,6 +355,57 @@ class ShopScopeIsNotOptionalTest {
     }
 
     @Test
+    @DisplayName("a query that reaches a shop-owned entity through a join has to name its shop")
+    void aJoinIsWhereTheFilterStops() {
+        Set<String> ownedEntityNames = new TreeSet<>();
+        for (Class<?> entity : entityClasses()) {
+            if (ShopOwned.class.isAssignableFrom(entity)) {
+                ownedEntityNames.add(entity.getSimpleName());
+            }
+        }
+        Set<String> associationsToOwned = associationNamesPointingAtShopOwnedEntities();
+        assertFalse(associationsToOwned.isEmpty(),
+                "no associations to shop-owned entities found - the scan is wrong, and a guard "
+                        + "that finds nothing passes for the wrong reason");
+
+        Set<String> found = new LinkedHashSet<>();
+        for (Class<?> repository : repositoryInterfaces()) {
+            for (Method method : repository.getDeclaredMethods()) {
+                Query query = method.getAnnotation(Query.class);
+                if (query == null || query.nativeQuery() || query.value().isBlank()) {
+                    continue;   // native queries are covered by their own test
+                }
+                String jpql = query.value();
+                String rootEntity = rootEntityOf(jpql);
+                if (rootEntity == null || ownedEntityNames.contains(rootEntity)) {
+                    continue;   // the filter applies to the root, so this one is scoped
+                }
+                if (jpql.contains(":shopId")) {
+                    continue;   // it names its shop, which is the way out of this list
+                }
+                for (String association : associationsToOwned) {
+                    if (java.util.regex.Pattern
+                            .compile("\\.\\s*" + association + "\\b")
+                            .matcher(jpql).find()) {
+                        found.add(repository.getSimpleName() + "." + method.getName());
+                        break;
+                    }
+                }
+            }
+        }
+
+        Set<String> unreviewed = new TreeSet<>(found);
+        unreviewed.removeAll(REVIEWED_JOIN_REACHING_QUERIES);
+
+        assertTrue(unreviewed.isEmpty(),
+                "these queries are rooted on an entity the shop filter does not cover and reach a "
+                        + "shop-owned one through an association. Hibernate does not follow a join: "
+                        + "each of these reads every shop in the marketplace. Give it a :shopId "
+                        + "parameter read from TenantContext.reportingShopId(), or list it in "
+                        + "REVIEWED_JOIN_REACHING_QUERIES with a reason: " + unreviewed);
+    }
+
+    @Test
     @DisplayName("the reviewed lists name real methods, so they cannot rot into permanent excuses")
     void theAllowlistsDoNotOutliveTheirMethods() {
         Set<String> everyRepositoryMethod = new TreeSet<>();
@@ -306,6 +418,7 @@ class ShopScopeIsNotOptionalTest {
         Set<String> stale = new TreeSet<>();
         stale.addAll(REVIEWED_NATIVE_QUERIES);
         stale.addAll(REVIEWED_BULK_STATEMENTS);
+        stale.addAll(REVIEWED_JOIN_REACHING_QUERIES);
         stale.removeAll(everyRepositoryMethod);
 
         assertTrue(stale.isEmpty(),
@@ -314,6 +427,42 @@ class ShopScopeIsNotOptionalTest {
     }
 
     // ------------------------------------------------------------- scanning
+
+    /**
+     * Every association name that points at a shop-owned entity.
+     *
+     * Read off the entity classes rather than listed by hand, so an
+     * association added to a new entity next month is covered without anyone
+     * remembering to come back here.
+     */
+    private static Set<String> associationNamesPointingAtShopOwnedEntities() {
+        Set<String> names = new TreeSet<>();
+        for (Class<?> entity : entityClasses()) {
+            for (java.lang.reflect.Field field : entity.getDeclaredFields()) {
+                Class<?> target = field.getType();
+                if (java.util.Collection.class.isAssignableFrom(target)) {
+                    java.lang.reflect.Type generic = field.getGenericType();
+                    if (generic instanceof java.lang.reflect.ParameterizedType parameterized
+                            && parameterized.getActualTypeArguments().length == 1
+                            && parameterized.getActualTypeArguments()[0] instanceof Class<?> element) {
+                        target = element;
+                    }
+                }
+                if (ShopOwned.class.isAssignableFrom(target)) {
+                    names.add(field.getName());
+                }
+            }
+        }
+        return names;
+    }
+
+    /** The entity a JPQL statement is rooted on - the one the filter covers. */
+    private static String rootEntityOf(String jpql) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\\bfrom\\s+([A-Za-z_$][\\w$]*)", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(jpql);
+        return matcher.find() ? matcher.group(1) : null;
+    }
 
     private Set<String> shopOwnedTableNames() {
         Set<String> tables = new TreeSet<>();

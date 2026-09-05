@@ -42,13 +42,16 @@ public class ShopSelfServiceController {
     private final MerchantRepository merchants;
     private final com.gpstore.repository.CustomerRepository customers;
     private final com.gpstore.service.AuditLogService auditLog;
+    private final com.gpstore.money.ShopEarnings earnings;
 
     public ShopSelfServiceController(ShopRepository shops, ShopLifecycleService shopLifecycle,
                                      ShopProductVariantRepository listings,
                                      ShopStaffRepository staff, CurrentUser currentUser,
                                      ShopMembership membership, MerchantRepository merchants,
                                      com.gpstore.repository.CustomerRepository customers,
-                                     com.gpstore.service.AuditLogService auditLog) {
+                                     com.gpstore.service.AuditLogService auditLog,
+                                     com.gpstore.money.ShopEarnings earnings) {
+        this.earnings = earnings;
         this.membership = membership;
         this.merchants = merchants;
         this.customers = customers;
@@ -181,6 +184,34 @@ public class ShopSelfServiceController {
         listing.setAvailable(Boolean.FALSE);
         listing.setActive(Boolean.FALSE);
         listings.save(listing);
+    }
+
+    // ------------------------------------------------------------ the money
+
+    /**
+     * What this shop took, and in what form.
+     *
+     * ANALYTICS_VIEW, deliberately - the same permission that opens the
+     * dashboard, because this is the dashboard's money half rather than a
+     * separate privilege. A shopkeeper who may see how many orders they had
+     * may see what those orders were worth.
+     *
+     * NO SHOP ID, again. The statement is about the shop the credential
+     * resolved to, so there is no id for anyone to change - and no route that
+     * would answer with somebody else's takings if they did.
+     */
+    @GetMapping("/earnings")
+    public com.gpstore.money.ShopEarnings.Statement earnings(
+            @RequestParam(defaultValue = "30") int days) {
+        requirePermission(AdminPermission.ANALYTICS_VIEW);
+        return earnings.forCurrentShop(days);
+    }
+
+    /** What is waiting to be done, by order status, for this shop only. */
+    @GetMapping("/open-work")
+    public java.util.Map<String, Long> openWork() {
+        requirePermission(AdminPermission.ORDERS_VIEW);
+        return earnings.openWorkForCurrentShop();
     }
 
     // -------------------------------------------------------------- the staff

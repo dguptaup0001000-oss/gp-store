@@ -33,6 +33,33 @@ import static org.junit.jupiter.api.Assertions.*;
 })
 class RecommendationHygieneTest {
 
+    /**
+     * The scope a real request would already be carrying.
+     *
+     * These tests call the services straight, with no filter in front of
+     * them, and the reporting queries now ask which shop they are about -
+     * TenantContext.reportingShopId() REQUIRES a scope rather than treating a
+     * missing one as "every shop", because a forgotten scope and a deliberate
+     * marketplace report must not look the same. So the test says what
+     * TenantContextFilter says on every real request: this is Shop #1's
+     * dashboard.
+     */
+    @org.junit.jupiter.api.BeforeEach
+    void actAsTheShopTheRequestWouldHaveResolvedTo() {
+        Long shopOne = shopsForScope.findByCode(platformForScope.getFirstShopCode())
+                .orElseThrow().getId();
+        com.gpstore.platform.TenantContext.set(
+                com.gpstore.platform.TenantScope.ofShop(shopOne));
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void dropTheScope() {
+        com.gpstore.platform.TenantContext.clear();
+    }
+
+    @Autowired private com.gpstore.platform.ShopRepository shopsForScope;
+    @Autowired private com.gpstore.platform.PlatformProperties platformForScope;
+
     @Autowired private RecommendationService recommendationService;
     @Autowired private OrderItemRepository orderItemRepository;
     @Autowired private CacheManager cacheManager;
@@ -49,7 +76,7 @@ class RecommendationHygieneTest {
         // trading volume, on a query the home screen calls on every open.
         LocalDateTime since = LocalDateTime.now().minusDays(3650);
 
-        List<Object[]> rows = orderItemRepository.findTrendingProductIds(since, PageRequest.of(0, 10));
+        List<Object[]> rows = orderItemRepository.findTrendingProductIds(since, null, PageRequest.of(0, 10));
 
         assertTrue(rows.size() <= 10,
                 "The limit must be applied by the database, got " + rows.size() + " rows");
@@ -59,7 +86,7 @@ class RecommendationHygieneTest {
     @DisplayName("Co-purchase ranking is bounded too")
     void frequentlyBoughtQueryIsBounded() {
         List<Object[]> rows =
-                orderItemRepository.findFrequentlyBoughtWithProductId(1L, PageRequest.of(0, 5));
+                orderItemRepository.findFrequentlyBoughtWithProductId(1L, null, PageRequest.of(0, 5));
 
         assertTrue(rows.size() <= 5, "got " + rows.size() + " rows");
     }
@@ -135,13 +162,18 @@ class RecommendationHygieneTest {
         // to ask fills the entry and every other shop is served its answer
         // with no query run. CacheConfig.keyGenerator prefixes the scope, so
         // the key below names the namespace as well as the arguments. This
-        // call runs with no tenant scope on the thread, which is its own
-        // namespace - not any shop's.
+        // call runs inside Shop #1's scope, exactly as a request would, so the
+        // namespace is that shop's - which is the version of this assertion
+        // worth having: it proves the SHOP ID reaches the key, not merely that
+        // some prefix does.
         //
         // Spring wraps multiple @Cacheable arguments in a SimpleKey - NOT a
         // List, which is what this asserted first time and is why it failed
         // while the caching worked perfectly.
-        assertNotNull(cache.get(new org.springframework.cache.interceptor.SimpleKey("unscoped", 7, 10)),
+        Long shopOne = shopsForScope.findByCode(platformForScope.getFirstShopCode())
+                .orElseThrow().getId();
+        assertNotNull(cache.get(new org.springframework.cache.interceptor.SimpleKey(
+                        "shop:" + shopOne, 7, 10)),
                 "a trending result must be cached, keyed on the shop it was computed for "
                         + "as well as on its own arguments");
         assertNull(cache.get(new org.springframework.cache.interceptor.SimpleKey(7, 10)),

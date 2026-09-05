@@ -46,8 +46,12 @@ public class RecommendationService {
     @Transactional(readOnly = true)
     @Cacheable(value = "frequentlyBought", sync = true)
     public List<ProductResponse> frequentlyBoughtWith(Long productId, int limit) {
+        // THIS SHOP'S BASKETS. The query reaches Order through a join, and a
+        // join is exactly where Hibernate's filter stops - so the shop is
+        // named. It comes off the scope, never off the request.
         List<Object[]> rows = orderItemRepository.findFrequentlyBoughtWithProductId(
-                productId, PageRequest.of(0, candidatePoolFor(limit)));
+                productId, com.gpstore.platform.TenantContext.reportingShopId(),
+                PageRequest.of(0, candidatePoolFor(limit)));
         return resolveTopProducts(rows, limit);
     }
 
@@ -77,7 +81,8 @@ public class RecommendationService {
     public List<ProductResponse> trending(int days, int limit) {
         LocalDateTime since = LocalDateTime.now().minusDays(days);
         List<Object[]> rows = orderItemRepository.findTrendingProductIds(
-                since, PageRequest.of(0, candidatePoolFor(limit)));
+                since, com.gpstore.platform.TenantContext.reportingShopId(),
+                PageRequest.of(0, candidatePoolFor(limit)));
         return resolveTopProducts(rows, limit);
     }
 

@@ -51,6 +51,31 @@ public final class TenantContext {
         return scope;
     }
 
+    /**
+     * The shop a report should be about, or null for every shop.
+     *
+     * THE ONE PLACE A QUERY PARAMETER IS ALLOWED TO COME FROM. Four
+     * reporting queries reach a shop-owned entity through a join, and
+     * Hibernate's filter does not follow a join - it restricts the entity a
+     * query is ROOTED on and nothing else. Those queries therefore carry an
+     * explicit shopId, and this is where it comes from: the scope on the
+     * thread, which TenantContextFilter derived from the credential. Never a
+     * request parameter (§78), and never a field on an object a client sent.
+     *
+     * NULL IS AN ANSWER, NOT AN OMISSION. A platform administrator looking at
+     * the marketplace, and the scheduled reporting a single-shop deployment
+     * has always run, are both legitimately about every shop. The queries
+     * spell that as "(:shopId is null or ...)" so the widening is visible in
+     * the SQL rather than implied by a missing clause.
+     *
+     * REQUIRES A SCOPE. Returning null when nothing is set would make a
+     * forgotten scope look exactly like a deliberate platform report, which
+     * is the failure this whole mechanism exists to prevent.
+     */
+    public static Long reportingShopId() {
+        return require().shopId();
+    }
+
     /** Whether a scope has been established at all. */
     public static boolean isSet() {
         return CURRENT.get() != null;

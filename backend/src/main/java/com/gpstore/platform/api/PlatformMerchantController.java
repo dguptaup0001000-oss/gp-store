@@ -26,13 +26,73 @@ public class PlatformMerchantController {
     private final MerchantLifecycleService merchantLifecycle;
     private final ShopLifecycleService shopLifecycle;
     private final ShopMembership membership;
+    private final com.gpstore.money.ShopEarnings earnings;
 
     public PlatformMerchantController(MerchantLifecycleService merchantLifecycle,
                                       ShopLifecycleService shopLifecycle,
-                                      ShopMembership membership) {
+                                      ShopMembership membership,
+                                      com.gpstore.money.ShopEarnings earnings) {
         this.merchantLifecycle = merchantLifecycle;
         this.shopLifecycle = shopLifecycle;
         this.membership = membership;
+        this.earnings = earnings;
+    }
+
+    // ------------------------------------------------------------- the market
+
+    /**
+     * @param shops     one line per shop that traded in the window, best first
+     * @param totals    the marketplace added up
+     * @param shopCount how many shops exist, whether or not they traded
+     */
+    public record MarketOverview(int periodDays,
+                                 List<com.gpstore.money.ShopEarnings.ShopLine> shops,
+                                 Totals totals, long shopCount, long merchantCount) {}
+
+    public record Totals(long orderCount, long cancelledCount, BigDecimal grossSales,
+                         BigDecimal refunds, BigDecimal netSales, int tradingShops) {}
+
+    /**
+     * How the marketplace is doing, shop by shop.
+     *
+     * THE ONE PLACE FIGURES FROM DIFFERENT MERCHANTS SIT SIDE BY SIDE, and
+     * that is what a platform administrator is for. Two things keep it from
+     * being the leak the rest of this transformation exists to prevent:
+     *
+     *   PERM_PLATFORM_ADMIN, which no shop ADMIN holds - RolePermissions
+     *   builds every shop's permission set by SUBTRACTING it, so a shopkeeper
+     *   cannot reach this route however senior they are inside their own shop;
+     *
+     *   and the query is scoped by the caller's own tenant scope, not by the
+     *   route. If this gate were ever removed, a shopkeeper reaching the route
+     *   would resolve to their own shop and read one line: their own. It fails
+     *   closed rather than open, which is the difference between a bug and a
+     *   breach.
+     *
+     * KEYED BY SHOP RATHER THAN POOLED. A single marketplace total would hide
+     * exactly what an operator needs to see - one shop cancelling everything,
+     * another taking no orders at all.
+     */
+    @GetMapping("/overview")
+    public MarketOverview overview(@RequestParam(defaultValue = "30") int days) {
+        List<com.gpstore.money.ShopEarnings.ShopLine> lines = earnings.byShop(days);
+
+        long orderCount = 0;
+        long cancelled = 0;
+        BigDecimal gross = BigDecimal.ZERO;
+        BigDecimal refunded = BigDecimal.ZERO;
+        for (com.gpstore.money.ShopEarnings.ShopLine line : lines) {
+            orderCount += line.orderCount();
+            cancelled += line.cancelledCount();
+            gross = gross.add(line.grossSales());
+            refunded = refunded.add(line.refunds());
+        }
+
+        return new MarketOverview(days, lines,
+                new Totals(orderCount, cancelled, gross, refunded, gross.subtract(refunded),
+                        lines.size()),
+                shopLifecycle.all().size(),
+                merchantLifecycle.all().size());
     }
 
     // ------------------------------------------------------------ merchants
