@@ -52,6 +52,20 @@ public class OutboxEvent {
     private Long id;
 
     /** What kind of thing this event is about, e.g. "Order". */
+    /**
+     * The shop this work is owed to.
+     *
+     * NOT A TENANT BOUNDARY - see V53. One worker drains every shop's events,
+     * so this row is deliberately unfiltered; the column says which scope to
+     * ENTER before doing the work, not who may read the row.
+     *
+     * Written by the code that creates the event, inside the transaction that
+     * created the aggregate, where the scope is known for certain. Deriving it
+     * later would mean every new event type remembering to.
+     */
+    @Column(name = "shop_id")
+    private Long shopId;
+
     @Column(name = "aggregate_type", nullable = false, length = 64)
     private String aggregateType;
 
@@ -91,8 +105,29 @@ public class OutboxEvent {
     public OutboxEvent() {
     }
 
-    public static OutboxEvent of(String aggregateType, Long aggregateId, String eventType) {
+    /**
+     * THE ONLY FACTORY, and the shop is not optional.
+     *
+     * There used to be a three-argument version beside this one. Four call
+     * sites had to be given a shop when V53 landed and three of them were -
+     * the fourth kept compiling, kept writing events with no shop, and those
+     * events would have run their work unscoped in production. Nothing in the
+     * type system said anything was missing, because the shorter overload was
+     * still there and still valid.
+     *
+     * So it is gone. A caller that genuinely has no shop - a test writing a
+     * deliberately malformed event - passes null and says so at the call site,
+     * which is a decision somebody can read rather than an argument nobody
+     * noticed omitting.
+     *
+     * @param shopId the shop whose scope this work must run in. Read from the
+     *               tenant scope of the transaction creating the event, or
+     *               from the aggregate it is about - never from a request.
+     */
+    public static OutboxEvent of(String aggregateType, Long aggregateId, String eventType,
+                                 Long shopId) {
         OutboxEvent event = new OutboxEvent();
+        event.shopId = shopId;
         event.aggregateType = aggregateType;
         event.aggregateId = aggregateId;
         event.eventType = eventType;
@@ -105,6 +140,14 @@ public class OutboxEvent {
 
     public Long getId() {
         return id;
+    }
+
+    public Long getShopId() {
+        return shopId;
+    }
+
+    public void setShopId(Long shopId) {
+        this.shopId = shopId;
     }
 
     public String getAggregateType() {

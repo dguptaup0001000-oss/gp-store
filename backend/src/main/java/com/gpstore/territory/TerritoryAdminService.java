@@ -231,6 +231,9 @@ public class TerritoryAdminService {
      * roads can say whether a border is a border a scooter can cross.
      */
     @Transactional
+    /** What a territory borders, after a change - ids, read while the collection is live. */
+    public record NeighbourList(Long subzoneId, String code, List<Long> neighbourIds) {}
+
     public DeliverySubzone setNeighbours(Long subzoneId, List<Long> neighbourIds) {
         DeliverySubzone subzone = requireSubzone(subzoneId);
 
@@ -259,6 +262,25 @@ public class TerritoryAdminService {
         DeliverySubzone saved = subzoneRepository.save(subzone);
         resolver.invalidate();
         return saved;
+    }
+
+    /**
+     * The same write, answered with the neighbour ids rather than the entity.
+     *
+     * READ INSIDE THIS TRANSACTION, which is the whole reason it exists.
+     * DeliverySubzone.neighbours is lazy and no longer serialised - see the
+     * comment on that field for the 500 it used to produce - so the one route
+     * whose answer is genuinely about neighbours reads them here, while the
+     * session is still open, and returns plain ids.
+     */
+    @Transactional
+    public NeighbourList setNeighboursAndList(Long subzoneId, List<Long> neighbourIds) {
+        DeliverySubzone saved = setNeighbours(subzoneId, neighbourIds);
+        List<Long> ids = new ArrayList<>();
+        for (DeliverySubzone neighbour : saved.getNeighbours()) {
+            ids.add(neighbour.getId());
+        }
+        return new NeighbourList(saved.getId(), saved.getCode(), ids);
     }
 
     // ------------------------------------------------------------ addresses

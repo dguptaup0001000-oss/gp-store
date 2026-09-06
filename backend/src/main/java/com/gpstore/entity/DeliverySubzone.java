@@ -139,6 +139,31 @@ public class DeliverySubzone implements ShopOwned {
      * Written in both directions by TerritoryAdminService so a lookup stays a
      * single indexed read.
      */
+    /*
+     * NOT SERIALISED, and leaving it serialisable was a bug that had shipped.
+     *
+     * spring.jpa.open-in-view is off, so the persistence session closes when
+     * the service's transaction commits - and Jackson then meets an
+     * uninitialised collection and throws HttpMessageNotWritableException. The
+     * whole response becomes a 500, AFTER the write has already committed. So
+     * every territory-admin route that returns a LOADED subzone answered 500
+     * while having done exactly what was asked: listing territories, pinning a
+     * rider, setting a backup list.
+     *
+     * It had been noticed from the outside and worked around rather than
+     * fixed: the Flutter admin screen has a "Couldn't load territories" state
+     * and a test that names the failure 'lazy neighbours'. Under one shop
+     * nobody could pin a rider through the API either; the seeded map made it
+     * survivable. A second merchant has no seeded map, so it is the first
+     * thing that stops them.
+     *
+     * Ignoring it is safe rather than lossy: this is a self-referential graph
+     * that would recurse if it ever serialised, and no client reads it - the
+     * Flutter TerritorySubzone model has no such field. The one route whose
+     * answer is about neighbours returns their ids explicitly instead, built
+     * inside the transaction where the collection is live.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
             name = "subzone_neighbours",

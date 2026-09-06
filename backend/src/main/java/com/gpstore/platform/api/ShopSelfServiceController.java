@@ -43,6 +43,7 @@ public class ShopSelfServiceController {
     private final com.gpstore.repository.CustomerRepository customers;
     private final com.gpstore.service.AuditLogService auditLog;
     private final com.gpstore.money.ShopEarnings earnings;
+    private final ShopReadiness readiness;
 
     public ShopSelfServiceController(ShopRepository shops, ShopLifecycleService shopLifecycle,
                                      ShopProductVariantRepository listings,
@@ -50,8 +51,10 @@ public class ShopSelfServiceController {
                                      ShopMembership membership, MerchantRepository merchants,
                                      com.gpstore.repository.CustomerRepository customers,
                                      com.gpstore.service.AuditLogService auditLog,
-                                     com.gpstore.money.ShopEarnings earnings) {
+                                     com.gpstore.money.ShopEarnings earnings,
+                                     ShopReadiness readiness) {
         this.earnings = earnings;
+        this.readiness = readiness;
         this.membership = membership;
         this.merchants = merchants;
         this.customers = customers;
@@ -184,6 +187,21 @@ public class ShopSelfServiceController {
         listing.setAvailable(Boolean.FALSE);
         listing.setActive(Boolean.FALSE);
         listings.save(listing);
+    }
+
+    /**
+     * What still stands between this shop and its first order.
+     *
+     * CATALOG_VIEW, the same as the rest of the read surface - this is the
+     * screen a shopkeeper opens when nothing is selling and they want to know
+     * why. It reports; ShopTradingGate still decides.
+     *
+     * Never shown to a customer. The customer's version of this answer is
+     * deliberately one sentence with no detail in it.
+     */
+    @GetMapping("/readiness")
+    public ShopReadiness.Readiness readiness() {
+        return readiness.forCurrentShop();
     }
 
     // ------------------------------------------------------------ the money

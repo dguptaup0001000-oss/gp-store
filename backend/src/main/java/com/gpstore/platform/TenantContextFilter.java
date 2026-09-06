@@ -100,7 +100,7 @@ public class TenantContextFilter extends OncePerRequestFilter {
      */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getServletPath();
+        String path = com.gpstore.config.RequestPath.of(request);
         // Liveness only. These must answer while the database is unreachable,
         // so they cannot depend on a shop row existing - a database problem
         // reading as a dead process is how a deploy script kills a healthy
@@ -147,7 +147,7 @@ public class TenantContextFilter extends OncePerRequestFilter {
      * fails loudly instead of landing in whichever shop the default named.
      */
     private static boolean spansEveryShop(HttpServletRequest request) {
-        String path = request.getServletPath();
+        String path = com.gpstore.config.RequestPath.of(request);
         return path.startsWith("/api/auth/")
                 || path.startsWith("/api/payments/webhooks/")
                 // FINDING A SHOP CANNOT REQUIRE HAVING ONE. A customer who

@@ -176,7 +176,37 @@ public class OutboxWorker {
         int attempt = self.countAttempt(eventId);
 
         try {
-            dispatch(event.getEventType(), event.getAggregateId());
+            // THE WORK RUNS IN THE SHOP THE EVENT IS FOR.
+            //
+            // This thread has no scope of its own - the drain is scheduled,
+            // not requested - and the work it does WRITES shop-owned rows: an
+            // invoice, a delivery, a batch. Without a scope, stamping has
+            // nothing to stamp with, and under MULTI_SHOP_PRODUCTION every
+            // ORDER_PLACED event failed with "Refusing to insert an Invoice
+            // with no shop" and retried until it dead-lettered. Which is the
+            // whole marketplace taking orders and dispatching none of them.
+            //
+            // Under one shop it never showed, because TenantDefaults answers
+            // Shop #1 when nothing says otherwise - so the invoice was stamped
+            // correctly by accident for as long as there was only one right
+            // answer.
+            //
+            // An event with no shop on it - written before V53, or by
+            // something that has not been taught to say - runs as it always
+            // did rather than being refused: this is durable work that has
+            // already been promised, and failing it here would strand orders
+            // that were placed perfectly well.
+            Long shopId = event.getShopId();
+            if (shopId == null) {
+                dispatch(event.getEventType(), event.getAggregateId());
+            } else {
+                com.gpstore.platform.TenantContext.runWithin(
+                        com.gpstore.platform.TenantScope.ofShop(shopId),
+                        () -> {
+                            dispatch(event.getEventType(), event.getAggregateId());
+                            return null;
+                        });
+            }
             self.markProcessed(eventId);
 
         } catch (Exception ex) {

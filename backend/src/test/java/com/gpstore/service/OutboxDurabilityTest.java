@@ -69,8 +69,12 @@ class OutboxDurabilityTest {
     void reprocessingAnEventDoesNotDuplicateWork() {
         Long orderId = anOrderIdWithNoInvoice();
 
+        // The event carries the order's own shop, exactly as checkout writes
+        // it - so this exercises the scoped dispatch the worker really does,
+        // not an unscoped path production no longer takes.
         OutboxEvent event = outboxEventRepository.save(OutboxEvent.of(
-                OutboxWorker.AGGREGATE_ORDER, orderId, OutboxWorker.EVENT_ORDER_PLACED));
+                OutboxWorker.AGGREGATE_ORDER, orderId, OutboxWorker.EVENT_ORDER_PLACED,
+                shopOf(orderId)));
 
         outboxWorker.processClaimedEvent(event.getId());
         assertEquals(OutboxEvent.Status.PROCESSED,
@@ -81,7 +85,8 @@ class OutboxDurabilityTest {
         // Simulate the crash-before-acknowledge case: the same work is
         // delivered again.
         OutboxEvent redelivered = outboxEventRepository.save(OutboxEvent.of(
-                OutboxWorker.AGGREGATE_ORDER, orderId, OutboxWorker.EVENT_ORDER_PLACED));
+                OutboxWorker.AGGREGATE_ORDER, orderId, OutboxWorker.EVENT_ORDER_PLACED,
+                shopOf(orderId)));
         outboxWorker.processClaimedEvent(redelivered.getId());
 
         assertEquals(OutboxEvent.Status.PROCESSED,
@@ -106,7 +111,9 @@ class OutboxDurabilityTest {
     @Test
     void aFailingEventBacksOffAndRemainsRecoverable() {
         OutboxEvent event = outboxEventRepository.save(OutboxEvent.of(
-                OutboxWorker.AGGREGATE_ORDER, -1L, "NO_SUCH_EVENT_TYPE"));
+                // No shop: this event is deliberately malformed and never
+                // reaches a handler, so there is no work to scope.
+                OutboxWorker.AGGREGATE_ORDER, -1L, "NO_SUCH_EVENT_TYPE", null));
 
         LocalDateTime before = LocalDateTime.now();
         outboxWorker.processClaimedEvent(event.getId());
@@ -131,7 +138,9 @@ class OutboxDurabilityTest {
     @Test
     void anEventThatKeepsFailingIsEventuallyDeadLetteredButNotDeleted() {
         OutboxEvent event = outboxEventRepository.save(OutboxEvent.of(
-                OutboxWorker.AGGREGATE_ORDER, -1L, "NO_SUCH_EVENT_TYPE"));
+                // No shop: this event is deliberately malformed and never
+                // reaches a handler, so there is no work to scope.
+                OutboxWorker.AGGREGATE_ORDER, -1L, "NO_SUCH_EVENT_TYPE", null));
 
         // Drive it past maxAttempts. Each pass resets next_attempt_at into
         // the future, so it is reset here rather than waiting out the real
@@ -163,7 +172,7 @@ class OutboxDurabilityTest {
         int inserted = 120;
         for (int i = 0; i < inserted; i++) {
             outboxEventRepository.save(OutboxEvent.of(
-                    OutboxWorker.AGGREGATE_ORDER, -2L, "NO_SUCH_EVENT_TYPE"));
+                    OutboxWorker.AGGREGATE_ORDER, -2L, "NO_SUCH_EVENT_TYPE", null));
         }
 
         List<Long> claimed = outboxWorker.claimBatch();
@@ -179,6 +188,10 @@ class OutboxDurabilityTest {
      * breakdown rather than operating on a stub that would not exercise the
      * same paths.
      */
+    private Long shopOf(Long orderId) {
+        return orderRepository.findById(orderId).map(com.gpstore.entity.Order::getShopId).orElse(null);
+    }
+
     private Long anOrderIdWithNoInvoice() {
         Category category = new Category();
         category.setName("Outbox Category " + System.nanoTime());

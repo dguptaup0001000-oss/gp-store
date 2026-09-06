@@ -84,10 +84,18 @@ public class TerritoryAdminController {
     }
 
     /** Body: {"neighbourIds": [4, 5]} - written in both directions. */
+    /**
+     * Returns the neighbour IDS, not the subzone entity.
+     *
+     * The collection is lazy and deliberately not serialised, so returning
+     * the entity here answered 500 after committing the change. Ids are what
+     * the caller asked about anyway.
+     */
     @PutMapping("/subzones/{subzoneId}/neighbours")
-    public DeliverySubzone setNeighbours(@PathVariable Long subzoneId,
-                                         @RequestBody Map<String, List<Long>> body) {
-        return adminService.setNeighbours(subzoneId, body.getOrDefault("neighbourIds", List.of()));
+    public TerritoryAdminService.NeighbourList setNeighbours(
+            @PathVariable Long subzoneId, @RequestBody Map<String, List<Long>> body) {
+        return adminService.setNeighboursAndList(
+                subzoneId, body.getOrDefault("neighbourIds", List.of()));
     }
 
     // ------------------------------------------------------------ addresses

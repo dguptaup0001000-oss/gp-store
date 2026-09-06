@@ -101,7 +101,34 @@ class ShopScopeIsNotOptionalTest {
      *
      * All three are asserted by MultiShopCheckoutTest.
      */
-    private static final Set<String> SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY = Set.of("cart_items");
+    private static final Set<String> SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY =
+            Set.of("cart_items", "outbox_events");
+
+    /*
+     * outbox_events is the second one, and for a different reason worth
+     * writing out.
+     *
+     * ONE WORKER SERVES EVERY SHOP. The drain is a scheduled sweep - filtering
+     * it would mean each merchant needing their own worker, or the sweep
+     * silently doing one shop's work and nobody else's. So the row stays
+     * readable platform-wide and the column says which shop to ACT FOR, not
+     * who may read it: OutboxWorker enters TenantScope.ofShop(event.shopId)
+     * before dispatching, which is what gives the invoice and the delivery a
+     * shop to be stamped with.
+     *
+     * WHAT PROTECTS IT INSTEAD:
+     *
+     *   the column is written by the code that CREATES the event, inside the
+     *   transaction that created the aggregate, from the scope already on that
+     *   thread - never from a request;
+     *
+     *   the work the event triggers runs inside that shop's scope, so every
+     *   row it writes is filtered and stamped like any other;
+     *
+     *   and V53 verifies that no order event names a shop other than its own
+     *   order's, which is the one crossing that would matter - it would send
+     *   one shop's rider to another merchant's customer.
+     */
 
     /**
      * Native queries that touch a shop-owned table and have been read.

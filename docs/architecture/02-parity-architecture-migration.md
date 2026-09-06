@@ -1116,3 +1116,156 @@ fee is already grouped per shop — without pretending a model has been chosen.
 | **A shop with no map falls back for every order** | Correct and fail-closed, but a newly onboarded merchant delivers with no local knowledge until somebody draws outlines | Onboarding |
 | **Delivery is still per shop order** | Two shops means two riders and two fees, which W4 confirms is the intended model rather than a gap | By decision |
 | **Flutter is unchanged** | Slices 7, 8 and 9 are backend-only and CI-verified | Frontend slice |
+
+---
+
+# Slice 10 — a second kirana starts from nothing
+
+Nine slices proved boundaries. This one asked a different question: **can a real
+merchant actually start?** Every piece had an endpoint and every endpoint had
+tests. Nobody had ever walked the path.
+
+The slice is one test — `SecondMerchantOnboardingTest` — that does what a real
+shopkeeper does, in order, over HTTP, with nothing seeded:
+
+```
+platform registers the merchant, reviews it, approves it
+platform opens the shop and puts the owner on its staff
+-- from here it is the merchant's own doing --
+they read their readiness checklist and see what is missing
+they draw their first territory
+they hire their first rider and give them that territory
+they list a product off the shared catalogue at their own price
+the platform switches the business on; the shop opens
+a customer nearby finds them, buys, and the order reaches THEIR rider
+and the money shows up in their own earnings
+```
+
+It found four real defects. Three had shipped.
+
+## 1. The outbox ran with no shop — so nothing was ever delivered
+
+`ORDER_PLACED` is written to `outbox_events` inside the checkout transaction,
+deliberately: generating an invoice and assigning a rider must survive a
+redeploy. `OutboxWorker` drains it on a scheduled thread — **and that thread has
+no tenant scope.**
+
+Under one shop it never showed: `TenantDefaults` answers Shop #1 when nothing
+says otherwise, so the invoice was stamped correctly *by accident*, for as long
+as there was only one right answer. Under `MULTI_SHOP_PRODUCTION` there is no
+fallback, so every event failed with
+
+```
+Refusing to insert an Invoice with no shop.
+```
+
+and retried until it dead-lettered. Which means, for **every order in the
+marketplace**: no invoice, and no rider. The order is taken, the money is taken,
+and nothing goes out.
+
+V53 puts the shop on the event — written by the code that creates it, inside the
+transaction that created the aggregate — and the worker enters
+`TenantScope.ofShop(...)` before dispatching. `outbox_events` is deliberately
+*not* a filtered entity: one worker serves every shop, so the column says which
+scope to **enter**, not who may read the row. Same distinction as `cart_items`,
+and recorded in both structural guards.
+
+**And then the same bug nearly recurred inside the fix.** Four call sites needed
+the shop; three got it. The fourth kept compiling because the three-argument
+factory still existed. That overload is gone — the shop is not optional, and a
+caller that genuinely has none passes `null` and says so.
+
+## 2. Filters were matching on a path the container may not provide
+
+Five filters decided what to do from `request.getServletPath()`. Under Spring
+Boot that returns the whole path and every check works. **Under MockMvc it
+returns the empty string.**
+
+So none of those checks ever matched in the entire test suite. Nothing failed,
+because every fallback was benign under one shop —
+`TenantContextFilter`'s marketplace branch was skipped and the resolver answered
+Shop #1 anyway. The platform-scope path that branch exists to take had **never
+once been executed by a test**. It surfaced the first time a test ran the
+marketplace in multi-shop mode, where the fallback is a 403 on the app's first
+screen.
+
+`RequestPath.of` derives the path the way Spring's own matchers do — request URI
+minus context path — identical in both worlds. The production behaviour did not
+change; what changed is that a test can now see it break.
+
+Two consequences worth naming, both of them tests that had been passing for the
+wrong reason:
+
+- `RateLimitFilterTest` simulated a `/v1` context path in the URI without setting
+  `getContextPath()` — a combination no container produces. Fixed to be faithful.
+- The rate limiter then started working in MockMvc tests for the first time, and
+  immediately 429'd three fixtures that register several accounts from the same
+  mock address. Real customers arrive from different addresses; the bucket is
+  widened in those fixtures rather than the filter weakened.
+
+## 3. The territory admin API always answered 500
+
+`DeliverySubzone.neighbours` is lazy and was serialisable. With
+`open-in-view=false` the session closes at commit and Jackson then throws — so
+every route returning a *loaded* subzone answered 500 **after** doing exactly
+what was asked. Listing territories, pinning a rider, setting a backup list.
+
+It had been noticed from the outside and worked around rather than fixed: the
+Flutter admin screen carries a "Couldn't load territories" state and a test
+whose fixture is literally named `Exception('lazy neighbours')`. Under one shop
+the seeded map made it survivable. A second merchant has no seeded map, so it is
+the first thing that stops them.
+
+The collection is no longer serialised — nothing reads it, and it is a
+self-referential graph that would recurse — and the one route whose answer *is*
+about neighbours returns their ids, read inside the transaction.
+
+## 4. Nothing told a shopkeeper what was missing
+
+When a step was not done, the only thing anyone was told was
+
+> This shop is not currently taking orders.
+
+which is the right sentence for a **customer** — the platform's reasons are
+between the platform and the merchant — and useless to the person who can fix
+it. The real answer on the day was that the merchant record was `APPROVED` and
+not `ACTIVE`: two switches, both real, and no screen anywhere showed the second.
+
+`GET /api/shop/readiness` is the shopkeeper's half of that message. Same facts,
+told to the person who can act on them, never to a customer. It **reports; it
+does not enforce** — `ShopTradingGate` still decides, because a checklist that
+were also the gate would drift into being the rule.
+
+It distinguishes blocking from merely worse, and that honesty is the point: an
+order still goes out with no territory and no rider of its own, just to whoever
+is least loaded. A checklist that called both "blocked" would train people to
+ignore it.
+
+## What the journey confirmed was already right
+
+Several stops turned out to be the design working, and they are worth recording
+because each looked like a bug first:
+
+- a merchant is an **application**, and goes to review before approval;
+- `APPROVED` ≠ `ACTIVE` — papers in order is not the same as trading;
+- a **COD order is confirmed the moment it is placed** (there is no payment to
+  wait for), while an online order waits for the gateway;
+- `/api/cart-items` is the admin route and a customer cannot reach it —
+  `/api/carts/add` is theirs;
+- checkout requires an `Idempotency-Key`, per attempt.
+
+## Commission: still nothing (W2)
+
+No commission field, no settlement arithmetic, no merchant deduction anywhere in
+this slice. The onboarding path deliberately has no fee step in it.
+
+## Still not protected
+
+| Gap | Why | Closes in |
+|---|---|---|
+| **No commission arithmetic anywhere** | W2 open. Not implemented, deliberately | Needs W2 |
+| **Onboarding needs a platform admin twice** | Registering the merchant and switching it on are both platform acts. Correct — a shop cannot approve itself — but there is no application form a merchant fills in themselves | Later |
+| **A dead-lettered outbox event needs a human** | It is audited and alerted, and now it can no longer be caused by a missing scope. Nothing replays one automatically | Later |
+| **`readiness` is not shown anywhere** | The endpoint exists and is tested; no Dart screen reads it | Frontend slice |
+| **Stock is set through `/api/inventory`, not the shop surface** | It works and is shop-scoped, but a new merchant's first stock entry goes through an admin-shaped API rather than an onboarding one | Later |
+| **Flutter unchanged** | Slices 7–10 are backend-only and CI-verified | Frontend slice |

@@ -1096,8 +1096,14 @@ public class OrderService {
         // exists but its invoice work was never recorded. Contrast the
         // executor below, which is in-memory and does not survive the
         // redeploys this service gets on every push.
+        // THE SHOP GOES ON THE EVENT. The worker that drains this runs on a
+        // background thread with no scope of its own; without the shop written
+        // down here, generating the invoice has nothing to stamp it with and
+        // the whole event dead-letters - no invoice, no rider, for every order
+        // in the marketplace. See V53.
         outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
-                OutboxWorker.AGGREGATE_ORDER, order.getId(), OutboxWorker.EVENT_ORDER_PLACED));
+                OutboxWorker.AGGREGATE_ORDER, order.getId(), OutboxWorker.EVENT_ORDER_PLACED,
+                order.getShopId()));
 
         // Payment row created HERE, inside the order transaction, instead of
         // leaving the client to make a second HTTP request for it.
@@ -1663,7 +1669,8 @@ public class OrderService {
         // The row is written inside THIS transaction, so it commits with the
         // cancellation or not at all.
         outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
-                OutboxWorker.AGGREGATE_ORDER, savedOrder.getId(), OutboxWorker.EVENT_ORDER_CANCELLED));
+                OutboxWorker.AGGREGATE_ORDER, savedOrder.getId(),
+                OutboxWorker.EVENT_ORDER_CANCELLED, savedOrder.getShopId()));
 
         // THE MONEY, on the same terms as the invoice above and for a
         // stronger reason: it is the customer's. The row commits with the
@@ -1674,7 +1681,7 @@ public class OrderService {
         if (refundNeedsSending) {
             outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
                     OutboxWorker.AGGREGATE_ORDER, savedOrder.getId(),
-                    OutboxWorker.EVENT_REFUND_REQUESTED));
+                    OutboxWorker.EVENT_REFUND_REQUESTED, savedOrder.getShopId()));
         }
 
         // The push notification is genuinely best-effort and involves a

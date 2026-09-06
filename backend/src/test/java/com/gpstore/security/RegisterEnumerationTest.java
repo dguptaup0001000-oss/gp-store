@@ -17,6 +17,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Public registration must not tell an attacker which identifier is taken.
  */
 @SpringBootTest(properties = {
+        // THE RATE LIMITER STARTED WORKING IN TESTS, and this fixture is the
+        // first thing it caught. Every MockMvc request comes from the same
+        // mock address, so a class that registers several accounts looks
+        // exactly like one machine hammering /api/auth/register - which is
+        // what the auth bucket exists to stop. Real customers arrive from
+        // different addresses; this is an artefact of the fixture, not the
+        // behaviour under test, so the bucket is widened rather than the
+        // filter weakened.
+        //
+        // Why it only started now: RateLimitFilter classified on
+        // getServletPath(), which MockMvc leaves empty, so every request in
+        // the suite fell into the default bucket. See RequestPath.
+        "rate-limit.auth-per-minute=10000",
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",

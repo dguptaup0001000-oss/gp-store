@@ -51,11 +51,26 @@ class TenancyColumnsAreInPlaceTest {
      * products/product_variants/categories are the central catalogue.
      * customers/addresses/wishlist are the customer, who belongs to the
      * platform and orders from any shop with one account.
+     *
+     * OUTBOX_EVENTS USED TO BE ON THIS LIST, and taking it off was a decision
+     * rather than an oversight, so it is recorded here.
+     *
+     * It was grouped with idempotency_records, refresh_tokens and
+     * otp_verifications as plumbing that belongs to nobody. Three of those
+     * four still do: none of them ever writes a shop-owned row. The outbox is
+     * different in kind - it is a record of WORK OWED, and the work generates
+     * an invoice and assigns a rider, both of which are shop-owned. A worker
+     * draining it with no scope has nothing to stamp them with, which under
+     * MULTI_SHOP_PRODUCTION meant every order in the marketplace got neither.
+     *
+     * The column is still not a boundary: one worker serves every shop and the
+     * row is deliberately unfiltered. It names the scope to ENTER. See V53 and
+     * ShopScopeIsNotOptionalTest.SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY.
      */
     private static final List<String> MUST_NOT_HAVE_SHOP = List.of(
             "products", "product_variants", "categories",
             "customers", "addresses", "wishlist",
-            "outbox_events", "idempotency_records", "refresh_tokens", "otp_verifications");
+            "idempotency_records", "refresh_tokens", "otp_verifications");
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ShopRepository shops;

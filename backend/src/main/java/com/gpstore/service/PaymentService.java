@@ -284,7 +284,8 @@ public class PaymentService {
             // cancellation or not at all - a crash here cannot leave a
             // cancelled order with a live invoice.
             outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
-                    OutboxWorker.AGGREGATE_ORDER, orderId, OutboxWorker.EVENT_ORDER_CANCELLED));
+                    OutboxWorker.AGGREGATE_ORDER, orderId, OutboxWorker.EVENT_ORDER_CANCELLED,
+                    order.getShopId()));
 
             // Initialised deliberately, while the session is still open. The
             // notification below runs after commit, by which point this
