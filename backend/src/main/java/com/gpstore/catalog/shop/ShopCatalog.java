@@ -37,8 +37,11 @@ public class ShopCatalog {
 
     private final ShopProductVariantRepository listings;
     private final PlatformProperties platform;
+    private final ShopShelfCache shelfCache;
 
-    public ShopCatalog(ShopProductVariantRepository listings, PlatformProperties platform) {
+    public ShopCatalog(ShopProductVariantRepository listings, PlatformProperties platform,
+                       ShopShelfCache shelfCache) {
+        this.shelfCache = shelfCache;
         this.listings = listings;
         this.platform = platform;
     }
@@ -216,7 +219,9 @@ public class ShopCatalog {
         listing.setAvailable(variant.getAvailable() == null ? Boolean.TRUE : variant.getAvailable());
         listing.setActive(variant.getActive() == null ? Boolean.TRUE : variant.getActive());
         listing.setDisplayOrder(variant.getDisplayOrder());
-        return listings.save(listing);
+        ShopProductVariant saved = listings.save(listing);
+        shelfCache.changed();
+        return saved;
     }
 
     /**
@@ -232,6 +237,7 @@ public class ShopCatalog {
             listing.setActive(Boolean.FALSE);
             listing.setAvailable(Boolean.FALSE);
             listings.save(listing);
+            shelfCache.changed();
         });
     }
 }

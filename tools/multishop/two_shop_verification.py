@@ -14,6 +14,7 @@ be shown to work when there is only one shop for it to narrow to. This builds
 the second shop and then tries, on purpose, to reach across.
 """
 import json
+import os
 import datetime
 import sys
 import time
@@ -28,6 +29,10 @@ STAMP = str(int(time.time()))
 # testing, and two shops that both serve the address is what makes a
 # multi-shop BASKET possible at all.
 LAT, LNG = 27.162310, 83.940468
+
+# Where the Flutter check picks up what this run built. Written last, so its
+# presence also means the checks above finished.
+FIXTURE_PATH = os.environ.get("TWO_SHOP_FIXTURE", "/tmp/two-shop/fixture.json")
 
 passed, failed = [], []
 
@@ -626,7 +631,53 @@ print(f"PASSED {len(passed)}    FAILED {len(failed)}")
 for name in failed:
     print("  FAILED: " + name)
 print("=" * 78)
-print(json.dumps({"shopA": shop_a, "shopB": shop_b, "merchantA": merchant_a,
-                  "merchantB": merchant_b, "group": group_id,
-                  "orders": order_in, "riders": {k: v["id"] for k, v in riders.items()}}))
+summary = {"shopA": shop_a, "shopB": shop_b, "merchantA": merchant_a,
+           "merchantB": merchant_b, "group": group_id,
+           "orders": order_in, "riders": {k: v["id"] for k, v in riders.items()}}
+print(json.dumps(summary))
+
+# ------------------------------------------------------- for the Flutter run
+#
+# WHAT THIS FILE IS FOR. The real app has to be driven against this same
+# marketplace - two shops that exist, with shelves that differ - and it cannot
+# be driven against ids somebody typed into a Dart file, because this database
+# is rebuilt from empty on every run. So the fixture writes down what it built
+# and the Flutter check reads it.
+#
+# It is NOT a mock or a seed: every id in here was created a moment ago
+# through the same public API a real onboarding uses, and the app then talks
+# to the same server.
+fixture = {
+    "baseUrl": BASE,
+    "password": PASSWORD,
+    "lat": LAT, "lng": LNG,
+    "shopA": shop_a, "shopB": shop_b,
+    "ownerA": owner_a_email, "ownerB": owner_b_email,
+    "platform": platform_email,
+    "riderA": riders[shop_a]["email"], "riderB": riders[shop_b]["email"],
+    "categoryId": category_id,
+    "productsA": {label: products[label] for label in listings[shop_a]},
+    "productsB": {label: products[label] for label in listings[shop_b]},
+    "variantsA": {label: variants[label] for label in listings[shop_a]},
+    "variantsB": {label: variants[label] for label in listings[shop_b]},
+    "brandA": brands["A-only-rice"], "brandB": brands["B-only-oil"],
+    "stamp": STAMP,
+
+    # NAMED SEPARATELY because checks 4/5 above left A-only-rice on BOTH
+    # shelves on purpose - two shops listing the same catalogue item at
+    # different prices is what makes "independent prices" a real claim rather
+    # than a trivial one. So an "only A sells this" assertion has to use the
+    # item that really is only A's.
+    "exclusiveAProduct": products["A-only-dal"], "exclusiveAVariant": variants["A-only-dal"],
+    "exclusiveBProduct": products["B-only-oil"], "exclusiveBVariant": variants["B-only-oil"],
+    "sharedProduct": products["A-only-rice"], "sharedVariant": variants["A-only-rice"],
+
+    # The order each shop already packed, so the rider check can say which
+    # round a delivery belongs to by name rather than by counting rows.
+    "orderA": order_in[shop_a], "orderB": order_in[shop_b],
+}
+with open(FIXTURE_PATH, "w") as handle:
+    json.dump(fixture, handle, indent=2)
+print(f"fixture written to {FIXTURE_PATH}")
+
 sys.exit(1 if failed else 0)

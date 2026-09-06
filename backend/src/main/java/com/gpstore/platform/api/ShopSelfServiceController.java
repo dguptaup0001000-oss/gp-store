@@ -44,6 +44,7 @@ public class ShopSelfServiceController {
     private final com.gpstore.service.AuditLogService auditLog;
     private final com.gpstore.money.ShopEarnings earnings;
     private final ShopReadiness readiness;
+    private final com.gpstore.catalog.shop.ShopShelfCache shelfCache;
 
     public ShopSelfServiceController(ShopRepository shops, ShopLifecycleService shopLifecycle,
                                      ShopProductVariantRepository listings,
@@ -52,7 +53,9 @@ public class ShopSelfServiceController {
                                      com.gpstore.repository.CustomerRepository customers,
                                      com.gpstore.service.AuditLogService auditLog,
                                      com.gpstore.money.ShopEarnings earnings,
-                                     ShopReadiness readiness) {
+                                     ShopReadiness readiness,
+                                     com.gpstore.catalog.shop.ShopShelfCache shelfCache) {
+        this.shelfCache = shelfCache;
         this.earnings = earnings;
         this.readiness = readiness;
         this.membership = membership;
@@ -177,7 +180,12 @@ public class ShopSelfServiceController {
         listing.setAvailable(update.available() == null ? Boolean.TRUE : update.available());
         listing.setActive(update.active() == null ? Boolean.TRUE : update.active());
         listing.setDisplayOrder(update.displayOrder());
-        return ListingView.of(listings.save(listing));
+        ListingView saved = ListingView.of(listings.save(listing));
+        // The customer app was showing the old price until the cache TTL
+        // drained - see ShopShelfCache. A price screen whose changes do not
+        // reach the storefront is decoration.
+        shelfCache.changed();
+        return saved;
     }
 
     @DeleteMapping("/listings/{productVariantId}")
@@ -187,6 +195,7 @@ public class ShopSelfServiceController {
         listing.setAvailable(Boolean.FALSE);
         listing.setActive(Boolean.FALSE);
         listings.save(listing);
+        shelfCache.changed();
     }
 
     /**
