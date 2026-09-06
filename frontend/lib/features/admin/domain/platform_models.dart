@@ -28,6 +28,10 @@ class MerchantView with _$MerchantView {
     bool? active,
   }) = _MerchantView;
 
+  // Required by freezed for the getter below: a class that adds anything of
+  // its own needs a private constructor for the generated code to extend.
+  const MerchantView._();
+
   factory MerchantView.fromJson(Map<String, dynamic> json) => _$MerchantViewFromJson(json);
 
   bool get isTrading => status == 'ACTIVE';

@@ -98,11 +98,26 @@ public class DeliveryController {
                 id, status, currentUser.get().getWorkerId(), isAdmin);
     }
 
-    // A delivery partner's own active assignments - resolved from their
-    // logged-in account, never a client-supplied partner id.
+    /**
+     * A delivery partner's own active assignments - resolved from their
+     * logged-in account, never a client-supplied partner id.
+     *
+     * THE ROSTER ID, NOT THE CUSTOMER ID. This read customerId(), and the two
+     * are different numbers from different tables: a worker session carries a
+     * delivery_partners id and no customer id at all, so the only caller this
+     * endpoint exists for got "Sign in with a worker login to use the worker
+     * app." every time. Meanwhile a staff account with DELIVERY_VIEW - which
+     * SecurityConfig also admits here - passed its CUSTOMER id into a lookup
+     * that treats it as a roster primary key, and was shown whichever rider
+     * happened to hold that number as "my assignments".
+     *
+     * updateDeliveryStatus above already resolved this correctly; the two
+     * simply disagreed. Found by signing a real worker in against a running
+     * backend from the worker app's own HTTP client.
+     */
     @GetMapping("/my-assignments")
     public List<com.gpstore.dto.response.MyDeliveryResponse> getMyAssignments() {
-        return deliveryService.getMyAssignments(currentUser.customerId());
+        return deliveryService.getMyAssignments(currentUser.get().getWorkerId());
     }
 
     // The manual-review list for your delivery guarantee - every delivery

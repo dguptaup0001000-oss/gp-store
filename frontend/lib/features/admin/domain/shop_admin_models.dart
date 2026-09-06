@@ -64,6 +64,9 @@ class ShopReadiness with _$ShopReadiness {
     @Default([]) List<ReadinessStep> steps,
   }) = _ShopReadiness;
 
+  // Required by freezed for the two getters below.
+  const ShopReadiness._();
+
   factory ShopReadiness.fromJson(Map<String, dynamic> json) => _$ShopReadinessFromJson(json);
 
   List<ReadinessStep> get outstandingBlockers =>

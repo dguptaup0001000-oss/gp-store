@@ -71,6 +71,9 @@ class OrderGroupCancelResult with _$OrderGroupCancelResult {
     @Default([]) List<OrderGroupCancelOutcome> outcomes,
   }) = _OrderGroupCancelResult;
 
+  // Required by freezed for the three getters below.
+  const OrderGroupCancelResult._();
+
   factory OrderGroupCancelResult.fromJson(Map<String, dynamic> json) =>
       _$OrderGroupCancelResultFromJson(json);
 
