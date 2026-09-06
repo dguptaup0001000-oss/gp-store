@@ -98,7 +98,10 @@ class OrderOwnershipTest {
                 // cancellation and ownership, never a checkout.
                 org.mockito.Mockito.mock(com.gpstore.ordergroup.OrderGroupRepository.class),
                 org.mockito.Mockito.mock(com.gpstore.platform.ShopRepository.class),
-                org.mockito.Mockito.mock(com.gpstore.platform.ShopScopeSwitch.class));
+                org.mockito.Mockito.mock(com.gpstore.platform.ShopScopeSwitch.class),
+                // Nor the customer-owned widening: that is the replay path,
+                // and nothing here retries a checkout.
+                org.mockito.Mockito.mock(com.gpstore.platform.CustomerOwnedRead.class));
     }
 
     private Order orderOwnedBy(Long ownerId) {

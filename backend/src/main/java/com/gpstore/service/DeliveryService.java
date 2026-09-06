@@ -219,7 +219,23 @@ public class DeliveryService {
             Long orderId, Long deliveryPartnerId,
             TerritoryDispatchService.DispatchDecision decision) {
 
-        Order order = orderRepository.findById(orderId)
+        // LOCKED, so the question below has a true answer by the time the
+        // insert runs.
+        //
+        // Two things assign riders and they do not know about each other: the
+        // outbox worker does it automatically moments after checkout commits,
+        // and a shopkeeper does it by hand from the admin screen. Both used to
+        // read "does this order already have a delivery?" without a lock, so
+        // both could read "no" and both insert. The database refused the
+        // second one - deliveries.order_id is unique because the mapping is
+        // one-to-one - which meant the DATA was never wrong, but the person
+        // who lost got a generic data-integrity failure instead of the
+        // sentence below, and went looking for a bug that was not there.
+        //
+        // The order row is the lock every path that touches this order already
+        // takes first (ORDER -> PAYMENT -> INVENTORY, ORDER -> DELIVERY in the
+        // pack scan), so taking it here adds no new ordering to reason about.
+        Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
         if (deliveryRepository.findByOrderId(orderId).isPresent()) {
@@ -424,6 +440,35 @@ public class DeliveryService {
      */
     @Transactional
     public com.gpstore.dto.response.DeliveryResponse updateDeliveryStatus(Long deliveryId, String status, Long callerWorkerId, boolean isAdmin) {
+
+        // THE ORDER ROW IS TAKEN BEFORE ANYTHING IS READ. Not for the order's
+        // sake - for the delivery's.
+        //
+        // This method is a read-check-write over the delivery: read the
+        // status, ask the transition table whether the move is legal, write
+        // the new status and, for DELIVERED, stamp deliveredAt, move the order
+        // and settle the cash. With no lock anywhere in it, two people doing
+        // that at once both read OUT_FOR_DELIVERY, both are told their move is
+        // legal, and both run their half of the consequences. Proved by
+        // DeliveryStateUnderConcurrencyTest: two riders both pressing
+        // Delivered settled the same COD payment twice and recorded the same
+        // delivery as completed twice, and DELIVERED racing CANCELLED could
+        // leave a cancelled delivery beside a delivered order and cash marked
+        // collected - money in the books that is not in the till.
+        //
+        // The lock is on the ORDER, not on the delivery, and deliberately so.
+        // Every other path that touches any part of this order - cancellation,
+        // the status dropdown, the pack scan, COD completion, the expiry sweep
+        // - already takes that row first, so this joins the queue they are
+        // all standing in rather than starting a second one that could
+        // deadlock against it. A delivery belongs to exactly one order, so
+        // that row is a complete gate on everything below.
+        //
+        // Read through a scalar projection so the Delivery is NOT in the
+        // session yet: see DeliveryRepository.findOrderIdById for why an
+        // unlocked read taken before a lock outlives it.
+        deliveryRepository.findOrderIdById(deliveryId)
+                .ifPresent(orderRepository::findByIdForUpdate);
 
         Delivery delivery = deliveryRepository.findById(deliveryId)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery not found"));

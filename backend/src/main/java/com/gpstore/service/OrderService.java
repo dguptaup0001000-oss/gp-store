@@ -65,6 +65,7 @@ public class OrderService {
     private final com.gpstore.ordergroup.OrderGroupRepository orderGroupRepository;
     private final com.gpstore.platform.ShopRepository shopRepository;
     private final com.gpstore.platform.ShopScopeSwitch shopScopeSwitch;
+    private final com.gpstore.platform.CustomerOwnedRead customerOwnedRead;
     private final com.gpstore.repository.DeliveryRepository deliveryRepository;
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
@@ -114,7 +115,8 @@ public class OrderService {
             com.gpstore.platform.ShopTradingGate shopTradingGate,
             com.gpstore.ordergroup.OrderGroupRepository orderGroupRepository,
             com.gpstore.platform.ShopRepository shopRepository,
-            com.gpstore.platform.ShopScopeSwitch shopScopeSwitch) {
+            com.gpstore.platform.ShopScopeSwitch shopScopeSwitch,
+            com.gpstore.platform.CustomerOwnedRead customerOwnedRead) {
 
         this.repository = repository;
         this.deliveryScheduleService = deliveryScheduleService;
@@ -145,6 +147,7 @@ public class OrderService {
         this.orderGroupRepository = orderGroupRepository;
         this.shopRepository = shopRepository;
         this.shopScopeSwitch = shopScopeSwitch;
+        this.customerOwnedRead = customerOwnedRead;
     }
 
 
@@ -375,6 +378,9 @@ public class OrderService {
     public PlaceOrderResponse placeOrder(PlaceOrderRequest request, Long customerId, String idempotencyKey) {
         try {
             return transactionTemplate.execute(status -> placeOrderInTransaction(request, customerId, idempotencyKey));
+        } catch (IdempotentReplayException replay) {
+            // An ordinary retry of a checkout that already completed.
+            return replayAcrossShops(customerId, replay.orderId());
         } catch (IdempotencyRaceException raced) {
             // The insert TX is already rolled back. Reading the winner here
             // is a new transaction, so a completed checkout can replay
@@ -472,8 +478,21 @@ public class OrderService {
 
                 if (record.getOrderId() != null) {
                     // Genuine replay: same checkout attempt, already completed.
-                    // Return the original result rather than processing again.
-                    return buildReplayResponse(record.getOrderId());
+                    //
+                    // ANSWERED OUTSIDE THIS TRANSACTION, not here. A replay
+                    // describes a checkout that may span several shops, and a
+                    // Hibernate filter is fixed when the session opens - this
+                    // session's is this request's ONE shop. Building the
+                    // answer here therefore returned the caller's own shop's
+                    // order and silently dropped every other shop's, which is
+                    // half a purchase reported as the whole of it.
+                    //
+                    // So the request is thrown out of the checkout
+                    // transaction and re-read across the customer's shops.
+                    // Nothing has been written at this point - the replay path
+                    // reads a cart and a fingerprint and nothing else - so
+                    // there is nothing for the rollback to lose.
+                    throw new IdempotentReplayException(record.getOrderId());
                 }
                 // A record exists with no order yet - a duplicate is either
                 // still being processed right now, or a prior attempt crashed
@@ -1201,20 +1220,65 @@ public class OrderService {
     }
 
     private PlaceOrderResponse replayAfterIdempotencyRace(Long customerId, String idempotencyKey) {
-        return transactionTemplate.execute(status -> {
+        return customerOwnedRead.acrossShops(() -> transactionTemplate.execute(status -> {
             Optional<com.gpstore.entity.IdempotencyRecord> winner =
                     idempotencyRecordRepository.findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey);
             if (winner.isPresent() && winner.get().getOrderId() != null) {
-                return buildReplayResponse(winner.get().getOrderId());
+                return buildReplayResponse(customerId, winner.get().getOrderId());
             }
             throw new ConflictException(
                     "This order is already being processed. Please wait a moment and check your order history before trying again.");
-        });
+        }));
+    }
+
+    /**
+     * Re-reads a finished checkout, across every shop it touched.
+     *
+     * WHY THE SCOPE IS WIDENED, AND WHY THAT IS SAFE. A checkout is one
+     * customer's purchase from one to several merchants (§16). Read inside one
+     * shop's scope it comes back as that shop's order alone - so the customer
+     * whose retry replayed was shown one order for a basket they had paid two
+     * kiranas for, with no group id to open the rest with. CustomerOwnedRead
+     * is the mechanism this codebase already has for exactly that shape: it
+     * relaxes the MERCHANT boundary for a caller who is a party to every row
+     * on the other side of it, and relaxes no ownership check at all.
+     *
+     * IT WRAPS THE TRANSACTION RATHER THAN SITTING INSIDE IT, which is the
+     * whole requirement - a Hibernate filter is enabled when the session
+     * opens, so widening after the fact does nothing. placeOrder is not
+     * itself transactional (it drives a TransactionTemplate), which is what
+     * makes wrapping possible here.
+     *
+     * The ownership check inside buildReplayResponse is what keeps this
+     * honest: the widening crosses shops, never customers.
+     */
+    private PlaceOrderResponse replayAcrossShops(Long customerId, Long orderId) {
+        return customerOwnedRead.acrossShops(
+                () -> transactionTemplate.execute(
+                        status -> buildReplayResponse(customerId, orderId)));
     }
 
     private static final class IdempotencyRaceException extends RuntimeException {
         IdempotencyRaceException(Throwable cause) {
             super(cause);
+        }
+    }
+
+    /**
+     * Carries a completed checkout's order id out of the checkout transaction
+     * so the answer can be built across shops. Not an error - it never
+     * reaches a client.
+     */
+    private static final class IdempotentReplayException extends RuntimeException {
+        private final Long orderId;
+
+        IdempotentReplayException(Long orderId) {
+            super(null, null, false, false);
+            this.orderId = orderId;
+        }
+
+        Long orderId() {
+            return orderId;
         }
     }
 
@@ -1817,10 +1881,21 @@ public class OrderService {
      * or the cart again - none of that should run a second time for the same
      * checkout attempt.
      */
-    private PlaceOrderResponse buildReplayResponse(Long orderId) {
+    private PlaceOrderResponse buildReplayResponse(Long customerId, Long orderId) {
         Order order = repository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Order not found for a completed idempotency record - data inconsistency, contact support"));
+
+        // THE ONE CHECK THE WIDENED SCOPE DOES NOT MAKE FOR US.
+        //
+        // Reading across shops turns off the merchant boundary, so the
+        // customer boundary has to be stated here rather than inherited. The
+        // id already came from an idempotency record looked up BY this
+        // customer, so this can only fire on a corrupted record - which is
+        // precisely when a silent cross-customer read would be worst.
+        if (order.getCustomer() == null || !order.getCustomer().getId().equals(customerId)) {
+            throw new ResourceNotFoundException("Order not found");
+        }
 
         PlaceOrderResponse response = new PlaceOrderResponse();
         response.setSuccess(true);
@@ -1858,6 +1933,48 @@ public class OrderService {
             // of the status so the client still gets a non-null value and
             // stays on the single-request path.
             response.setPaymentStatus(nameOf(order.getPaymentStatus()));
+        }
+
+        // A REPLAY MUST DESCRIBE THE SAME CHECKOUT, NOT ONE ORDER OF IT.
+        //
+        // This used to stop at the payment fields, and under one shop that was
+        // complete - a checkout was an order. Since Slice 6 it is a GROUP with
+        // one order per shop, and a customer whose retry replayed was handed
+        // the first shop's order with no group id and no sign that a second
+        // shop's order existed at all. Their app then showed one order for a
+        // two-shop basket they had paid for, and the group screen could not be
+        // opened because there was no id to open it with.
+        //
+        // Found by racing two identical checkouts rather than repeating one:
+        // both callers were answered, and only the winner's answer was whole.
+        // The sequential replay had exactly the same hole - the race is what
+        // made anybody look.
+        //
+        // Read back from the persisted orders, like everything else on this
+        // path. A replay reports what IS, not what was computed the first
+        // time.
+        if (order.getOrderGroupId() != null) {
+            orderGroupRepository.findById(order.getOrderGroupId()).ifPresent(group -> {
+                response.setOrderGroupId(group.getId());
+                response.setOrderGroupNumber(group.getGroupNumber());
+            });
+            List<Order> siblings =
+                    repository.findByOrderGroupIdOrderByShopIdAsc(order.getOrderGroupId());
+            response.setShopOrders(siblings.stream()
+                    .map(sibling -> new PlaceOrderResponse.ShopOrderSummary(
+                            sibling.getId(),
+                            sibling.getOrderNumber(),
+                            sibling.getShopId(),
+                            sibling.getTotalAmount(),
+                            sibling.getDeliveryFee(),
+                            nameOf(paymentRepository.findByOrderId(sibling.getId())
+                                    .map(Payment::getPaymentStatus)
+                                    .orElse(sibling.getPaymentStatus())),
+                            paymentService.upiLinkFor(sibling,
+                                    paymentRepository.findByOrderId(sibling.getId())
+                                            .map(Payment::getPaymentMethod)
+                                            .orElse(null))))
+                    .toList());
         }
 
         return response;

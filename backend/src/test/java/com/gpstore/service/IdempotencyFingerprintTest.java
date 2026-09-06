@@ -120,6 +120,21 @@ class IdempotencyFingerprintTest {
                 "A retry must return the ORIGINAL order, not a new one");
         assertEquals(1, ordersFor(fixture.customerId),
                 "Exactly one real order may exist for one idempotency key");
+
+        // AND IT MUST DESCRIBE THE WHOLE CHECKOUT, not one order of it.
+        //
+        // A checkout has been a GROUP since Slice 6 - one order per shop - and
+        // a replay that answered with only orderId left the customer's app
+        // with no group id to open the group screen with, and no sign that a
+        // second shop's order existed. One shop is one entry here, so this
+        // reads the same either way; it is the assertion that stops the group
+        // half of the answer going missing again.
+        assertEquals(first.getOrderGroupId(), replay.getOrderGroupId(),
+                "A retry must name the same checkout, not just one of its orders");
+        assertEquals(first.getOrderGroupNumber(), replay.getOrderGroupNumber(),
+                "The group number a customer quotes to the shop must not change on retry");
+        assertEquals(first.getShopOrders().size(), replay.getShopOrders().size(),
+                "A retry must list every shop's order the first answer listed");
     }
 
     @Test

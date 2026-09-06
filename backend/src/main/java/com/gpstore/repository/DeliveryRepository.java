@@ -14,6 +14,27 @@ public interface DeliveryRepository
 
     Optional<Delivery> findByOrderId(Long orderId);
 
+    /**
+     * WHICH ORDER THIS DELIVERY BELONGS TO, WITHOUT LOADING THE DELIVERY.
+     *
+     * The one thing a status change needs before it may take any lock. The
+     * project-wide lock ordering starts at the order row (ORDER -> PAYMENT ->
+     * INVENTORY, and ORDER -> DELIVERY in the pack scan), so a change that
+     * arrives holding only a delivery id has to find its order first - and it
+     * must do that WITHOUT putting the Delivery, or its Order, or its Payment,
+     * into the persistence context.
+     *
+     * That last part is the whole reason this is a scalar projection rather
+     * than {@code findById(id).getOrder()}. Hibernate will not overwrite an
+     * entity it has already loaded in this session when a later query - even a
+     * locking one - returns the same row. So an unlocked read taken before the
+     * lock is not a harmless head start: it is the value the locked re-read
+     * will keep, and the lock then guards a decision made on stale data.
+     * Reading one column returns a Long and leaves the session empty.
+     */
+    @Query("select d.order.id from Delivery d where d.id = :id")
+    Optional<Long> findOrderIdById(@Param("id") Long id);
+
     long countByBatchId(Long batchId);
 
     /**
