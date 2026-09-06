@@ -174,8 +174,10 @@ void main() {
 
       // THE PRODUCT PAGE, reached by id - a deep link, a shared card, or a
       // home screen left open from before the customer switched shops.
-      final mine = await app
-          .read(productDetailProvider(fixture['exclusiveAProduct'] as int).future);
+      final mine = await _watched(
+          app,
+          productDetailProvider(fixture['exclusiveAProduct'] as int),
+          productDetailProvider(fixture['exclusiveAProduct'] as int).future);
       expect(mine.id, fixture['exclusiveAProduct']);
       await expectLater(
         app.read(productDetailProvider(fixture['exclusiveBProduct'] as int).future),
@@ -397,20 +399,60 @@ Future<int> _saveAddress(ProviderContainer app) async {
 Future<void> _openShop(ProviderContainer app, int shopId) async {
   app.read(shopSwitchProvider).select(shopId);
   expect(app.read(shopContextProvider), shopId);
+  // LET THE DISCARD LAND. Choosing a shop throws away the last shop's cached
+  // answers, and Riverpod schedules that rather than doing it inside select().
+  // A screen never notices - it rebuilds when the invalidation arrives - but
+  // a check that reads the very next line can subscribe to the element that
+  // is about to be disposed and get an empty state back. Pumping once is
+  // waiting for the app to finish switching shops, which is what a customer
+  // does too.
+  await Future<void>.delayed(const Duration(milliseconds: 50));
 }
 
 /// Which products this shop's home feed actually puts on the screen.
 Future<Set<int>> _shelfSeenIn(ProviderContainer app, int shopId) async {
   await _openShop(app, shopId);
-  final feed = await app.read(productFeedProvider.future);
-  return feed.products.map((p) => p.id).toSet();
+  final feed = await _watched(app, productFeedProvider, productFeedProvider.future);
+  final ids = feed.products.map((p) => p.id).toSet();
+  // WHAT THE SERVER ACTUALLY SENT, beside what the provider ended up holding.
+  // When those two disagree the difference is the app's, not the backend's,
+  // and a report that only prints one of them cannot say which.
+  final direct = await app
+      .read(apiClientProvider)
+      .dio
+      .get('/api/products/feed', queryParameters: {'page': 0, 'size': 50});
+  final onTheWire = ((direct.data as Map)['content'] as List)
+      .map((p) => (p as Map)['id'])
+      .toList();
+  print('SHOP $shopId: provider $ids, server $onTheWire');
+  return ids;
 }
 
 /// The price this shop's product page shows for one product.
 Future<double?> _priceSeenIn(
     ProviderContainer app, int shopId, int productId) async {
   await _openShop(app, shopId);
-  final product = await app.read(productDetailProvider(productId).future);
+  final product = await _watched(app, productDetailProvider(productId),
+      productDetailProvider(productId).future);
   final ProductVariant? variant = product.primaryVariant;
   return variant?.sellingPrice;
+}
+
+/// Reads an autoDispose provider the way a SCREEN reads it - while watching.
+///
+/// WHY THIS IS NOT CEREMONY. productFeedProvider and productDetailProvider
+/// are autoDispose: a bare `read` opens a subscription and closes it in the
+/// same breath, so Riverpod is free to tear the provider down while its
+/// build is still in flight, and the future then settles on an empty state.
+/// It does not fail every time, which is worse - a green run would have been
+/// luck. A widget holds the subscription for as long as it is on screen, so
+/// the check holds one too, and what it measures is what a customer sees.
+Future<T> _watched<T>(ProviderContainer app, ProviderListenable<Object?> provider,
+    ProviderListenable<Future<T>> future) async {
+  final subscription = app.listen(provider, (_, __) {});
+  try {
+    return await app.read(future);
+  } finally {
+    subscription.close();
+  }
 }

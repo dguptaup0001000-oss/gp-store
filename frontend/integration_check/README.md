@@ -14,6 +14,32 @@ the backend sends. These ask the backend.
   watch** reach the backend: discovery, shop selection, catalogue, cart,
   checkout, order group, merchant earnings, the platform console's writes,
   the rider's round, and the tenant refusals.
+- `two_shop_journey_test.dart` — the same graph against **two real shops**,
+  which is the only way to see isolation at all: a filter that narrows to
+  "the caller's shop" looks perfect when there is one shop to narrow to. It
+  walks registration → address → discover both → open A → A's shelf → add →
+  open B → B's shelf → add → one basket → checkout → two shop orders →
+  history → both merchants' dashboards → both riders' rounds, and finishes by
+  repricing an item in Shop A and checking that Shop B's screens do not move.
+
+## two_shop_journey_test
+
+This one does **not** use the accounts below. It reads a fixture written by
+the verification script, which builds the whole marketplace from an empty
+database on every run - so the ids are never the same twice and must not be
+typed into the Dart file:
+
+```bash
+tools/multishop/run_two_shop_verification.sh     # writes /tmp/two-shop/fixture.json
+                                                 # and leaves the server on :8090
+
+flutter test integration_check/two_shop_journey_test.dart \
+  --dart-define=API_BASE_URL=http://localhost:8090/v1 \
+  --dart-define=TWO_SHOP_FIXTURE=/tmp/two-shop/fixture.json
+```
+
+Nothing needs cleaning up afterwards: the next run drops the database.
+
 
 ## Running them
 
