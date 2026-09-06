@@ -21,6 +21,9 @@ import '../../features/admin/presentation/admin_returns_screen.dart';
 import '../../features/admin/presentation/admin_reviews_screen.dart';
 import '../../features/admin/presentation/admin_territories_screen.dart';
 import '../../features/admin/presentation/admin_voice_settings_screen.dart';
+import '../../features/admin/presentation/my_shop_screen.dart';
+import '../../features/admin/presentation/platform_console_screen.dart';
+import '../../features/admin/presentation/shop_earnings_screen.dart';
 import '../dashboard/admin_dashboard_screen.dart';
 import '../operations/morning_preparation_screen.dart';
 import '../operations/store_operations_screen.dart';
@@ -286,6 +289,18 @@ class AdminNav {
           description: 'Sales, top products, order status',
           builder: _analytics,
         ),
+        // analyticsView, matching what SecurityConfig gates
+        // /api/shop/earnings on. Distinct from Analytics: that screen is
+        // about what sold, this one is about what was TAKEN and in what form
+        // - cash still in a rider's pocket is not the same fact as a sale.
+        AdminDestination(
+          id: 'earnings',
+          requires: AdminPermission.analyticsView,
+          label: 'Earnings',
+          icon: Icons.account_balance_wallet_outlined,
+          description: 'What this shop took, and how it arrived',
+          builder: _earnings,
+        ),
         AdminDestination(
           id: 'audit',
           requires: AdminPermission.auditView,
@@ -299,6 +314,18 @@ class AdminNav {
     AdminNavGroup(
       title: 'System',
       destinations: [
+        // catalogView is the widest permission SecurityConfig lets through
+        // /api/shop/** - so anyone who can be shown this screen can actually
+        // load it. It answers "why is my shop not selling", which is a
+        // question every staff role eventually asks.
+        AdminDestination(
+          id: 'my-shop',
+          requires: AdminPermission.catalogView,
+          label: 'My Shop',
+          icon: Icons.storefront_outlined,
+          description: 'Status, what still needs doing, what needs attention',
+          builder: _myShop,
+        ),
         AdminDestination(
           id: 'announcements',
           label: 'Order Announcements',
@@ -312,6 +339,26 @@ class AdminNav {
           icon: Icons.print_outlined,
           description: 'Connect a printer to auto-print new orders',
           builder: _printer,
+        ),
+      ],
+    ),
+    // THE MARKETPLACE ITSELF, and it is last because almost nobody sees it.
+    //
+    // platformAdmin is the one permission no shop role holds - RolePermissions
+    // builds each shop role by SUBTRACTING it - so this group is invisible to
+    // every merchant, including a shop owner holding everything their own shop
+    // can grant. Hiding it is only tidiness; the server refuses the routes
+    // regardless.
+    AdminNavGroup(
+      title: 'Marketplace',
+      destinations: [
+        AdminDestination(
+          id: 'platform',
+          requires: AdminPermission.platformAdmin,
+          label: 'Merchants & Shops',
+          icon: Icons.hub_outlined,
+          description: 'Approve, suspend, and see the whole market',
+          builder: _platform,
         ),
       ],
     ),
@@ -392,4 +439,7 @@ class AdminNav {
       const AdminVoiceSettingsScreen();
   static Widget _printer(BuildContext context) =>
       const AdminPrinterSettingsScreen();
+  static Widget _earnings(BuildContext context) => const ShopEarningsScreen();
+  static Widget _myShop(BuildContext context) => const MyShopScreen();
+  static Widget _platform(BuildContext context) => const PlatformConsoleScreen();
 }

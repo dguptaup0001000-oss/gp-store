@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gpstore/core/marketplace/marketplace_models.dart';
+import 'package:gpstore/core/marketplace/marketplace_providers.dart';
 import 'package:gpstore/core/store/store_status.dart';
 import 'package:gpstore/core/store/store_status_provider.dart';
 import 'package:gpstore/features/home/presentation/home_screen.dart';
@@ -97,6 +99,13 @@ void main() {
           // there is nothing outstanding when the tree goes away.
           storeStatusProvider
               .overrideWith((ref) => Stream.value(StoreStatus.unknown())),
+          // Same reason as the banner above, for the app-bar title. The shop
+          // switcher asks /api/marketplace/mode, which left real opens a Dio
+          // request the test binding never resolves. Answered here with the
+          // single-shop value, which is also what this test's subject is:
+          // the request budget of the ORDINARY home screen.
+          marketplaceModeProvider
+              .overrideWith((ref) async => MarketplaceMode.singleShop),
         ],
         child: const MaterialApp(home: HomeScreen()),
       ),

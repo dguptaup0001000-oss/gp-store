@@ -10,6 +10,10 @@ class ShopOrderView with _$ShopOrderView {
     required int orderId,
     String? orderNumber,
     int? shopId,
+
+    /// Who this part was bought from, in words. Null when the shop row has
+    /// gone; the screen then falls back to the id rather than inventing one.
+    String? shopName,
     String? shopStatus,
     String? paymentStatus,
     double? totalAmount,

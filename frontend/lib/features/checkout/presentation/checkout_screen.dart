@@ -267,6 +267,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             paymentMethod: _effectivePaymentMethod(),
             upiPaymentLink: upiPaymentLink,
             verifiedPaymentStatus: verifiedPaymentStatus,
+            // Passed straight through, unread by this screen. Under one shop
+            // the group holds one order and the confirmation is unchanged.
+            orderGroupId: orderResult.orderGroupId,
+            shopOrders: orderResult.shopOrders,
           ),
         ),
       );

@@ -38,16 +38,31 @@ public class OrderGroupService {
     private final OrderGroupRepository groups;
     private final OrderRepository orders;
     private final OrderService orderService;
+    private final com.gpstore.platform.ShopRepository shops;
 
     public OrderGroupService(OrderGroupRepository groups, OrderRepository orders,
-                             OrderService orderService) {
+                             OrderService orderService,
+                             com.gpstore.platform.ShopRepository shops) {
         this.groups = groups;
         this.orders = orders;
         this.orderService = orderService;
+        this.shops = shops;
     }
 
     /** One shop's part of a checkout, as the customer sees it. */
-    public record ShopOrderView(Long orderId, String orderNumber, Long shopId, String shopStatus,
+    /**
+     * @param shopName who the customer bought this part from, in words.
+     *
+     *                 A GROUP SCREEN WITHOUT IT IS A LIST OF NUMBERS. The
+     *                 whole reason this view exists is to tell a customer
+     *                 that one press of Place Order became two orders with
+     *                 two kiranas - and "Shop 4" and "Shop 9" does not tell
+     *                 them that. Null when the shop row has since gone, which
+     *                 the screen renders as the id rather than inventing a
+     *                 name.
+     */
+    public record ShopOrderView(Long orderId, String orderNumber, Long shopId, String shopName,
+                                String shopStatus,
                                 String paymentStatus, BigDecimal totalAmount, BigDecimal deliveryFee,
                                 boolean cancellable) {}
 
@@ -156,12 +171,31 @@ public class OrderGroupService {
     }
 
     private GroupView viewOf(OrderGroup group) {
+        List<Order> shopOrdersInGroup = ordersIn(group);
+
+        // ONE QUERY FOR EVERY NAME, not one per order. A checkout has at most
+        // a handful of shops, but "at most a handful" is the kind of thing
+        // that stops being true quietly.
+        java.util.Map<Long, String> namesById = new java.util.HashMap<>();
+        java.util.Set<Long> shopIds = new java.util.LinkedHashSet<>();
+        for (Order order : shopOrdersInGroup) {
+            if (order.getShopId() != null) {
+                shopIds.add(order.getShopId());
+            }
+        }
+        if (!shopIds.isEmpty()) {
+            for (com.gpstore.platform.Shop shop : shops.findAllById(shopIds)) {
+                namesById.put(shop.getId(), shop.getDisplayName());
+            }
+        }
+
         List<ShopOrderView> shopOrders = new ArrayList<>();
-        for (Order order : ordersIn(group)) {
+        for (Order order : shopOrdersInGroup) {
             shopOrders.add(new ShopOrderView(
                     order.getId(),
                     order.getOrderNumber(),
                     order.getShopId(),
+                    namesById.get(order.getShopId()),
                     order.getOrderStatus() == null ? null : order.getOrderStatus().name(),
                     order.getPaymentStatus() == null ? null : order.getPaymentStatus().name(),
                     order.getTotalAmount(),

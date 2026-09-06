@@ -63,6 +63,20 @@ void main() {
       // gate on /api/admin/catalog/**: one spreadsheet can rewrite every
       // price in the shop, so it is not opened to the catalogue roles.
       'Import Catalogue',
+      // What this shop TOOK, and in what form - distinct from Analytics,
+      // which is about what sold. Cash still in a rider's pocket is not the
+      // same fact as a sale. Behind analyticsView, matching SecurityConfig's
+      // gate on /api/shop/earnings.
+      'Earnings',
+      // Why this shop is or is not selling: its status, the steps that still
+      // block orders, and what is waiting to be packed. Behind catalogView,
+      // the widest permission /api/shop/** admits.
+      'My Shop',
+      // RUNNING THE MARKETPLACE, not running a shop. platformAdmin only,
+      // which no shop role holds - see admin_permissions_test. It is in this
+      // console rather than a fifth app because the platform operator and the
+      // shopkeeper use the same screens for orders, customers and audit.
+      'Merchants & Shops',
     };
 
     final labels = AdminNav.all.map((d) => d.label).toSet();

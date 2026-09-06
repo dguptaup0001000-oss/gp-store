@@ -26,7 +26,6 @@ import 'package:gpstore/features/auth/data/auth_repository.dart';
 import 'package:gpstore/features/admin/data/platform_repository.dart';
 import 'package:gpstore/features/admin/data/shop_self_service_repository.dart';
 import 'package:gpstore/features/cart/data/cart_repository.dart';
-import 'package:gpstore/features/delivery/data/delivery_partner_repository.dart';
 import 'package:gpstore/features/worker/data/worker_repository.dart';
 
 import '../test/support/test_api_client.dart';
@@ -144,7 +143,7 @@ void main() {
 
     test('the platform admin reads the marketplace it runs', () async {
       if (stamp.isEmpty) return;
-      await signIn('live-plat');
+      await signIn('check-plat');
       final platform = PlatformRepository(apiClient: api);
 
       final merchants = await platform.merchants();
@@ -159,7 +158,7 @@ void main() {
 
     test('a shop admin reads their own shop and nothing wider', () async {
       if (stamp.isEmpty) return;
-      await signIn('live-merch');
+      await signIn('check-merch');
       final shop = ShopSelfServiceRepository(apiClient: api);
 
       final readiness = await shop.readiness();
@@ -174,7 +173,7 @@ void main() {
 
     test('a shop admin is refused the platform surface', () async {
       if (stamp.isEmpty) return;
-      await signIn('live-merch');
+      await signIn('check-merch');
       await expectLater(
         PlatformRepository(apiClient: api).merchants(),
         throwsA(isA<Object>()),
@@ -192,7 +191,7 @@ void main() {
       final response = await api.dio.post(
         '/api/worker/auth/login',
         data: {
-          'identifier': 'live-rider-$stamp@gmail.com',
+          'identifier': 'check-rider-$stamp@gmail.com',
           'password': 'LiveCheck!2345',
         },
       );
@@ -214,10 +213,24 @@ void main() {
     test('the rider can read their own round', () async {
       if (stamp.isEmpty) return;
       await signInAsRider();
-      final round =
-          await DeliveryPartnerRepository(apiClient: api).getMyAssignments();
-      print('ROUND: ${round.length} assignment(s)');
-      expect(round, isA<List>());
+
+      // TWO WAYS TO THE SAME ROWS, and the app takes the first.
+      // /api/worker/me carries activeTasks, which the backend builds by
+      // calling the very same getMyAssignments - so WorkerHomeScreen already
+      // has the round without a second request. The bare endpoint is checked
+      // beside it because it is still public API, and because it is the one
+      // that used to answer "Sign in with a worker login" to a signed-in
+      // worker (fixed in Slice 14).
+      final me = await WorkerRepository(apiClient: api).me();
+      print('ROUND via /worker/me: ${me.activeTasks.length} assignment(s)');
+
+      final direct = await api.dio.get('/api/deliveries/my-assignments');
+      print('ROUND via /deliveries/my-assignments: '
+          '${(direct.data as List).length} assignment(s)');
+      expect(direct.statusCode, 200);
+      expect((direct.data as List).length, me.activeTasks.length,
+          reason: 'the worker app and the delivery endpoint must not disagree '
+              'about what this rider has to do');
     });
 
     test('a rider is refused the platform surface', () async {

@@ -138,13 +138,40 @@ void main() {
   });
 
   group('navigation filtering', () {
-    test('an admin sees every destination', () {
+    test('an admin sees every destination that belongs to a shop', () {
       final groups =
           AdminNav.groupsFor(AdminRoles.permissionsFor(AdminRoles.admin));
       final labels = [
         for (final g in groups) ...g.destinations.map((d) => d.label)
       ];
-      expect(labels.toSet(), AdminNav.all.map((d) => d.label).toSet());
+      // EVERYTHING EXCEPT THE MARKETPLACE. platformAdmin is the one
+      // permission no shop role holds - RolePermissions builds each shop role
+      // by SUBTRACTING it - so a shop owner with every permission their own
+      // shop can grant still does not run the market. The exception is named
+      // rather than the set loosened, so adding a second platform-only
+      // destination fails here until somebody decides it belongs.
+      final shopDestinations = AdminNav.all
+          .where((d) => d.requires != AdminPermission.platformAdmin)
+          .map((d) => d.label)
+          .toSet();
+      expect(labels.toSet(), shopDestinations);
+    });
+
+    test('no SHOP role can see the marketplace console, and the platform role can', () {
+      // The server refuses /api/platform/** regardless; this is the other
+      // half - not offering a shopkeeper a door that only ever answers 403,
+      // and not hiding it from the one person whose job it is.
+      for (final role in AdminRoles.all) {
+        final groups = AdminNav.groupsFor(AdminRoles.permissionsFor(role));
+        final labels = [
+          for (final g in groups) ...g.destinations.map((d) => d.label)
+        ];
+        if (role == AdminRoles.platformAdmin) {
+          expect(labels, contains('Merchants & Shops'), reason: role);
+        } else {
+          expect(labels, isNot(contains('Merchants & Shops')), reason: role);
+        }
+      }
     });
 
     test('support sees a short menu and no inventory or coupons', () {
