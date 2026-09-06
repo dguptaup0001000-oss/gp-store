@@ -1269,3 +1269,112 @@ this slice. The onboarding path deliberately has no fee step in it.
 | **`readiness` is not shown anywhere** | The endpoint exists and is tested; no Dart screen reads it | Frontend slice |
 | **Stock is set through `/api/inventory`, not the shop surface** | It works and is shop-scoped, but a new merchant's first stock entry goes through an admin-shaped API rather than an onboarding one | Later |
 | **Flutter unchanged** | Slices 7–10 are backend-only and CI-verified | Frontend slice |
+
+---
+
+# Slice 11 — no background thread touches data without saying whose
+
+Slice 10 ended with a claim: the remaining risk is concentrated in background
+and scheduled paths, not request paths. This slice went and looked.
+
+## The shape of the problem
+
+A tenant scope is a **ThreadLocal**. A scheduled job and a post-commit callback
+both run on a pool thread, so neither inherits one — and an absent scope behaves
+*almost exactly* like the platform scope:
+
+| | no scope | `TenantScope.platform()` |
+|---|---|---|
+| Hibernate filter | disabled | disabled |
+| `@PostLoad` ownership check | skipped | skipped |
+| reads | every shop | every shop |
+| **insert of a shop-owned row** | **throws under multi-shop** | throws under multi-shop |
+
+Identical everywhere that was ever exercised. The one column where it matters is
+the one that took down the whole marketplace's dispatch in Slice 10 — and even
+there both are wrong; what saved the outbox was giving it the *right* shop, not
+merely a scope.
+
+So the real defect is not any single job. It is that **"deliberately spans every
+shop" and "nobody set a scope" were indistinguishable**, and nothing anywhere
+forced the difference to be stated. `TenantScope.platform()` has existed since
+Slice 1 precisely to make it sayable. Eight of nine jobs never said it.
+
+## Twelve jobs, not nine
+
+Two separate text searches for `@Scheduled` found nine. The reflective scan in
+the new guard found **twelve** — three jobs write the annotation fully qualified
+and hide from a grep entirely:
+
+- `PaymentService.reconcileRefundsAwaitingProvider` — the stuck-refund sweep. Money.
+- `CrashReportService.deleteOldReports` — retention (§44).
+- `OtpService.cleanUpExpiredOtps`.
+
+An audit of "every background path" done by grep looks complete and is three
+quarters of the way there. That is the reason the guard is built from the
+annotations themselves rather than from a list somebody typed.
+
+## What was fixed, structurally
+
+**Scheduled work declares the platform scope, once, in the one place every task
+passes through.** A `ThreadPoolTaskSchedulerCustomizer` sets a `TaskDecorator` on
+the scheduler Spring Boot already builds — a customizer rather than our own
+`TaskScheduler` bean, so pool size, thread names and shutdown stay Boot's
+business and there is nothing to keep in step. A new `@Scheduled` method is
+covered without anyone remembering, which matters given that three of the twelve
+already evaded a grep.
+
+Nesting still works and is used: `OutboxWorker.drain` enters each event's own
+shop scope inside the platform one, and the outer scope is restored when the
+inner block ends.
+
+**Post-commit work carries the request's scope, not the platform's.**
+`AfterCommitExecutor` now captures `TenantContext.current()` on the request
+thread — where it is still set — and reinstates it around the work. This is
+deliberately *not* the platform scope: sending an order's notification is part of
+placing that order and belongs to that order's shop. Widening it would let a
+continuation write into a shop the request had no business in, which is the
+opposite of what the boundary is for.
+
+## What was NOT wrong, stated plainly
+
+This slice found **no second outage**. Every one of the twelve jobs was already
+behaving correctly:
+
+- all twelve only **update or delete** rows they have already loaded, or touch
+  tables that belong to no shop — none inserts a shop-owned row, which is the
+  only operation an absent scope actually breaks;
+- the stale-payment sweep restores stock through
+  `findByProductVariantIdAndShopIdForUpdate`, which names the shop **from the
+  order being restored** rather than from the scope — already right, and the one
+  place it would have mattered most;
+- nothing currently queued through `AfterCommitExecutor` writes a shop-owned row
+  either, so that fix closes a trap rather than a live bug.
+
+Recording that honestly matters more than a bigger-sounding finding. The value of
+this slice is that the twelve jobs are now *declared* rather than *coincidentally
+correct*, and that the thirteenth cannot be added without somebody answering the
+question.
+
+## The entry that will one day matter
+
+Every job today is platform-wide, and the decorator's default is right for a
+sweep. The list in `BackgroundWorkIsScopedTest` exists for the job that isn't:
+one that should run **per shop** needs its own scope per iteration, the way
+`OutboxWorker.drain` does, and the platform default would be silently wrong for
+it. That is the case the allowlist is there to force a human to notice.
+
+## Commission: still nothing (W2)
+
+No commission field, no settlement arithmetic, no fee logic in any background
+path.
+
+## Still not protected
+
+| Gap | Why | Closes in |
+|---|---|---|
+| **No commission arithmetic anywhere** | W2 open. Not implemented, deliberately | Needs W2 |
+| **A dead-lettered outbox event still needs a human** | Audited and alerted, and it can no longer be caused by a missing scope. Nothing replays one automatically | Later |
+| **`@Async` is not used, so nothing covers it** | If a `@Async` method is ever added it gets no scope, exactly as scheduled work did. The decorator pattern would extend to it; there is nothing to decorate yet | When one exists |
+| **Manually created threads or executors would bypass this** | Only `AfterCommitExecutor` and the scheduler exist today, and both are covered. A new `ExecutorService` would not be | Guard is per-mechanism, not universal |
+| **Flutter unchanged** | Slices 7–11 are backend-only and CI-verified | Frontend slice |
