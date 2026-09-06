@@ -14,6 +14,7 @@ be shown to work when there is only one shop for it to narrow to. This builds
 the second shop and then tries, on purpose, to reach across.
 """
 import json
+import datetime
 import sys
 import time
 import urllib.error
@@ -138,10 +139,18 @@ status, category = call("POST", "/api/categories", platform,
 category_id = category["id"]
 
 variants = {}
+products = {}
+# A BRAND PER SHELF, because "Shop by Brand" and the brand counts are browse
+# surfaces like any other: a storefront offering a tile for a brand it has
+# never stocked opens on an empty grid, and the number on the tile is a count
+# of the shop next door's stock.
+brands = {"A-only-rice": f"BrandA{STAMP}", "A-only-dal": f"BrandA{STAMP}",
+          "B-only-oil": f"BrandB{STAMP}", "B-only-atta": f"BrandB{STAMP}"}
 for label in ["A-only-rice", "A-only-dal", "B-only-oil", "B-only-atta"]:
     status, product = call("POST", "/api/products", platform, {
-        "name": f"{label} {STAMP}", "brand": "TwoShop", "active": True,
+        "name": f"{label} {STAMP}", "brand": brands[label], "active": True,
         "category": {"id": category_id}})
+    products[label] = product["id"]
     status, variant = call("POST", "/api/product-variants", platform, {
         "product": {"id": product["id"]}, "quantity": 1.0, "unit": "kg",
         "mrp": 100, "sellingPrice": 90, "available": True, "active": True})
@@ -284,6 +293,116 @@ check("2. Shop A's storefront offers Shop A's items and NONE of Shop B's",
       catalogue_a == {"A-only-rice", "A-only-dal"}, f"offers {sorted(catalogue_a)}")
 check("3. Shop B's storefront offers Shop B's items and NONE of Shop A's",
       catalogue_b == {"B-only-oil", "B-only-atta"}, f"offers {sorted(catalogue_b)}")
+
+# 3b-3h. -------------------- and so does EVERY OTHER WAY INTO THE CATALOGUE
+#
+# The feed above is one door. A customer also searches, taps a brand, opens a
+# bestseller tile, and follows a link straight to a product page - and each of
+# those is a different query. Checking only the feed is how the feed gets
+# fixed and the other five keep answering with the whole marketplace.
+def ids_in(payload):
+    items = payload.get("content", payload) if isinstance(payload, dict) else payload
+    return {item.get("id") for item in items if isinstance(item, dict)}
+
+def searched(shop_id, keyword):
+    status, page = call("GET", f"/api/products/search/instant?keyword={keyword}&size=50",
+                        customer, shop=shop_id)
+    return ids_in(page if isinstance(page, (dict, list)) else {})
+
+found_a = searched(shop_a, STAMP)
+found_b = searched(shop_b, STAMP)
+check("3b. search in Shop A finds A's products and none of B's",
+      products["A-only-rice"] in found_a and products["B-only-oil"] not in found_a,
+      f"A found {len(found_a)}")
+check("3c. search in Shop B finds B's products and none of A's",
+      products["B-only-oil"] in found_b and products["A-only-rice"] not in found_b,
+      f"B found {len(found_b)}")
+
+check("3d. searching Shop A for a brand only Shop B stocks returns nothing of B's",
+      products["B-only-oil"] not in searched(shop_a, brands["B-only-oil"]),
+      "search is the easiest door into another shop's stock")
+
+def brand_names(shop_id):
+    status, rows = call("GET", "/api/products/brands", customer, shop=shop_id)
+    return {row.get("brand") for row in rows or []}
+
+brands_a = brand_names(shop_a)
+check("3e. Shop A's brand list holds its own brand and not Shop B's",
+      brands["A-only-rice"] in brands_a and brands["B-only-oil"] not in brands_a,
+      f"{len(brands_a)} brands")
+
+status, brand_page = call(
+    "GET", f"/api/products/brand/{brands['B-only-oil']}?size=50", customer, shop=shop_a)
+check("3f. browsing Shop A by Shop B's brand shows nothing",
+      products["B-only-oil"] not in ids_in(brand_page), "the tile would open on an empty grid")
+
+status, mine = call("GET", f"/api/products/{products['A-only-rice']}", customer, shop=shop_a)
+status_theirs, theirs = call(
+    "GET", f"/api/products/{products['B-only-oil']}", customer, shop=shop_a)
+check("3g. a product page opens for this shop's item and 404s for the other's",
+      isinstance(mine, dict) and mine.get("id") == products["A-only-rice"]
+      and status_theirs == 404,
+      f"own {status}, other {status_theirs}")
+
+def tile_products(shop_id):
+    status, tiles = call("GET", "/api/products/bestsellers?categories=12&perCategory=8",
+                         customer, shop=shop_id)
+    ids = set()
+    for tile in tiles or []:
+        if tile.get("categoryId") == category_id:
+            ids.update(tile.get("productIds") or [])
+    return ids
+
+tiles_a = tile_products(shop_a)
+check("3h. the bestsellers collage in Shop A holds only A's products",
+      products["A-only-rice"] in tiles_a and products["B-only-oil"] not in tiles_a,
+      f"tile holds {sorted(tiles_a)}")
+
+# 3i-3l. ------------------------ opening hours, and looking farther than home
+#
+# WHETHER A SHOP IS OPEN IS THE SHOP'S OWN ANSWER, from its own hours - the
+# same answer checkout consults before it will take an order. A storefront
+# that says OPEN and then refuses the basket is the failure these check for.
+def storefront(shop_id, token=None):
+    status, rows = call("GET", f"/api/marketplace/shops?lat={LAT}&lng={LNG}", token or customer)
+    for row in rows or []:
+        if row.get("shopId") == shop_id:
+            return row
+    return {}
+
+call("PUT", "/api/admin/store/operations", owner_b,
+     {"orderAcceptance": "OFF", "closureMessage": f"Stocktaking {STAMP}"})
+front_a, front_b = storefront(shop_a), storefront(shop_b)
+check("3i. one shop closing does not close the shop next door",
+      front_a.get("acceptingOrders") is True and front_b.get("acceptingOrders") is False,
+      f"A={front_a.get('acceptingOrders')} B={front_b.get('acceptingOrders')}")
+check("3j. browsing stays open at a shop that has stopped taking orders",
+      front_b.get("openNow") is True
+      and front_b.get("closureReason") == f"Stocktaking {STAMP}",
+      f"reason {front_b.get('closureReason')!r}")
+call("PUT", "/api/admin/store/operations", owner_b, {"orderAcceptance": "AUTO"})
+
+# The same festival, declared by both shops. Before store_closures belonged to
+# a shop the second one was refused - by the first shop's row.
+today = datetime.date.today().isoformat()
+status_a, _ = call("POST", "/api/admin/store/closures", owner_a,
+                   {"date": today, "reason": f"Festival {STAMP}"})
+status_b, _ = call("POST", "/api/admin/store/closures", owner_b,
+                   {"date": today, "reason": f"Festival {STAMP}"})
+status_list, closures_a = call("GET", "/api/admin/store/closures", owner_a)
+check("3k. both shops may close for the same festival, and each sees only its own",
+      status_a == 200 and status_b == 200 and len(closures_a or []) == 1,
+      f"A={status_a} B={status_b} A sees {len(closures_a or [])}")
+call("DELETE", f"/api/admin/store/closures/{today}", owner_a)
+call("DELETE", f"/api/admin/store/closures/{today}", owner_b)
+
+status, near = call("GET", f"/api/marketplace/discovery?lat={LAT}&lng={LNG}", customer)
+status, far = call("GET",
+                   f"/api/marketplace/discovery?lat={LAT}&lng={LNG}&radiusKm=100000", customer)
+check("3l. search farther is bounded by the server and stops at the top rung",
+      near.get("radiusKm") is None and str(near.get("nextRadiusKm")) == "3"
+      and float(far.get("radiusKm")) == 25.0 and far.get("nextRadiusKm") is None,
+      f"default next={near.get('nextRadiusKm')} clamped={far.get('radiusKm')}")
 
 # 4/5. ------------------------------------ price and stock move independently
 def listing_price(token, variant_id):
