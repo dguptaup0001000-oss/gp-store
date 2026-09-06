@@ -369,10 +369,16 @@ public class ProductService {
         return content;
     }
 
-    /** Only brands with at least one active product - guaranteed by the underlying GROUP BY query. */
+    /**
+     * Only brands with at least one active product - guaranteed by the
+     * underlying GROUP BY query - and, under a marketplace, only brands this
+     * shop actually lists. The cache entry is keyed by shop
+     * (CacheConfig.keyGenerator), so two storefronts do not share one answer.
+     */
+    @Transactional(readOnly = true)
     @Cacheable(value = "brands", sync = true)
     public List<com.gpstore.dto.response.BrandSummary> getBrandsWithCounts() {
-        return productRepository.findBrandsWithProductCounts().stream()
+        return productRepository.findBrandsWithProductCounts(requireListing()).stream()
                 .map(row -> new com.gpstore.dto.response.BrandSummary((String) row[0], (Long) row[1]))
                 .toList();
     }
@@ -426,7 +432,31 @@ public class ProductService {
             return null;
         }
 
-        ProductResponse product = ProductResponse.from(entity, shopPricedCatalogue.termsFor(entity));
+        Map<Long, com.gpstore.catalog.shop.ShopProductVariant> terms =
+                shopPricedCatalogue.termsFor(entity);
+
+        // NOT ON THIS SHOP'S SHELF IS NOT FOUND, under a marketplace.
+        //
+        // Detail is reached by id, so it is the one browse surface a
+        // customer can land on without having browsed: a deep link, a
+        // shared card, a stale home screen from before they switched shops,
+        // or simply an id typed into the URL. Every list around it is
+        // narrowed to the shelf; if this one is not, the narrowing is
+        // decoration - anybody can read any shop's catalogue one id at a
+        // time. termsFor is shop-filtered (ShopCatalog), so an empty answer
+        // means this shop does not list the product.
+        //
+        // Returning null rather than throwing gives it exactly the answer an
+        // id that does not exist already gets, which is the right answer:
+        // as far as this storefront is concerned, it does not. The cache is
+        // keyed by shop (CacheConfig.keyGenerator), so this shop's "no" is
+        // never served to a customer standing in another one.
+        if (requireListing() && terms.values().stream().noneMatch(
+                com.gpstore.catalog.shop.ShopProductVariant::isOrderable)) {
+            return null;
+        }
+
+        ProductResponse product = ProductResponse.from(entity, terms);
 
         // The 3D model, like the gallery below, is attached ONLY here.
         // ProductResponse.from deliberately leaves it null so that no list

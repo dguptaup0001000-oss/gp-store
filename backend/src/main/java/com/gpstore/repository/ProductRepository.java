@@ -161,9 +161,33 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * Only brands that actually have at least one active product - the
      * GROUP BY naturally guarantees this (a brand with zero products
      * simply never produces a row), no separate filter needed.
+     *
+     * "Shop by Brand" IS A BROWSE SURFACE, and a count is a leak like any
+     * other: showing a storefront "Aashirvaad (14)" for a brand it has never
+     * stocked hands the customer a tile that opens on an empty grid, and
+     * hands the merchant a count of what the shop down the road carries.
+     * requireListing narrows the count to this shop's shelf exactly the way
+     * findSellable does, and relies on the same two things - the EXISTS for
+     * "listed at all", and the shop filter on ShopProductVariant for "listed
+     * HERE", which Hibernate applies to this JPQL automatically.
+     *
+     * INERT UNDER SINGLE_SHOP: requireListing is false and the extra clause
+     * short-circuits, leaving the count this query has always returned.
+     *
+     * The vocabulary that powers spell correction deliberately passes false
+     * even under a marketplace - see BrandVocabulary.
      */
     @Query("select p.brand as brand, count(p) as productCount from Product p " +
             "where p.active = true and p.brand is not null and p.brand <> '' " +
+            "and (:requireListing = false or exists (" +
+            "  select 1 from ProductVariant v" +
+            "  where v.product = p and v.available = true" +
+            "    and (v.active = true or v.active is null)" +
+            "    and v.sellingPrice is not null and v.sellingPrice > 0" +
+            "    and exists (select 1 from ShopProductVariant l" +
+            "                where l.productVariantId = v.id and l.available = true" +
+            "                  and (l.active = true or l.active is null)" +
+            "                  and l.sellingPrice is not null and l.sellingPrice > 0))) " +
             "group by p.brand order by p.brand asc")
-    List<Object[]> findBrandsWithProductCounts();
+    List<Object[]> findBrandsWithProductCounts(@Param("requireListing") boolean requireListing);
 }
