@@ -21,8 +21,15 @@ public class CartResponse {
     private final List<CartItemResponse> items;
     private final BigDecimal totalAmount;
     private final Integer totalItems;
+    private final List<CartShop> shops;
 
     public CartResponse(Long cartId, List<CartItemResponse> items, BigDecimal totalAmount, Integer totalItems) {
+        this(cartId, items, totalAmount, totalItems, List.of());
+    }
+
+    public CartResponse(Long cartId, List<CartItemResponse> items, BigDecimal totalAmount,
+                        Integer totalItems, List<CartShop> shops) {
+        this.shops = shops == null ? List.of() : shops;
         this.cartId = cartId;
         this.items = items;
         this.totalAmount = totalAmount;
@@ -60,6 +67,19 @@ public class CartResponse {
     public static CartResponse from(Cart cart, Map<Long, Integer> stockByVariantId,
                                     Map<Long, BigDecimal> shopPriceByVariantId,
                                     java.util.Set<Long> stillListedVariantIds) {
+        return from(cart, stockByVariantId, shopPriceByVariantId, stillListedVariantIds, Map.of());
+    }
+
+    /**
+     * @param shopNamesById the display name of each shop this basket has lines
+     *                      from. Empty is allowed and simply means the caller
+     *                      had no names to give - the ids on the lines are
+     *                      still there, so a client can group without them.
+     */
+    public static CartResponse from(Cart cart, Map<Long, Integer> stockByVariantId,
+                                    Map<Long, BigDecimal> shopPriceByVariantId,
+                                    java.util.Set<Long> stillListedVariantIds,
+                                    Map<Long, String> shopNamesById) {
         if (cart == null) {
             return new CartResponse(null, List.of(), BigDecimal.ZERO, 0);
         }
@@ -77,11 +97,38 @@ public class CartResponse {
                 .map(CartItemResponse::getTotalPrice)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        return new CartResponse(cart.getId(), items, totalAmount, totalItems);
+        // ONE ENTRY PER SHOP THE BASKET TOUCHES, in the order the lines were
+        // added, so a screen listing them does not reshuffle between refreshes.
+        Map<Long, String> names = shopNamesById == null ? Map.of() : shopNamesById;
+        java.util.LinkedHashMap<Long, CartShop> shops = new java.util.LinkedHashMap<>();
+        for (CartItemResponse line : items) {
+            if (line.getShopId() != null) {
+                shops.computeIfAbsent(line.getShopId(),
+                        id -> new CartShop(id, names.get(id)));
+            }
+        }
+
+        return new CartResponse(cart.getId(), items, totalAmount, totalItems,
+                List.copyOf(shops.values()));
     }
 
     public Long getCartId() { return cartId; }
     public List<CartItemResponse> getItems() { return items; }
+
+    /**
+     * The shops this basket spans, named.
+     *
+     * SO THE SCREEN CAN SAY WHO IT IS BUYING FROM. Every line carries a
+     * shopId; without a name beside it a client either shows a number or
+     * fetches each shop separately from a list it already knows. One shop is
+     * one entry and the existing single-shop app can ignore the field
+     * entirely - it is additive (§96), and the keys that were there before
+     * are unchanged.
+     */
+    public List<CartShop> getShops() { return shops; }
+
+    /** One shop a basket has lines from. */
+    public record CartShop(Long shopId, String shopName) {}
     public BigDecimal getTotalAmount() { return totalAmount; }
     public Integer getTotalItems() { return totalItems; }
 
@@ -100,9 +147,25 @@ public class CartResponse {
         private final BigDecimal mrp;
         private final Boolean available;
 
+        /**
+         * WHICH SHOP THIS LINE CAME OFF THE SHELF OF.
+         *
+         * A basket spans shops by design (§16) and checkout splits it into one
+         * order per shop - so the screen showing the basket has to be able to
+         * say which lines belong together, and which shop each group is with.
+         *
+         * IT IS SENT RATHER THAN DERIVED, deliberately. The client could not
+         * work it out from anything else in this response, and a client that
+         * guessed - by price, by product, by anything - would be inventing a
+         * grouping the server did not decide. cart_items.shop_id is stamped by
+         * the server at add-to-cart time and this is that value, unchanged.
+         */
+        private final Long shopId;
+
         private CartItemResponse(Long cartItemId, Long productId, String productName, String productBrand,
                                   Long variantId, Integer quantity, Double variantQuantity, String unit, String imageUrl,
-                                  BigDecimal price, BigDecimal totalPrice, BigDecimal mrp, Boolean available) {
+                                  BigDecimal price, BigDecimal totalPrice, BigDecimal mrp, Boolean available,
+                                  Long shopId) {
             this.cartItemId = cartItemId;
             this.productId = productId;
             this.productName = productName;
@@ -116,6 +179,7 @@ public class CartResponse {
             this.totalPrice = totalPrice;
             this.mrp = mrp;
             this.available = available;
+            this.shopId = shopId;
         }
 
         static CartItemResponse from(CartItem item) {
@@ -191,7 +255,8 @@ public class CartResponse {
                     unitPrice,
                     lineTotal,
                     variant != null ? variant.getMrp() : null,
-                    isAvailable
+                    isAvailable,
+                    item.getShopId()
             );
         }
 
@@ -208,5 +273,6 @@ public class CartResponse {
         public BigDecimal getTotalPrice() { return totalPrice; }
         public BigDecimal getMrp() { return mrp; }
         public Boolean getAvailable() { return available; }
+        public Long getShopId() { return shopId; }
     }
 }

@@ -45,6 +45,35 @@ public class OrderResponse {
     // already know it's their own order).
     private String customerName;
 
+    /**
+     * WHO THE CUSTOMER ACTUALLY BOUGHT FROM.
+     *
+     * A split checkout is several orders, one per shop (§16), and a customer
+     * looking at their history has to be able to tell them apart - "two orders
+     * on Tuesday" is confusing until it says which kirana each was with.
+     *
+     * Additive (§96). Under one shop every order carries the same pair and an
+     * existing client that ignores both fields behaves exactly as it did.
+     */
+    private Long shopId;
+    private String shopName;
+
+    public Long getShopId() {
+        return shopId;
+    }
+
+    public void setShopId(Long shopId) {
+        this.shopId = shopId;
+    }
+
+    public String getShopName() {
+        return shopName;
+    }
+
+    public void setShopName(String shopName) {
+        this.shopName = shopName;
+    }
+
     public String getCustomerName() {
         return customerName;
     }

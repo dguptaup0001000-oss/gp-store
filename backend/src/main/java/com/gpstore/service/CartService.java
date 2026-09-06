@@ -33,6 +33,8 @@ public class CartService {
     private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
     private final com.gpstore.catalog.shop.ShopProductVariantRepository shopListings;
     private final com.gpstore.platform.ShopScopeSwitch shopScopeSwitch;
+    private final com.gpstore.platform.ShopRepository shops;
+    private final com.gpstore.platform.PlatformProperties platform;
 
     public CartService(
             CartRepository cartRepository,
@@ -42,7 +44,9 @@ public class CartService {
             InventoryRepository inventoryRepository,
             com.gpstore.catalog.shop.ShopCatalog shopCatalog,
             com.gpstore.catalog.shop.ShopProductVariantRepository shopListings,
-            com.gpstore.platform.ShopScopeSwitch shopScopeSwitch) {
+            com.gpstore.platform.ShopScopeSwitch shopScopeSwitch,
+            com.gpstore.platform.ShopRepository shops,
+            com.gpstore.platform.PlatformProperties platform) {
 
         this.cartRepository = cartRepository;
         this.customerRepository = customerRepository;
@@ -52,6 +56,8 @@ public class CartService {
         this.shopCatalog = shopCatalog;
         this.shopListings = shopListings;
         this.shopScopeSwitch = shopScopeSwitch;
+        this.shops = shops;
+        this.platform = platform;
     }
 
     public Cart saveCart(Cart cart) {
@@ -401,8 +407,31 @@ public class CartService {
         // is overcharged - but finding out at the last step, after choosing an
         // address and a payment method, is the surprise the availability flag
         // exists to prevent.
+        // AND WHO EACH GROUP IS WITH - BUT ONLY WHERE THAT IS A QUESTION.
+        //
+        // THE COST IS TIED TO THE DEPLOYMENT, NOT TO THE BASKET. Under one
+        // shop there is nobody to distinguish from: the customer knows whose
+        // shop they are in, the screen renders the flat list it always did,
+        // and a name nothing displays is a query nothing needed. So a
+        // single-shop read - every read in production today - costs exactly
+        // what it cost before this field existed. CheckoutPerformanceTest
+        // asserts that, and caught the first version of this doing one lookup
+        // per shop.
+        //
+        // Under a marketplace the names are always fetched, in ONE batched
+        // query, even for a basket that happens to be from a single shop -
+        // because there the customer genuinely does not know which kirana
+        // they are buying from until told.
+        java.util.Map<Long, String> shopNames = java.util.Map.of();
+        if (platform.getMode().isMultiShop()) {
+            shopNames = new java.util.LinkedHashMap<>();
+            for (com.gpstore.platform.Shop shop : shops.findAllById(variantsByShop.keySet())) {
+                shopNames.put(shop.getId(), shop.getDisplayName());
+            }
+        }
+
         return com.gpstore.dto.response.CartResponse.from(
-                cart, stock, shopPrices, java.util.Set.copyOf(stillListed));
+                cart, stock, shopPrices, java.util.Set.copyOf(stillListed), shopNames);
     }
 
     private void requireStockFor(Long variantId, int quantity, String productName) {

@@ -167,3 +167,31 @@ bool isConnectivityFailure(Object error) {
       return false;
   }
 }
+
+/// Whether this failure means the app's picture of the shop is out of date.
+///
+/// WHAT IT IS FOR: deciding whether to RELOAD, not what to say. The sentence
+/// shown to the customer is still the backend's own - it knows which item went
+/// out of stock, which shop shut, which coupon expired, and this layer knows
+/// none of that and must not guess at it.
+///
+/// The three that mean "look again":
+///
+///   409 - something changed under the customer. Stock ran out between the
+///   basket screen and checkout, a shop delisted an item, a price moved. The
+///   backend refuses and the basket on screen is now wrong.
+///
+///   404 - the thing is gone, or the shop is no longer one this customer may
+///   see. A suspended or closed shop answers 404 exactly like a shop that
+///   never existed, deliberately, so this covers both.
+///
+///   403 on a shop-scoped route - the credential no longer resolves to the
+///   shop being looked at. A staff member moved between shops, or a customer's
+///   selected storefront stopped serving their address.
+///
+/// A 401 is deliberately NOT here: that is a dead session, handled by the
+/// refresh path in ApiClient, and reloading a screen will not fix it.
+bool meansShopViewIsStale(Object error) {
+  final status = apiStatusOf(error);
+  return status == 404 || status == 409 || status == 403;
+}

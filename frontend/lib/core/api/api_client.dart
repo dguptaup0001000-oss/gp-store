@@ -40,6 +40,7 @@ class ApiClient {
   ApiClient({
     required this.tokenStorage,
     this.onSessionExpired,
+    this.activeShopId,
     AppEnvironment? environment,
     RetryPolicy retryPolicy = const RetryPolicy(),
   })  : environment = environment ?? AppEnvironment.current,
@@ -88,6 +89,20 @@ class ApiClient {
   /// should navigate to the login screen when this fires.
   final void Function()? onSessionExpired;
 
+  /// Which shop the app is acting for, or null to let the backend decide.
+  ///
+  /// THIS GRANTS NOTHING. The header it produces can only NARROW a scope the
+  /// credential already permits - see ShopContext, and TenantResolver.select
+  /// on the server, which refuses a shop the caller is not entitled to rather
+  /// than honouring it. Sending it is therefore safe in the specific sense
+  /// that matters: a tampered value cannot widen anything, because the server
+  /// never takes the tenant from the request (§78).
+  ///
+  /// Null - which is what the single-shop app has always effectively sent -
+  /// means the backend picks: Shop #1 under SINGLE_SHOP, the customer's
+  /// nearest serving shop under a marketplace.
+  final int? Function()? activeShopId;
+
   // Guards against multiple simultaneous 401s all trying to refresh at once
   // (e.g. several API calls in flight when the access token expires) -
   // only the first one actually calls /refresh; the rest wait for it.
@@ -107,6 +122,14 @@ class ApiClient {
       if (token != null) {
         options.headers['Authorization'] = 'Bearer $token';
       }
+    }
+
+    // NOT on auth endpoints, and not when nothing has been chosen. A request
+    // that names no shop is the normal case and the one the shipped app makes:
+    // the backend answers Shop #1 under SINGLE_SHOP without being asked.
+    final shopId = activeShopId?.call();
+    if (!isAuthEndpoint && shopId != null) {
+      options.headers['X-Shop-Id'] = shopId.toString();
     }
     handler.next(options);
   }

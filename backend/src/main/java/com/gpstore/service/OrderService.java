@@ -1444,6 +1444,17 @@ public class OrderService {
             response.setCustomerName(order.getCustomer() != null ? order.getCustomer().getFullName() : null);
         }
 
+        // THE SELLER, NAMED. The id alone would leave the app showing a
+        // number; the name is read through the shop repository, which is
+        // platform-level - a customer's own order history legitimately spans
+        // shops (CustomerOwnedRead), so the name of a shop they bought from
+        // is not somebody else's data.
+        response.setShopId(order.getShopId());
+        if (order.getShopId() != null) {
+            shopRepository.findById(order.getShopId())
+                    .ifPresent(shop -> response.setShopName(shop.getDisplayName()));
+        }
+
         return response;
     }
 

@@ -7,6 +7,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../address/domain/address_models.dart';
 import '../../address/presentation/address_providers.dart';
 import '../../checkout/presentation/checkout_screen.dart';
+import '../domain/cart_grouping.dart';
 import '../domain/cart_models.dart';
 import 'cart_providers.dart';
 import '../../../core/images/gp_network_image.dart';
@@ -78,14 +79,41 @@ class _CartBody extends ConsumerWidget {
       );
     }
 
+    // SHOP #1 RENDERS EXACTLY AS IT ALWAYS DID.
+    //
+    // A basket whose lines all come from one shop - every basket in a
+    // single-shop deployment, and most baskets in a marketplace - takes the
+    // original branch below, unchanged: the same ListView, the same tiles, no
+    // headers, no mention of shops at all. §2: an existing customer must not
+    // have to learn that a multi-shop architecture exists.
+    //
+    // The grouped branch runs only when a basket genuinely spans shops, which
+    // is when checkout will produce more than one order and the customer has
+    // to be told BEFORE they press pay, not after.
+    if (!isSplitAcrossShops(cart)) {
+      return Column(
+        children: [
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: cart.items.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) => _CartItemTile(item: cart.items[index]),
+            ),
+          ),
+          _CartSummary(cart: cart),
+        ],
+      );
+    }
+
+    final groups = groupCartByShop(cart);
     return Column(
       children: [
         Expanded(
-          child: ListView.separated(
+          child: ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: cart.items.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) => _CartItemTile(item: cart.items[index]),
+            itemCount: groups.length,
+            itemBuilder: (context, index) => _CartShopSection(group: groups[index]),
           ),
         ),
         _CartSummary(cart: cart),
@@ -306,6 +334,64 @@ class _CartSummary extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+/// One shop's lines, under a header naming the shop.
+///
+/// Shown only when a basket spans shops - see the branch in the cart body.
+/// The grouping and the name are both the server's (cart_items.shop_id and
+/// CartResponse.shops); nothing here decides which lines belong together.
+class _CartShopSection extends StatelessWidget {
+  const _CartShopSection({required this.group});
+
+  final CartShopGroup group;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.storefront_outlined, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  // A shop the server sent no name for is labelled by what is
+                  // known rather than by a name invented here.
+                  group.shopName ?? 'Another shop',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                '${group.itemCount} item${group.itemCount == 1 ? '' : 's'}',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            // Said before payment, not after. A customer pressing one button
+            // and receiving two orders needs to have been told.
+            'Delivered separately by this shop',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          for (final item in group.items) ...[
+            _CartItemTile(item: item),
+            const SizedBox(height: 12),
+          ],
+        ],
       ),
     );
   }
