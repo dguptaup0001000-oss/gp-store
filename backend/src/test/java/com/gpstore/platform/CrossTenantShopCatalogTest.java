@@ -60,6 +60,8 @@ class CrossTenantShopCatalogTest {
     @Autowired private MerchantRepository merchants;
     @Autowired private PlatformProperties platform;
     @Autowired private ShopCatalog shopCatalog;
+    @Autowired private com.gpstore.service.ProductService productService;
+    @Autowired private org.springframework.cache.CacheManager caches;
     @Autowired private ShopProductVariantRepository listings;
     @Autowired private ProductRepository products;
     @Autowired private ProductVariantRepository variants;
@@ -388,6 +390,100 @@ class CrossTenantShopCatalogTest {
                         + "exactly how a settings row would be rewritten from another shop");
     }
 
+    @Test
+    @DisplayName("under one shop the browse is still catalogue-wide, exactly as it was")
+    void theListingFilterIsInertUnderSingleShop() {
+        // THE OTHER HALF OF THE MARKETPLACE FIX (see
+        // StorefrontShowsItsOwnShelfTest). A storefront under a marketplace
+        // shows only what that shop lists. Under SINGLE_SHOP it must show
+        // what it always showed - including a variant that was priced without
+        // ever being listed, which exists in real data and whose disappearance
+        // would be a live product vanishing from a working shop (§12).
+        Product loose = new Product();
+        loose.setName("Priced but unlisted " + tag);
+        loose.setCategory(categories.findById(categoryId).orElseThrow());
+        loose.setActive(true);
+        Long looseProductId = products.save(loose).getId();
+
+        ProductVariant variant = new ProductVariant();
+        variant.setProduct(loose);
+        variant.setQuantity(1.0);
+        variant.setUnit("kg");
+        variant.setSellingPrice(new BigDecimal("77.00"));
+        variant.setAvailable(Boolean.TRUE);
+        variant.setActive(Boolean.TRUE);
+        Long looseVariantId = variants.save(variant).getId();
+        jdbc.update("DELETE FROM shop_product_variants WHERE product_variant_id = ?",
+                looseVariantId);
+
+        assertTrue(namesBrowsableBy(shopA).contains(looseProductId),
+                "an unlisted but priced variant must keep selling under one shop");
+
+        jdbc.update("DELETE FROM product_variants WHERE id = ?", looseVariantId);
+        jdbc.update("DELETE FROM products WHERE id = ?", looseProductId);
+    }
+
+    private java.util.Set<Long> namesBrowsableBy(long shopId) {
+        // THE FEED IS CACHED, per shop, and this fixture changes what is on
+        // the shelf mid-test. A cached page from before the change is not a
+        // stale test - it is the test asking the cache a question about the
+        // database.
+        java.util.Optional.ofNullable(caches.getCache("productFeed"))
+                .ifPresent(org.springframework.cache.Cache::clear);
+        return TenantContext.runWithin(TenantScope.ofShop(shopId), () ->
+                productService.browseAll(org.springframework.data.domain.PageRequest.of(0, 40,
+                        org.springframework.data.domain.Sort.by(
+                                org.springframework.data.domain.Sort.Direction.DESC, "id")))
+                        .getContent().stream()
+                        .map(com.gpstore.dto.response.ProductResponse::getId)
+                        .collect(java.util.stream.Collectors.toSet()));
+    }
+
+    @Test
+    @DisplayName("the platform can define a catalogue variant without owning a shelf")
+    void aPlatformScopedCatalogueWriteListsNothingAndDoesNotFail() {
+        // §10: ONE CENTRAL CATALOGUE, PER-SHOP SHELVES. A platform admin
+        // defining what a product IS is acting for the marketplace, not for a
+        // shop - so there is no shelf to auto-list it on, and each shop lists
+        // it for itself.
+        //
+        // THIS USED TO BE A 500. saveProductVariant called shopCatalog.list()
+        // unconditionally; TenantDefaults correctly refuses to insert a
+        // shop-owned row with no shop and no single shop to fall back to, so
+        // under MULTI_SHOP_PRODUCTION the platform could not create a
+        // catalogue variant at all. Under one shop every caller has a scope,
+        // which is why nothing had ever run this path.
+        ProductVariant fresh = new ProductVariant();
+        fresh.setProduct(products.findById(productId).orElseThrow());
+        fresh.setQuantity(1.0);
+        fresh.setUnit("kg");
+        fresh.setMrp(new BigDecimal("100"));
+        fresh.setSellingPrice(new BigDecimal("90"));
+        fresh.setAvailable(Boolean.TRUE);
+        fresh.setActive(Boolean.TRUE);
+        Long freshId = TenantContext.runWithin(TenantScope.platform(),
+                () -> variants.save(fresh).getId());
+
+        assertNull(TenantContext.runWithin(TenantScope.platform(),
+                        () -> shopCatalog.list(variants.findById(freshId).orElseThrow())),
+                "a caller with no shelf must list nothing rather than fail");
+
+        assertEquals(0L, jdbc.queryForObject(
+                        "SELECT count(*) FROM shop_product_variants WHERE product_variant_id = ?",
+                        Long.class, freshId),
+                "NOBODY'S SHELF. A variant defined by the platform belongs to no shop until a "
+                        + "shop lists it - putting it on one would be the platform stocking a "
+                        + "merchant's shop for them (§103).");
+
+        // And a shop can still pick it up afterwards, which is the whole point.
+        assertNotNull(TenantContext.runWithin(TenantScope.ofShop(shopB),
+                        () -> shopCatalog.list(variants.findById(freshId).orElseThrow())),
+                "a shop must still be able to list a platform-defined variant");
+
+        jdbc.update("DELETE FROM shop_product_variants WHERE product_variant_id = ?", freshId);
+        jdbc.update("DELETE FROM product_variants WHERE id = ?", freshId);
+    }
+
     // ------------------------------------------------------------ fixtures
 
     private long newShop(String code) {
@@ -411,6 +507,10 @@ class CrossTenantShopCatalogTest {
 
     /** Lists the shared variant at one shop, through the ordinary path. */
     private void listAt(long shopId, BigDecimal price, BigDecimal cost) {
+        listAt(shopId, price, cost, variantId);
+    }
+
+    private void listAt(long shopId, BigDecimal price, BigDecimal cost, Long variantId) {
         TenantContext.runWithin(TenantScope.ofShop(shopId), () -> {
             ShopProductVariant listing = listings.findByProductVariantId(variantId)
                     .orElseGet(ShopProductVariant::new);

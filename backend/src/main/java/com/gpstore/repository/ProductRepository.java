@@ -57,6 +57,29 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @EntityGraph(attributePaths = {"category"})
     Page<Product> findByCategoryIdAndActiveTrue(Long categoryId, Pageable pageable);
 
+    /**
+     * What a customer standing in THIS shop may buy.
+     *
+     * "SELLABLE" MEANT "IN THE CATALOGUE" AND THAT IS NOT THE SAME QUESTION.
+     * Products and variants are central by design (§10) - one row per item for
+     * the whole marketplace - so a query that asks only "is this variant
+     * priced" answers for the catalogue rather than for a shelf. With two
+     * shops running, a customer who opened Shop A's storefront was shown Shop
+     * B's goods: not a data leak (nothing shop-owned is returned, and an
+     * unlisted item is refused at add-to-cart because ShopCatalog's catalogue
+     * fallback is off under a marketplace) but a shop advertising a
+     * neighbour's stock, which no shopkeeper would accept.
+     *
+     * THE SUBQUERY IS SHOP-FILTERED, not shop-parameterised. ShopProductVariant
+     * carries the Slice 1 @Filter, so as a subquery root it is already narrowed
+     * to the shop in scope - which is why no shop id is passed and there is
+     * none for a caller to change.
+     *
+     * INERT UNDER SINGLE_SHOP, deliberately. requireListing is false there, so
+     * the query is character-for-character the one Shop #1 has always run - a
+     * variant created before listings existed, or one an admin priced without
+     * listing, keeps selling exactly as it did (§12).
+     */
     @EntityGraph(attributePaths = {"category"})
     @Query("""
             SELECT p FROM Product p
@@ -68,10 +91,19 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                     AND (v.active = true OR v.active IS NULL)
                     AND v.sellingPrice IS NOT NULL
                     AND v.sellingPrice > 0
+                    AND (:requireListing = false OR EXISTS (
+                        SELECT 1 FROM ShopProductVariant l
+                        WHERE l.productVariantId = v.id
+                          AND l.available = true
+                          AND (l.active = true OR l.active IS NULL)
+                          AND l.sellingPrice IS NOT NULL
+                          AND l.sellingPrice > 0
+                    ))
               )
             """)
-    Page<Product> findSellable(Pageable pageable);
+    Page<Product> findSellable(@Param("requireListing") boolean requireListing, Pageable pageable);
 
+    /** The same question, inside one category. See findSellable. */
     @EntityGraph(attributePaths = {"category"})
     @Query("""
             SELECT p FROM Product p
@@ -84,9 +116,19 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                     AND (v.active = true OR v.active IS NULL)
                     AND v.sellingPrice IS NOT NULL
                     AND v.sellingPrice > 0
+                    AND (:requireListing = false OR EXISTS (
+                        SELECT 1 FROM ShopProductVariant l
+                        WHERE l.productVariantId = v.id
+                          AND l.available = true
+                          AND (l.active = true OR l.active IS NULL)
+                          AND l.sellingPrice IS NOT NULL
+                          AND l.sellingPrice > 0
+                    ))
               )
             """)
-    Page<Product> findSellableByCategoryId(@Param("categoryId") Long categoryId, Pageable pageable);
+    Page<Product> findSellableByCategoryId(@Param("categoryId") Long categoryId,
+                                           @Param("requireListing") boolean requireListing,
+                                           Pageable pageable);
 
     @EntityGraph(attributePaths = {"category"})
     Page<Product> findByActiveTrueOrderByCreatedAtDesc(Pageable pageable);

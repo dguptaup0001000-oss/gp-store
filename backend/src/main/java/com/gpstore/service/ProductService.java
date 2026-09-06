@@ -32,18 +32,34 @@ public class ProductService {
     private final com.gpstore.repository.CategoryRepository categoryRepository;
 
     private final com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue;
+    private final com.gpstore.platform.PlatformProperties platform;
 
     public ProductService(
             ProductRepository productRepository,
             ProductBrowseRepository productBrowseRepository,
             com.gpstore.repository.ProductImageRepository productImageRepository,
             com.gpstore.repository.CategoryRepository categoryRepository,
-            com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue) {
+            com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue,
+            com.gpstore.platform.PlatformProperties platform) {
         this.productRepository = productRepository;
         this.productImageRepository = productImageRepository;
         this.productBrowseRepository = productBrowseRepository;
         this.categoryRepository = categoryRepository;
         this.shopPricedCatalogue = shopPricedCatalogue;
+        this.platform = platform;
+    }
+
+    /**
+     * Whether a product has to be on THIS shop's shelf to be shown.
+     *
+     * Under one shop it does not: the catalogue and the shelf are the same
+     * thing, and requiring a listing would hide any variant that was priced
+     * without being listed - a live product disappearing from a working shop
+     * (§12). Under a marketplace it does: a storefront shows what that shop
+     * sells.
+     */
+    private boolean requireListing() {
+        return platform.getMode().isMultiShop();
     }
 
     /**
@@ -122,7 +138,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable(value = "products", sync = true)
     public List<ProductResponse> getAllProducts(org.springframework.data.domain.Pageable pageable) {
-        return batchFetchWithVariants(productRepository.findSellable(pageable)).getContent();
+        return batchFetchWithVariants(productRepository.findSellable(requireListing(), pageable)).getContent();
     }
 
     /** Admin management view - includes inactive/deactivated products too, unlike the customer-facing list above. */
@@ -204,7 +220,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable(value = "productFeed", sync = true)
     public Page<ProductResponse> browseAll(Pageable pageable) {
-        return batchFetchWithVariants(productRepository.findSellable(pageable));
+        return batchFetchWithVariants(productRepository.findSellable(requireListing(), pageable));
     }
 
     /**
@@ -264,7 +280,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable(value = "categoryProducts", sync = true)
     public Page<ProductResponse> browseByCategory(Long categoryId, Pageable pageable) {
-        return batchFetchWithVariants(productRepository.findSellableByCategoryId(categoryId, pageable));
+        return batchFetchWithVariants(productRepository.findSellableByCategoryId(categoryId, requireListing(), pageable));
     }
 
     /**
@@ -285,6 +301,7 @@ public class ProductService {
     @Cacheable(value = "newArrivals", sync = true)
     public Page<ProductResponse> getNewArrivals(Pageable pageable) {
         return batchFetchWithVariants(productRepository.findSellable(
+                requireListing(),
                 org.springframework.data.domain.PageRequest.of(
                         pageable.getPageNumber(),
                         pageable.getPageSize(),

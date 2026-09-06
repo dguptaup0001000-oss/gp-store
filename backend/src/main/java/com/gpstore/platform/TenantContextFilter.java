@@ -149,12 +149,47 @@ public class TenantContextFilter extends OncePerRequestFilter {
     private static boolean spansEveryShop(HttpServletRequest request) {
         String path = com.gpstore.config.RequestPath.of(request);
         return path.startsWith("/api/auth/")
+                // A RIDER SIGNS IN THROUGH A DIFFERENT DOOR, and it is still a
+                // door. /api/worker/auth/login checks credentials that live on
+                // delivery_partners rather than on customers, so it runs before
+                // there is anything to resolve a shop from - exactly like
+                // /api/auth/ above, and it was missed only because of where it
+                // sits in the path tree. Without this, no delivery worker could
+                // sign in AT ALL under MULTI_SHOP_PRODUCTION: the filter refused
+                // the login request for having no shop, and the shop is on the
+                // roster row the login would have found. Under one shop the
+                // resolver falls back to Shop #1 and this never showed.
+                || path.startsWith("/api/worker/auth/")
                 || path.startsWith("/api/payments/webhooks/")
                 // FINDING A SHOP CANNOT REQUIRE HAVING ONE. A customer who
                 // has just installed the app has no shop yet, and asking them
                 // to have one before they may ask which shops exist is a 403
                 // on the first screen. These routes read shops and nothing
                 // shop-owned - see MarketplaceController.
-                || path.startsWith("/api/marketplace/");
+                || path.startsWith("/api/marketplace/")
+                // AND NEITHER CAN SAVING THE ADDRESS THAT FINDS ONE.
+                //
+                // THE DEADLOCK THIS BREAKS, found by running a real
+                // marketplace rather than one shop: a customer's shop is the
+                // nearest one that delivers to their ADDRESS, so a customer
+                // with no address resolves to no shop - and TenantResolver
+                // refuses, correctly, to invent one. That refusal reached
+                // every authenticated request they could make, including
+                // POST /api/addresses. A new customer on a marketplace could
+                // therefore do nothing at all: they could not add the address
+                // that would have given them a shop. Under SINGLE_SHOP the
+                // resolver falls back to Shop #1 and this was never reachable.
+                //
+                // AN ADDRESS BELONGS TO A CUSTOMER, NOT TO A SHOP - Address
+                // does not implement ShopOwned and every query here is keyed
+                // on the customer id from the token - so there is nothing for
+                // a shop scope to protect and nothing for the platform scope
+                // to widen. Ownership is still checked, on every route, by
+                // AddressService.getOwnedAddress.
+                //
+                // ONE EXCEPTION, KEPT SCOPED: "will you deliver here?" is a
+                // question about a SHOP, answered from that shop's radius and
+                // its coordinates. It needs a shop and must keep needing one.
+                || (path.startsWith("/api/addresses") && !path.endsWith("/deliverable"));
     }
 }

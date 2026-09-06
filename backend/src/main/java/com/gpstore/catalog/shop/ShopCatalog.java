@@ -175,11 +175,29 @@ public class ShopCatalog {
      * scope on the thread, so this cannot be called "for" another shop even by
      * a caller that wants to - which is why there is no shopId parameter to
      * leave out of a validation.
+     *
+     * A CALLER WITH NO SHOP LISTS NOTHING, and that is a real caller rather
+     * than a defensive branch. A platform admin defining a catalogue variant
+     * (§10: one central PRODUCT, per-shop SHOP_PRODUCT) is acting for the
+     * marketplace, not for a shelf - so there is no shop to put the item on,
+     * and each shop lists it for itself through /api/shop/listings.
+     *
+     * Without this, creating any catalogue variant under
+     * MULTI_SHOP_PRODUCTION answered 500: TenantDefaults correctly refuses to
+     * insert a shop-owned row with no shop, and this was asking it to. Found
+     * by building a real second shop; under one shop every caller has a scope
+     * and the branch never ran.
      */
     @Transactional
     public ShopProductVariant list(ProductVariant variant) {
         if (variant == null || variant.getId() == null) {
             throw new IllegalArgumentException("A listing needs a catalogue variant.");
+        }
+        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+        if (scope == null || scope.isPlatform()) {
+            log.debug("Catalogue variant {} defined without a shop in scope - "
+                    + "no shelf to list it on.", variant.getId());
+            return null;
         }
         BigDecimal price = variant.getSellingPrice();
         if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
