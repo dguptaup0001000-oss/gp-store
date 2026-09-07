@@ -72,6 +72,7 @@ public class MarketplaceController {
                                  boolean acceptingOrders,
                                  boolean closedToday,
                                  String closureReason,
+                                 java.time.LocalDateTime pausedUntil,
                                  LocalDate nextDeliveryDate,
                                  String supportPhone, String timeZone) {}
 
@@ -212,6 +213,11 @@ public class MarketplaceController {
      * still worth looking at - what changes is when the order arrives, which
      * is what nextDeliveryDate says.
      *
+     * pausedUntil is the difference between "back at four" and "closed": a
+     * shopkeeper who stepped out for half an hour has told the customer
+     * something worth drawing, and a shop that simply is not taking orders
+     * has not.
+     *
      * ONE SETTINGS READ AND ONE CLOSURES QUERY PER SHOP IN THE LIST. That is
      * affordable because a discovery list is a handful of shops in one town,
      * not a catalogue; if it ever stops being, this is the line to batch.
@@ -222,7 +228,8 @@ public class MarketplaceController {
                 shop.getLatitude(), shop.getLongitude(), shop.getMaxDeliveryRadiusKm(),
                 distanceKm, deliversHere,
                 status.browsingOpen(), status.acceptingOrders(),
-                status.closedToday(), status.closureReason(), status.deliveryDate(),
+                status.closedToday(), status.closureReason(), status.pausedUntil(),
+                status.deliveryDate(),
                 shop.getSupportPhone(), shop.getTimeZone());
     }
 }

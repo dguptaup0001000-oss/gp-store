@@ -57,7 +57,8 @@ public class StoreStatusController {
     @GetMapping("/status")
     public ResponseEntity<StoreStatusResponse> status() {
         StoreStatusResponse body = StoreStatusResponse.from(
-                scheduleService.getStoreStatus(), scheduleService.getProperties());
+                scheduleService.getStoreStatus(), scheduleService.getProperties(),
+                scheduleService.shopZone());
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.maxAge(10, TimeUnit.SECONDS).cachePrivate())
                 .body(body);

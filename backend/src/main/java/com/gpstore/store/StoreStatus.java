@@ -36,6 +36,11 @@ import java.time.LocalDate;
  * @param nextWindow         the next delivery run, or null if none is reachable
  * @param deliveryType       what an order placed now would be, or null if none
  * @param countdownRemaining time left of same-day ordering, or null if not close
+ * @param pausedUntil        when a temporary pause lifts by itself, or null -
+ *                           null both for a shop that is open and for one
+ *                           closed with no stated resume time, because "back
+ *                           at four" and "closed until further notice" are
+ *                           different promises and only one of them has a time
  */
 public record StoreStatus(
         Instant at,
@@ -47,7 +52,13 @@ public record StoreStatus(
         String closureReason,
         DeliveryWindow nextWindow,
         DeliveryType deliveryType,
-        Duration countdownRemaining) {
+        Duration countdownRemaining,
+        java.time.LocalDateTime pausedUntil) {
+
+    /** Whether this is a pause that ends by itself rather than an open-ended closure. */
+    public boolean pausedTemporarily() {
+        return pausedUntil != null;
+    }
 
     /** Whether the "same-day ordering closes in N minutes" warning is showing. */
     public boolean countdownActive() {

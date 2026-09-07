@@ -9,6 +9,8 @@ import com.gpstore.security.CurrentUser;
 import com.gpstore.store.DeliveryScheduleService;
 import com.gpstore.store.DeliveryWindow;
 import com.gpstore.store.StoreOperationsService;
+import com.gpstore.store.hours.ShopBusinessHours;
+import com.gpstore.store.hours.ShopHoursOverride;
 import com.gpstore.store.StoreOrderAcceptance;
 import com.gpstore.store.StoreStatusResponse;
 import org.springframework.data.domain.Page;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -63,10 +66,12 @@ public class StoreAdminController {
         Map<String, Object> body = new HashMap<>();
         body.put("orderAcceptance", settings.acceptanceOrDefault());
         body.put("closureMessage", settings.getClosureMessage());
+        body.put("pausedUntil", settings.getPausedUntil());
         body.put("updatedAt", settings.getUpdatedAt());
         body.put("updatedBy", settings.getUpdatedBy());
         body.put("status", StoreStatusResponse.from(
-                scheduleService.getStoreStatus(), scheduleService.getProperties()));
+                scheduleService.getStoreStatus(), scheduleService.getProperties(),
+                scheduleService.shopZone()));
         body.put("closures", operationsService.upcomingClosures().stream()
                 .map(StoreAdminController::closureJson)
                 .toList());
@@ -123,6 +128,188 @@ public class StoreAdminController {
         return ResponseEntity.noContent().build();
     }
 
+    // ------------------------------------------------------------------
+    // Stepping out.
+    // ------------------------------------------------------------------
+
+    /**
+     * "Back in 30 minutes", "back at four", or "no more orders today".
+     *
+     * <p>ONE ROUTE, because they are one act with three different times, and
+     * three routes would be three chances for them to disagree about what a
+     * pause does to the orders already on the board. It does nothing to them:
+     * see StoreOperationsService.pauseUntil and §12.
+     *
+     * <p>The body carries exactly one of minutes / until / restOfDay.
+     */
+    @PostMapping("/pause")
+    public Map<String, Object> pause(@RequestBody Map<String, Object> request) {
+        Object minutes = request.get("minutes");
+        Object until = request.get("until");
+        boolean restOfDay = Boolean.TRUE.equals(request.get("restOfDay"))
+                || "true".equalsIgnoreCase(String.valueOf(request.get("restOfDay")));
+        String reason = request.get("reason") == null ? null : String.valueOf(request.get("reason"));
+
+        int given = (minutes != null ? 1 : 0) + (until != null ? 1 : 0) + (restOfDay ? 1 : 0);
+        if (given != 1) {
+            throw new BadRequestException(
+                    "Say how long to pause for, exactly one way: minutes, until, or restOfDay.");
+        }
+
+        if (minutes != null) {
+            operationsService.pauseForMinutes(parseMinutes(minutes), reason, actor());
+        } else if (until != null) {
+            operationsService.pauseUntil(parseLocalDateTime(String.valueOf(until)), reason, actor());
+        } else {
+            operationsService.pauseForRestOfDay(reason, actor());
+        }
+        return operations();
+    }
+
+    /** Back open now, whatever the pause said. */
+    @PostMapping("/resume")
+    public Map<String, Object> resume() {
+        operationsService.resume(actor());
+        return operations();
+    }
+
+    // ------------------------------------------------------------------
+    // The shop's own week.
+    // ------------------------------------------------------------------
+
+    /**
+     * This shop's trading hours.
+     *
+     * <p>AN EMPTY WEEK IS A REAL ANSWER and the app has to be able to draw it:
+     * it means this shop has not set its own hours and trades on the
+     * deployment's, which is where every shop starts and where Shop #1 has
+     * been since long before shops had hours of their own.
+     */
+    @GetMapping("/hours")
+    public Map<String, Object> hours() {
+        Map<String, List<Map<String, String>>> week = new LinkedHashMap<>();
+        for (ShopBusinessHours row : operationsService.weeklyHours()) {
+            week.computeIfAbsent(row.day().name(), day -> new ArrayList<>())
+                    .add(Map.of("opensAt", row.getOpensAt().toString(),
+                            "closesAt", row.getClosesAt().toString()));
+        }
+        Map<String, Object> body = new HashMap<>();
+        body.put("week", week);
+        body.put("usesOwnHours", !week.isEmpty());
+        body.put("overrides", operationsService.upcomingHourOverrides().stream()
+                .map(StoreAdminController::overrideJson).toList());
+        return body;
+    }
+
+    /**
+     * Replaces the whole week.
+     *
+     * <p>THE WHOLE WEEK, NEVER A DAY - a weekday with no sessions is closed,
+     * so a per-day save cannot tell "we are still editing" from "we do not
+     * open on Tuesdays". Body shape:
+     * {@code {"week": {"MONDAY": [{"opensAt":"07:00","closesAt":"13:00"}, ...]}}}
+     */
+    @PutMapping("/hours")
+    public Map<String, Object> setHours(@RequestBody Map<String, Object> request) {
+        operationsService.replaceWeek(parseWeek(request.get("week")), actor());
+        return hours();
+    }
+
+    /** One date's hours instead of that weekday's. An empty list restores the usual week. */
+    @PutMapping("/hours/{date}")
+    public Map<String, Object> setHoursOn(@PathVariable String date,
+                                          @RequestBody Map<String, Object> request) {
+        operationsService.setHoursOn(parseDate(date), parseSessions(request.get("sessions")),
+                request.get("reason") == null ? null : String.valueOf(request.get("reason")),
+                actor());
+        return hours();
+    }
+
+    private static Map<String, Object> overrideJson(ShopHoursOverride row) {
+        Map<String, Object> json = new HashMap<>();
+        json.put("id", row.getId());
+        json.put("date", row.getOnDate());
+        json.put("opensAt", row.getOpensAt().toString());
+        json.put("closesAt", row.getClosesAt().toString());
+        json.put("reason", row.getReason());
+        return json;
+    }
+
+    private static Map<java.time.DayOfWeek, List<StoreOperationsService.TradingSession>> parseWeek(
+            Object raw) {
+        if (raw == null) {
+            return Map.of();
+        }
+        if (!(raw instanceof Map<?, ?> byDay)) {
+            throw new BadRequestException("week must be an object keyed by weekday name.");
+        }
+        Map<java.time.DayOfWeek, List<StoreOperationsService.TradingSession>> week =
+                new java.util.EnumMap<>(java.time.DayOfWeek.class);
+        for (Map.Entry<?, ?> entry : byDay.entrySet()) {
+            java.time.DayOfWeek day;
+            try {
+                day = java.time.DayOfWeek.valueOf(
+                        String.valueOf(entry.getKey()).trim().toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException unknown) {
+                throw new BadRequestException("Unknown weekday: " + entry.getKey());
+            }
+            List<StoreOperationsService.TradingSession> sessions = parseSessions(entry.getValue());
+            // An empty list and an absent key both mean closed; keeping the
+            // key would only make the audit line say "7 days" for a shop that
+            // opens on two.
+            if (!sessions.isEmpty()) {
+                week.put(day, sessions);
+            }
+        }
+        return week;
+    }
+
+    private static List<StoreOperationsService.TradingSession> parseSessions(Object raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        if (!(raw instanceof List<?> list)) {
+            throw new BadRequestException("sessions must be a list of {opensAt, closesAt}.");
+        }
+        List<StoreOperationsService.TradingSession> sessions = new ArrayList<>(list.size());
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> session)) {
+                throw new BadRequestException("Each session must be {opensAt, closesAt}.");
+            }
+            sessions.add(new StoreOperationsService.TradingSession(
+                    parseTime(session.get("opensAt")), parseTime(session.get("closesAt"))));
+        }
+        return sessions;
+    }
+
+    private static java.time.LocalTime parseTime(Object raw) {
+        if (raw == null) {
+            throw new BadRequestException("A session needs opensAt and closesAt, as HH:mm.");
+        }
+        try {
+            return java.time.LocalTime.parse(String.valueOf(raw).trim());
+        } catch (java.time.format.DateTimeParseException badTime) {
+            throw new BadRequestException("'" + raw + "' is not a time in HH:mm form.");
+        }
+    }
+
+    private static java.time.LocalDateTime parseLocalDateTime(String raw) {
+        try {
+            return java.time.LocalDateTime.parse(raw.trim());
+        } catch (java.time.format.DateTimeParseException badTime) {
+            throw new BadRequestException(
+                    "'" + raw + "' is not a local date and time (YYYY-MM-DDTHH:mm).");
+        }
+    }
+
+    private static int parseMinutes(Object raw) {
+        try {
+            return Integer.parseInt(String.valueOf(raw).trim());
+        } catch (NumberFormatException notANumber) {
+            throw new BadRequestException("minutes must be a whole number.");
+        }
+    }
+
     /**
      * What has to be packed for a given day's 09:00 run.
      *
@@ -165,11 +352,17 @@ public class StoreAdminController {
             rows.add(row);
         }
 
+        // NULL WHEN THE SHOP DOES NOT TRADE THAT DAY, which became possible the
+        // moment shops got their own weeks: asking for Sunday's packing list at
+        // a shop that shuts on Sundays is a fair question with the answer "no
+        // run". The order list is still returned - orders scheduled for a day
+        // the shop has since stopped trading are exactly the ones somebody
+        // needs to see - so only the two times are omitted.
         DeliveryWindow window = scheduleService.windowOn(target);
         Map<String, Object> body = new HashMap<>();
         body.put("date", target);
-        body.put("packingStartsAt", window.preparation());
-        body.put("deliveriesStartAt", window.start());
+        body.put("packingStartsAt", window == null ? null : window.preparation());
+        body.put("deliveriesStartAt", window == null ? null : window.start());
         body.put("totalOrders", orders.getTotalElements());
         body.put("page", orders.getNumber());
         body.put("size", orders.getSize());

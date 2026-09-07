@@ -32,6 +32,10 @@ import java.time.LocalTime;
  * @param countdownSeconds  seconds of same-day ordering left, or null
  * @param closedToday       whether today is a declared full-day closure
  * @param message           the shop's own words about why, or null
+ * @param pausedUntil       when a temporary pause lifts by itself, or null.
+ *                          Distinct from a shop that is simply not taking
+ *                          orders: "back at four" is a promise the app can
+ *                          draw, "closed" is not a time
  */
 public record StoreStatusResponse(
         Instant serverTime,
@@ -46,11 +50,21 @@ public record StoreStatusResponse(
         LocalTime deliveryEndTime,
         Long countdownSeconds,
         boolean closedToday,
-        String message) {
+        String message,
+        java.time.LocalDateTime pausedUntil) {
 
-    public static StoreStatusResponse from(StoreStatus status, StoreScheduleProperties properties) {
+    /**
+     * @param zone THE SHOP'S zone, because the opening and closing times below
+     *             are read off its own next run rather than off the
+     *             deployment's configuration. Before shops had hours of their
+     *             own the two were the same value; now a shop that opens at
+     *             seven would otherwise be advertised as opening at nine.
+     */
+    public static StoreStatusResponse from(StoreStatus status, StoreScheduleProperties properties,
+                                           java.time.ZoneId zone) {
         DeliveryWindow window = status.nextWindow();
         Duration remaining = status.countdownRemaining();
+        java.time.ZoneId shopZone = zone == null ? properties.getZone() : zone;
         return new StoreStatusResponse(
                 status.at(),
                 status.browsingOpen(),
@@ -60,13 +74,21 @@ public record StoreStatusResponse(
                 status.deliveryDate(),
                 window == null ? null : window.start(),
                 window == null ? null : window.end(),
-                properties.getDeliveryStart(),
-                properties.getDeliveryEnd(),
+                // THE RUN THE CUSTOMER IS ACTUALLY BEING PROMISED, not the
+                // deployment's configured hours. With no reachable run - a
+                // shop closed past the lookahead - the configuration is the
+                // only answer left, and it is better than two nulls on a
+                // banner that reads "delivers from - to -".
+                window == null ? properties.getDeliveryStart()
+                        : window.start().atZone(shopZone).toLocalTime(),
+                window == null ? properties.getDeliveryEnd()
+                        : window.end().atZone(shopZone).toLocalTime(),
                 // Null rather than 0 when inactive, so a client cannot render
                 // "closes in 0 minutes" at nine in the morning by forgetting
                 // to check a separate flag.
                 remaining == null ? null : remaining.toSeconds(),
                 status.closedToday(),
-                status.closureReason());
+                status.closureReason(),
+                status.pausedUntil());
     }
 }

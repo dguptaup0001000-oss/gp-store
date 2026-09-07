@@ -94,6 +94,28 @@ public class StoreOperationsSettings implements ShopOwned {
     @Column(name = "closure_message", length = 300)
     private String closureMessage;
 
+    /**
+     * When a pause ends by itself, or null for one that does not.
+     *
+     * <p>THE HALF THAT WAS MISSING FROM "OFF". A shopkeeper stepping out for
+     * thirty minutes had to choose between leaving the shop taking orders they
+     * cannot pack and closing it - and then discovering at nine that evening
+     * that nobody had reopened it. OFF with a time is "back shortly"; OFF
+     * without one is "closed until we say otherwise", which is still a real
+     * thing a shop needs to be able to say.
+     *
+     * <p>NOTHING RESUMES IT. There is no scheduled job, because there does not
+     * need to be one: {@link #effectiveAcceptance} compares the clock, so a
+     * pause that has run out is already over the next time anybody asks. A job
+     * would be a second place that could disagree with the first, and it would
+     * be wrong for exactly as long as it was late.
+     *
+     * <p>Stored as a timestamp rather than a duration so that "until 16:00"
+     * survives a restart, a reread and a second server.
+     */
+    @Column(name = "paused_until")
+    private LocalDateTime pausedUntil;
+
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
@@ -103,5 +125,36 @@ public class StoreOperationsSettings implements ShopOwned {
     /** Never null, whatever the row says. A null switch must not read as "off". */
     public StoreOrderAcceptance acceptanceOrDefault() {
         return orderAcceptance == null ? StoreOrderAcceptance.AUTO : orderAcceptance;
+    }
+
+    /**
+     * The switch as it stands AT AN INSTANT, with an expired pause already
+     * lifted.
+     *
+     * <p>Every read of the acceptance state on the order path goes through
+     * here rather than through {@link #acceptanceOrDefault}, so a shop that
+     * paused for half an hour is taking orders again half an hour later
+     * without anybody touching the row. The row is left alone deliberately:
+     * rewriting it on a read would turn every status check into a write, and
+     * the stored value is still the truthful record of what the shopkeeper
+     * chose.
+     *
+     * @param at the moment being asked about - the caller's, never this
+     *           method's, for the same reason getStoreStatusAt takes one
+     */
+    public StoreOrderAcceptance effectiveAcceptance(java.time.LocalDateTime at) {
+        StoreOrderAcceptance stated = acceptanceOrDefault();
+        if (stated != StoreOrderAcceptance.OFF || pausedUntil == null || at == null) {
+            return stated;
+        }
+        return at.isBefore(pausedUntil) ? StoreOrderAcceptance.OFF : StoreOrderAcceptance.AUTO;
+    }
+
+    /** The moment this pause lifts, or null when it is not a timed pause. */
+    public LocalDateTime pauseEndsAt(java.time.LocalDateTime at) {
+        if (acceptanceOrDefault() != StoreOrderAcceptance.OFF || pausedUntil == null) {
+            return null;
+        }
+        return at != null && at.isBefore(pausedUntil) ? pausedUntil : null;
     }
 }

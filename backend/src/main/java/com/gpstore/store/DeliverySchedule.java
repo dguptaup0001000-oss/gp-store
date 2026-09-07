@@ -1,10 +1,14 @@
 package com.gpstore.store;
 
+import com.gpstore.store.hours.ShopHours;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
 
@@ -24,14 +28,32 @@ import java.util.function.Predicate;
  * {@link Instant}; this class converts into the shop's zone itself. That is
  * the single place the UTC-server problem is solved, and it cannot be bypassed
  * by a caller who reaches for LocalDateTime.now() out of habit.
+ *
+ * <p>THE HOURS ARE THE SHOP'S, and they arrive as a {@link ShopHours} value
+ * rather than being read off the deployment configuration. Everything else
+ * here is unchanged, because everything else was already a function of "when
+ * is the run" - it simply used to be one answer for the whole marketplace.
+ *
+ * <p>A DAY IS A LIST OF SESSIONS, not a single run. A shop that shuts for
+ * lunch has two, and the difference shows up in exactly one place: the scan
+ * below walks sessions within a day before moving to the next day, so an
+ * order placed at 14:00 at a shop closed 13:00-16:00 is scheduled for that
+ * afternoon's run rather than being called same-day against a van that is
+ * parked. A shop with one session behaves identically to before, because one
+ * session is what the deployment default is.
  */
 public final class DeliverySchedule {
 
     private final StoreScheduleProperties properties;
+    private final ShopHours hours;
     private final Predicate<LocalDate> closed;
 
     /**
-     * @param properties the hours, from configuration
+     * @param properties the deployment-wide parts of the schedule that are not
+     *                   a shop's trading hours: how far ahead to look for an
+     *                   open day, how long the closing countdown runs, and what
+     *                   time the morning preparation list is for
+     * @param hours      THIS SHOP's trading hours
      * @param closed     whether a given shop-local date is a full-day closure.
      *                   Taken as a predicate rather than a repository so this
      *                   class stays free of persistence; the service passes an
@@ -39,14 +61,21 @@ public final class DeliverySchedule {
      *                   one query answers a whole lookahead scan rather than
      *                   one query per day.
      */
-    public DeliverySchedule(StoreScheduleProperties properties, Predicate<LocalDate> closed) {
+    public DeliverySchedule(StoreScheduleProperties properties, ShopHours hours,
+                            Predicate<LocalDate> closed) {
         this.properties = Objects.requireNonNull(properties, "properties");
+        this.hours = Objects.requireNonNull(hours, "hours");
         this.closed = Objects.requireNonNull(closed, "closed");
+    }
+
+    /** The shop's own zone. Every local time in this class is in it. */
+    public ZoneId zone() {
+        return hours.zone();
     }
 
     /** The shop-local date at {@code at}. */
     public LocalDate localDate(Instant at) {
-        return at.atZone(properties.getZone()).toLocalDate();
+        return at.atZone(hours.zone()).toLocalDate();
     }
 
     /**
@@ -60,39 +89,68 @@ public final class DeliverySchedule {
      * order is placed now and delivered at 09:00 the same date.
      */
     public DeliveryWindow nextWindow(Instant at) {
-        ZoneId zone = properties.getZone();
-        ZonedDateTime local = at.atZone(zone);
-        LocalDate today = local.toLocalDate();
+        LocalDate today = localDate(at);
 
         for (int offset = 0; offset <= properties.getMaxClosureLookaheadDays(); offset++) {
             LocalDate date = today.plusDays(offset);
             if (closed.test(date)) {
                 continue;
             }
-            DeliveryWindow window = windowOn(date);
-            // Today's run is only a candidate while it is still running. Any
-            // later date's run is entirely in the future by construction.
-            if (!window.end().isAfter(at)) {
-                continue;
+            // SESSIONS WITHIN THE DAY, in order. For a shop with one session
+            // this is the loop that was here before; for a shop that shuts for
+            // lunch it is what makes 14:00 find the afternoon run rather than
+            // reporting that a parked van is out.
+            for (DeliveryWindow window : windowsOn(date)) {
+                // A run is only a candidate while it has not finished. Any
+                // later date's run is entirely in the future by construction.
+                if (window.end().isAfter(at)) {
+                    return window;
+                }
             }
-            return window;
         }
         return null;
     }
 
-    /** The fixed delivery run for a given shop-local date, open or not. */
+    /**
+     * The shop's runs on a given shop-local date, earliest first.
+     *
+     * Empty when the shop does not trade that weekday. Full-day closures are
+     * NOT applied here - they sit over the top, in the scan above - so this
+     * answers "what are this date's hours" rather than "is the shop shut",
+     * which is the distinction store_closures exists to keep.
+     */
+    public List<DeliveryWindow> windowsOn(LocalDate date) {
+        ZoneId zone = hours.zone();
+        List<ShopHours.OpenPeriod> sessions = hours.on(date);
+        List<DeliveryWindow> windows = new ArrayList<>(sessions.size());
+        for (ShopHours.OpenPeriod session : sessions) {
+            windows.add(new DeliveryWindow(
+                    date,
+                    // ZonedDateTime.of resolves a local time that does not exist
+                    // (a spring-forward gap) forward rather than throwing, and an
+                    // ambiguous one to the earlier offset. Asia/Kolkata has no
+                    // DST so neither arises today; a shop in a zone that does gets
+                    // a defined answer instead of an exception on the order path.
+                    ZonedDateTime.of(date, session.opensAt(), zone).toInstant(),
+                    ZonedDateTime.of(date, session.closesAt(), zone).toInstant(),
+                    ZonedDateTime.of(date, properties.getMorningPreparation(), zone).toInstant()));
+        }
+        return windows;
+    }
+
+    /**
+     * The first run of a given shop-local date, or null if the shop does not
+     * trade that day.
+     *
+     * WHY THE FIRST AND NOT THE WHOLE DAY. Its one production caller is the
+     * morning preparation list - "what has to be packed for that day's run" -
+     * and packing is done before the shop opens, so the run it means is the
+     * first one. A shop with a single session, which is every shop until one
+     * says otherwise, is unaffected either way.
+     */
     public DeliveryWindow windowOn(LocalDate date) {
-        ZoneId zone = properties.getZone();
-        return new DeliveryWindow(
-                date,
-                // ZonedDateTime.of resolves a local time that does not exist
-                // (a spring-forward gap) forward rather than throwing, and an
-                // ambiguous one to the earlier offset. Asia/Kolkata has no
-                // DST so neither arises today; a shop in a zone that does gets
-                // a defined answer instead of an exception on the order path.
-                ZonedDateTime.of(date, properties.getDeliveryStart(), zone).toInstant(),
-                ZonedDateTime.of(date, properties.getDeliveryEnd(), zone).toInstant(),
-                ZonedDateTime.of(date, properties.getMorningPreparation(), zone).toInstant());
+        List<DeliveryWindow> windows = windowsOn(date);
+        return windows.isEmpty() ? null : windows.get(0);
     }
 
     /**
@@ -176,8 +234,16 @@ public final class DeliverySchedule {
         return nextWindow(at) != null;
     }
 
-    /** Everything above, computed once, for the status endpoint. */
-    public StoreStatus status(Instant at, StoreOrderAcceptance acceptance, String closureReason) {
+    /**
+     * Everything above, computed once, for the status endpoint.
+     *
+     * @param acceptance  the switch AS IT STANDS AT {@code at} - the caller has
+     *                    already lifted an expired pause, because only the
+     *                    caller has the row that recorded one
+     * @param pausedUntil when the shop said it would be back, or null
+     */
+    public StoreStatus status(Instant at, StoreOrderAcceptance acceptance, String closureReason,
+                              java.time.LocalDateTime pausedUntil) {
         DeliveryWindow next = nextWindow(at);
         boolean sameDay = next != null && next.contains(at);
         Duration remaining = null;
@@ -198,6 +264,7 @@ public final class DeliverySchedule {
                 closureReason,
                 next,
                 next == null ? null : (sameDay ? DeliveryType.SAME_DAY : DeliveryType.NEXT_MORNING),
-                remaining);
+                remaining,
+                pausedUntil);
     }
 }

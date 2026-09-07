@@ -46,12 +46,17 @@ class DeliveryScheduleTest {
     }
 
     private static DeliverySchedule open() {
-        return new DeliverySchedule(defaults(), date -> false);
+        // deploymentDefault: the hours every shop had before shops had hours,
+        // which is what these cases are about. The per-shop week has its own
+        // test beside this one.
+        return new DeliverySchedule(defaults(),
+                com.gpstore.store.hours.ShopHours.deploymentDefault(defaults()), date -> false);
     }
 
     private static DeliverySchedule closedOn(LocalDate... dates) {
         Set<LocalDate> shut = Set.of(dates);
-        return new DeliverySchedule(defaults(), shut::contains);
+        return new DeliverySchedule(defaults(),
+                com.gpstore.store.hours.ShopHours.deploymentDefault(defaults()), shut::contains);
     }
 
     /** A shop-local wall-clock time on {@link #DAY}, as an absolute instant. */
@@ -110,7 +115,8 @@ class DeliveryScheduleTest {
             DeliverySchedule schedule = open();
             for (int hour = 0; hour < 24; hour++) {
                 StoreStatus status = schedule.status(
-                        at(String.format("%02d:00:00", hour)), StoreOrderAcceptance.AUTO, null);
+                        at(String.format("%02d:00:00", hour)), StoreOrderAcceptance.AUTO,
+                        null, null);
                 assertTrue(status.browsingOpen(), "browsing at " + hour + ":00");
             }
         }
@@ -119,7 +125,7 @@ class DeliveryScheduleTest {
         void browsingStaysOpenEvenWhenOrderingIsSwitchedOff() {
             // Turning off orders must not turn off the catalogue. These are
             // separate switches and this is the test that says so.
-            StoreStatus status = open().status(at("03:00:00"), StoreOrderAcceptance.OFF, "Stocktake");
+            StoreStatus status = open().status(at("03:00:00"), StoreOrderAcceptance.OFF, "Stocktake", null);
             assertTrue(status.browsingOpen());
             assertFalse(status.acceptingOrders());
         }
@@ -205,7 +211,7 @@ class DeliveryScheduleTest {
             assertEquals(StoreMode.NIGHT, schedule.mode(now));
             assertEquals(DeliveryType.NEXT_MORNING, schedule.deliveryType(now));
             assertEquals(DAY.plusDays(1), schedule.deliveryDate(now));
-            assertTrue(schedule.status(now, StoreOrderAcceptance.AUTO, "Holi").closedToday());
+            assertTrue(schedule.status(now, StoreOrderAcceptance.AUTO, "Holi", null).closedToday());
         }
 
         @Test
@@ -213,7 +219,7 @@ class DeliveryScheduleTest {
             // A closed day is a day with no van, not a day with no shop.
             DeliverySchedule schedule = closedOn(DAY);
             assertTrue(schedule.acceptingOrders(at("14:00:00"), StoreOrderAcceptance.AUTO));
-            assertTrue(schedule.status(at("14:00:00"), StoreOrderAcceptance.AUTO, "Holi").browsingOpen());
+            assertTrue(schedule.status(at("14:00:00"), StoreOrderAcceptance.AUTO, "Holi", null).browsingOpen());
         }
 
         @Test
@@ -341,7 +347,8 @@ class DeliveryScheduleTest {
             p.setMorningPreparation(LocalTime.of(9, 30));
             p.setClosingCountdown(Duration.ofMinutes(30));
             p.validate();
-            DeliverySchedule schedule = new DeliverySchedule(p, date -> false);
+            DeliverySchedule schedule = new DeliverySchedule(
+                    p, com.gpstore.store.hours.ShopHours.deploymentDefault(p), date -> false);
 
             assertEquals(StoreMode.NIGHT, schedule.mode(at("09:30:00")));
             assertEquals(StoreMode.SAME_DAY, schedule.mode(at("10:00:00")));
