@@ -49,6 +49,7 @@ public class ShopSelfServiceController {
     private final com.gpstore.catalog.shop.ShopShelfCache shelfCache;
     private final com.gpstore.platform.shopinfo.ShopPolicyRepository policies;
     private final com.gpstore.platform.ShopReliability reliabilityService;
+    private final com.gpstore.payment.collection.PaymentCollection paymentCollection;
 
     public ShopSelfServiceController(ShopRepository shops, ShopLifecycleService shopLifecycle,
                                      ShopProductVariantRepository listings,
@@ -60,7 +61,9 @@ public class ShopSelfServiceController {
                                      ShopReadiness readiness,
                                      com.gpstore.catalog.shop.ShopShelfCache shelfCache,
                                      com.gpstore.platform.shopinfo.ShopPolicyRepository policies,
-                                     com.gpstore.platform.ShopReliability reliabilityService) {
+                                     com.gpstore.platform.ShopReliability reliabilityService,
+                                     com.gpstore.payment.collection.PaymentCollection paymentCollection) {
+        this.paymentCollection = paymentCollection;
         this.shelfCache = shelfCache;
         this.policies = policies;
         this.reliabilityService = reliabilityService;
@@ -125,6 +128,59 @@ public class ShopSelfServiceController {
     public ShopProfile profile() {
         return ShopProfile.of(currentShop());
     }
+
+    /**
+     * Every shop this account may work in, and which one it is working in now.
+     *
+     * <p>WHAT THE SWITCHER NEEDS, and the missing half of §4. One merchant
+     * owning several shops was already true in the data and already enforced
+     * on the way in - TenantResolver.select accepts an X-Shop-Id naming any
+     * shop the credential permits, and refuses every other - but nothing told
+     * the app WHICH shops those were, so a merchant with three kiranas had no
+     * way to reach the second and third.
+     *
+     * <p>THIS IS NOT AN AUTHORIZATION, it is a list of ones already granted.
+     * The ids come from this account's staff rows; sending one back as
+     * X-Shop-Id narrows to a shop it already permits and can never widen
+     * (§13). A shop the account is not staff of is not in this list and is
+     * refused if named anyway.
+     *
+     * <p>It also answers the case that used to be a hard error: an account on
+     * two rosters with no default could not resolve a shop at all, because
+     * choosing one for them would have been choosing one merchant's data over
+     * another's. Now the app can ask, show them both, and let them pick.
+     */
+    @GetMapping("/my-shops")
+    public MyShops myShops() {
+        Long accountId = currentUser.customerId();
+        List<Long> permitted = membership.shopIdsFor(accountId);
+        Long active = TenantContext.current() == null ? null : TenantContext.current().shopId();
+
+        List<ShopChoice> choices = permitted.stream()
+                .map(shops::findById)
+                .flatMap(java.util.Optional::stream)
+                .map(shop -> new ShopChoice(shop.getId(), shop.getCode(), shop.getDisplayName(),
+                        shop.getStatus(), shop.getLogoUrl(),
+                        // OPERABLE, not merely listed: a shop that is closed,
+                        // or whose merchant has been removed, has nothing left
+                        // to administer, and offering it in a switcher would
+                        // be offering a screen that errors on arrival.
+                        membership.isOperable(shop.getId()),
+                        shop.getId().equals(active)))
+                .toList();
+
+        return new MyShops(choices, active);
+    }
+
+    /**
+     * @param shops  every shop this account is on the staff list of
+     * @param acting the one this request was scoped to, so a switcher can show
+     *               which is selected without guessing
+     */
+    public record MyShops(List<ShopChoice> shops, Long acting) {}
+
+    public record ShopChoice(Long shopId, String code, String displayName, ShopStatus status,
+                             String logoUrl, boolean operable, boolean acting) {}
 
     @PutMapping("/profile")
     public ShopProfile updateProfile(@RequestBody ProfileUpdate update) {
@@ -215,6 +271,20 @@ public class ShopSelfServiceController {
     @GetMapping("/reliability")
     public com.gpstore.platform.ShopReliability.Record reliability() {
         return reliabilityService.forCurrentShop();
+    }
+
+    /**
+     * Where this shop's online money actually goes.
+     *
+     * <p>SAID OUT LOUD, because it is currently GP-STORE's account and a
+     * shopkeeper is entitled to know that rather than to infer it from an
+     * earnings screen that says "awaiting collection". It is also the open
+     * business decision (§17) made visible in the product instead of buried
+     * in a properties file - see PaymentCollectionModel.
+     */
+    @GetMapping("/payment-collection")
+    public com.gpstore.payment.collection.PaymentCollection.Collector paymentCollection() {
+        return paymentCollection.forShop(currentShop().getId());
     }
 
     public record PolicyUpdate(String body) {}
