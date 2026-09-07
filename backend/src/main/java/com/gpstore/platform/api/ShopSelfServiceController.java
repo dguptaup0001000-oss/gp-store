@@ -5,6 +5,8 @@ import com.gpstore.catalog.shop.ShopProductVariantRepository;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.platform.*;
+import com.gpstore.platform.shopinfo.ShopPolicy;
+import com.gpstore.platform.shopinfo.ShopPolicyKind;
 import com.gpstore.security.AdminPermission;
 import com.gpstore.security.CurrentUser;
 import org.springframework.web.bind.annotation.*;
@@ -45,6 +47,8 @@ public class ShopSelfServiceController {
     private final com.gpstore.money.ShopEarnings earnings;
     private final ShopReadiness readiness;
     private final com.gpstore.catalog.shop.ShopShelfCache shelfCache;
+    private final com.gpstore.platform.shopinfo.ShopPolicyRepository policies;
+    private final com.gpstore.platform.ShopReliability reliabilityService;
 
     public ShopSelfServiceController(ShopRepository shops, ShopLifecycleService shopLifecycle,
                                      ShopProductVariantRepository listings,
@@ -54,8 +58,12 @@ public class ShopSelfServiceController {
                                      com.gpstore.service.AuditLogService auditLog,
                                      com.gpstore.money.ShopEarnings earnings,
                                      ShopReadiness readiness,
-                                     com.gpstore.catalog.shop.ShopShelfCache shelfCache) {
+                                     com.gpstore.catalog.shop.ShopShelfCache shelfCache,
+                                     com.gpstore.platform.shopinfo.ShopPolicyRepository policies,
+                                     com.gpstore.platform.ShopReliability reliabilityService) {
         this.shelfCache = shelfCache;
+        this.policies = policies;
+        this.reliabilityService = reliabilityService;
         this.earnings = earnings;
         this.readiness = readiness;
         this.membership = membership;
@@ -72,18 +80,30 @@ public class ShopSelfServiceController {
     public record ShopProfile(Long id, String code, String displayName, ShopStatus status,
                               String statusReason, Double latitude, Double longitude,
                               BigDecimal maxDeliveryRadiusKm, String timeZone,
-                              String supportPhone, String supportEmail, String supportWhatsapp) {
+                              String supportPhone, String supportEmail, String supportWhatsapp,
+                              String logoUrl, String businessName, String gstin,
+                              String fssaiLicence,
+                              // READ-ONLY HERE. The shopkeeper sees what the
+                              // platform has confirmed about them; they cannot
+                              // set it - see updateProfile, which has no branch
+                              // that touches it (§10).
+                              com.gpstore.platform.ShopVerificationLevel verificationLevel,
+                              java.time.LocalDateTime verifiedAt) {
         static ShopProfile of(Shop s) {
             return new ShopProfile(s.getId(), s.getCode(), s.getDisplayName(), s.getStatus(),
                     s.getStatusReason(), s.getLatitude(), s.getLongitude(),
                     s.getMaxDeliveryRadiusKm(), s.getTimeZone(),
-                    s.getSupportPhone(), s.getSupportEmail(), s.getSupportWhatsapp());
+                    s.getSupportPhone(), s.getSupportEmail(), s.getSupportWhatsapp(),
+                    s.getLogoUrl(), s.getBusinessName(), s.getGstin(), s.getFssaiLicence(),
+                    s.getVerificationLevel(), s.getVerifiedAt());
         }
     }
 
     public record ProfileUpdate(String displayName, String supportPhone, String supportEmail,
                                 String supportWhatsapp, Double latitude, Double longitude,
-                                BigDecimal maxDeliveryRadiusKm, String timeZone) {}
+                                BigDecimal maxDeliveryRadiusKm, String timeZone,
+                                String logoUrl, String businessName, String gstin,
+                                String fssaiLicence) {}
 
     public record PauseRequest(String status, String reason) {}
 
@@ -126,7 +146,83 @@ public class ShopSelfServiceController {
         if (update.timeZone() != null && !update.timeZone().isBlank()) {
             shop.setTimeZone(update.timeZone().trim());
         }
+        if (update.logoUrl() != null) shop.setLogoUrl(blankToNull(update.logoUrl()));
+        if (update.businessName() != null) shop.setBusinessName(blankToNull(update.businessName()));
+        if (update.gstin() != null) shop.setGstin(blankToNull(update.gstin()));
+        if (update.fssaiLicence() != null) shop.setFssaiLicence(blankToNull(update.fssaiLicence()));
+
+        // VERIFICATION IS NOT HERE, and its absence is the feature. A merchant
+        // who could set their own verification level has been verified by
+        // nobody; the badge is the platform's to grant (§10), through
+        // PlatformMerchantController and nowhere else. Business details ARE
+        // here - a shopkeeper states them, and the platform checks them.
         return ShopProfile.of(shops.save(shop));
+    }
+
+    // --------------------------------------------------- what the shop promises
+
+    /** This shop's policies, in the shopkeeper's own words. */
+    @GetMapping("/policies")
+    public List<PolicyView> policies() {
+        return policies.findAllByOrderByKindAsc().stream().map(PolicyView::of).toList();
+    }
+
+    /**
+     * Writes one policy.
+     *
+     * <p>An empty body REMOVES it rather than storing an empty promise: a
+     * heading with nothing under it reads to a customer as a policy they
+     * cannot find, which is worse than a shop that has not written one.
+     */
+    @PutMapping("/policies/{kind}")
+    public List<PolicyView> setPolicy(@PathVariable String kind, @RequestBody PolicyUpdate update) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        ShopPolicyKind parsed;
+        try {
+            parsed = ShopPolicyKind.valueOf(kind.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            throw new BadRequestException("Unknown policy: " + kind
+                    + ". This shop can state its DELIVERY, CANCELLATION and RETURNS policies.");
+        }
+
+        ShopPolicy row = policies.findByKind(parsed.name()).orElse(null);
+        if (update.body() == null || update.body().isBlank()) {
+            if (row != null) {
+                policies.delete(row);
+                auditLog.log("SHOP_POLICY_REMOVED", "ShopPolicy", row.getId(), parsed.name());
+            }
+            return policies();
+        }
+
+        if (row == null) {
+            row = new ShopPolicy();
+            row.setKind(parsed);
+        }
+        row.setBody(update.body().trim());
+        row.setUpdatedBy("shop:" + currentUser.customerId());
+        ShopPolicy saved = policies.save(row);
+        auditLog.log("SHOP_POLICY_SET", "ShopPolicy", saved.getId(), parsed.name());
+        return policies();
+    }
+
+    /**
+     * This shop's own trading record, and what stands between it and TRUSTED.
+     *
+     * <p>THE MERCHANT'S OWN, and only their own - it is computed for the shop
+     * in scope. A badge a shopkeeper cannot find out how to earn is a badge
+     * that looks bought, so the answer includes why it is not showing.
+     */
+    @GetMapping("/reliability")
+    public com.gpstore.platform.ShopReliability.Record reliability() {
+        return reliabilityService.forCurrentShop();
+    }
+
+    public record PolicyUpdate(String body) {}
+
+    public record PolicyView(String kind, String body, java.time.LocalDateTime updatedAt) {
+        static PolicyView of(ShopPolicy policy) {
+            return new PolicyView(policy.getKindName(), policy.getBody(), policy.getUpdatedAt());
+        }
     }
 
     /**

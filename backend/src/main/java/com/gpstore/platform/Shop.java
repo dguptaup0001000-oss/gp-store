@@ -107,6 +107,50 @@ public class Shop {
 
     // -------------------------------------------------------------- contact
 
+    /** The shop's own picture, shown wherever the marketplace lists it. */
+    @Column(name = "logo_url", length = 500)
+    private String logoUrl;
+
+    /**
+     * The registered business behind this shop, and its licences.
+     *
+     * <p>PER SHOP, NOT PER MERCHANT, and that is not a detail: a GSTIN and an
+     * FSSAI licence are issued against PREMISES, so a merchant with three
+     * kiranas has three of them. Hanging one off the merchant would put the
+     * wrong licence number on two of their shops' invoices.
+     */
+    @Column(name = "business_name", length = 200)
+    private String businessName;
+
+    @Column(name = "gstin", length = 20)
+    private String gstin;
+
+    @Column(name = "fssai_licence", length = 30)
+    private String fssaiLicence;
+
+    /**
+     * How far GP-STORE has checked who this shop is.
+     *
+     * <p>SET BY THE PLATFORM AND BY NOBODY ELSE. A merchant who could set
+     * their own verification level has not been verified by anybody, and the
+     * badge would mean exactly nothing - see ShopSelfServiceController, which
+     * has no route that touches this, and PlatformMerchantController, which
+     * has the only one that does.
+     */
+    @Column(name = "verification_level", nullable = false, length = 30)
+    @Enumerated(EnumType.STRING)
+    private ShopVerificationLevel verificationLevel = ShopVerificationLevel.NONE;
+
+    @Column(name = "verified_at")
+    private LocalDateTime verifiedAt;
+
+    @Column(name = "verified_by", length = 120)
+    private String verifiedBy;
+
+    /** Why the platform granted or withdrew it. Internal; never shown to a customer. */
+    @Column(name = "verification_note", length = 500)
+    private String verificationNote;
+
     @Column(name = "support_phone", length = 30)
     private String supportPhone;
 
@@ -193,6 +237,36 @@ public class Shop {
 
     public String getPincode() { return pincode; }
     public void setPincode(String pincode) { this.pincode = pincode; }
+
+    public String getLogoUrl() { return logoUrl; }
+    public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
+
+    public String getBusinessName() { return businessName; }
+    public void setBusinessName(String businessName) { this.businessName = businessName; }
+
+    public String getGstin() { return gstin; }
+    public void setGstin(String gstin) { this.gstin = gstin; }
+
+    public String getFssaiLicence() { return fssaiLicence; }
+    public void setFssaiLicence(String fssaiLicence) { this.fssaiLicence = fssaiLicence; }
+
+    /** Never null: a row written before this column existed reads as NONE. */
+    public ShopVerificationLevel getVerificationLevel() {
+        return verificationLevel == null ? ShopVerificationLevel.NONE : verificationLevel;
+    }
+
+    public void setVerificationLevel(ShopVerificationLevel verificationLevel) {
+        this.verificationLevel = verificationLevel;
+    }
+
+    public LocalDateTime getVerifiedAt() { return verifiedAt; }
+    public void setVerifiedAt(LocalDateTime verifiedAt) { this.verifiedAt = verifiedAt; }
+
+    public String getVerifiedBy() { return verifiedBy; }
+    public void setVerifiedBy(String verifiedBy) { this.verifiedBy = verifiedBy; }
+
+    public String getVerificationNote() { return verificationNote; }
+    public void setVerificationNote(String verificationNote) { this.verificationNote = verificationNote; }
 
     public String getSupportPhone() { return supportPhone; }
     public void setSupportPhone(String supportPhone) { this.supportPhone = supportPhone; }

@@ -259,6 +259,10 @@ public class SecurityConfig {
                 // rather than the accident it is. The controller asks for the
                 // same permission again - see requirePermission there.
                 .requestMatchers("/api/shop/earnings").hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
+                // The shop's own trading record is figures about its orders,
+                // so it is gated like its takings rather than like its
+                // catalogue.
+                .requestMatchers("/api/shop/reliability").hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
                 .requestMatchers("/api/shop/open-work").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
 
                 .requestMatchers("/api/shop/**").hasAuthority(AdminPermission.CATALOG_VIEW.authority())

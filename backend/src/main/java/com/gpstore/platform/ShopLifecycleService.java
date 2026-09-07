@@ -135,6 +135,43 @@ public class ShopLifecycleService {
         return saved;
     }
 
+    /**
+     * Records how far GP-STORE has checked who a shop is (§10).
+     *
+     * <p>NOT A STATUS TRANSITION, and kept apart from one on purpose. A shop's
+     * STATUS is whether it may trade; its VERIFICATION is what the platform
+     * has confirmed about who is behind it. A suspended shop can be business
+     * verified, and a brand-new unverified shop can be trading - conflating
+     * them would mean withdrawing a badge to suspend a shop, or vouching for
+     * one to let it open.
+     *
+     * <p>AUDITED IN BOTH DIRECTIONS. Withdrawing a badge is the more important
+     * of the two to be able to explain later, so the note is recorded whether
+     * the level went up or down.
+     */
+    @Transactional
+    public Shop verify(Long shopId, ShopVerificationLevel level, String note) {
+        Shop shop = shops.findById(shopId).orElseThrow(
+                () -> new com.gpstore.exception.ResourceNotFoundException("Shop not found"));
+        ShopVerificationLevel previous = shop.getVerificationLevel();
+
+        shop.setVerificationLevel(level);
+        shop.setVerificationNote(note == null || note.isBlank() ? null : note.trim());
+        // Cleared rather than kept when the badge is withdrawn: "verified on
+        // the 3rd" beside a shop that is no longer verified is a sentence that
+        // reads as an endorsement.
+        shop.setVerifiedAt(level == ShopVerificationLevel.NONE ? null : java.time.LocalDateTime.now());
+        // WHO is recorded by the audit entry below, which is the record that
+        // matters and the one that cannot be overwritten by the next change.
+        // This column is for the storefront's "verified by GP-STORE" line.
+        shop.setVerifiedBy(level == ShopVerificationLevel.NONE ? null : "GP-STORE");
+        Shop saved = shops.save(shop);
+
+        auditLog.log("SHOP_VERIFICATION_CHANGED", "Shop", shopId,
+                previous + " -> " + level + (note == null ? "" : ": " + note));
+        return saved;
+    }
+
     /** A platform-level move: any transition the table allows. */
     @Transactional
     public Shop transitionAsPlatform(Long shopId, ShopStatus next, String reason) {

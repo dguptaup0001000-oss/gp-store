@@ -44,10 +44,16 @@ public class MarketplaceController {
     private final PlatformProperties platform;
     private final ShopScopeSwitch shopScope;
     private final DeliveryScheduleService schedule;
+    private final com.gpstore.platform.ShopReliability reliability;
+    private final com.gpstore.platform.shopinfo.ShopPolicyRepository policies;
 
     public MarketplaceController(ShopDiscovery discovery, ShopRepository shops,
                                  PlatformProperties platform, ShopScopeSwitch shopScope,
-                                 DeliveryScheduleService schedule) {
+                                 DeliveryScheduleService schedule,
+                                 com.gpstore.platform.ShopReliability reliability,
+                                 com.gpstore.platform.shopinfo.ShopPolicyRepository policies) {
+        this.reliability = reliability;
+        this.policies = policies;
         this.discovery = discovery;
         this.shops = shops;
         this.platform = platform;
@@ -65,6 +71,14 @@ public class MarketplaceController {
      */
     public record StorefrontView(Long shopId, String code, String displayName,
                                  Double latitude, Double longitude,
+                                 String logoUrl,
+                                 // WHAT GP-STORE HAS CHECKED, and nothing more.
+                                 // Both come off the shops row, so they cost
+                                 // the discovery list nothing; TRUSTED does
+                                 // not, and is on the detail below for that
+                                 // reason.
+                                 com.gpstore.platform.ShopVerificationLevel verificationLevel,
+                                 String verificationBadge,
                                  BigDecimal maxDeliveryRadiusKm,
                                  Double distanceKm,
                                  Boolean deliversHere,
@@ -170,14 +184,42 @@ public class MarketplaceController {
      */
     @Transactional(readOnly = true)
     @GetMapping("/shops/{shopId}")
-    public StorefrontView storefront(@PathVariable Long shopId) {
+    public StorefrontDetail storefront(@PathVariable Long shopId) {
         if (!discovery.isBrowsableByCustomers(shopId)) {
             throw new com.gpstore.exception.ResourceNotFoundException("Shop not found");
         }
-        return view(shops.findById(shopId).orElseThrow(
-                () -> new com.gpstore.exception.ResourceNotFoundException("Shop not found")),
-                null, null);
+        Shop shop = shops.findById(shopId).orElseThrow(
+                () -> new com.gpstore.exception.ResourceNotFoundException("Shop not found"));
+
+        // TRUSTED AND THE POLICIES ARE HERE AND NOT ON THE LIST, deliberately.
+        // Both need queries inside the shop's own scope - the trading record
+        // is counted from its orders - and a discovery list of a dozen shops
+        // would pay for all of them to draw one badge each. This is the screen
+        // a customer opens when they are deciding whether to buy from a shop,
+        // which is where the answer is worth a query.
+        boolean trusted = shopScope.within(shopId, reliability::isTrusted);
+        List<PolicyView> promises = shopScope.within(shopId,
+                () -> policies.findAllByOrderByKindAsc().stream()
+                        .map(p -> new PolicyView(p.getKindName(), p.getBody()))
+                        .toList());
+
+        return new StorefrontDetail(view(shop, null, null), trusted, promises,
+                shop.getBusinessName());
     }
+
+    /**
+     * One storefront, as a customer deciding whether to buy from it sees it.
+     *
+     * @param trusted §10's EARNED badge, computed from this shop's own trading
+     *                record every time it is asked. There is no column behind
+     *                it, which is what makes it unpurchasable rather than
+     *                merely expensive.
+     */
+    public record StorefrontDetail(StorefrontView shop, boolean trusted,
+                                   List<PolicyView> policies, String businessName) {}
+
+    /** A promise this shop makes, in its own words. */
+    public record PolicyView(String kind, String body) {}
 
     /**
      * Whether this deployment is a marketplace at all.
@@ -225,7 +267,10 @@ public class MarketplaceController {
     private StorefrontView view(Shop shop, Double distanceKm, Boolean deliversHere) {
         StoreStatus status = shopScope.within(shop.getId(), schedule::getStoreStatus);
         return new StorefrontView(shop.getId(), shop.getCode(), shop.getDisplayName(),
-                shop.getLatitude(), shop.getLongitude(), shop.getMaxDeliveryRadiusKm(),
+                shop.getLatitude(), shop.getLongitude(),
+                shop.getLogoUrl(),
+                shop.getVerificationLevel(), shop.getVerificationLevel().badge(),
+                shop.getMaxDeliveryRadiusKm(),
                 distanceKm, deliversHere,
                 status.browsingOpen(), status.acceptingOrders(),
                 status.closedToday(), status.closureReason(), status.pausedUntil(),

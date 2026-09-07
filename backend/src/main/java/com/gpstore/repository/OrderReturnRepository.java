@@ -67,4 +67,15 @@ public interface OrderReturnRepository extends JpaRepository<OrderReturn, Long> 
     Optional<OrderReturn> findByIdForUpdate(@Param("id") Long id);
 
     long countByStatus(OrderReturn.Status status);
+
+    /**
+     * Returns raised against this shop since a date.
+     *
+     * <p>Shop-scoped by the filter, like everything else here, so it answers
+     * "how often does THIS shop have to take something back" rather than the
+     * marketplace's average - which is the only version of the question that
+     * says anything about the shop (see ShopReliability).
+     */
+    @Query("select count(r) from OrderReturn r where r.requestedAt >= :since")
+    long countSince(@Param("since") java.time.LocalDateTime since);
 }

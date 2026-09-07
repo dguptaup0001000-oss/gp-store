@@ -173,6 +173,37 @@ public class PlatformMerchantController {
     }
 
     /**
+     * How far GP-STORE has checked who a shop is (§10).
+     *
+     * <p>THE ONLY ROUTE THAT CAN SET THIS, AND IT IS THE PLATFORM'S. A
+     * merchant who could verify their own shop has been verified by nobody,
+     * and the badge would mean exactly nothing to the customer reading it -
+     * so ShopSelfServiceController has no route that touches it, which is a
+     * fact ShopVerificationIsEarnedTest asserts rather than a convention.
+     *
+     * <p>TRUSTED IS NOT SETTABLE HERE EITHER, and not because it was left out:
+     * it is not a value anywhere. It is computed from the shop's own trading
+     * record (ShopReliability), so there is nothing to grant, nothing to
+     * backfill, and nothing to sell.
+     */
+    @PutMapping("/shops/{id}/verification")
+    public ShopView setVerification(@PathVariable Long id,
+                                    @RequestBody VerificationRequest request) {
+        com.gpstore.platform.ShopVerificationLevel level;
+        try {
+            level = com.gpstore.platform.ShopVerificationLevel.valueOf(
+                    String.valueOf(request.level()).trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException | NullPointerException unknown) {
+            throw new com.gpstore.exception.BadRequestException(
+                    "Unknown verification level: " + request.level()
+                            + ". TRUSTED is earned from the shop's trading record, not granted.");
+        }
+        return ShopView.of(shopLifecycle.verify(id, level, request.note()));
+    }
+
+    public record VerificationRequest(String level, String note) {}
+
+    /**
      * Puts an account on a shop's staff list.
      *
      * THE ONLY WAY A STAFF ACCOUNT GETS A SHOP, and therefore the only way one

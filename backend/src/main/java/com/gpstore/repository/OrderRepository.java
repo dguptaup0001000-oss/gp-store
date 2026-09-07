@@ -239,6 +239,20 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Object[]> countByStatus();
 
     /**
+     * This shop's own trading record over a window: how many orders, in what
+     * state.
+     *
+     * <p>JPQL over a shop-owned entity, so the filter narrows it to the shop
+     * in scope - which is what makes "this shop's reliability" a question that
+     * cannot accidentally be answered with the marketplace's. It is also why
+     * this takes no shop id: a reliability figure computed for a shop the
+     * caller named would be a shop's record read by whoever asked.
+     */
+    @Query("select o.orderStatus as status, count(o) as cnt from Order o "
+            + "where o.orderDate >= :since group by o.orderStatus")
+    List<Object[]> countByStatusSince(@Param("since") java.time.LocalDateTime since);
+
+    /**
      * Backs order number generation (see OrderService.placeOrder) with a
      * real Postgres sequence (V6 migration) instead of JVM memory - a
      * database sequence survives process restarts, unlike the in-memory
