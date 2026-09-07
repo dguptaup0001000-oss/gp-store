@@ -409,6 +409,98 @@ check("3l. search farther is bounded by the server and stops at the top rung",
       and float(far.get("radiusKm")) == 25.0 and far.get("nextRadiusKm") is None,
       f"default next={near.get('nextRadiusKm')} clamped={far.get('radiusKm')}")
 
+# 3m-3t. -------------------------- what Part 1 added, over HTTP on two shops
+#
+# Every one of these was a deployment-wide setting or a missing capability
+# until Part 1. They are checked here, against two real shops on a real
+# server, because a per-shop setting that is only per-shop in a unit test is
+# a per-shop setting nobody has run.
+
+# The shop's own week. A sets its hours; B says nothing and keeps the
+# deployment's, which is what every shop did before shops had hours.
+week = {day: [{"opensAt": "07:00", "closesAt": "11:00"}] for day in
+        ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]}
+status_hours, _ = call("PUT", "/api/admin/store/hours", owner_a, {"week": week})
+status_a_hours, hours_a = call("GET", "/api/admin/store/hours", owner_a)
+status_b_hours, hours_b = call("GET", "/api/admin/store/hours", owner_b)
+check("3m. a shop sets its own trading hours, and its neighbour keeps the deployment's",
+      status_hours == 200 and hours_a.get("usesOwnHours") is True
+      and hours_b.get("usesOwnHours") is False,
+      f"A uses own={hours_a.get('usesOwnHours')} B uses own={hours_b.get('usesOwnHours')}")
+
+status_a_ops, ops_a = call("GET", "/api/admin/store/operations", owner_a)
+status_b_ops, ops_b = call("GET", "/api/admin/store/operations", owner_b)
+check("3n. and the customer-facing window follows the shop that set them",
+      ops_a["status"]["deliveryStartTime"].startswith("07:")
+      and ops_b["status"]["deliveryStartTime"].startswith("09:"),
+      f"A opens {ops_a['status']['deliveryStartTime']}, B opens {ops_b['status']['deliveryStartTime']}")
+
+# Put A back on the deployment's hours so nothing after this trades at 07:00.
+call("PUT", "/api/admin/store/hours", owner_a, {"week": {}})
+
+# "Back in 30 minutes" - one shop only.
+call("POST", "/api/admin/store/pause", owner_a, {"minutes": 30, "reason": f"Back shortly {STAMP}"})
+front_a, front_b = storefront(shop_a), storefront(shop_b)
+check("3o. a timed pause stops one shop taking orders and says when it is back",
+      front_a.get("acceptingOrders") is False and front_a.get("pausedUntil") is not None
+      and front_b.get("acceptingOrders") is True,
+      f"A paused until {front_a.get('pausedUntil')}, B accepting={front_b.get('acceptingOrders')}")
+call("POST", "/api/admin/store/resume", owner_a, {})
+check("3p. and resuming clears it",
+      storefront(shop_a).get("acceptingOrders") is True
+      and storefront(shop_a).get("pausedUntil") is None,
+      "the shopkeeper is back")
+
+# §7 STATE 2 - sold out, over HTTP.
+sold_out = variants["A-only-dal"]
+call("PUT", f"/api/inventory/{inventory_ids[(shop_a, 'A-only-dal')]}", owner_a,
+     {"stock": 0, "reservedStock": 0})
+status_feed, feed = call("GET", "/api/products/feed?page=0&size=200", customer, shop=shop_a)
+empty_card = None
+for item in feed.get("content", []):
+    if item.get("id") == products["A-only-dal"]:
+        empty_card = item
+check("3q. a sold-out line is still on the shelf, and says it is out of stock",
+      empty_card is not None
+      and empty_card["variants"][0].get("inStock") is False
+      and empty_card["variants"][0].get("available") is True,
+      f"card={'present' if empty_card else 'MISSING'} "
+      f"inStock={empty_card['variants'][0].get('inStock') if empty_card else '-'}")
+add_when_empty = call("POST", f"/api/carts/add?variantId={sold_out}&quantity=1", customer,
+                      shop=shop_a)
+check("3r. and the server refuses to put it in a basket",
+      add_when_empty[0] != 200, f"HTTP {add_when_empty[0]}")
+call("PUT", f"/api/inventory/{inventory_ids[(shop_a, 'A-only-dal')]}", owner_a,
+     {"stock": 12, "reservedStock": 0})
+
+# §10 - the platform grants a badge; the merchant cannot.
+call("PUT", f"/api/platform/shops/{shop_b}/verification", platform,
+     {"level": "BUSINESS_VERIFIED", "note": f"papers checked {STAMP}"})
+status_detail_b, detail_b = call("GET", f"/api/marketplace/shops/{shop_b}", customer)
+status_detail_a, detail_a = call("GET", f"/api/marketplace/shops/{shop_a}", customer)
+check("3s. a verification badge is the platform's to grant, and it does not spread",
+      detail_b["shop"]["verificationLevel"] == "BUSINESS_VERIFIED"
+      and detail_a["shop"]["verificationLevel"] == "NONE",
+      f"B={detail_b['shop']['verificationLevel']} A={detail_a['shop']['verificationLevel']}")
+check("3t. trusted is earned, so a shop that opened today does not have it",
+      detail_b.get("trusted") is False,
+      "no column to set, so nothing to buy")
+call("PUT", f"/api/platform/shops/{shop_b}/verification", platform, {"level": "NONE"})
+
+# §4 and §17 - the switcher, and where the money goes.
+status_mine, mine = call("GET", "/api/shop/my-shops", owner_a)
+check("3u. a shopkeeper is shown the shops they may work in, and no others",
+      status_mine == 200
+      and {s["shopId"] for s in mine["shops"]} == {shop_a}
+      and mine["acting"] == shop_a,
+      f"sees {[s['shopId'] for s in mine.get('shops', [])]}")
+
+status_pay, pay = call("GET", "/api/shop/payment-collection", owner_a)
+check("3v. a shopkeeper can find out whose account their online money lands in",
+      status_pay == 200 and pay["model"] == "PLATFORM_COLLECTS",
+      f"{pay.get('model')}: {pay.get('note')}")
+
+
 # 4/5. ------------------------------------ price and stock move independently
 def listing_price(token, variant_id):
     status, rows = call("GET", "/api/shop/listings?page=0&size=200", token)

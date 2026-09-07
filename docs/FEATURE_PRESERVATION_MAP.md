@@ -43,7 +43,10 @@ needed architectural change it was migrated, never deleted (§19).
 | Order history | `OrderService`, `OrderGroupService` | shop-scoped | Every order names the shop it came from (§5). |
 | Delivery tracking | `delivery/` | shop-scoped | |
 | Notifications (FCM) | `service/NotificationService` | shop-scoped | |
-| Store status banner | `StoreStatusController` | shop-scoped | Now reports the shop's own hours. |
+| Store status banner | `StoreStatusController` | shop-scoped | Now reports the shop's own hours and a timed pause. |
+| Out-of-stock state (§7 STATE 2) | `ShopStock`, `VariantResponse.inStock` | shop-scoped | Listed-but-empty shows, says so, hides the price, cannot be added. |
+| Shop logo, badge, policies | `shops.logo_url`, `shop_policies` | shop-scoped | On the storefront detail. |
+| Trusted badge | `ShopReliability` | shop-scoped, **computed** | No column, no setter, no route — §10's "not purchasable". |
 
 ## Merchant-facing
 
@@ -65,6 +68,11 @@ needed architectural change it was migrated, never deleted (§19).
 | Timed pause | `StoreOperationsSettings.pausedUntil` | shop-scoped | Added in Part 1. |
 | Closed days | `entity/StoreClosure` | shop-scoped | Per shop since V54. |
 | **Trading hours** | `shop_business_hours`, `shop_hours_override` | shop-scoped | Added in Part 1 — was deployment-wide. |
+| Shop switcher | `/api/shop/my-shops` | shop-scoped | Lists grants that already exist; naming anything else is refused. |
+| Policies (delivery / cancellation / returns) | `shop_policies` | shop-scoped | Empty body removes rather than storing an empty promise. |
+| Business identity (GSTIN, FSSAI) | `shops` | shop-scoped | Per premises, not per merchant. |
+| Own trading record | `/api/shop/reliability` | shop-scoped | Includes what stands between the shop and TRUSTED. |
+| Where the money goes | `/api/shop/payment-collection` | deployment-wide, **stated** | See below. |
 | Morning preparation list | `StoreAdminController` | shop-scoped | Reads the shop's own first run. |
 
 ## Worker-facing
@@ -83,6 +91,7 @@ needed architectural change it was migrated, never deleted (§19).
 | Feature | Where it lives | Status | Notes |
 |---|---|---|---|
 | Merchant lifecycle | `MerchantLifecycleService` | platform | APPLICATION → PENDING_REVIEW → APPROVED → ACTIVE (§9). |
+| Shop verification (§10) | `ShopLifecycleService.verify` | platform | NONE / VERIFIED / BUSINESS_VERIFIED. The **only** route that grants one. |
 | Shop lifecycle | `ShopLifecycleService` | platform | |
 | Market overview | `PlatformMerchantController` | platform | |
 | Catalogue definition | `CatalogDefinitionAuthorization` | platform | Only the platform defines central products. |
@@ -106,6 +115,6 @@ needed architectural change it was migrated, never deleted (§19).
 
 | Setting | Where | Correct as-is? |
 |---|---|---|
-| Payment gateway credentials (`cashfree.*`) | `CashfreeProperties` | **No.** One merchant account collects for every shop. Needs a decision before a second merchant takes an online payment. |
+| Payment gateway credentials (`cashfree.*`) | `CashfreeProperties` | **No, and now said out loud.** One account collects for every shop, which makes GP-STORE a payment aggregator. §17 forbids inventing per-merchant accounts on an architectural preference, so `PaymentCollection` is the boundary: the question is asked per shop, the merchant is told the answer, and configuring `MERCHANT_COLLECTS` without an implementation fails at boot rather than misreporting every settlement. The business decision is still open. |
 | Morning preparation time, closing countdown, closure lookahead | `StoreScheduleProperties` | Acceptable. Operational timings, not "when is this shop open". |
 | Rate limits, CORS, JWT, uploads, R2 | `config/` | Correct — platform infrastructure. |
