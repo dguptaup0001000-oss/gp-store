@@ -7,6 +7,8 @@ import com.gpstore.platform.TenantScope;
 import com.gpstore.store.StoreScheduleProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -66,6 +68,20 @@ public class ShopHoursService {
      * DeliveryScheduleService already makes for the closures table, and for
      * the same reason.
      */
+    /**
+     * CACHED, and it has to be. Building this reads three rows sets - the
+     * week, the overrides in range, and the shop's zone - and the schedule is
+     * rebuilt on every question the order path asks: is the shop accepting,
+     * what date is this for, what is the status. Without a cache that is
+     * three extra queries per checkout, which CheckoutPerformanceTest caught
+     * the moment this was introduced.
+     *
+     * <p>Safe to cache in a way a price or a stock count would not be: a
+     * shop's week changes when a shopkeeper edits it, and the edit evicts.
+     * Keyed by shop (CacheConfig.keyGenerator) and by the date range, which
+     * is derived from today and so is stable for the day.
+     */
+    @Cacheable(value = "shopHours", sync = true)
     @Transactional(readOnly = true)
     public ShopHours forCurrentShop(LocalDate from, LocalDate to) {
         try {
@@ -87,6 +103,20 @@ public class ShopHoursService {
                     + "hours instead: {}", ex.toString());
             return ShopHours.deploymentDefault(properties);
         }
+    }
+
+    /**
+     * Called after any write that changes what {@link #forCurrentShop} would
+     * answer: the week, an override, or the shop's zone.
+     *
+     * <p>All shops' entries, for the reason ShopShelfCache spells out -
+     * @CacheEvict clears a region rather than a key prefix, and a shop whose
+     * hours are ten minutes stale is a shop telling customers the wrong
+     * thing about when their shopping arrives.
+     */
+    @CacheEvict(value = "shopHours", allEntries = true)
+    public void hoursChanged() {
+        // The annotation is the whole method.
     }
 
     /**

@@ -39,10 +39,18 @@ import java.util.Map;
  * applies them as a predicate over the top of this. Expressing a closed day
  * twice is how two places start disagreeing about whether the shop is shut.
  */
-public final class ShopHours {
+public final class ShopHours implements java.io.Serializable {
+
+    /**
+     * Pinned so this type can gain fields without invalidating entries already
+     * sitting in Redis - see ProductResponse for the failure that argument
+     * comes from.
+     */
+    private static final long serialVersionUID = 1L;
 
     /** One stretch of a day the shop is open. Never spans midnight - see V55. */
-    public record OpenPeriod(LocalTime opensAt, LocalTime closesAt) {
+    public record OpenPeriod(LocalTime opensAt, LocalTime closesAt)
+            implements java.io.Serializable {
         public OpenPeriod {
             if (opensAt == null || closesAt == null || !closesAt.isAfter(opensAt)) {
                 throw new IllegalArgumentException(

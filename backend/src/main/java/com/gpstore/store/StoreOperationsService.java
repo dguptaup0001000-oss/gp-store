@@ -63,6 +63,7 @@ public class StoreOperationsService {
     private final StoreClosureRepository closureRepository;
     private final ShopBusinessHoursRepository weeklyHours;
     private final ShopHoursOverrideRepository hourOverrides;
+    private final com.gpstore.store.hours.ShopHoursService shopHours;
     private final DeliveryScheduleService scheduleService;
     private final AuditLogService auditLogService;
 
@@ -71,12 +72,14 @@ public class StoreOperationsService {
             StoreClosureRepository closureRepository,
             ShopBusinessHoursRepository weeklyHours,
             ShopHoursOverrideRepository hourOverrides,
+            com.gpstore.store.hours.ShopHoursService shopHours,
             DeliveryScheduleService scheduleService,
             AuditLogService auditLogService) {
         this.settingsRepository = settingsRepository;
         this.closureRepository = closureRepository;
         this.weeklyHours = weeklyHours;
         this.hourOverrides = hourOverrides;
+        this.shopHours = shopHours;
         this.scheduleService = scheduleService;
         this.auditLogService = auditLogService;
     }
@@ -291,6 +294,7 @@ public class StoreOperationsService {
             }
         }
 
+        shopHours.hoursChanged();
         auditLogService.log("SHOP_HOURS_CHANGED", "ShopBusinessHours", null,
                 saved.isEmpty()
                         ? "hours cleared; trading on the deployment's configured hours"
@@ -328,6 +332,7 @@ public class StoreOperationsService {
             saved.add(hourOverrides.save(row));
         }
 
+        shopHours.hoursChanged();
         auditLogService.log("SHOP_HOURS_OVERRIDE_SET", "ShopHoursOverride", null,
                 date + ": " + (saved.isEmpty() ? "back to the usual week" : saved.size() + " session(s)"));
         return saved;
