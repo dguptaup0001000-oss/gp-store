@@ -124,7 +124,7 @@ class _VariantPickerSheet extends ConsumerWidget {
   static List<ProductVariant> _ordered(List<ProductVariant> variants) {
     final sorted = variants.toList();
     sorted.sort((a, b) {
-      if (a.available != b.available) return a.available ? -1 : 1;
+      if (a.isBuyable != b.isBuyable) return a.isBuyable ? -1 : 1;
       return (a.quantity ?? 0).compareTo(b.quantity ?? 0);
     });
     return sorted;

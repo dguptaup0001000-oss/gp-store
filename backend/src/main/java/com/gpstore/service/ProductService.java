@@ -32,6 +32,7 @@ public class ProductService {
     private final com.gpstore.repository.CategoryRepository categoryRepository;
 
     private final com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue;
+    private final com.gpstore.catalog.shop.ShopStock shopStock;
     private final com.gpstore.platform.PlatformProperties platform;
 
     public ProductService(
@@ -40,7 +41,9 @@ public class ProductService {
             com.gpstore.repository.ProductImageRepository productImageRepository,
             com.gpstore.repository.CategoryRepository categoryRepository,
             com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue,
+            com.gpstore.catalog.shop.ShopStock shopStock,
             com.gpstore.platform.PlatformProperties platform) {
+        this.shopStock = shopStock;
         this.productRepository = productRepository;
         this.productImageRepository = productImageRepository;
         this.productBrowseRepository = productBrowseRepository;
@@ -359,11 +362,18 @@ public class ProductService {
         Map<Long, com.gpstore.catalog.shop.ShopProductVariant> shopTerms =
                 shopPricedCatalogue.termsFor(byId.values());
 
+        // AND ONE FOR STOCK, batched the same way and for the same reason.
+        // Without it every card on the grid says "add to basket" for a size
+        // this shop has run out of, and the customer is refused at the moment
+        // they tap it - the refusal has always been there (§7 STATE 2), the
+        // card simply had no way to know.
+        Map<Long, Integer> held = shopStock.heldFor(byId.values());
+
         List<ProductResponse> content = new ArrayList<>(orderedIds.size());
         for (Long id : orderedIds) {
             Product product = byId.get(id);
             if (product != null) {
-                content.add(ProductResponse.fromCard(product, shopTerms));
+                content.add(ProductResponse.fromCard(product, shopTerms, held));
             }
         }
         return content;
@@ -456,7 +466,7 @@ public class ProductService {
             return null;
         }
 
-        ProductResponse product = ProductResponse.from(entity, terms);
+        ProductResponse product = ProductResponse.from(entity, terms, shopStock.heldFor(entity));
 
         // The 3D model, like the gallery below, is attached ONLY here.
         // ProductResponse.from deliberately leaves it null so that no list

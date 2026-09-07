@@ -33,13 +33,16 @@ public class RecommendationService {
     private final ProductRepository productRepository;
 
     private final com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue;
+    private final com.gpstore.catalog.shop.ShopStock shopStock;
     private final com.gpstore.platform.PlatformProperties platform;
 
     public RecommendationService(OrderItemRepository orderItemRepository,
                                  ProductRepository productRepository,
                                  com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue,
+                                 com.gpstore.catalog.shop.ShopStock shopStock,
                                  com.gpstore.platform.PlatformProperties platform) {
         this.platform = platform;
+        this.shopStock = shopStock;
         this.orderItemRepository = orderItemRepository;
         this.productRepository = productRepository;
         this.shopPricedCatalogue = shopPricedCatalogue;
@@ -212,7 +215,9 @@ public class RecommendationService {
                     com.gpstore.catalog.shop.ShopProductVariant::isOrderable)) {
                 continue;
             }
-            results.add(ProductResponse.from(product, terms));
+            // Stock too: a rail that recommends what the shop has run out of
+            // is the same defect as a grid that does (§7 STATE 2).
+            results.add(ProductResponse.from(product, terms, shopStock.heldFor(product)));
         }
         return results;
     }

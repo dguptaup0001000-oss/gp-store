@@ -83,7 +83,7 @@ class WishlistScreen extends ConsumerWidget {
                           ],
                         ),
                       ),
-                      if (variant != null && variant.available)
+                      if (variant != null && variant.isBuyable)
                         IconButton(
                           icon: const Icon(Icons.add_shopping_cart_outlined, color: AppColors.primary),
                           tooltip: 'Add to cart',

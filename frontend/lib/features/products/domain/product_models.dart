@@ -28,6 +28,20 @@ class ProductVariant with _$ProductVariant {
     String? unit,
     String? imageUrl,
     required bool available,
+
+    /// Whether THIS SHOP is holding any right now.
+    ///
+    /// NULL MEANS THE SERVER DID NOT SAY, and every screen must read that as
+    /// "assume yes". It is null on an older backend, and on any response
+    /// built without a shop whose stock it could mean - an admin catalogue
+    /// screen, a platform report. Defaulting a missing value to false would
+    /// grey out the entire catalogue the moment one response left it off.
+    ///
+    /// DISTINCT FROM [available], which is "this shop lists it". A kirana
+    /// that sells atta and has run out is listed and not in stock, and §7
+    /// STATE 2 is precisely that case: the card stays on the shelf, says
+    /// "Out of stock", hides the price, and cannot be added.
+    bool? inStock,
     double? mrp,
     required double sellingPrice,
     int? displayOrder,
@@ -47,6 +61,16 @@ class ProductVariant with _$ProductVariant {
   }) = _ProductVariant;
 
   factory ProductVariant.fromJson(Map<String, dynamic> json) => _$ProductVariantFromJson(json);
+
+  const ProductVariant._();
+
+  /// Listed by this shop AND held by it - the one question every screen asks.
+  ///
+  /// Written once because it was previously written as `variant.available` in
+  /// four places, all of which meant this and none of which said it. A null
+  /// [inStock] reads as yes: it means the server did not report stock, not
+  /// that there is none.
+  bool get isBuyable => available && (inStock ?? true);
 }
 
 @freezed
@@ -147,7 +171,14 @@ class Product with _$Product {
   /// yet - this is deliberately just "what to show in a list".
   ProductVariant? get primaryVariant {
     if (variants.isEmpty) return null;
-    final available = variants.where((v) => v.available).toList();
+    // BUYABLE FIRST, then merely listed. A shop out of 1 kg but holding 5 kg
+    // is selling 5 kg (§7), so the card must not lead with the empty shelf -
+    // and when the whole product is sold out it still needs a variant to
+    // render, which is what the second fallback is for.
+    final buyable = variants.where((v) => v.isBuyable).toList();
+    final available = buyable.isNotEmpty
+        ? buyable
+        : variants.where((v) => v.available).toList();
     // Always a fresh copy, never `variants` itself. Two reasons, and the
     // second is the one that actually crashed: sorting in place would reorder
     // the model's own list as a side effect of reading a getter, and the list

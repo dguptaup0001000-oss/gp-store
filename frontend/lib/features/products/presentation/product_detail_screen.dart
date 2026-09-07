@@ -72,7 +72,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     final loaded = ref.watch(productDetailProvider(widget.product.id)).valueOrNull;
     final product = loaded ?? widget.product;
     final variant = _selectedVariant;
-    final isInStock = variant?.available ?? false;
+    // Listed AND held - see ProductCard for why null reads as yes.
+    final isInStock = variant?.isBuyable ?? false;
 
     return Scaffold(
       appBar: AppBar(
