@@ -31,6 +31,38 @@ public class Order implements ShopOwned {
     // Nullable in the column definition only because V46 added it to
     // tables that already had rows; every row is backfilled and the
     // migration refuses to complete otherwise.
+    /**
+     * HOW THIS ORDER ENDED, recorded rather than encoded in the status.
+     *
+     * <p>WHY NOT CUSTOMER_CANCELLED / MERCHANT_CANCELLED AS STATES. Every
+     * report, dashboard count, index, screen and test in this application asks
+     * {@code order_status = 'CANCELLED'}. Splitting that into three states is
+     * the tidy-looking change that silently makes all of them miss two thirds
+     * of the cancellations. Recording WHO beside the state answers everything
+     * Part 3 asks and keeps every existing query correct (§19).
+     *
+     * <p>AND FAULT IS A SEPARATE COLUMN FROM WHO, which is the whole of §12. A
+     * customer who cancels because the shop rang to say the atta never arrived
+     * cancelled it and is not at fault for it; billing them for the shop's
+     * stock-out is exactly the unfairness §12 exists to prevent. One column
+     * cannot say both.
+     */
+    @Column(name = "ended_by", length = 20)
+    @Enumerated(EnumType.STRING)
+    private com.gpstore.enums.OrderActor endedBy;
+
+    /** In the ender's own words, and shown to the other side. */
+    @Column(name = "ended_reason", length = 500)
+    private String endedReason;
+
+    @Column(name = "ended_at")
+    private LocalDateTime endedAt;
+
+    /** Null means nobody has decided yet - which is different from NOBODY. */
+    @Column(name = "fault", length = 20)
+    @Enumerated(EnumType.STRING)
+    private com.gpstore.enums.OrderFault fault;
+
     @Column(name = "shop_id")
     private Long shopId;
 
@@ -691,6 +723,35 @@ public void setTotalAmount(BigDecimal totalAmount) {
 
     public void setInventoryRestored(Boolean inventoryRestored) {
         this.inventoryRestored = inventoryRestored;
+    }
+
+    public com.gpstore.enums.OrderActor getEndedBy() { return endedBy; }
+    public void setEndedBy(com.gpstore.enums.OrderActor endedBy) { this.endedBy = endedBy; }
+
+    public String getEndedReason() { return endedReason; }
+    public void setEndedReason(String endedReason) { this.endedReason = endedReason; }
+
+    public LocalDateTime getEndedAt() { return endedAt; }
+    public void setEndedAt(LocalDateTime endedAt) { this.endedAt = endedAt; }
+
+    public com.gpstore.enums.OrderFault getFault() { return fault; }
+    public void setFault(com.gpstore.enums.OrderFault fault) { this.fault = fault; }
+
+    /**
+     * Records who ended this order and why, in one call.
+     *
+     * <p>One method rather than four setters at each call site, because the
+     * four belong together: an order with an ender and no time, or a fault and
+     * no ender, is a half-written record that the charge logic (§10) and the
+     * dispute trail (§15) then have to guess at.
+     */
+    public void endedBy(com.gpstore.enums.OrderActor actor,
+                        com.gpstore.enums.OrderFault whoseFault,
+                        String reason) {
+        this.endedBy = actor;
+        this.fault = whoseFault;
+        this.endedReason = reason == null || reason.isBlank() ? null : reason.trim();
+        this.endedAt = LocalDateTime.now();
     }
 
     @Override

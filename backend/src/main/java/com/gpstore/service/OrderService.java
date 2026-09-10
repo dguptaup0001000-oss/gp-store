@@ -20,6 +20,7 @@ import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.PaymentRepository;
 
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.order.OrderLifecycle;
 
 import com.gpstore.repository.OrderItemRepository;
 import com.gpstore.repository.OrderRepository;
@@ -1534,33 +1535,39 @@ public class OrderService {
         Order order = repository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
-        if (order.getOrderStatus() == OrderStatus.DELIVERED) {
-            throw new ConflictException("Delivered order status cannot be changed");
-        }
-
-        if (order.getOrderStatus() == OrderStatus.CANCELLED) {
-            throw new ConflictException("Cancelled order status cannot be changed");
+        // DELIVERED is terminal for STATUS PURPOSES but not for the order:
+        // DELIVERED -> COMPLETED is a real transition (§1), so the guard asks
+        // the lifecycle rather than naming states, which is also how REJECTED
+        // and COMPLETED became unmovable without a third and fourth branch.
+        if (OrderLifecycle.isTerminal(order.getOrderStatus())
+                && !OrderLifecycle.allows(order.getOrderStatus(), status)) {
+            throw new ConflictException(
+                    order.getOrderStatus() + " order status cannot be changed");
         }
 
         OrderStatus currentStatus = order.getOrderStatus();
 
-        boolean validTransition =
-                (currentStatus == OrderStatus.PENDING_CONFIRMATION && status == OrderStatus.CONFIRMED)
-                        || (currentStatus == OrderStatus.CONFIRMED && status == OrderStatus.PACKING)
-                        || (currentStatus == OrderStatus.PACKING && status == OrderStatus.READY_TO_DISPATCH)
-                        || (currentStatus == OrderStatus.READY_TO_DISPATCH && status == OrderStatus.OUT_FOR_DELIVERY)
-                        // PACKED is what a worker's QR scan writes. It sits
-                        // beside READY_TO_DISPATCH rather than replacing it:
-                        // the older state is still reachable from the admin
-                        // status dropdown and still on live orders, and
-                        // deleting a state that production rows hold is how a
-                        // deployment breaks every order mid-flight.
-                        || (currentStatus == OrderStatus.CONFIRMED && status == OrderStatus.PACKED)
-                        || (currentStatus == OrderStatus.PACKING && status == OrderStatus.PACKED)
-                        || (currentStatus == OrderStatus.READY_TO_DISPATCH && status == OrderStatus.PACKED)
-                        || (currentStatus == OrderStatus.PACKED && status == OrderStatus.OUT_FOR_DELIVERY)
-                        || (currentStatus == OrderStatus.PACKED && status == OrderStatus.READY_TO_DISPATCH)
-                        || (currentStatus == OrderStatus.OUT_FOR_DELIVERY && status == OrderStatus.DELIVERED);
+        // ENDING AN ORDER IS NOT A STATUS EDIT, and this is the guard that
+        // says so. CANCELLED and REJECTED both have to give the stock back
+        // and start the refund; reaching them through here would set the
+        // column and do neither, leaving a cancelled order whose goods are
+        // still off the shelf and whose customer is still out of pocket.
+        // OrderStatusStateMachineTest caught exactly that the moment the
+        // transition table made them reachable.
+        if (status == OrderStatus.CANCELLED || status == OrderStatus.REJECTED) {
+            throw new ConflictException(
+                    "An order is " + (status == OrderStatus.CANCELLED ? "cancelled" : "rejected")
+                            + " through its own endpoint, which returns the stock to the shelf "
+                            + "and starts the refund. Setting the status alone would do neither.");
+        }
+
+        // THE TABLE, NOT A CHAIN OF ORs. These rules used to be a fourteen
+        // clause boolean expression right here; they are now
+        // OrderLifecycle, which the merchant app can also ask "what can this
+        // order do next" instead of hard-coding a second copy that drifts.
+        // Every transition that worked before still works - the table was
+        // transcribed from the expression clause by clause.
+        boolean validTransition = OrderLifecycle.allows(currentStatus, status);
 
         if (!validTransition) {
             throw new ConflictException(
@@ -1640,6 +1647,39 @@ public class OrderService {
     @Transactional
     @io.micrometer.core.annotation.Timed(value = "order.cancel", description = "Order cancellation critical path", percentiles = {0.5, 0.95, 0.99})
     public com.gpstore.dto.response.OrderDetailResponse cancelOrder(Long orderId, Long callerCustomerId, boolean isAdmin) {
+        return endOrder(orderId, callerCustomerId, isAdmin, OrderStatus.CANCELLED, null, null);
+    }
+
+    /**
+     * The shop refuses an order it has not accepted (§1).
+     *
+     * <p>THE SAME MACHINERY AS A CANCELLATION, deliberately. A rejected order
+     * has to give its stock back and refund its payment exactly as a cancelled
+     * one does - the only differences are the word the customer sees and the
+     * fact that nobody is billed for it. Writing a second path would be
+     * writing a second chance to forget the refund.
+     *
+     * <p>ONLY BEFORE ACCEPTANCE. OrderLifecycle refuses PENDING_CONFIRMATION
+     * as the only origin, because §2 says a shop that has said yes owes the
+     * order; a shop that cannot fulfil one it accepted cancels it instead, at
+     * MERCHANT fault, and the customer is still not charged (§12).
+     */
+    @Transactional
+    public com.gpstore.dto.response.OrderDetailResponse rejectOrder(Long orderId, String reason) {
+        return endOrder(orderId, null, true, OrderStatus.REJECTED,
+                com.gpstore.enums.OrderActor.MERCHANT, reason);
+    }
+
+    /**
+     * Ends an order: cancelled or rejected, stock back, refund started.
+     *
+     * @param endState  CANCELLED or REJECTED - the word, not the mechanism
+     * @param asActor   who is ending it, or null to infer from isAdmin
+     * @param reason    in the ender's own words, shown to the other side
+     */
+    private com.gpstore.dto.response.OrderDetailResponse endOrder(
+            Long orderId, Long callerCustomerId, boolean isAdmin,
+            OrderStatus endState, com.gpstore.enums.OrderActor asActor, String reason) {
 
         // See OrderRepository.findByIdForUpdate's doc comment - this is the
         // fix for the exact race a double-tap on "Cancel order" (or two
@@ -1654,12 +1694,21 @@ public class OrderService {
             throw new ResourceNotFoundException("Order not found");
         }
 
-        if (order.getOrderStatus() == OrderStatus.DELIVERED) {
-            throw new ConflictException("Delivered order cannot be cancelled");
+        if (OrderLifecycle.isTerminal(order.getOrderStatus())) {
+            throw new ConflictException(
+                    order.getOrderStatus() == OrderStatus.CANCELLED
+                            ? "Order is already cancelled"
+                            : order.getOrderStatus() + " order cannot be cancelled");
         }
 
-        if (order.getOrderStatus() == OrderStatus.CANCELLED) {
-            throw new ConflictException("Order is already cancelled");
+        // §2 lives here as well as in the table: rejection is only available
+        // before the shop has accepted, so a shop looking for a way out of an
+        // order it took on is told to cancel it - which puts the fault, and
+        // therefore the refund, where §12 says it belongs.
+        if (!OrderLifecycle.allows(order.getOrderStatus(), endState)) {
+            throw new ConflictException(
+                    "A " + order.getOrderStatus() + " order cannot be "
+                            + endState.name().toLowerCase(java.util.Locale.ROOT) + ".");
         }
 
         if (!isAdmin && !customerMayCancel(order.getOrderStatus())) {
@@ -1667,7 +1716,27 @@ public class OrderService {
                     "This order can no longer be cancelled. Contact the shop if you need help.");
         }
 
-        order.setOrderStatus(OrderStatus.CANCELLED);
+        order.setOrderStatus(endState);
+
+        // WHO ENDED IT, written down at the moment it ends (§10/§12). A
+        // customer cancelling their own order is, by default, their own
+        // doing - it is the ordinary case, and the only case a cancellation
+        // charge may ever apply to. A REJECTION is the shop's own decision and
+        // the customer did not cause it, so the fault is the merchant's and
+        // nothing is billed. An admin cancelling during a dispute is PLATFORM
+        // with the fault left NULL, because "not decided yet" is the truth at
+        // that moment and guessing would decide somebody's refund on this
+        // method's behalf.
+        com.gpstore.enums.OrderActor actor = asActor != null
+                ? asActor
+                : (isAdmin ? com.gpstore.enums.OrderActor.PLATFORM
+                           : com.gpstore.enums.OrderActor.CUSTOMER);
+        com.gpstore.enums.OrderFault whoseFault = switch (actor) {
+            case CUSTOMER -> com.gpstore.enums.OrderFault.CUSTOMER;
+            case MERCHANT, WORKER -> com.gpstore.enums.OrderFault.MERCHANT;
+            case PLATFORM, SYSTEM -> null;
+        };
+        order.endedBy(actor, whoseFault, reason);
 
         // ORDER (already locked above) -> PAYMENT -> INVENTORY. Locking the
         // payment row rather than plain-reading it: the expiry sweep and the
@@ -1732,8 +1801,11 @@ public class OrderService {
         // Audit stays in the transaction - one INSERT, and a cancellation is
         // exactly the kind of event that must not be missing from the record
         // if the process dies a moment later.
-        auditLogService.log("ORDER_CANCELLED", "Order", savedOrder.getId(),
-                "cancelled by " + (isAdmin ? "admin/staff" : "customer"));
+        auditLogService.log(
+                endState == OrderStatus.REJECTED ? "ORDER_REJECTED" : "ORDER_CANCELLED",
+                "Order", savedOrder.getId(),
+                endState.name().toLowerCase(java.util.Locale.ROOT) + " by " + actor
+                        + (reason == null ? "" : ": " + reason));
 
         // Invoice cancellation is ACCOUNTING work, not a nicety: a cancelled
         // order whose invoice stays active still reads as a valid sale for
@@ -1793,8 +1865,9 @@ public class OrderService {
      * rider may already have the bag. Admin/staff can still cancel those
      * with the usual audit trail.
      */
+    /** Delegates, so the window cannot drift from the transition table (§9). */
     static boolean customerMayCancel(OrderStatus status) {
-        return status == OrderStatus.PENDING_CONFIRMATION || status == OrderStatus.CONFIRMED;
+        return OrderLifecycle.customerMayCancel(status);
     }
 
     /**
