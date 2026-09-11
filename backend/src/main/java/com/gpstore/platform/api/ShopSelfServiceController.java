@@ -50,6 +50,8 @@ public class ShopSelfServiceController {
     private final com.gpstore.platform.shopinfo.ShopPolicyRepository policies;
     private final com.gpstore.platform.ShopReliability reliabilityService;
     private final com.gpstore.payment.collection.PaymentCollection paymentCollection;
+    private final com.gpstore.repository.InventoryRepository inventory;
+    private final com.gpstore.repository.ProductVariantRepository variants;
 
     public ShopSelfServiceController(ShopRepository shops, ShopLifecycleService shopLifecycle,
                                      ShopProductVariantRepository listings,
@@ -62,8 +64,12 @@ public class ShopSelfServiceController {
                                      com.gpstore.catalog.shop.ShopShelfCache shelfCache,
                                      com.gpstore.platform.shopinfo.ShopPolicyRepository policies,
                                      com.gpstore.platform.ShopReliability reliabilityService,
-                                     com.gpstore.payment.collection.PaymentCollection paymentCollection) {
+                                     com.gpstore.payment.collection.PaymentCollection paymentCollection,
+                                     com.gpstore.repository.InventoryRepository inventory,
+                                     com.gpstore.repository.ProductVariantRepository variants) {
         this.paymentCollection = paymentCollection;
+        this.inventory = inventory;
+        this.variants = variants;
         this.shelfCache = shelfCache;
         this.policies = policies;
         this.reliabilityService = reliabilityService;
@@ -122,6 +128,20 @@ public class ShopSelfServiceController {
 
     public record ListingUpdate(BigDecimal sellingPrice, BigDecimal costPrice, BigDecimal mrp,
                                 Boolean available, Boolean active, Integer displayOrder) {}
+
+    /**
+     * What a shopkeeper says is on the shelf.
+     *
+     * <p>COUNTED STOCK ONLY. There is deliberately no reservedStock here: that
+     * number belongs to baskets and orders in flight, and a shopkeeper doing a
+     * stock-take is counting sacks of atta, not carts. Letting this route set
+     * it would let a correction quietly release stock somebody has already
+     * paid for.
+     */
+    public record StockUpdate(Integer stock, Integer minimumStock, Integer maximumStock) {}
+
+    public record StockView(Long productVariantId, Integer stock, Integer reservedStock,
+                            Integer availableStock, Integer minimumStock, Integer maximumStock) {}
 
     /** The shop this request is for. Which shop that is came from the credential. */
     @GetMapping("/profile")
@@ -365,6 +385,92 @@ public class ShopSelfServiceController {
         listing.setActive(Boolean.FALSE);
         listings.save(listing);
         shelfCache.changed();
+    }
+
+    /**
+     * How much of a listed item this shop actually has.
+     *
+     * <p>THE STEP THAT HAD NO ROUTE. A shop could set its price here and could
+     * not put stock behind it: /api/inventory takes a raw Inventory entity and
+     * needs the stock row's own id, which a brand-new listing does not have
+     * yet. The result was that the only way to open a shelf was to write to
+     * the inventory table directly - which is what the second-merchant
+     * onboarding test did, with a jdbc INSERT, because nothing else worked.
+     * A flow that cannot be completed through the API is not an onboarding
+     * flow, so this is the missing half of {@link #upsertListing}.
+     *
+     * <p>REFUSES STOCK FOR SOMETHING THIS SHOP DOES NOT SELL. The listing is
+     * looked up first, through the shop-scoped repository. Without that, a
+     * shop could create inventory rows for catalogue items it has never
+     * listed - rows that no storefront would ever show and no stock-take would
+     * ever reconcile.
+     *
+     * <p>THE SHOP IS NOT A PARAMETER, exactly as in {@link #upsertListing}.
+     * The row is read through the shop-scoped repository and stamped by the
+     * tenant listener on insert, so two shops holding stock of the same
+     * catalogue variant get two rows and neither can see the other's -
+     * inventory is unique on (shop_id, product_variant_id), not on the variant
+     * alone (V48).
+     */
+    @PutMapping("/listings/{productVariantId}/stock")
+    public StockView setStock(@PathVariable Long productVariantId,
+                              @RequestBody StockUpdate update) {
+        requirePermission(AdminPermission.INVENTORY_MANAGE);
+        if (update.stock() == null || update.stock() < 0) {
+            throw new BadRequestException("Stock cannot be negative, and has to be given.");
+        }
+        listings.findByProductVariantId(productVariantId).orElseThrow(
+                () -> new ResourceNotFoundException(
+                        "This shop does not list that item. Put it on the shelf with a price "
+                                + "first, then say how much of it there is."));
+
+        com.gpstore.entity.Inventory row = inventory.findByProductVariantId(productVariantId)
+                .orElseGet(() -> {
+                    com.gpstore.entity.Inventory fresh = new com.gpstore.entity.Inventory();
+                    fresh.setProductVariant(variants.getReferenceById(productVariantId));
+                    // NOT NULL: a new row has nothing reserved, and leaving it
+                    // null would make availableStock() arithmetic on a null.
+                    fresh.setReservedStock(0);
+                    return fresh;
+                });
+
+        Integer wasStock = row.getStock();
+        row.setStock(update.stock());
+        if (update.minimumStock() != null) {
+            row.setMinimumStock(update.minimumStock());
+        }
+        if (update.maximumStock() != null) {
+            row.setMaximumStock(update.maximumStock());
+        }
+        // reservedStock is deliberately untouched - see StockUpdate.
+
+        com.gpstore.entity.Inventory saved = inventory.save(row);
+        auditLog.log("SHOP_STOCK_SET", "Inventory", saved.getId(),
+                "variant=" + productVariantId + ", " + wasStock + " -> " + update.stock());
+        // The storefront caches what is on the shelf, and a shelf that still
+        // says "out of stock" after a delivery arrived is the same bug the
+        // price path had.
+        shelfCache.changed();
+
+        int reserved = saved.getReservedStock() == null ? 0 : saved.getReservedStock();
+        int stock = saved.getStock() == null ? 0 : saved.getStock();
+        return new StockView(productVariantId, saved.getStock(), saved.getReservedStock(),
+                Math.max(0, stock - reserved), saved.getMinimumStock(), saved.getMaximumStock());
+    }
+
+    /** What this shop has on the shelf for one item it lists. */
+    @GetMapping("/listings/{productVariantId}/stock")
+    public StockView stock(@PathVariable Long productVariantId) {
+        requirePermission(AdminPermission.INVENTORY_MANAGE);
+        listings.findByProductVariantId(productVariantId).orElseThrow(
+                () -> new ResourceNotFoundException("This shop does not list that item"));
+        com.gpstore.entity.Inventory row = inventory.findByProductVariantId(productVariantId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "No stock has been recorded for that item yet."));
+        int reserved = row.getReservedStock() == null ? 0 : row.getReservedStock();
+        int stock = row.getStock() == null ? 0 : row.getStock();
+        return new StockView(productVariantId, row.getStock(), row.getReservedStock(),
+                Math.max(0, stock - reserved), row.getMinimumStock(), row.getMaximumStock());
     }
 
     /**

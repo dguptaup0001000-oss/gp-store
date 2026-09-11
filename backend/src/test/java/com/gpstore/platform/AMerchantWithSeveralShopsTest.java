@@ -166,6 +166,63 @@ class AMerchantWithSeveralShopsTest {
     }
 
     @Test
+    @DisplayName("granting a second shop as default MOVES the default, rather than quietly not")
+    void theDefaultActuallyMoves() {
+        // FOUND BY ONBOARDING THE SAME OWNER TWICE over real HTTP, which is
+        // not an exotic thing to do - it is what happens when a merchant opens
+        // their second shop. grant(..., asDefault=true) used to check whether
+        // the account already had a default and, if it did, drop the flag on
+        // the floor: HTTP 200, no change, the administrator told the owner's
+        // home was the new shop and the owner still landing in the old one.
+        assertEquals(ourFirstShop, membership.defaultShopIdFor(ourAccount).orElseThrow(),
+                "the fixture's default should start on the first shop");
+
+        membership.grantAndMakeDefault(ourSecondShop, ourAccount);
+
+        assertEquals(ourSecondShop, membership.defaultShopIdFor(ourAccount).orElseThrow(),
+                "asking for the second shop to be the default did nothing");
+        // And the old one is not still claiming to be a default too - the
+        // table has a unique index that says only one may be, so if both rows
+        // were flagged this would already have failed on the write.
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT count(*) FROM shop_staff WHERE customer_id = ? AND is_default AND active",
+                Integer.class, ourAccount),
+                "an account must have exactly one default shop");
+        // The other shop is still theirs to work in - moving a default is not
+        // resigning from a job.
+        assertTrue(membership.shopIdsFor(ourAccount).contains(ourFirstShop),
+                "moving the default removed them from their first shop");
+    }
+
+    @Test
+    @DisplayName("granting without asking for a default leaves the one they have alone")
+    void aSilentGrantDoesNotStealTheDefault() {
+        membership.grant(ourSecondShop, ourAccount, false);
+
+        assertEquals(ourFirstShop, membership.defaultShopIdFor(ourAccount).orElseThrow(),
+                "adding somebody to another shop took away the home they had");
+    }
+
+    @Test
+    @DisplayName("opening a second storefront does not move the owner out of their first")
+    void openingAnotherBranchDoesNotRelocateTheOwner() {
+        // THE OTHER HALF OF THE SAME DISTINCTION, and the one that caught the
+        // first attempt at this fix out. ShopLifecycleService.open() grants
+        // the merchant's owner their new shop so that a brand new storefront
+        // is not one nobody can sign in to - that is bootstrapping access, and
+        // it must not relocate somebody who was working in their other shop a
+        // moment ago and was not asked. Making grant() move the default
+        // unconditionally broke five tests in MarketplaceIdentityTest, all of
+        // them saying this.
+        assertEquals(ourFirstShop, membership.defaultShopIdFor(ourAccount).orElseThrow());
+
+        membership.grant(ourSecondShop, ourAccount, true);
+
+        assertEquals(ourFirstShop, membership.defaultShopIdFor(ourAccount).orElseThrow(),
+                "opening another branch silently moved the owner's home shop");
+    }
+
+    @Test
     @DisplayName("a shop the platform has closed is listed but not offered as workable")
     void aClosedShopIsShownAsNotOperable() {
         jdbc.update("UPDATE shops SET status = 'CLOSED' WHERE id = ?", ourSecondShop);

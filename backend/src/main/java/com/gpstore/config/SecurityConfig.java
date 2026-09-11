@@ -269,6 +269,16 @@ public class SecurityConfig {
                 // A SHOPKEEPER'S OWN SHOP: their profile, their price list,
                 // their staff. Shop-scoped by TenantContextFilter, so "their
                 // own" is enforced by the tenant filter rather than by a path.
+                // HOW MUCH IS ON THE SHELF IS AN INVENTORY ACT, not a
+                // catalogue one, and this line has to sit ABOVE the listings
+                // rule below or the more general pattern would swallow it and
+                // demand CATALOG_MANAGE for a stock-take. A shop's stock clerk
+                // holds INVENTORY_MANAGE and no pricing permission; pricing and
+                // counting are different jobs in a real kirana, and /api/inventory
+                // is already gated this way. The controller asks for the same
+                // permission again - see requirePermission there.
+                .requestMatchers("/api/shop/listings/*/stock")
+                    .hasAuthority(AdminPermission.INVENTORY_MANAGE.authority())
                 .requestMatchers("/api/shop/listings/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
 
                 // THE BACK OFFICE, gated on what it is about rather than on

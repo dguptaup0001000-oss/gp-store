@@ -275,11 +275,21 @@ class SecondMerchantOnboardingTest {
                  "available":true,"active":true}
                 """, 200);
 
-        // and put stock behind it
-        jdbc.update("DELETE FROM inventory WHERE shop_id = ? AND product_variant_id = ?",
-                shopId, variantId);
-        jdbc.update("INSERT INTO inventory (product_variant_id, stock, reserved_stock, shop_id) "
-                + "VALUES (?, 50, 0, ?)", variantId, shopId);
+        // ---- 8b. and put stock behind it, THROUGH THE API ------------------
+        //
+        // THIS STEP USED TO BE A jdbc INSERT INTO inventory, and that was the
+        // most useful thing this test ever said. There was no route a
+        // shopkeeper could call to stock a listing they had just created:
+        // /api/inventory wants a whole Inventory entity and the stock row's own
+        // id, which a new listing has not got. The test reached around the API
+        // into the table, the onboarding looked complete, and a real merchant
+        // would have been stuck at exactly this point.
+        //
+        // If this call is ever replaced by SQL again, the flow has stopped
+        // being completable through the API and the test has stopped telling
+        // the truth about onboarding.
+        perform(put("/api/shop/listings/" + variantId + "/stock"), owner, Role.ADMIN,
+                "{\"stock\":50,\"minimumStock\":5}", 200);
 
         // ---- 9. they open for business ------------------------------------
         //

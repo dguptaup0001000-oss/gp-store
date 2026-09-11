@@ -214,7 +214,16 @@ public class PlatformMerchantController {
      */
     @PostMapping("/shops/{shopId}/staff")
     public void addStaff(@PathVariable Long shopId, @RequestBody StaffRequest request) {
-        membership.grant(shopId, request.customerId(), Boolean.TRUE.equals(request.asDefault()));
+        // ASKED FOR, SO DONE. "Add them and make this their default" is an
+        // instruction from the platform console, not a hint - see
+        // ShopMembership.grantAndMakeDefault. Without the split this line
+        // answered 200 and changed nothing for anybody who already had a
+        // home shop, which is every merchant opening their second one.
+        if (Boolean.TRUE.equals(request.asDefault())) {
+            membership.grantAndMakeDefault(shopId, request.customerId());
+        } else {
+            membership.grant(shopId, request.customerId(), false);
+        }
     }
 
     @DeleteMapping("/shops/{shopId}/staff/{customerId}")

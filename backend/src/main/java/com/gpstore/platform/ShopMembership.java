@@ -153,7 +153,25 @@ public class ShopMembership {
         return grant(shopId, customerId, true);
     }
 
-    /** Adds an account to a shop's staff, idempotently. */
+    /**
+     * Adds an account to a shop's staff, idempotently, giving them somewhere
+     * to sign in if they had nowhere.
+     *
+     * <p>{@code asDefault} HERE MEANS "IF THEY HAVE NO HOME SHOP YET", and
+     * deliberately does not relocate an existing one. The caller that matters
+     * is {@link ShopLifecycleService#open}, which grants the merchant's owner
+     * their new shop so that a brand new storefront is not one nobody can sign
+     * in to. A merchant opening their SECOND storefront must not be moved out
+     * of their first one as a side effect of the paperwork - they were working
+     * in it a moment ago and nobody asked them.
+     *
+     * <p>WHEN SOMEBODY ACTUALLY ASKS for the home shop to move, that is
+     * {@link #grantAndMakeDefault}. The two used to be one method and the
+     * difference cost a real defect in each direction: as a plain conditional
+     * it made the platform console's explicit request a silent no-op, and as
+     * an unconditional move it relocated an owner every time their business
+     * opened another branch.
+     */
     @Transactional
     public ShopStaff grant(Long shopId, Long customerId, boolean asDefault) {
         ShopStaff membership = staff.findByShopIdAndCustomerId(shopId, customerId)
@@ -164,6 +182,48 @@ public class ShopMembership {
         if (asDefault && defaultShopIdFor(customerId).isEmpty()) {
             membership.setIsDefault(Boolean.TRUE);
         }
+        return staff.save(membership);
+    }
+
+    /**
+     * Adds an account to a shop's staff AND makes that shop their home,
+     * moving it off whichever shop held it before.
+     *
+     * <p>THIS IS AN INSTRUCTION, NOT A PREFERENCE. It exists because the
+     * platform console's "add this person, and make it their default" used to
+     * answer 200 and do nothing whenever the account already had a default -
+     * which is precisely the case onboarding hits, since a merchant opening a
+     * second shop already has a first. The administrator was told the owner's
+     * home was the new shop; the owner signed in and landed in the old one. It
+     * was found by running the onboarding script twice against the same owner
+     * account, which is not an exotic thing to do.
+     *
+     * <p>THE OLD DEFAULT IS CLEARED FIRST, and the order is not incidental:
+     * {@code uk_shop_staff_one_default} is a unique index over
+     * {@code (customer_id) WHERE is_default AND active}, so two defaults is not
+     * a state this table can hold. Flushing between the two writes is what
+     * stops Hibernate from ordering the insert before the update and tripping
+     * the index that is protecting us.
+     *
+     * <p>THE OLD SHOP IS STILL THEIRS TO WORK IN. Moving a home is not
+     * resigning from a job - only the membership's default flag changes.
+     */
+    @Transactional
+    public ShopStaff grantAndMakeDefault(Long shopId, Long customerId) {
+        java.util.Optional<Long> current = defaultShopIdFor(customerId);
+        if (current.isPresent() && !current.get().equals(shopId)) {
+            staff.findByShopIdAndCustomerId(current.get(), customerId)
+                    .ifPresent(previous -> {
+                        previous.setIsDefault(Boolean.FALSE);
+                        staff.saveAndFlush(previous);
+                    });
+        }
+        ShopStaff membership = staff.findByShopIdAndCustomerId(shopId, customerId)
+                .orElseGet(ShopStaff::new);
+        membership.setShopId(shopId);
+        membership.setCustomerId(customerId);
+        membership.setActive(Boolean.TRUE);
+        membership.setIsDefault(Boolean.TRUE);
         return staff.save(membership);
     }
 
