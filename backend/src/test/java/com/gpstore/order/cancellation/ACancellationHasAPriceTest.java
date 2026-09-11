@@ -142,7 +142,13 @@ class ACancellationHasAPriceTest {
         jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", shopB);
         jdbc.update("DELETE FROM shops WHERE id = ?", shopB);
         jdbc.update("DELETE FROM merchants WHERE id = ?", merchantId);
-        TenantDefaults.install(platform.getMode(),
+        // BACK TO SINGLE_SHOP, NOT BACK TO THIS CLASS'S OWN MODE. TenantDefaults
+        // is a static holder shared by every cached Spring context in the run,
+        // and this class's PlatformProperties says MULTI_SHOP_PRODUCTION -
+        // so restoring platform.getMode() here would leave the whole JVM in
+        // multi-shop mode and make later single-shop tests fail depending on
+        // what order surefire happened to run them in.
+        TenantDefaults.install(PlatformMode.SINGLE_SHOP,
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
     }
 

@@ -96,7 +96,7 @@ class MarketplaceStartupPathsTest {
         jdbc.update("DELETE FROM shop_staff WHERE customer_id = ?", shopOwner);
         jdbc.update("DELETE FROM customers WHERE id IN (?, ?)",
                 customerWithNoAddress, shopOwner);
-        TenantDefaults.install(platform.getMode(),
+        TenantDefaults.install(PlatformMode.SINGLE_SHOP,
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
     }
 

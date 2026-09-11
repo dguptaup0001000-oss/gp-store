@@ -212,6 +212,26 @@ public class SecurityConfig {
                 // must be admin-only, and there's no other rule that would
                 // cover this DELETE path otherwise.
                 .requestMatchers(HttpMethod.DELETE, "/api/reviews/*/moderate").hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
+                // THE MODERATION QUEUE IS NOT PUBLIC, and it would be without
+                // this line: "/api/reviews/**" is permitAll for GET a few
+                // rules below, so a flagged-reviews listing added under that
+                // prefix is world-readable the moment it exists. Stated here,
+                // ahead of it, for the same ordering reason the comment above
+                // gives for GET /api/reviews.
+                .requestMatchers(HttpMethod.GET, "/api/reviews/reported")
+                    .hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
+                .requestMatchers(HttpMethod.POST, "/api/reviews/*/unhide")
+                    .hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
+                // The shop's side of the conversation (§21) and its flag
+                // (§22). Without these they fall through to
+                // anyRequest().authenticated() and any signed-in shopper
+                // could answer a review AS the shop.
+                .requestMatchers(HttpMethod.POST, "/api/reviews/*/respond",
+                        "/api/reviews/*/report")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                // The customer's single reply is theirs, and the service
+                // checks they wrote the review.
+                .requestMatchers(HttpMethod.POST, "/api/reviews/*/reply").authenticated()
                 // Same ordering reason as /api/reviews above - the admin
                 // "everything including inactive" product list must come
                 // before the broad public GET /api/products/** rule below.
@@ -264,6 +284,15 @@ public class SecurityConfig {
                 // catalogue.
                 .requestMatchers("/api/shop/reliability").hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
                 .requestMatchers("/api/shop/open-work").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                // A SHOP'S OWN DISCIPLINARY RECORD (§2). More sensitive than
+                // the catalogue view "/api/shop/**" falls back to below, so
+                // it takes the same owner-level permission as earnings and
+                // reliability rather than the one a stock clerk holds. The
+                // merchant is never named in the request - it is derived from
+                // the shop the credential resolved to - so this rule is about
+                // WHO IN THE SHOP may read it, not which shop.
+                .requestMatchers("/api/shop/governance", "/api/shop/governance/**")
+                    .hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
 
                 .requestMatchers("/api/shop/**").hasAuthority(AdminPermission.CATALOG_VIEW.authority())
 
@@ -507,6 +536,33 @@ public class SecurityConfig {
                     .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
                 .requestMatchers(HttpMethod.GET, "/api/returns/pending", "/api/returns/pending/count")
                     .hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+
+                // SHOP RATINGS (§17-§22). Four audiences on one path prefix,
+                // and the rule is the only thing keeping them apart.
+                //
+                // WITHOUT THESE LINES every one of them falls through to
+                // anyRequest().authenticated(), and any signed-in shopper
+                // could respond to a rating AS the shop, or hide a one-star
+                // rating of a kirana they have never bought from. The two
+                // that moderate content take REVIEWS_MODERATE rather than a
+                // general admin permission, because §20 makes hiding a
+                // rating a platform decision rather than a merchant one.
+                .requestMatchers(HttpMethod.GET, "/api/shop-ratings/reported")
+                    .hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
+                .requestMatchers(HttpMethod.POST, "/api/shop-ratings/*/hide",
+                        "/api/shop-ratings/*/unhide")
+                    .hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
+                .requestMatchers(HttpMethod.GET, "/api/shop-ratings/manage")
+                    .hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                .requestMatchers(HttpMethod.POST, "/api/shop-ratings/*/respond",
+                        "/api/shop-ratings/*/report")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                // The customer's own three, stated rather than left to fall
+                // through - a rule that is only correct because of what
+                // follows it is one reordering away from being wrong.
+                .requestMatchers(HttpMethod.POST, "/api/shop-ratings").authenticated()
+                .requestMatchers(HttpMethod.POST, "/api/shop-ratings/*/reply").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/shop-ratings/mine").authenticated()
 
                 // CANCELLATION DEBTS (§11). /mine takes the customer from the
                 // token and needs no rule beyond being signed in. The other

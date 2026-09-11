@@ -98,6 +98,23 @@ needed architectural change it was migrated, never deleted (§19).
 | Ops status, monitoring | `monitoring/` | platform | |
 | Customer 360 | `controller/` | platform | |
 
+## Added after the first map was written
+
+*These are the subsystems Parts 3 and 4 asked for. They are listed here for the
+same reason everything above is: so that "what belongs to a shop and what
+belongs to the platform" stays one answer rather than a habit.*
+
+| Feature | Where it lives | Status | Notes |
+|---|---|---|---|
+| Cancellation terms (§9/§10) | `store_operations_settings` columns, `CancellationPolicy` | shop-scoped | The free window and the fee are the shop's; the ceiling is platform configuration. |
+| Cancellation debts (§11) | `customer_cancellation_dues` | shop-scoped | The debt is to a shop, not to GP-STORE. A shop must not see what a customer owes its competitor. |
+| Order lifecycle table (§1) | `OrderLifecycle` | central | One transition table, no per-caller `if`s. |
+| Shop ratings (§17) | `shop_ratings` | shop-scoped | Service, not product. |
+| Product reviews (§17) | `reviews` | central | Follows the product across every shop that sells it. |
+| Rating moderation (§20) | `HideReason`, `ReviewService.hideReview` | platform | Hidden, never deleted; closed reason list. |
+| Billing plans and ledger | `billing/` | platform | Append-only, enforced by a trigger. No commercial amount in the code. |
+| Merchant governance (§2) | `merchant_governance_actions`, `MerchantGovernance` | platform | `about_shop_id`, **not** `shop_id` — it is data, not a tenancy boundary. |
+
 ## Cross-cutting
 
 | Concern | Where it lives | Status |

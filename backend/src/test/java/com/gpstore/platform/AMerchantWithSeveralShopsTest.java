@@ -119,7 +119,7 @@ class AMerchantWithSeveralShopsTest {
             jdbc.update("DELETE FROM shops WHERE id = ?", shop);
         }
         jdbc.update("DELETE FROM merchants WHERE id IN (?, ?)", ourMerchant, theirMerchant);
-        TenantDefaults.install(platform.getMode(),
+        TenantDefaults.install(PlatformMode.SINGLE_SHOP,
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
     }
 

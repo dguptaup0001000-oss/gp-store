@@ -138,7 +138,7 @@ class APriceEditReachesTheStorefrontTest {
         jdbc.update("DELETE FROM product_variants WHERE id = ?", variantId);
         jdbc.update("DELETE FROM products WHERE id = ?", productId);
         jdbc.update("DELETE FROM categories WHERE id = ?", categoryId);
-        TenantDefaults.install(platform.getMode(),
+        TenantDefaults.install(PlatformMode.SINGLE_SHOP,
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
     }
 

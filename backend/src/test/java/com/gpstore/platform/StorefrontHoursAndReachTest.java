@@ -124,7 +124,7 @@ class StorefrontHoursAndReachTest {
             jdbc.update("DELETE FROM shops WHERE id = ?", shop);
         }
         jdbc.update("DELETE FROM merchants WHERE id = ?", merchantId);
-        TenantDefaults.install(platform.getMode(),
+        TenantDefaults.install(PlatformMode.SINGLE_SHOP,
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
     }
 

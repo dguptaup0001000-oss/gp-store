@@ -116,7 +116,7 @@ class MerchantLedgerTest {
         jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", shopId);
         jdbc.update("DELETE FROM shops WHERE id = ?", shopId);
         jdbc.update("DELETE FROM merchants WHERE id = ?", merchantId);
-        TenantDefaults.install(platform.getMode(),
+        TenantDefaults.install(PlatformMode.SINGLE_SHOP,
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
     }
 

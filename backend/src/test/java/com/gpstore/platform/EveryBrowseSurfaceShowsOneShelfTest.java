@@ -150,7 +150,7 @@ class EveryBrowseSurfaceShowsOneShelfTest {
         jdbc.update("DELETE FROM shops WHERE id = ?", shopB);
         jdbc.update("DELETE FROM merchants WHERE id = ?", merchantB);
         clearBrowseCaches();
-        TenantDefaults.install(platform.getMode(),
+        TenantDefaults.install(PlatformMode.SINGLE_SHOP,
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
     }
 

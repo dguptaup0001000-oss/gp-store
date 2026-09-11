@@ -113,7 +113,7 @@ class ShopVerificationIsEarnedTest {
         jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", shopB);
         jdbc.update("DELETE FROM shops WHERE id = ?", shopB);
         jdbc.update("DELETE FROM merchants WHERE id = ?", merchantId);
-        TenantDefaults.install(platform.getMode(),
+        TenantDefaults.install(PlatformMode.SINGLE_SHOP,
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
     }
 

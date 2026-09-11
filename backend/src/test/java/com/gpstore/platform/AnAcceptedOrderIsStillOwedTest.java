@@ -94,7 +94,7 @@ class AnAcceptedOrderIsStillOwedTest {
                 + "paused_until = NULL, closure_message = NULL WHERE shop_id = ?", shopId);
         jdbc.update("DELETE FROM store_closures WHERE shop_id = ? AND reason LIKE ?",
                 shopId, "%" + tag + "%");
-        TenantDefaults.install(platform.getMode(),
+        TenantDefaults.install(PlatformMode.SINGLE_SHOP,
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
     }
 
