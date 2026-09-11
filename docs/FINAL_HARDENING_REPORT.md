@@ -10,8 +10,10 @@ report it as passed.*
 This code is on a branch. Production is still running the previous build. No
 APK exists. Nothing is deployed — though a staging stack for the VPS you
 already own is now written and validated, so that is a decision rather than a
-gap. The payment collection model is still undecided. None of that is a
-test-coverage problem and none of it is fixed by more tests.
+gap. Money still lands in one platform account, contradicting Decision W1 —
+which already says a merchant's product proceeds are the merchant's — so that
+one is a known gap against a recorded decision, not an open question. None of
+that is a test-coverage problem and none of it is fixed by more tests.
 
 Results are separated by **how** they were verified, because "the suite is
 green" and "a customer bought something" are different claims:
@@ -441,7 +443,7 @@ Each of these is a real gap, not a formality.
 | 1 | **No staging environment exists** | INFRASTRUCTURE MISSING | The five items in B |
 | 2 | **No Android SDK; `dl.google.com` 403 through the proxy** | ENVIRONMENT BLOCKED | Build on a machine with the SDK — command in H |
 | 3 | **No device access, ever, from this environment** | INHERENT | Only you can run H |
-| 4 | **Payment collection model undecided** | BUSINESS + LEGAL + PROVIDER DECISION | Your provider and legal advice. One Cashfree account currently holds every shop's money |
+| 4 | **Collection contradicts Decision W1** — one platform account holds every shop's product money, when W1 says a merchant's proceeds are the merchant's | RULE DECIDED; **provider, KYC, settlement, fees and refunds** are not | Your provider and legal advice: choose a provider, an onboarding/KYC flow, a settlement mechanism, fee and refund treatment. The *rule* needs nothing from you — it is already recorded |
 | 5 | **`api.gpstore.co.in` unreachable from here** (403 at the proxy) and **no SSH key in this container** | ENVIRONMENT + CREDENTIAL BLOCKED | Not needed if staging exists; production deploys on merge to `main`, which is your call |
 | 6 | **No commercial amounts exist** — cancellation is free for everyone, merchants cannot set fee terms | FOUNDER DECISION | Set `platform.cancellation.max-fee-percent` and the billing amounts |
 | 7 | **Governance and reliability thresholds are unapproved defaults** | FOUNDER DECISION | Six properties, no release needed |
@@ -452,11 +454,20 @@ Each of these is a real gap, not a formality.
 
 ## G. Production risks
 
-1. **Money currently flows the wrong way.** One Cashfree account carries every
-   shop's money. The seam is real and *refuses* rather than lying —
-   `prepareCheckout` throws for any shop configured to collect its own payments
-   — but the model itself is undecided (F4). **This is the largest risk on the
-   list and it is a decision, not a defect.**
+1. **Money currently flows the wrong way.** One platform account carries every
+   shop's product money. That is not an undecided question: Decision W1
+   (`docs/architecture/03-decision-w1-money-model.md`, 2026-09-05) already
+   records the requirement — each merchant's product proceeds belong to that
+   merchant, and GP-STORE is a technology marketplace rather than a payment
+   aggregator holding everybody's money in one account. The code does not
+   honour that decision yet, so this is a **gap against a recorded decision**.
+   The seam is real and *refuses* rather than lying — `prepareCheckout` throws
+   for any shop configured to collect its own payments, and the application
+   logs the non-conformance at startup. What is genuinely open is only *how*
+   to honour W1 compliantly: the payment provider, merchant onboarding and
+   KYC, the settlement mechanism, how fees are borne, and how refunds are
+   funded and reversed (F4). The boundary stays provider-agnostic until those
+   are settled. **This is the largest risk on the list.**
 2. **The app has never run against a real backend.** Every marketplace screen
    added in this phase is widget-verified against a scripted contract. A
    mismatch between that contract and the live server would surface on a
@@ -617,7 +628,7 @@ tests.** This is the honest arithmetic rather than a re-weighted scale:
 
 | Withheld | Worth roughly | Who can clear it |
 |---|---|---|
-| Payment collection model undecided — one account holds every shop's money | **10** | You, with your provider and legal advice |
+| Collection does not honour Decision W1 — one platform account holds every shop's product money | **10** | You, with your provider and legal advice: provider, onboarding/KYC, settlement, fees, refunds |
 | Never run on a real device against a real backend | **6** | An Android SDK machine + your phone |
 | Not deployed — this is on a branch; production runs the previous build | **4** | You; merging to `main` is a live-shop decision |
 | Load measured on a container, not the VPS | **3** | The VPS, once a staging stack exists |
@@ -635,7 +646,7 @@ decisions or a machine this environment does not have.
 | Order lifecycle | a resurrection bug and a wrongful-cancellation bug are gone; one guarded door |
 | Schema and provisioning | impossible → verified → **constraint-parity proved and guarded** |
 | Customer-facing marketplace | functional; widget-verified; API-verified over HTTP; **not on a device** |
-| Payment safety | structurally sound and honest about what it does not know; **the model is undecided** |
+| Payment safety | boundary structurally sound and provider-agnostic; **the implementation does not yet honour Decision W1** |
 | Performance | measured, on the wrong hardware |
 | Commercial model | deliberately absent |
 | Deployed | **no** |

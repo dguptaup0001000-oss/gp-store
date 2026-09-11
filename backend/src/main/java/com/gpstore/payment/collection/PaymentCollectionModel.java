@@ -3,42 +3,66 @@ package com.gpstore.payment.collection;
 /**
  * WHOSE ACCOUNT AN ONLINE PAYMENT LANDS IN.
  *
- * <p>THE OPEN BUSINESS DECISION, named so it stops being invisible. GP-STORE
- * runs one Cashfree account today, so every shop's online money arrives in
- * the platform's account and is owed onward - which makes GP-STORE a payment
- * aggregator, with everything that implies about settlement and about who is
- * answerable when a customer's money is somewhere neither they nor the
- * shopkeeper can see it.
+ * <p>THE BUSINESS RULE IS DECIDED AND WRITTEN DOWN. Decision W1
+ * ({@code docs/architecture/03-decision-w1-money-model.md}, 2026-09-05):
+ * <b>a merchant's product proceeds belong to that merchant.</b> GP-STORE is a
+ * technology marketplace, not a payment aggregator - it is not to operate a
+ * pooled account holding everybody's money and redistributing it afterwards.
+ * That is a requirement, not a preference, and it is not something this
+ * codebase gets to renegotiate.
  *
- * <p>The alternative - each merchant collecting into their own account - is a
- * different product, a different Cashfree integration and a different
- * regulatory position, and it is not a decision this codebase gets to make by
- * itself. §17 is explicit about that: build the boundary, do not invent the
- * provider-specific implementation.
+ * <p>WHAT IS NOT DECIDED is how to honour it compliantly: which payment
+ * provider, how merchants are onboarded and their KYC verified, by what
+ * mechanism funds reach the merchant, how fees are borne, how refunds are
+ * funded and reversed (W1 §2 turns a refund into a three-party obligation the
+ * platform tracks rather than executes), and the regulatory position that
+ * follows. Those are provider, legal and commercial decisions. §17 is explicit
+ * that this codebase builds the boundary and does not invent the
+ * provider-specific implementation behind it.
  *
- * <p>So this enum exists to make the question askable in code, per shop, with
- * exactly one implemented answer today. Nothing here changes how a rupee
- * moves; it changes what the application can say about where it went.
+ * <p>So the two values below are not two equally valid options to choose
+ * between. One is the requirement; the other is where the code is today.
  */
 public enum PaymentCollectionModel {
 
     /**
-     * GP-STORE's gateway account receives the money and owes it onward.
+     * GP-STORE's own gateway account receives the money and owes it onward.
      *
-     * <p>What every shop does today, and the reason ShopEarnings reports
-     * "awaiting collection" rather than "in your account".
+     * <p><b>INTERIM AND NON-CONFORMING.</b> This is what every shop does
+     * today, and it is the thing W1 says must not be how GP-STORE operates:
+     * one account holds every merchant's product money and redistributes it
+     * later. It is a gap against a recorded decision - not an open question,
+     * and not a model anybody chose. It is recorded honestly rather than dressed up -
+     * {@code ShopEarnings} says "awaiting collection" and not "in your
+     * account", {@code payments.collection_model} stamps every new row with
+     * who actually collected it, and the application logs a warning at startup
+     * naming the gap.
+     *
+     * <p>It remains the only implemented value because implementing the other
+     * one requires decisions nobody has made yet - see the class comment. It
+     * is a state to leave, not a model to settle on.
      */
     PLATFORM_COLLECTS,
 
     /**
-     * The merchant's own gateway account receives it directly.
+     * The merchant's own account receives their product proceeds directly.
      *
-     * <p>NOT IMPLEMENTED, and deliberately not stubbed. Configuring it is a
-     * startup failure rather than a silent fall-back to the platform account
-     * (see PaymentCollection): a flag that says merchants collect while every
-     * rupee still lands in one account is worse than no flag, because
-     * everything downstream - the merchant's earnings screen, the settlement
-     * report, the tax position - would be quietly wrong.
+     * <p><b>W1'S ANSWER, and deliberately not stubbed.</b> Configuring
+     * it is a startup failure rather than a silent fall-back (see
+     * {@link PaymentCollection}): a flag that says merchants collect while
+     * every rupee still lands in one account is worse than no flag, because
+     * the merchant's earnings screen, the settlement report and the tax
+     * position would all be quietly wrong.
+     *
+     * <p>Implementing it is not a code change alone. It needs the provider,
+     * the onboarding and KYC flow, the settlement mechanism, the fee and
+     * refund treatment, and a compliance position - none of which this file
+     * may assume.
      */
-    MERCHANT_COLLECTS
+    MERCHANT_COLLECTS;
+
+    /** Whether this value satisfies the rule that a merchant's money is theirs. */
+    public boolean meetsTheMerchantOwnsTheirMoneyRule() {
+        return this == MERCHANT_COLLECTS;
+    }
 }

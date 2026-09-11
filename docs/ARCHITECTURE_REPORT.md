@@ -264,22 +264,38 @@ functionality not disappear.
 
 This is the most important section for anybody about to deploy.
 
-**What exists today:** one deployment-wide payment account (`CashfreeProperties`).
-Every shop's money passes through it.
+**What exists today:** one deployment-wide payment account. Every shop's
+product money passes through it.
 
-**What the brief requires:** Decision W1 and Part 3 §7 — each merchant collects
-directly; GP-STORE is a technology marketplace, **not a payment aggregator**.
+**What the rule is — and it is already decided:** Decision W1
+(`docs/architecture/03-decision-w1-money-model.md`, 2026-09-05) and Part 3 §7 —
+**each merchant's product proceeds belong to that merchant**, collected
+directly. GP-STORE is a technology marketplace, **not a payment aggregator**,
+and is not to pool everybody's money in one account and redistribute it later.
+That is a requirement on record, not a preference this codebase may renegotiate.
 
-**What was built:** `PaymentCollection` / `PaymentCollectionModel` — a clean
-abstraction and configuration boundary (Part 1 §17), with a `forShop(shopId)`
-that returns the collector for a shop, and a constructor that **throws** if
-`MERCHANT_COLLECTS` is configured. That last part is deliberate: Part 3 §7 and
-Part 4 §10 both say *do not invent a payment provider architecture*, so the
-code refuses to pretend it has one.
+**What is still open** is only how to honour it compliantly: the payment
+provider, merchant onboarding and KYC, the settlement mechanism, how fees are
+borne, how refunds are funded and reversed (W1 §2 makes a refund a three-party
+obligation the platform tracks rather than executes), and the regulatory
+position that follows.
 
-**The gap is real and it is commercial, not technical.** Running one account
-for many merchants makes GP-STORE a payment aggregator, with the regulatory
-consequences that follow in India. See §24.
+**What was built:** `PaymentCollection` / `PaymentCollectionModel` — a clean,
+**provider-agnostic** abstraction and configuration boundary (Part 1 §17), with
+a `forShop(shopId)` that returns the collector for a shop, a
+`meetsTheMerchantOwnsTheirMoneyRule()` that says whether a model honours W1, a
+startup warning that names the non-conformance, and a constructor that
+**throws** if `MERCHANT_COLLECTS` is configured without an implementation
+behind it. That last part is deliberate: Part 3 §7 and Part 4 §10 both say *do
+not invent a payment provider architecture*, so the code refuses to pretend it
+has one, and the boundary names no provider at all — a test fails the build if
+one appears in it.
+
+**The gap is real, and it is a gap against a recorded decision.** Running one
+account for many merchants is what W1 says GP-STORE must not do, and it makes
+GP-STORE a payment aggregator with the regulatory consequences that follow in
+India. Closing it needs the provider and compliance decisions above, not a
+re-litigation of whose money it is. See §24.
 
 ## 16. Billing
 
@@ -533,7 +549,7 @@ builds. This section is why.**
 
 | # | What | Why it is yours |
 |---|---|---|
-| A2 | **Payment provider / direct-to-merchant settlement.** | Part 3 §7 and Part 4 §10 forbid inventing a provider architecture. Today one Cashfree account carries every shop's money, which makes GP-STORE a payment aggregator. That is a business and compliance decision, not a coding one. The abstraction boundary is built and waiting (`PaymentCollection`); the implementation behind it is not, on purpose. |
+| A2 | **Payment provider, merchant onboarding/KYC, settlement mechanism, fees and refund funding.** | The *rule* is not yours to decide again — Decision W1 (`docs/architecture/03-decision-w1-money-model.md`, 2026-09-05) already records it: each merchant's product proceeds belong to that merchant, and GP-STORE does not operate a pooled account holding everybody's money. Today one platform account carries every shop's product money, so the code is **non-conforming against that decision**, and it says so at startup. What needs your decision is how to honour it compliantly: which provider, how merchants are onboarded and KYC-verified, by what mechanism funds reach them, how fees are borne, and how refunds are funded and reversed. Part 3 §7 and Part 4 §10 forbid inventing a provider architecture, so the boundary (`PaymentCollection`) is built, provider-agnostic and waiting; the implementation behind it is not, on purpose. |
 | A3 | **Commercial amounts.** | Tiers, weekly fees, commission rates. Part 4 §5 says these are not decided. The billing machinery takes them as data and contains no number. |
 | A4 | **Cancellation fee ceiling.** | There is now **no default**. `platform.cancellation.max-fee-percent` is unset, `CancellationPolicy.capIsDecided()` is false, every cancellation is free, and a merchant who tries to set fee terms is refused with an explanation. Set the property and fees become possible; until then GP-STORE charges nobody, because 5% was a number I invented, not one you approved. |
 | A5 | **Governance thresholds.** | 90-day warning decay, 180-day final warning, and the reliability thresholds for TRUSTED (25 orders / 92% / 8%) are defensible defaults, not decisions you made. They are no longer compile-time constants: `governance.warning-days`, `governance.final-warning-days`, `reliability.window-days`, `reliability.min-orders`, `reliability.min-completion-rate` and `reliability.max-return-rate` change them without a release. |
@@ -544,7 +560,7 @@ builds. This section is why.**
 |---|---|---|
 | B1 | **No Android APK or AAB can be produced here.** `dl.google.com` returns **403 through the proxy** (`CONNECT tunnel failed, response 403`). | This is a **BUILD ENVIRONMENT FAILURE, not a code failure** (Part 4 §25). The Gradle build cannot fetch the Android toolchain. |
 | B2 | `OpsStatusServiceTest.diskOnARealDirectoryIsHealthy` fails whenever the 2.4 GB Flutter SDK is resident — it pushes free disk under the 10% floor the test asserts. | The SDK is deleted before backend runs and re-fetched for Flutter runs; the two cannot pass in the same invocation on this box. |
-| B3 | `LazySerialisationTest` / `ReturnsTest` flake on a mobile-number collision from a `"9" + nanoTime % 1e9` fixture. | Pre-existing, not introduced here, and worth fixing. |
+| ~~B3~~ | ~~`LazySerialisationTest` / `ReturnsTest` flake on a mobile-number collision from a `"9" + nanoTime % 1e9` fixture.~~ **CLOSED.** | The fixture, not the tests, was broken: `substring(0, 9)` of `nanoTime` keeps the *high-order* digits, which barely move between two calls in the same run. Replaced by `TestMobileNumbers` — a per-JVM random block plus an `AtomicLong` — and swept across 23 files. |
 
 ### C. Verified in the hardening pass, and what is still unverified
 

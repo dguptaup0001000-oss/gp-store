@@ -278,9 +278,12 @@ public class ShopSelfServiceController {
      *
      * <p>SAID OUT LOUD, because it is currently GP-STORE's account and a
      * shopkeeper is entitled to know that rather than to infer it from an
-     * earnings screen that says "awaiting collection". It is also the open
-     * business decision (§17) made visible in the product instead of buried
-     * in a properties file - see PaymentCollectionModel.
+     * earnings screen that says "awaiting collection". Decision W1 already
+     * says a merchant's product proceeds are the merchant's, so this endpoint
+     * is a known gap reported honestly rather than an open question put to
+     * the shopkeeper - see PaymentCollectionModel. §17 keeps the seam behind
+     * it provider-agnostic until the provider, onboarding/KYC, settlement,
+     * fee and refund decisions are made.
      */
     @GetMapping("/payment-collection")
     public com.gpstore.payment.collection.PaymentCollection.Collector paymentCollection() {
