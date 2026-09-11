@@ -67,6 +67,8 @@ public class OrderService {
     private final com.gpstore.platform.ShopRepository shopRepository;
     private final com.gpstore.platform.ShopScopeSwitch shopScopeSwitch;
     private final com.gpstore.platform.CustomerOwnedRead customerOwnedRead;
+    private final com.gpstore.order.cancellation.CancellationPolicy cancellationPolicy;
+    private final com.gpstore.order.cancellation.CancellationDues cancellationDues;
     private final com.gpstore.repository.DeliveryRepository deliveryRepository;
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
@@ -117,7 +119,9 @@ public class OrderService {
             com.gpstore.ordergroup.OrderGroupRepository orderGroupRepository,
             com.gpstore.platform.ShopRepository shopRepository,
             com.gpstore.platform.ShopScopeSwitch shopScopeSwitch,
-            com.gpstore.platform.CustomerOwnedRead customerOwnedRead) {
+            com.gpstore.platform.CustomerOwnedRead customerOwnedRead,
+            com.gpstore.order.cancellation.CancellationPolicy cancellationPolicy,
+            com.gpstore.order.cancellation.CancellationDues cancellationDues) {
 
         this.repository = repository;
         this.deliveryScheduleService = deliveryScheduleService;
@@ -149,6 +153,8 @@ public class OrderService {
         this.shopRepository = shopRepository;
         this.shopScopeSwitch = shopScopeSwitch;
         this.customerOwnedRead = customerOwnedRead;
+        this.cancellationPolicy = cancellationPolicy;
+        this.cancellationDues = cancellationDues;
     }
 
 
@@ -1651,6 +1657,60 @@ public class OrderService {
     }
 
     /**
+     * What cancelling this order would cost, WITHOUT cancelling it (§10).
+     *
+     * <p>THE SAME QUOTE THE CANCELLATION APPLIES. It calls
+     * CancellationPolicy.quote with the same arguments endOrder does, so the
+     * number the customer agreed to and the number taken cannot drift apart -
+     * the alternative, a display calculation beside a charging calculation,
+     * is two implementations of one rule and eventually two answers.
+     *
+     * <p>Ownership is checked exactly as it is for cancelling: a customer who
+     * cannot cancel an order cannot price cancelling it either, and the 404
+     * is deliberately the same one, so probing ids tells an attacker nothing.
+     */
+    @Transactional(readOnly = true)
+    public com.gpstore.order.cancellation.CancellationQuoteResponse cancellationQuote(
+            Long orderId, Long callerCustomerId, boolean isAdmin) {
+
+        Order order = repository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        if (!isAdmin && (order.getCustomer() == null
+                || !order.getCustomer().getId().equals(callerCustomerId))) {
+            throw new ResourceNotFoundException("Order not found");
+        }
+
+        String blocked = null;
+        if (OrderLifecycle.isTerminal(order.getOrderStatus())) {
+            blocked = "This order has already ended.";
+        } else if (!OrderLifecycle.allows(order.getOrderStatus(), OrderStatus.CANCELLED)) {
+            blocked = "A " + order.getOrderStatus() + " order cannot be cancelled.";
+        } else if (!isAdmin && !customerMayCancel(order.getOrderStatus())) {
+            blocked = "This order can no longer be cancelled. Contact the shop if you need help.";
+        }
+
+        // The fault this cancellation WOULD carry, derived the same way
+        // endOrder derives it - an admin cancellation is PLATFORM, whose
+        // fault is undecided and therefore free (§12).
+        com.gpstore.enums.OrderFault wouldBeFault =
+                isAdmin ? null : com.gpstore.enums.OrderFault.CUSTOMER;
+
+        com.gpstore.order.cancellation.CancellationCharge charge =
+                cancellationPolicy.quote(order, wouldBeFault,
+                        java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+
+        Payment payment = paymentRepository.findByOrderId(orderId).orElse(null);
+        boolean cashOnDelivery = payment == null
+                || payment.getPaymentMethod() == PaymentMethod.COD
+                || payment.getPaymentStatus() != PaymentStatus.SUCCESS;
+
+        return com.gpstore.order.cancellation.CancellationQuoteResponse.of(
+                order.getId(), order.getOrderNumber(), blocked == null, blocked,
+                charge, cashOnDelivery);
+    }
+
+    /**
      * The shop refuses an order it has not accepted (§1).
      *
      * <p>THE SAME MACHINERY AS A CANCELLATION, deliberately. A rejected order
@@ -1738,6 +1798,24 @@ public class OrderService {
         };
         order.endedBy(actor, whoseFault, reason);
 
+        // WHAT THIS COSTS THE CUSTOMER (§10), decided once, here, and written
+        // onto the order rather than recomputed later. A shop may edit its
+        // terms tomorrow; the customer was charged what they were charged.
+        //
+        // THE QUOTE ENDPOINT RUNS THIS SAME METHOD, which is what makes
+        // "the customer must see the charge before confirming" true rather
+        // than aspirational - the number on the confirm dialog and the number
+        // taken are produced by one piece of code, not two that agree today.
+        //
+        // §9 and §12 are both inside the quote: the free window and a
+        // merchant-fault cancellation both come back as zero, and there is no
+        // arrangement of shop settings that can get past either.
+        com.gpstore.order.cancellation.CancellationCharge charge =
+                cancellationPolicy.quote(order, whoseFault,
+                        java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+        final java.math.BigDecimal cancellationFee = charge.isFree() ? null : charge.amount();
+        order.setCancellationFee(cancellationFee);
+
         // ORDER (already locked above) -> PAYMENT -> INVENTORY. Locking the
         // payment row rather than plain-reading it: the expiry sweep and the
         // UPI/COD confirmation paths can be looking at this same payment
@@ -1759,6 +1837,16 @@ public class OrderService {
 
                 payment.setPaymentStatus(PaymentStatus.FAILED);
 
+                // §11: A COD ORDER COLLECTED NOTHING, so a cancellation
+                // charge has nothing to come out of. It becomes a debt to
+                // this shop, shown to the customer and added to a later
+                // order here. Written in THIS transaction, so a debt cannot
+                // outlive a cancellation that rolled back.
+                if (cancellationFee != null) {
+                    cancellationDues.record(order, cancellationFee,
+                            "Cancellation charge on order " + order.getOrderNumber());
+                }
+
             } else if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
 
                 payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
@@ -1775,7 +1863,16 @@ public class OrderService {
                 payment.setRefundChannel(cash
                         ? Payment.RefundChannel.CASH
                         : Payment.RefundChannel.GATEWAY);
-                payment.setRefundAmount(payment.getAmount());
+                // THE FEE COMES OUT OF THE REFUND, which is the only place
+                // a prepaid cancellation can take it from - and the reason
+                // §11's debt mechanism is needed for COD and only for COD.
+                // Floored at zero: a fee larger than the payment would
+                // otherwise send a negative refund to the provider.
+                java.math.BigDecimal refundable = payment.getAmount();
+                if (cancellationFee != null) {
+                    refundable = refundable.subtract(cancellationFee).max(java.math.BigDecimal.ZERO);
+                }
+                payment.setRefundAmount(refundable);
                 refundNeedsSending = !cash;
 
             } else if (payment.getPaymentStatus() == PaymentStatus.PENDING) {
@@ -1805,7 +1902,9 @@ public class OrderService {
                 endState == OrderStatus.REJECTED ? "ORDER_REJECTED" : "ORDER_CANCELLED",
                 "Order", savedOrder.getId(),
                 endState.name().toLowerCase(java.util.Locale.ROOT) + " by " + actor
-                        + (reason == null ? "" : ": " + reason));
+                        + (reason == null ? "" : ": " + reason)
+                        + (cancellationFee == null
+                                ? "" : " [cancellation charge " + cancellationFee.toPlainString() + "]"));
 
         // Invoice cancellation is ACCOUNTING work, not a nicety: a cancelled
         // order whose invoice stays active still reads as a valid sale for

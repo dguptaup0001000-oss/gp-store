@@ -63,6 +63,21 @@ public class Order implements ShopOwned {
     @Enumerated(EnumType.STRING)
     private com.gpstore.enums.OrderFault fault;
 
+    /**
+     * What the customer was actually charged for cancelling (§10).
+     *
+     * <p>WRITTEN DOWN BECAUSE A CHARGE NOBODY CAN POINT AT IS A CHARGE THAT
+     * GETS DISPUTED. Recomputing it later from the shop's current settings
+     * would answer a different question - settings get edited - and the
+     * customer was charged what they were charged.
+     *
+     * <p>Null means none was applied, which is every cancellation before this
+     * column existed, every one inside the free window, and every one where
+     * the shop was at fault.
+     */
+    @Column(name = "cancellation_fee", precision = 12, scale = 2)
+    private java.math.BigDecimal cancellationFee;
+
     @Column(name = "shop_id")
     private Long shopId;
 
@@ -736,6 +751,11 @@ public void setTotalAmount(BigDecimal totalAmount) {
 
     public com.gpstore.enums.OrderFault getFault() { return fault; }
     public void setFault(com.gpstore.enums.OrderFault fault) { this.fault = fault; }
+
+    public java.math.BigDecimal getCancellationFee() { return cancellationFee; }
+    public void setCancellationFee(java.math.BigDecimal cancellationFee) {
+        this.cancellationFee = cancellationFee;
+    }
 
     /**
      * Records who ended this order and why, in one call.

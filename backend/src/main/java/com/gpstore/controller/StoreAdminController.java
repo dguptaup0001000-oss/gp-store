@@ -317,6 +317,80 @@ public class StoreAdminController {
      * day, which overnight is today's 09:00 run - the list whoever arrives at
      * 08:00 actually wants.
      */
+    // ------------------------------------------------------------------
+    // What it costs a customer to cancel here (Part 3 §9/§10).
+    // ------------------------------------------------------------------
+
+    /**
+     * The shop's own terms, with the platform's ceiling stated beside them.
+     *
+     * <p>THE CAP IS RETURNED, NOT JUST ENFORCED. A form that rejects 8% on
+     * save without ever having said what the limit was is a form that wastes
+     * a shopkeeper's afternoon.
+     */
+    @GetMapping("/cancellation-policy")
+    public Map<String, Object> cancellationPolicy() {
+        var terms = operationsService.cancellationTerms();
+        Map<String, Object> body = new HashMap<>();
+        body.put("freeCancellationSeconds", terms.freeSeconds());
+        body.put("feePercent", terms.feePercent());
+        body.put("chargesDelivery", terms.chargesDelivery());
+        body.put("maxFeePercent", operationsService.maxCancellationFeePercent());
+        return body;
+    }
+
+    /**
+     * Sets them.
+     *
+     * <p>A MISSING KEY AND A NULL MEAN DIFFERENT THINGS, which is the whole
+     * reason this reads the map rather than binding a DTO: omitting
+     * feePercent leaves the fee alone, while sending it as null clears it.
+     * With a DTO both arrive as null and "stop charging" becomes unsayable.
+     */
+    @PutMapping("/cancellation-policy")
+    public Map<String, Object> setCancellationPolicy(@RequestBody Map<String, Object> request) {
+        Integer freeSeconds = request.containsKey("freeCancellationSeconds")
+                ? parseSeconds(request.get("freeCancellationSeconds")) : null;
+        Boolean chargesDelivery = request.containsKey("chargesDelivery")
+                ? Boolean.valueOf(String.valueOf(request.get("chargesDelivery"))) : null;
+
+        java.math.BigDecimal feePercent = null;
+        if (request.containsKey("feePercent")) {
+            feePercent = parsePercent(request.get("feePercent"));
+        } else {
+            // Not mentioned: leave whatever the shop already had. Passing
+            // null through would clear it, which is the opposite of silence.
+            feePercent = operationsService.cancellationTerms().feePercent();
+        }
+
+        operationsService.setCancellationTerms(freeSeconds, feePercent, chargesDelivery, actor());
+        return cancellationPolicy();
+    }
+
+    private static Integer parseSeconds(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(String.valueOf(raw).trim());
+        } catch (NumberFormatException notANumber) {
+            throw new BadRequestException(
+                    "freeCancellationSeconds must be a whole number of seconds.");
+        }
+    }
+
+    private static java.math.BigDecimal parsePercent(Object raw) {
+        if (raw == null || String.valueOf(raw).isBlank()) {
+            return null;
+        }
+        try {
+            return new java.math.BigDecimal(String.valueOf(raw).trim());
+        } catch (NumberFormatException notANumber) {
+            throw new BadRequestException(
+                    "feePercent must be a number, or null for no charge.");
+        }
+    }
+
     @GetMapping("/preparation")
     @Transactional(readOnly = true)
     public Map<String, Object> preparation(

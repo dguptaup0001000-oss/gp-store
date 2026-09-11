@@ -66,6 +66,7 @@ public class StoreOperationsService {
     private final com.gpstore.store.hours.ShopHoursService shopHours;
     private final DeliveryScheduleService scheduleService;
     private final AuditLogService auditLogService;
+    private final com.gpstore.order.cancellation.CancellationPolicy cancellationPolicy;
 
     public StoreOperationsService(
             StoreOperationsSettingsRepository settingsRepository,
@@ -74,7 +75,8 @@ public class StoreOperationsService {
             ShopHoursOverrideRepository hourOverrides,
             com.gpstore.store.hours.ShopHoursService shopHours,
             DeliveryScheduleService scheduleService,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            com.gpstore.order.cancellation.CancellationPolicy cancellationPolicy) {
         this.settingsRepository = settingsRepository;
         this.closureRepository = closureRepository;
         this.weeklyHours = weeklyHours;
@@ -82,6 +84,7 @@ public class StoreOperationsService {
         this.shopHours = shopHours;
         this.scheduleService = scheduleService;
         this.auditLogService = auditLogService;
+        this.cancellationPolicy = cancellationPolicy;
     }
 
     // ------------------------------------------------------------------
@@ -379,6 +382,89 @@ public class StoreOperationsService {
             }
             previousClose = session.closesAt();
         }
+    }
+
+    // ------------------------------------------------------------------
+    // What it costs a customer to change their mind (Part 3 §9/§10).
+    // ------------------------------------------------------------------
+
+    /** This shop's cancellation terms, as they stand. */
+    @Transactional(readOnly = true)
+    public com.gpstore.order.cancellation.CancellationTerms cancellationTerms() {
+        return com.gpstore.order.cancellation.CancellationTerms.of(currentSettings());
+    }
+
+    /** The highest percentage this deployment permits - the shop's ceiling. */
+    public java.math.BigDecimal maxCancellationFeePercent() {
+        return cancellationPolicy.maxFeePercent();
+    }
+
+    /**
+     * The merchant sets its own cancellation terms (§10).
+     *
+     * <p>REFUSED ABOVE THE PLATFORM'S CAP, out loud. Silently clamping a 40%
+     * fee to 5% would leave a shopkeeper believing they charge 40% and a
+     * customer paying 5%, and the first either of them would hear about it is
+     * an argument. The quote path clamps as a last defence, but a shop is
+     * told here.
+     *
+     * @param freeSeconds     null leaves the free window alone
+     * @param feePercent      null CLEARS the fee - "we do not charge" has to
+     *                        be sayable, and it is the more common answer
+     * @param chargesDelivery null leaves the switch alone
+     */
+    @Transactional
+    public StoreOperationsSettings setCancellationTerms(
+            Integer freeSeconds, java.math.BigDecimal feePercent,
+            Boolean chargesDelivery, String actor) {
+
+        StoreOperationsSettings settings = currentSettings();
+        com.gpstore.order.cancellation.CancellationTerms before =
+                com.gpstore.order.cancellation.CancellationTerms.of(settings);
+
+        if (freeSeconds != null) {
+            if (freeSeconds < 0 || freeSeconds > 3600) {
+                throw new BadRequestException(
+                        "The free cancellation window must be between 0 and 3600 seconds.");
+            }
+            settings.setFreeCancellationSeconds(freeSeconds);
+        }
+
+        if (feePercent == null) {
+            settings.setCancellationFeePercent(null);
+        } else {
+            if (feePercent.signum() < 0) {
+                throw new BadRequestException("A cancellation charge cannot be negative.");
+            }
+            java.math.BigDecimal cap = cancellationPolicy.maxFeePercent();
+            if (feePercent.compareTo(cap) > 0) {
+                throw new BadRequestException(
+                        "A cancellation charge may not be more than "
+                                + cap.stripTrailingZeros().toPlainString() + "%.");
+            }
+            settings.setCancellationFeePercent(feePercent);
+        }
+
+        if (chargesDelivery != null) {
+            settings.setCancellationChargesDelivery(chargesDelivery);
+        }
+
+        settings.setUpdatedAt(LocalDateTime.now());
+        settings.setUpdatedBy(actor);
+        StoreOperationsSettings saved = settingsRepository.save(settings);
+
+        com.gpstore.order.cancellation.CancellationTerms after =
+                com.gpstore.order.cancellation.CancellationTerms.of(saved);
+        auditLogService.log(
+                "STORE_CANCELLATION_TERMS_CHANGED",
+                "StoreOperationsSettings",
+                saved.getId(),
+                "free window: " + before.freeSeconds() + "s -> " + after.freeSeconds() + "s, "
+                        + "fee: " + before.feePercent() + " -> " + after.feePercent() + ", "
+                        + "delivery included: " + before.chargesDelivery()
+                        + " -> " + after.chargesDelivery());
+
+        return saved;
     }
 
     /** The settings row for the shop in scope, created on first write. */

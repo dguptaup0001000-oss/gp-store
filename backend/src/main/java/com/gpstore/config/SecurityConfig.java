@@ -508,6 +508,17 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/returns/pending", "/api/returns/pending/count")
                     .hasAuthority(AdminPermission.ORDERS_VIEW.authority())
 
+                // CANCELLATION DEBTS (§11). /mine takes the customer from the
+                // token and needs no rule beyond being signed in. The other
+                // two are the SHOP's side and need one urgently: without it
+                // any signed-in shopper could list what every customer of the
+                // shop in scope owes, and - worse - waive their own debt.
+                .requestMatchers(HttpMethod.GET, "/api/cancellation-dues/outstanding")
+                    .hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                .requestMatchers(HttpMethod.POST, "/api/cancellation-dues/*/waive")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.GET, "/api/cancellation-dues/mine").authenticated()
+
                 // Without this, any authenticated customer could deactivate
                 // (or reactivate) ANY other customer's account.
                 .requestMatchers(HttpMethod.PUT, "/api/customers/*/active").hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())

@@ -131,6 +131,28 @@ public class OrderController {
         return orderService.updateOrderStatus(orderId, status);
     }
 
+    // What cancelling would cost, before anything is cancelled (§10).
+    //
+    // A SEPARATE READ RATHER THAN A FLAG ON THE CANCEL CALL, because the
+    // point is that the customer sees it and then decides. A "cancel with
+    // dryRun=true" would put the charge behind the same button that takes it,
+    // which is one mistyped parameter away from charging somebody who was
+    // only asking.
+    //
+    // Read across shops for the same reason order detail is: one account
+    // buys from several shops, and the order being priced is not necessarily
+    // from the shop in scope.
+    @GetMapping("/{orderId}/cancellation-quote")
+    public com.gpstore.order.cancellation.CancellationQuoteResponse cancellationQuote(
+            @PathVariable Long orderId) {
+        boolean isAdmin = currentUser.has(AdminPermission.ORDERS_MANAGE);
+        Long me = currentUser.customerId();
+        return isAdmin
+                ? orderService.cancellationQuote(orderId, me, true)
+                : customerOwnedRead.acrossShops(
+                        () -> orderService.cancellationQuote(orderId, me, false));
+    }
+
     // Customers may cancel only their own order; admins may cancel any order.
     @PutMapping("/{orderId}/cancel")
     public com.gpstore.dto.response.OrderDetailResponse cancelOrder(@PathVariable Long orderId) {

@@ -116,6 +116,43 @@ public class StoreOperationsSettings implements ShopOwned {
     @Column(name = "paused_until")
     private LocalDateTime pausedUntil;
 
+    /**
+     * How long after ordering it costs nothing to cancel (§9).
+     *
+     * <p>THE FIVE-SECOND COUNTDOWN, MOVED SOMEWHERE IT CANNOT BE LOST. It
+     * used to exist only as a timer on a screen, which meant it was a promise
+     * the client made and the server knew nothing about - a request arriving
+     * a moment late, or from a build with a different timer, got whatever the
+     * cancellation path happened to do. It is now the shop's own setting,
+     * defaulted to the five seconds §9 says must remain, and the server that
+     * takes the money is the thing that honours it.
+     *
+     * <p>A shop may widen it. None may remove it below zero, and V59 bounds
+     * it at an hour - past that it is not a countdown, it is a policy.
+     */
+    @Column(name = "free_cancellation_seconds", nullable = false)
+    private Integer freeCancellationSeconds = 5;
+
+    /**
+     * What this shop charges to cancel after that window, or null for nothing.
+     *
+     * <p>THE MERCHANT'S NUMBER (§10). GP-STORE caps it - see
+     * CancellationPolicy - but does not set it, and the default is null
+     * because a fee nobody chose is a charge nobody agreed to.
+     */
+    @Column(name = "cancellation_fee_percent", precision = 5, scale = 2)
+    private java.math.BigDecimal cancellationFeePercent;
+
+    /**
+     * Whether the fee also applies to what was paid for delivery.
+     *
+     * <p>Off unless a shop turns it on: the delivery charge is money paid for
+     * a journey that did not happen. A shop whose rider was already out has a
+     * real case for it, which is why the switch exists at all.
+     */
+    @Column(name = "cancellation_charges_delivery", nullable = false)
+    private Boolean cancellationChargesDelivery = Boolean.FALSE;
+
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 

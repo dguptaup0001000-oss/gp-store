@@ -101,7 +101,17 @@ class OrderOwnershipTest {
                 org.mockito.Mockito.mock(com.gpstore.platform.ShopScopeSwitch.class),
                 // Nor the customer-owned widening: that is the replay path,
                 // and nothing here retries a checkout.
-                org.mockito.Mockito.mock(com.gpstore.platform.CustomerOwnedRead.class));
+                org.mockito.Mockito.mock(com.gpstore.platform.CustomerOwnedRead.class),
+                // THE REAL POLICY, not a mock, and with no settings behind it.
+                // A mocked quote returns null and would hand this test a
+                // green tick for a path that NPEs in production; the real one
+                // with an empty repository answers what an unconfigured shop
+                // actually answers - nothing is charged.
+                new com.gpstore.order.cancellation.CancellationPolicy(
+                        org.mockito.Mockito.mock(
+                                com.gpstore.repository.StoreOperationsSettingsRepository.class),
+                        "5"),
+                org.mockito.Mockito.mock(com.gpstore.order.cancellation.CancellationDues.class));
     }
 
     private Order orderOwnedBy(Long ownerId) {
