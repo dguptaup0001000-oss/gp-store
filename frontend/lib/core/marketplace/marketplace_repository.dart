@@ -1,15 +1,16 @@
 import '../api/api_client.dart';
 import 'marketplace_models.dart';
 
-/// Reads the public marketplace surface.
+/// Reads the public marketplace surface, and the customer's own preferences.
 ///
 /// EVERY DECISION HERE IS THE BACKEND'S. Which shops serve a point, how far
-/// each is, whether a shop may be shown to customers at all - all of it is
-/// answered by `/api/marketplace/**` and none of it is recomputed in Dart.
-/// This class parses and nothing else, on purpose: a distance calculated in
-/// the app and a distance calculated on the server would disagree the first
-/// time either changed, and the server's is the one that decided whether the
-/// shop was offered.
+/// each is, whether a shop may be shown to customers at all, which shop is the
+/// best deal, whether a farther shop is cheap enough to be worth it, what a
+/// basket costs per shop - all of it is answered by the API and none of it is
+/// recomputed in Dart. This class parses and nothing else, on purpose: a rule
+/// evaluated in the app and the same rule evaluated on the server would
+/// disagree the first time either changed, and the server's is the one that
+/// decided what the customer was offered.
 class MarketplaceRepository {
   MarketplaceRepository({required this.apiClient});
 
@@ -38,17 +39,108 @@ class MarketplaceRepository {
         .toList(growable: false);
   }
 
-  /// One storefront. Throws ApiException(404) when the marketplace does not
-  /// show it - a draft, closed or suspended shop is indistinguishable from a
-  /// shop that never existed, which is the backend's choice and not this
-  /// app's to undo.
-  Future<Storefront> storefront(int shopId) async {
+  /// The same question with a "search farther" answer attached.
+  ///
+  /// LOCAL FIRST: with no radius this is exactly [shopsNear] - the shops that
+  /// can actually deliver here. A radius is the second tap, and the server
+  /// keeps climbing its own ladder until it finds something rather than
+  /// answering an empty screen at each rung in turn.
+  Future<DiscoveryPage> discover({
+    double? latitude,
+    double? longitude,
+    double? radiusKm,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/marketplace/discovery',
+      queryParameters: {
+        if (latitude != null) 'lat': latitude,
+        if (longitude != null) 'lng': longitude,
+        if (radiusKm != null) 'radiusKm': radiusKm,
+      },
+    );
+    return DiscoveryPage.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// One storefront, with everything the decision to buy from it needs.
+  ///
+  /// Throws ApiException(404) when the marketplace does not show it - a draft,
+  /// closed or suspended shop is indistinguishable from a shop that never
+  /// existed, which is the backend's choice and not this app's to undo.
+  Future<StorefrontDetail> storefront(int shopId) async {
     final response = await apiClient.dio.get('/api/marketplace/shops/$shopId');
-    return Storefront.fromJson(Map<String, dynamic>.from(response.data as Map));
+    return StorefrontDetail.fromJson(Map<String, dynamic>.from(response.data as Map));
   }
 
   Future<MarketplaceMode> mode() async {
     final response = await apiClient.dio.get('/api/marketplace/mode');
     return MarketplaceMode.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// Every shop's price for one item, ordered by Best Deal.
+  Future<ShopComparison> compare({
+    required int variantId,
+    double? latitude,
+    double? longitude,
+    double? radiusKm,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/discovery/compare',
+      queryParameters: {
+        'variantId': variantId,
+        if (latitude != null) 'lat': latitude,
+        if (longitude != null) 'lng': longitude,
+        if (radiusKm != null) 'radiusKm': radiusKm,
+      },
+    );
+    return ShopComparison.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// The same offers, the customer's own order first.
+  Future<PreferredFirstOffers> preferredFirst({
+    required int variantId,
+    required int categoryId,
+    double? latitude,
+    double? longitude,
+    double? radiusKm,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/discovery/preferred',
+      queryParameters: {
+        'variantId': variantId,
+        'categoryId': categoryId,
+        if (latitude != null) 'lat': latitude,
+        if (longitude != null) 'lng': longitude,
+        if (radiusKm != null) 'radiusKm': radiusKm,
+      },
+    );
+    return PreferredFirstOffers.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// This customer's chosen shops for one category.
+  Future<PreferredShopChoice> preferredShops(int categoryId) async {
+    final response = await apiClient.dio.get('/api/preferred-shops/$categoryId');
+    return PreferredShopChoice.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// Replaces a category's choices. An empty list clears it - that is how
+  /// "actually, no preference" is said, and it needs to be sayable.
+  Future<PreferredShopChoice> setPreferredShops(int categoryId, List<int> shopIds) async {
+    final response = await apiClient.dio.put(
+      '/api/preferred-shops/$categoryId',
+      data: {'shopIds': shopIds},
+    );
+    return PreferredShopChoice.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// The basket drawn as the several purchases it actually is.
+  ///
+  /// The address is what lets each shop quote delivery; without one every
+  /// section says so rather than showing zero.
+  Future<BasketByShop> basketByShop({int? addressId}) async {
+    final response = await apiClient.dio.get(
+      '/api/carts/mine/by-shop',
+      queryParameters: {if (addressId != null) 'addressId': addressId},
+    );
+    return BasketByShop.fromJson(Map<String, dynamic>.from(response.data as Map));
   }
 }

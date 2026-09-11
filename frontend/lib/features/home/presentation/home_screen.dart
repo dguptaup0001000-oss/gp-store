@@ -462,7 +462,7 @@ class _ShopTitle extends ConsumerWidget {
     // chosen one and the backend is picking their nearest - which is a real
     // and correct state, so it is labelled rather than hidden.
     final storefront = ref.watch(selectedStorefrontProvider).valueOrNull;
-    final label = storefront?.displayName ?? 'Choose a shop';
+    final label = storefront?.shop.displayName ?? 'Choose a shop';
 
     return InkWell(
       onTap: hapticize(() => Navigator.of(context).push(

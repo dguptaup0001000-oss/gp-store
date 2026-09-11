@@ -76,12 +76,152 @@ final deliveryPinProvider = Provider<({double lat, double lng})?>((ref) {
 
 /// The storefront the customer is currently shopping, when they have chosen
 /// one. Null under a single shop, and null on a marketplace until they pick.
+///
+/// THE DETAIL, NOT THE LIST ROW. The rating, the trusted badge and the shop's
+/// own promises are only on the detail response - the discovery list
+/// deliberately does not pay for them - so this is what the shop profile
+/// screen reads.
 final selectedStorefrontProvider =
-    FutureProvider.autoDispose<Storefront?>((ref) async {
+    FutureProvider.autoDispose<StorefrontDetail?>((ref) async {
   final shopId = ref.watch(shopContextProvider);
   if (shopId == null) return null;
   return ref.watch(marketplaceRepositoryProvider).storefront(shopId);
 });
+
+/// One storefront by id, for looking at a shop that is not the current one.
+///
+/// SEPARATE FROM [selectedStorefrontProvider] on purpose: opening a
+/// competitor's profile to compare must not change which shop the app is
+/// acting for. Switching is a deliberate act with its own button.
+final storefrontProvider =
+    FutureProvider.autoDispose.family<StorefrontDetail, int>((ref, shopId) {
+  return ref.watch(marketplaceRepositoryProvider).storefront(shopId);
+});
+
+/// How far the customer has asked us to look, in km.
+///
+/// NULL IS LOCAL-FIRST and is where every customer starts: the shops that can
+/// actually deliver to them. A value here means they pressed "search farther"
+/// and the server is free to climb past it to the next rung that has anything
+/// in it.
+class DiscoveryRadius extends Notifier<double?> {
+  @override
+  double? build() => null;
+
+  void searchFarther(double? nextRadiusKm) {
+    if (nextRadiusKm == null) return;
+    state = nextRadiusKm;
+  }
+
+  /// Back to the shops that deliver here.
+  void backToLocal() => state = null;
+}
+
+final discoveryRadiusProvider =
+    NotifierProvider<DiscoveryRadius, double?>(DiscoveryRadius.new);
+
+/// Discovery: the shops, plus how much farther there is to look.
+///
+/// THE LADDER IS THE SERVER'S, INCLUDING THE WORDS. When the rung the customer
+/// asked for was empty the server widens and says so in `message`; the screen
+/// prints that sentence rather than composing its own, so the wording and the
+/// behaviour cannot drift apart.
+final discoveryProvider = FutureProvider.autoDispose
+    .family<DiscoveryPage, ({double lat, double lng})>((ref, point) {
+  final radiusKm = ref.watch(discoveryRadiusProvider);
+  return ref.watch(marketplaceRepositoryProvider).discover(
+        latitude: point.lat,
+        longitude: point.lng,
+        radiusKm: radiusKm,
+      );
+});
+
+/// The address a delivery quote is worked out against.
+///
+/// The same address [deliveryPinProvider] uses, by id rather than by point -
+/// the basket needs the row, not the coordinates, because a shop quotes
+/// delivery against an address it can check is inside its circle.
+final deliveryAddressIdProvider = Provider<int?>((ref) {
+  final addresses = ref.watch(myAddressesProvider).valueOrNull;
+  if (addresses == null || addresses.isEmpty) return null;
+  return addresses
+      .firstWhere((address) => address.defaultAddress, orElse: () => addresses.first)
+      .id;
+});
+
+/// The basket, priced per shop by the server.
+///
+/// WHY NOT COMPUTED FROM THE CART RESPONSE: delivery is per shop, quoted by
+/// that shop against this address, and discounts are per shop too. Adding the
+/// lines up in Dart would produce a number no shop agreed to and that
+/// checkout would then contradict.
+final basketByShopProvider = FutureProvider.autoDispose<BasketByShop>((ref) {
+  // Re-reads whenever the basket itself changes, so a quantity edit on the
+  // cart screen updates the per-shop totals under it.
+  ref.watch(cartControllerProvider);
+  final addressId = ref.watch(deliveryAddressIdProvider);
+  return ref.watch(marketplaceRepositoryProvider).basketByShop(addressId: addressId);
+});
+
+/// Every shop's price for one item, ordered by Best Deal.
+final shopComparisonProvider = FutureProvider.autoDispose
+    .family<ShopComparison, int>((ref, variantId) {
+  final pin = ref.watch(deliveryPinProvider);
+  final radiusKm = ref.watch(discoveryRadiusProvider);
+  return ref.watch(marketplaceRepositoryProvider).compare(
+        variantId: variantId,
+        latitude: pin?.lat,
+        longitude: pin?.lng,
+        radiusKm: radiusKm,
+      );
+});
+
+/// The same offers with the customer's own shops first.
+final preferredFirstOffersProvider = FutureProvider.autoDispose
+    .family<PreferredFirstOffers, ({int variantId, int categoryId})>((ref, key) {
+  final pin = ref.watch(deliveryPinProvider);
+  return ref.watch(marketplaceRepositoryProvider).preferredFirst(
+        variantId: key.variantId,
+        categoryId: key.categoryId,
+        latitude: pin?.lat,
+        longitude: pin?.lng,
+      );
+});
+
+/// This customer's chosen shops for one category, and the cap on them.
+final preferredShopsProvider =
+    FutureProvider.autoDispose.family<PreferredShopChoice, int>((ref, categoryId) {
+  return ref.watch(marketplaceRepositoryProvider).preferredShops(categoryId);
+});
+
+/// Adds or removes a shop from a category's preferences.
+///
+/// THE CAP IS THE SERVER'S. `maxPerCategory` comes back on every read and the
+/// server refuses a third shop regardless; this reads the current list, edits
+/// it, and sends the whole list back, which is the shape the endpoint takes.
+/// Nothing here decides what the limit is.
+class PreferredShopsEditor {
+  const PreferredShopsEditor(this._ref);
+
+  final Ref _ref;
+
+  Future<PreferredShopChoice> toggle(int categoryId, int shopId) async {
+    final repo = _ref.read(marketplaceRepositoryProvider);
+    final current = await repo.preferredShops(categoryId);
+    final ids = List<int>.from(current.shopIds);
+    if (ids.contains(shopId)) {
+      ids.remove(shopId);
+    } else {
+      ids.add(shopId);
+    }
+    final saved = await repo.setPreferredShops(categoryId, ids);
+    _ref.invalidate(preferredShopsProvider(categoryId));
+    return saved;
+  }
+}
+
+final preferredShopsEditorProvider =
+    Provider<PreferredShopsEditor>(PreferredShopsEditor.new);
 
 /// Switches which shop the app is acting for, and throws away what belonged
 /// to the last one.
@@ -140,6 +280,9 @@ class ShopSwitch {
     _ref.invalidate(cartControllerProvider);
     // Order history is read under the request's scope.
     _ref.invalidate(myOrdersProvider);
+    // The per-shop basket: its delivery quotes were worked out against the
+    // shops that were in the basket, and switching can add one.
+    _ref.invalidate(basketByShopProvider);
   }
 }
 

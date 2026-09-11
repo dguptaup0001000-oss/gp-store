@@ -9,6 +9,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../address/presentation/address_list_screen.dart';
 import '../../address/presentation/address_providers.dart';
+import 'shop_profile_screen.dart';
 
 /// Which shop the customer is buying from.
 ///
@@ -91,10 +92,10 @@ class _NearbyList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final shopsAsync = ref.watch(shopsNearProvider(pin));
+    final pageAsync = ref.watch(discoveryProvider(pin));
     final current = ref.watch(shopContextProvider);
 
-    return shopsAsync.when(
+    return pageAsync.when(
       loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       error: (error, _) => Center(
         child: Column(
@@ -103,25 +104,37 @@ class _NearbyList extends ConsumerWidget {
             Text("Couldn't load shops: ${extractErrorMessage(error)}"),
             const SizedBox(height: 8),
             TextButton(
-              onPressed: hapticize(() => ref.invalidate(shopsNearProvider(pin))),
+              onPressed: hapticize(() => ref.invalidate(discoveryProvider(pin))),
               child: const Text('Retry'),
             ),
           ],
         ),
       ),
-      data: (shops) {
-        if (shops.isEmpty) return const _NobodyDeliversHere();
+      data: (page) {
+        if (page.shops.isEmpty) {
+          return _NothingHere(page: page, pin: pin);
+        }
         return RefreshIndicator(
-          onRefresh: () async => ref.invalidate(shopsNearProvider(pin)),
+          onRefresh: () async => ref.invalidate(discoveryProvider(pin)),
           child: ListView.separated(
             padding: const EdgeInsets.all(16),
-            itemCount: shops.length,
+            // One extra row at the top for the widened notice, and one at the
+            // bottom for "search farther" - both drawn only when the server
+            // said there is something to draw.
+            itemCount: page.shops.length + 2,
             separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) => _ShopTile(
-              shop: shops[index],
-              nearest: index == 0,
-              selected: shops[index].shopId == current,
-            ),
+            itemBuilder: (context, index) {
+              if (index == 0) return _WidenedNotice(page: page);
+              if (index == page.shops.length + 1) {
+                return _SearchFarther(page: page);
+              }
+              final shop = page.shops[index - 1];
+              return _ShopTile(
+                shop: shop,
+                nearest: index == 1,
+                selected: shop.shopId == current,
+              );
+            },
           ),
         );
       },
@@ -129,20 +142,108 @@ class _NearbyList extends ConsumerWidget {
   }
 }
 
-/// Nobody delivers to this address.
+/// "No shops within 8 km. Showing results within 20 km."
 ///
-/// AND THERE IS NO "SEARCH FARTHER" BUTTON, deliberately. A shop appears here
-/// only when the address is inside THAT SHOP'S OWN declared delivery radius,
-/// which is the shop's decision and not the platform's. Widening the search
-/// would list shops that would refuse the order at checkout - an offer the
-/// app is not in a position to make. The two things that genuinely change the
-/// answer are a different address or a new shop opening nearby, so those are
-/// what this offers.
-class _NobodyDeliversHere extends StatelessWidget {
-  const _NobodyDeliversHere();
+/// THE SENTENCE IS THE SERVER'S. The widening decision and the words
+/// describing it are made in the same place, so a change to the ladder
+/// cannot leave the app telling customers something that is no longer true.
+/// Nothing is drawn when the server did not widen.
+class _WidenedNotice extends StatelessWidget {
+  const _WidenedNotice({required this.page});
+
+  final DiscoveryPage page;
 
   @override
   Widget build(BuildContext context) {
+    final message = page.message;
+    if (!page.widened || message == null || message.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.secondary.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.travel_explore_outlined,
+              size: 18, color: AppColors.secondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The next rung of the server's ladder, offered as a button.
+///
+/// THE APP DOES NOT PICK THE NUMBER. `nextRadiusKm` is what the server says
+/// comes after what it just searched; when it is null there is nowhere
+/// farther to go and this draws nothing rather than offering a search that
+/// would return the same list.
+class _SearchFarther extends ConsumerWidget {
+  const _SearchFarther({required this.page});
+
+  final DiscoveryPage page;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final next = page.nextRadiusKm;
+    final searchedFar = ref.watch(discoveryRadiusProvider) != null;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 24),
+      child: Column(
+        children: [
+          if (next != null)
+            OutlinedButton.icon(
+              onPressed: hapticize(
+                  () => ref.read(discoveryRadiusProvider.notifier).searchFarther(next)),
+              icon: const Icon(Icons.expand_more, size: 18),
+              label: Text('Search within ${_km(next)} km'),
+            ),
+          if (searchedFar) ...[
+            const SizedBox(height: 4),
+            TextButton(
+              onPressed: hapticize(
+                  () => ref.read(discoveryRadiusProvider.notifier).backToLocal()),
+              child: const Text('Only shops that deliver to me'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+String _km(double value) =>
+    value == value.roundToDouble() ? value.toStringAsFixed(0) : value.toStringAsFixed(1);
+
+/// Nothing came back at this rung.
+///
+/// LOCAL-FIRST IS NOT LOCAL-ONLY. A shop appears in the unwidened list only
+/// when the address is inside THAT SHOP'S OWN declared delivery radius, which
+/// is the shop's decision and not the platform's - so the first answer is
+/// still "nobody delivers here". What changed is that this is no longer the
+/// end of the conversation: the customer can look farther, see that shops
+/// exist, and decide for themselves, and every one of those rows says plainly
+/// that it will not deliver to this address.
+class _NothingHere extends ConsumerWidget {
+  const _NothingHere({required this.page, required this.pin});
+
+  final DiscoveryPage page;
+  final ({double lat, double lng}) pin;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final next = page.nextRadiusKm;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -155,13 +256,22 @@ class _NobodyDeliversHere extends StatelessWidget {
             const Text('No shop delivers here yet',
                 style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 6),
-            const Text(
-              'Every shop sets how far it will deliver. None of them reaches '
-              'this address at the moment. Try a different saved address.',
+            Text(
+              page.message ??
+                  'Every shop sets how far it will deliver. None of them reaches '
+                      'this address at the moment.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+              style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
             ),
             const SizedBox(height: 16),
+            if (next != null)
+              FilledButton.icon(
+                onPressed: hapticize(() =>
+                    ref.read(discoveryRadiusProvider.notifier).searchFarther(next)),
+                icon: const Icon(Icons.travel_explore_outlined, size: 18),
+                label: Text('Look within ${_km(next)} km'),
+              ),
+            const SizedBox(height: 8),
             OutlinedButton(
               onPressed: hapticize(() => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const AddressListScreen()),
@@ -191,13 +301,14 @@ class _ShopTile extends ConsumerWidget {
     final theme = Theme.of(context);
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: hapticize(() {
-        // SELECT, THEN LEAVE. The switch also discards the previous shop's
-        // cached catalogue - see ShopSwitch - so the home screen behind this
-        // one is rebuilding against the new shop by the time it is visible.
-        ref.read(shopSwitchProvider).select(shop.shopId);
-        Navigator.of(context).pop();
-      }),
+      // OPENS THE SHOP, DOES NOT SWITCH TO IT. Choosing where to buy from is
+      // worth more than one line of text on a tile - the shop's rating, what
+      // it has verified, when it is open and what it promises about returns
+      // all live on its profile, and "Shop here" is a deliberate button
+      // there. Switching from a tile made the decision for the customer.
+      onTap: hapticize(() => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => ShopProfileScreen(shopId: shop.shopId)),
+          )),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -227,7 +338,45 @@ class _ShopTile extends ConsumerWidget {
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: AppColors.textSecondary),
                   ),
-                  if (nearest && !selected) ...[
+                  // WHAT GP-STORE HAS CHECKED, in the server's own words.
+                  if ((shop.verificationBadge ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      shop.verificationBadge!,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
+                  // A SHOP OUTSIDE ITS OWN RADIUS IS STILL SHOWN, and is
+                  // told plainly that it cannot deliver here. Searching
+                  // farther widens what the customer can SEE; it widens
+                  // nothing any shop promised.
+                  if (shop.deliversHere == false) ...[
+                    const SizedBox(height: 4),
+                    const Text(
+                      "Doesn't deliver to this address",
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.error,
+                      ),
+                    ),
+                  ],
+                  if (_whenItIsShut(shop) != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _whenItIsShut(shop)!,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                  if (nearest && !selected && shop.deliversHere != false) ...[
                     const SizedBox(height: 4),
                     const Text(
                       'Closest to your address',
@@ -247,6 +396,24 @@ class _ShopTile extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// Why this shop will not take an order right now, or null when it will.
+  ///
+  /// BROWSING IS NEVER CLOSED, so none of this hides the shop - it explains
+  /// it. "Back at 4pm" and "closed today" are different facts and a customer
+  /// deciding where to buy from needs the difference.
+  static String? _whenItIsShut(Storefront shop) {
+    if (shop.closedToday) {
+      final reason = shop.closureReason;
+      return (reason == null || reason.isEmpty) ? 'Closed today' : 'Closed today - $reason';
+    }
+    if (!shop.acceptingOrders) {
+      final until = shop.pausedUntil;
+      return until == null ? 'Not taking orders right now' : 'Paused until $until';
+    }
+    if (!shop.openNow) return 'Closed right now';
+    return null;
   }
 
   /// How far away it is, and how far it is willing to come.

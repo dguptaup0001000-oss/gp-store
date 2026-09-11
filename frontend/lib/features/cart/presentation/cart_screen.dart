@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/marketplace/marketplace_models.dart';
+import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../address/domain/address_models.dart';
@@ -296,6 +298,22 @@ class _CartSummary extends ConsumerWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
               ],
             ),
+            // SAID BEFORE PAYMENT, NOT AFTER. A customer pressing one
+            // button and receiving two orders, two bills and two deliveries
+            // has to have been told, and the combined figure above is a
+            // total for the trip rather than a bill anybody will issue.
+            if (isSplitAcrossShops(cart)) ...[
+              const SizedBox(height: 4),
+              const Text(
+                'Each shop is paid separately and delivers separately. The '
+                'total above is what the whole trip costs you, not one bill.',
+                style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+            ],
             if (cart.items.any((item) => item.available == false)) ...[
               const Text(
                 'Remove unavailable items before checkout.',
@@ -345,14 +363,25 @@ class _CartSummary extends ConsumerWidget {
 /// Shown only when a basket spans shops - see the branch in the cart body.
 /// The grouping and the name are both the server's (cart_items.shop_id and
 /// CartResponse.shops); nothing here decides which lines belong together.
-class _CartShopSection extends StatelessWidget {
+class _CartShopSection extends ConsumerWidget {
   const _CartShopSection({required this.group});
 
   final CartShopGroup group;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    // THIS SHOP'S OWN MONEY, PRICED BY THIS SHOP. Delivery is quoted by the
+    // shop against this address and discounts are that shop's own, so the
+    // section's total is the server's arithmetic and not a sum of the lines
+    // above it - a figure added up here would be one no shop agreed to and
+    // that checkout would then contradict.
+    final section = ref
+        .watch(basketByShopProvider)
+        .valueOrNull
+        ?.shops
+        .where((s) => s.shopId == group.shopId)
+        .firstOrNull;
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Column(
@@ -391,7 +420,80 @@ class _CartShopSection extends StatelessWidget {
             _CartItemTile(item: item),
             const SizedBox(height: 12),
           ],
+          if (section != null) _ShopMoney(section: section),
         ],
+      ),
+    );
+  }
+}
+
+/// What this one shop will charge: its subtotal, its discount, its delivery,
+/// its total.
+///
+/// FOUR LINES RATHER THAN ONE, because they are four different shops'
+/// decisions and a customer comparing kiranas needs to see which of them is
+/// charging for what.
+///
+/// DELIVERY NOT KNOWN IS NOT DELIVERY FREE. A shop that could not quote -
+/// no address saved, or an address outside its circle - says so. Printing
+/// ₹0 would understate the bill and make this shop look like the cheap one.
+class _ShopMoney extends StatelessWidget {
+  const _ShopMoney({required this.section});
+
+  final BasketShopSection section;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.cardBackground,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          _row('Items', '₹${section.subtotal.toStringAsFixed(0)}'),
+          if (section.discount > 0)
+            _row('Discount', '-₹${section.discount.toStringAsFixed(0)}',
+                color: AppColors.success),
+          _row(
+            'Delivery',
+            section.deliveryKnown
+                ? '₹${section.deliveryCharge.toStringAsFixed(0)}'
+                : 'Quoted at checkout',
+          ),
+          const Divider(height: 16),
+          _row(
+            'This shop',
+            '₹${section.shopTotal.toStringAsFixed(0)}',
+            bold: true,
+          ),
+          for (final note in section.notes)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(note,
+                    style: const TextStyle(
+                        fontSize: 11.5, color: AppColors.textSecondary)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  static Widget _row(String label, String value, {bool bold = false, Color? color}) {
+    final style = TextStyle(
+      fontSize: bold ? 14 : 12.5,
+      fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
+      color: color,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [Text(label, style: style), Text(value, style: style)],
       ),
     );
   }
