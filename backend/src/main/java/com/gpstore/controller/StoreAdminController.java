@@ -336,6 +336,10 @@ public class StoreAdminController {
         body.put("feePercent", terms.feePercent());
         body.put("chargesDelivery", terms.chargesDelivery());
         body.put("maxFeePercent", operationsService.maxCancellationFeePercent());
+        // STATED, NOT INFERRED FROM A NULL. A screen reading only maxFeePercent
+        // would have to decide for itself what null means, and "unlimited" is
+        // one of the readings it might pick.
+        body.put("feeChargingAvailable", operationsService.maxCancellationFeePercent() != null);
         return body;
     }
 

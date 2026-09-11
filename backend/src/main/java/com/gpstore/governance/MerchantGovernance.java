@@ -51,16 +51,34 @@ import java.util.Set;
 public class MerchantGovernance {
 
     /**
-     * How long a warning counts for.
+     * How long a warning counts for. CONFIGURATION, NOT A DECISION.
      *
-     * <p>Ninety days, and the number matters less than the fact that there is
-     * one: a ladder with no way down is a ladder every long-lived merchant
-     * eventually falls off, for a bad fortnight two years ago.
+     * <p>Ninety days is a working default, not a policy anybody approved -
+     * {@code governance.warning-days} is what actually binds. The number
+     * matters less than the fact that there IS one: a ladder with no way down
+     * is a ladder every long-lived merchant eventually falls off, for a bad
+     * fortnight two years ago.
+     *
+     * <p>REQUIRES FOUNDER DECISION: how long a warning should follow a
+     * merchant is a fairness question, and nobody has answered it.
      */
-    public static final int WARNING_DAYS = 90;
+    static final int DEFAULT_WARNING_DAYS = 90;
 
-    /** A final warning is heavier, so it stands for longer. */
-    public static final int FINAL_WARNING_DAYS = 180;
+    /** A final warning is heavier, so it stands for longer. Same caveat. */
+    static final int DEFAULT_FINAL_WARNING_DAYS = 180;
+
+    private final int warningDays;
+    private final int finalWarningDays;
+
+    /** How long a warning counts for on this deployment. */
+    public int warningDays() {
+        return warningDays;
+    }
+
+    /** How long a final warning counts for on this deployment. */
+    public int finalWarningDays() {
+        return finalWarningDays;
+    }
 
     private final MerchantGovernanceRepository actions;
     private final MerchantRepository merchants;
@@ -72,7 +90,19 @@ public class MerchantGovernance {
                               MerchantRepository merchants,
                               ShopRepository shops,
                               ShopLifecycleService shopLifecycle,
-                              AuditLogService auditLog) {
+                              AuditLogService auditLog,
+                              @org.springframework.beans.factory.annotation.Value(
+                                      "${governance.warning-days:0}") int configuredWarningDays,
+                              @org.springframework.beans.factory.annotation.Value(
+                                      "${governance.final-warning-days:0}")
+                              int configuredFinalWarningDays) {
+        // A non-positive or unset value means "not configured", which keeps
+        // the working default rather than making warnings expire instantly -
+        // an unreadable setting must never silently wipe a merchant's record.
+        this.warningDays = configuredWarningDays > 0
+                ? configuredWarningDays : DEFAULT_WARNING_DAYS;
+        this.finalWarningDays = configuredFinalWarningDays > 0
+                ? configuredFinalWarningDays : DEFAULT_FINAL_WARNING_DAYS;
         this.actions = actions;
         this.merchants = merchants;
         this.shops = shops;
@@ -143,10 +173,10 @@ public class MerchantGovernance {
         return saved;
     }
 
-    private static LocalDateTime expiryFor(GovernanceLevel level, LocalDateTime now) {
+    private LocalDateTime expiryFor(GovernanceLevel level, LocalDateTime now) {
         return switch (level) {
-            case WARNING -> now.plusDays(WARNING_DAYS);
-            case FINAL_WARNING -> now.plusDays(FINAL_WARNING_DAYS);
+            case WARNING -> now.plusDays(warningDays);
+            case FINAL_WARNING -> now.plusDays(finalWarningDays);
             // A SUSPENSION does not lift itself. Somebody decides it is over,
             // and that decision is its own recorded action.
             case SUSPENSION, TERMINATION, REINSTATEMENT -> null;

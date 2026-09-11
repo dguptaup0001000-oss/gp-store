@@ -45,18 +45,20 @@ import java.time.ZoneOffset;
 @Service
 public class CancellationPolicy {
 
-    /**
-     * The ceiling when nothing is configured.
-     *
-     * <p>Five, because §10 named 1-5%. It is a fallback for a missing
-     * property and nothing else: no code compares against it, and a
-     * deployment that has an opinion sets the property.
-     */
-    private static final BigDecimal DEFAULT_MAX_FEE_PERCENT = new BigDecimal("5");
-
     private static final BigDecimal HUNDRED = new BigDecimal("100");
 
     private final StoreOperationsSettingsRepository settingsRepository;
+
+    /**
+     * The ceiling, or NULL when nobody has decided one.
+     *
+     * <p>THERE IS NO DEFAULT, AND THAT IS THE POINT. This used to fall back
+     * to 5% because the brief mentioned "1-5%" as the business concept of the
+     * day. A concept in a brief is not a decision, and a number that appears
+     * in a cap by default is a number GP-STORE has chosen on the founder's
+     * behalf - which is exactly what §3 forbids. Every other commercial
+     * amount in this system is absent until configured; this one now matches.
+     */
     private final BigDecimal maxFeePercent;
 
     public CancellationPolicy(
@@ -66,26 +68,54 @@ public class CancellationPolicy {
         this.maxFeePercent = parseCap(configuredMax);
     }
 
+    /**
+     * Reads the property, or answers null.
+     *
+     * <p>A MALFORMED CAP READS AS NO CAP, which fails CLOSED rather than
+     * open: with no ceiling decided, {@link #quote} charges nothing at all
+     * and {@code setCancellationTerms} refuses to accept a fee. Falling back
+     * to some other number would be inventing a second one to cover for the
+     * first being unreadable.
+     */
     private static BigDecimal parseCap(String raw) {
         if (raw == null || raw.isBlank()) {
-            return DEFAULT_MAX_FEE_PERCENT;
+            return null;
         }
         try {
             BigDecimal parsed = new BigDecimal(raw.trim());
-            // A negative or absurd cap is a typo, and a typo must not be able
-            // to make every shop's fee illegal or every fee unlimited.
+            // Negative is meaningless and above 100 is a slipped decimal
+            // point. Either way nobody has stated a usable ceiling.
             if (parsed.signum() < 0 || parsed.compareTo(HUNDRED) > 0) {
-                return DEFAULT_MAX_FEE_PERCENT;
+                return null;
             }
             return parsed;
         } catch (NumberFormatException notANumber) {
-            return DEFAULT_MAX_FEE_PERCENT;
+            return null;
         }
     }
 
-    /** The highest percentage any shop on this deployment may charge. */
+    /**
+     * The highest percentage any shop on this deployment may charge, or null
+     * when the platform has not decided one.
+     *
+     * <p>REQUIRES FOUNDER DECISION: set
+     * {@code platform.cancellation.max-fee-percent}. Until it is set, no shop
+     * can charge a cancellation fee at all - see {@link #capIsDecided}.
+     */
     public BigDecimal maxFeePercent() {
         return maxFeePercent;
+    }
+
+    /**
+     * Whether a cancellation fee may be charged on this deployment at all.
+     *
+     * <p>False until somebody decides the ceiling. A merchant asking to
+     * charge 2% while the platform has stated no maximum is asking GP-STORE
+     * to enforce a policy it does not have, and the safe answer for the
+     * customer - who is the one who would pay - is no.
+     */
+    public boolean capIsDecided() {
+        return maxFeePercent != null;
     }
 
     /**
@@ -147,6 +177,14 @@ public class CancellationPolicy {
         }
 
         if (!terms.chargesAFee()) {
+            return CancellationCharge.free(false, freeUntil,
+                    "This shop does not charge for cancelling.");
+        }
+
+        // NO CEILING DECIDED, NO CHARGE TAKEN. A row carrying a percentage on
+        // a deployment whose platform has stated no maximum is a fee nobody
+        // approved a limit for, and the customer is the one who would pay it.
+        if (!capIsDecided()) {
             return CancellationCharge.free(false, freeUntil,
                     "This shop does not charge for cancelling.");
         }

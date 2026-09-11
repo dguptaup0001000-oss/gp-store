@@ -436,6 +436,17 @@ public class StoreOperationsService {
             if (feePercent.signum() < 0) {
                 throw new BadRequestException("A cancellation charge cannot be negative.");
             }
+            // REFUSED OUTRIGHT WHILE THE PLATFORM HAS NO CEILING. Accepting
+            // the number and then quietly charging nothing (which is what the
+            // quote would do) would leave a shopkeeper believing they charge
+            // 2% and collecting nothing, and the first they would hear of it
+            // is a cancellation that cost them.
+            if (!cancellationPolicy.capIsDecided()) {
+                throw new BadRequestException(
+                        "GP-STORE has not set a maximum cancellation charge yet, so no shop "
+                                + "can charge one. Your other cancellation settings were not "
+                                + "changed.");
+            }
             java.math.BigDecimal cap = cancellationPolicy.maxFeePercent();
             if (feePercent.compareTo(cap) > 0) {
                 throw new BadRequestException(

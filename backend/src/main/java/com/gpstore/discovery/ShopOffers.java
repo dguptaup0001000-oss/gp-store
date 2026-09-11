@@ -45,6 +45,16 @@ import java.util.List;
 @Service
 public class ShopOffers {
 
+    /**
+     * How many shops one comparison will price.
+     *
+     * <p>See the note in {@link #forVariant}: the per-shop work is a scope
+     * switch and several queries, so this is the difference between a fast
+     * page and a slow one in a dense area. Twenty is more shops than a
+     * customer will scroll and far fewer than a city can produce.
+     */
+    static final int MAX_SHOPS_COMPARED = 20;
+
     private final ShopDiscovery discovery;
     private final ShopScopeSwitch shopScope;
     private final ShopCatalog catalog;
@@ -96,8 +106,25 @@ public class ShopOffers {
                 ? discovery.shopsServing(lat, lng)
                 : discovery.searchOutwards(lat, lng, radiusKm).shops();
 
+        // BOUNDED, BECAUSE THIS IS O(SHOPS) ROUND TRIPS. Each shop below
+        // costs a scope switch and a handful of queries - a listing, a stock
+        // count, a settings read, a rating tally. That is affordable for the
+        // dozen kiranas in range of one pin and is not affordable for fifty,
+        // which is what a dense city on the widest rung of the ladder looks
+        // like: one comparison request would become two hundred and fifty
+        // queries while a customer waits.
+        //
+        // NEAREST FIRST IS ALREADY THE ORDER, so the cap keeps the shops a
+        // customer would actually consider and drops the tail. Truncating is
+        // the honest failure here: the alternative is a page that takes four
+        // seconds, and the fifty-first nearest shop is not the answer to
+        // "who near me sells this".
+        List<ShopDiscovery.NearbyShop> considered = nearby.size() > MAX_SHOPS_COMPARED
+                ? nearby.subList(0, MAX_SHOPS_COMPARED)
+                : nearby;
+
         List<ShopOffer> offers = new ArrayList<>();
-        for (ShopDiscovery.NearbyShop near : nearby) {
+        for (ShopDiscovery.NearbyShop near : considered) {
             ShopOffer offer = offerFrom(near, variant, productId);
             if (offer != null) {
                 offers.add(offer);

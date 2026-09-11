@@ -232,7 +232,7 @@ class ALadderNotASwitchTest {
             assertEquals(GovernanceLevel.WARNING,
                     governance.standing(merchantId, warning.getIssuedAt().plusDays(1)).level());
             assertTrue(governance.standing(merchantId,
-                    warning.getIssuedAt().plusDays(MerchantGovernance.WARNING_DAYS + 1)).isClean(),
+                    warning.getIssuedAt().plusDays(governance.warningDays() + 1)).isClean(),
                     "and ninety days later the record is clean again");
         }
     }

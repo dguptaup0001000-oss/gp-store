@@ -44,23 +44,66 @@ public class ShopReliability {
      * badge that never forgets is one nobody can recover from. It also keeps
      * the query bounded as the order table grows.
      */
-    private static final int WINDOW_DAYS = 90;
+    static final int DEFAULT_WINDOW_DAYS = 90;
 
     /** Below this the record is too thin to mean anything either way. */
-    private static final long MIN_ORDERS_FOR_TRUST = 25;
+    static final long DEFAULT_MIN_ORDERS_FOR_TRUST = 25;
 
     /** Of the orders it took, this many have to have arrived. */
-    private static final double MIN_COMPLETION_RATE = 0.92;
+    static final double DEFAULT_MIN_COMPLETION_RATE = 0.92;
 
     /** And this few can have come back. */
-    private static final double MAX_RETURN_RATE = 0.08;
+    static final double DEFAULT_MAX_RETURN_RATE = 0.08;
 
     private final OrderRepository orders;
     private final OrderReturnRepository returns;
 
-    public ShopReliability(OrderRepository orders, OrderReturnRepository returns) {
+
+    /**
+     * WHAT "TRUSTED" COSTS, and none of it is a decision anybody approved.
+     *
+     * <p>Twenty-five orders, 92% completion, 8% returns over ninety days are
+     * working defaults chosen to be defensible, not thresholds a founder
+     * signed off. They decide whether a real kirana carries a badge customers
+     * read as "safe to buy from", which makes them a fairness question rather
+     * than a tuning one.
+     *
+     * <p>REQUIRES FOUNDER DECISION. Configurable through
+     * {@code reliability.*} so the answer can change without a release.
+     */
+    private final int windowDays;
+    private final long minOrders;
+    private final double minCompletionRate;
+    private final double maxReturnRate;
+
+    public int windowDays() { return windowDays; }
+    public long minOrdersForTrust() { return minOrders; }
+    public double minCompletionRate() { return minCompletionRate; }
+    public double maxReturnRate() { return maxReturnRate; }
+
+    public ShopReliability(
+            OrderRepository orders, OrderReturnRepository returns,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${reliability.window-days:0}") int configuredWindowDays,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${reliability.min-orders:0}") long configuredMinOrders,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${reliability.min-completion-rate:0}") double configuredMinCompletion,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${reliability.max-return-rate:-1}") double configuredMaxReturn) {
         this.orders = orders;
         this.returns = returns;
+        // Unset or nonsensical keeps the working default. A misread setting
+        // must not be able to hand out - or withdraw - a trust badge from
+        // every shop on the marketplace at once.
+        this.windowDays = configuredWindowDays > 0
+                ? configuredWindowDays : DEFAULT_WINDOW_DAYS;
+        this.minOrders = configuredMinOrders > 0
+                ? configuredMinOrders : DEFAULT_MIN_ORDERS_FOR_TRUST;
+        this.minCompletionRate = configuredMinCompletion > 0 && configuredMinCompletion <= 1
+                ? configuredMinCompletion : DEFAULT_MIN_COMPLETION_RATE;
+        this.maxReturnRate = configuredMaxReturn >= 0 && configuredMaxReturn <= 1
+                ? configuredMaxReturn : DEFAULT_MAX_RETURN_RATE;
     }
 
     /**
@@ -92,7 +135,7 @@ public class ShopReliability {
     @Transactional(readOnly = true)
     public Record forCurrentShop() {
         try {
-            LocalDateTime since = LocalDateTime.now().minusDays(WINDOW_DAYS);
+            LocalDateTime since = LocalDateTime.now().minusDays(windowDays);
 
             long total = 0;
             long completed = 0;
@@ -134,19 +177,19 @@ public class ShopReliability {
      * The one place the thresholds are applied, so the badge and the
      * explanation cannot disagree about why it is not showing.
      */
-    private static String whyNotTrusted(long total, double completionRate, double returnRate) {
-        if (total < MIN_ORDERS_FOR_TRUST) {
-            return "Trusted status is earned over " + MIN_ORDERS_FOR_TRUST
+    private String whyNotTrusted(long total, double completionRate, double returnRate) {
+        if (total < minOrders) {
+            return "Trusted status is earned over " + minOrders
                     + " orders. This shop has completed " + total + " in the last "
-                    + WINDOW_DAYS + " days.";
+                    + windowDays + " days.";
         }
-        if (completionRate < MIN_COMPLETION_RATE) {
+        if (completionRate < minCompletionRate) {
             return "Trusted shops deliver at least "
-                    + Math.round(MIN_COMPLETION_RATE * 100) + "% of the orders they accept.";
+                    + Math.round(minCompletionRate * 100) + "% of the orders they accept.";
         }
-        if (returnRate > MAX_RETURN_RATE) {
+        if (returnRate > maxReturnRate) {
             return "Trusted shops keep returns under "
-                    + Math.round(MAX_RETURN_RATE * 100) + "% of orders.";
+                    + Math.round(maxReturnRate * 100) + "% of orders.";
         }
         return null;
     }

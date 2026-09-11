@@ -17,6 +17,7 @@ import com.gpstore.dto.response.GatewayCheckoutResponse;
 import com.gpstore.payment.gateway.CashfreeProperties;
 import com.gpstore.payment.gateway.CashfreeGateway;
 import com.gpstore.payment.gateway.CashfreeSignatureVerifier;
+import com.gpstore.payment.collection.PaymentCollection;
 import com.gpstore.payment.gateway.PaymentGateway;
 import com.gpstore.payment.gateway.PaymentGateway.GatewayOrderStatus;
 import com.gpstore.repository.OrderRepository;
@@ -91,7 +92,16 @@ public class GatewayPaymentService {
      */
     private final GatewayPaymentService self;
 
-    public GatewayPaymentService(PaymentGateway gateway,
+    /**
+     * The seam between an order and whoever receives the money for it.
+     *
+     * <p>Injected here rather than consulted in a report, because this is the
+     * class that actually takes payments - see prepareCheckout.
+     */
+    private final PaymentCollection paymentCollection;
+
+    public GatewayPaymentService(PaymentCollection paymentCollection,
+                                 PaymentGateway gateway,
                                  CashfreeProperties properties,
                                  CashfreeSignatureVerifier signatureVerifier,
                                  PaymentRepository paymentRepository,
@@ -101,6 +111,7 @@ public class GatewayPaymentService {
                                  AuditLogService auditLogService,
                                  ObjectMapper objectMapper,
                                  @org.springframework.context.annotation.Lazy GatewayPaymentService self) {
+        this.paymentCollection = paymentCollection;
         this.gateway = gateway;
         this.properties = properties;
         this.signatureVerifier = signatureVerifier;
@@ -233,6 +244,31 @@ public class GatewayPaymentService {
         // committed state - so the id the app is handed is always the one on
         // the payment row, never a second live session competing with it.
         String providerOrderId = mintProviderOrderId(orderId);
+
+        // THE COLLECTION BOUNDARY, ASKED ON THE PATH THAT ACTUALLY TAKES THE
+        // MONEY. Until this line existed, PaymentCollection was reachable
+        // from exactly one place - a read-only endpoint that told a merchant
+        // in words who collects - and the payment path hard-coded everything
+        // and recorded nothing. A seam nothing passes through is a label, not
+        // a boundary.
+        //
+        // IT REFUSES RATHER THAN GUESSES. If the deployment ever claims a
+        // merchant collects directly, this path has no implementation that
+        // could honour it, and continuing would mean taking the customer's
+        // money into GP-STORE's account while every earnings screen and every
+        // settlement said the merchant had it. That is the precise failure
+        // the whole boundary exists to make impossible, so it is checked here
+        // as well as at boot: a second line of defence at the point the money
+        // is actually taken.
+        PaymentCollection.Collector collector = paymentCollection.forShop(order.getShopId());
+        if (collector.merchantCollectsDirectly()) {
+            throw new IllegalStateException(
+                    "Shop " + order.getShopId() + " is configured to collect its own payments, "
+                            + "but no per-merchant collection is implemented. Refusing to take "
+                            + "this payment into the platform account while reporting it as "
+                            + "the merchant's.");
+        }
+        payment.setCollectionModel(collector.model());
 
         payment.setProvider(PaymentProvider.CASHFREE);
         payment.setProviderOrderId(providerOrderId);

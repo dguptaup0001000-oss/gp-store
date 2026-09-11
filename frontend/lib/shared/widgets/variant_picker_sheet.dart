@@ -159,11 +159,23 @@ class _VariantRow extends ConsumerWidget {
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    Text('₹${variant.sellingPrice.toStringAsFixed(0)}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 15)),
-                    if (variant.mrp != null &&
-                        variant.mrp! > variant.sellingPrice) ...[
+                    // OUT OF STOCK HAS NO PRICE (Part 2 §10), so the picker
+                    // says so in words where the rupees would have been -
+                    // a blank gap reads as a rendering bug, not as a shelf
+                    // the shop has run out of.
+                    if (!variant.hasPrice)
+                      const Text('Out of stock',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                              color: AppColors.textSecondary))
+                    else
+                      Text('₹${variant.sellingPrice!.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 15)),
+                    if (variant.hasPrice &&
+                        variant.mrp != null &&
+                        variant.mrp! > variant.sellingPrice!) ...[
                       const SizedBox(width: 6),
                       Text(
                         '₹${variant.mrp!.toStringAsFixed(0)}',

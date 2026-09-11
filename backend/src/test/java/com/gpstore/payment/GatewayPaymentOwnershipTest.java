@@ -20,6 +20,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SpringBootTest(properties = {
@@ -67,6 +68,25 @@ class GatewayPaymentOwnershipTest {
         assertEquals(PaymentStatus.COD_PENDING, payment.getPaymentStatus(),
                 "refusing checkout must not rewrite a COD payment into PENDING");
         assertEquals(PaymentMethod.COD, payment.getPaymentMethod());
+    }
+
+    @Test
+    @DisplayName("preparing a checkout records who collected the money")
+    void theCollectionModelIsRecorded() {
+        Order order = persistedOrder(PaymentMethod.ONLINE, PaymentStatus.PENDING);
+
+        gatewayPaymentService.prepareCheckout(order.getId(), order.getCustomer().getId());
+
+        Payment payment = paymentRepository.findByOrderId(order.getId()).orElseThrow();
+        assertNotNull(payment.getCollectionModel(),
+                "EVERY PAYMENT MUST SAY WHO COLLECTED IT. PaymentCollection was the seam "
+                        + "between an order and whoever receives the money for it, and until "
+                        + "this was wired the payment path never consulted it and recorded "
+                        + "nothing - so no historical payment could answer the first question "
+                        + "any settlement dispute asks.");
+        assertEquals(com.gpstore.payment.collection.PaymentCollectionModel.PLATFORM_COLLECTS,
+                payment.getCollectionModel(),
+                "and it records what is ACTUALLY true today, not an aspiration");
     }
 
     private Order persistedOrder(PaymentMethod method, PaymentStatus status) {

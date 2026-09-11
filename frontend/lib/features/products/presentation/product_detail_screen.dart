@@ -182,14 +182,26 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                       const SizedBox(height: 16),
                     ],
 
-                    if (variant != null)
+                    // NO PRICE ON AN EMPTY SHELF (Part 2 §10). The detail
+                    // screen says it in words rather than leaving a gap,
+                    // because this is the screen a customer opens to find
+                    // out whether they can buy the thing.
+                    if (variant != null && !variant.hasPrice)
+                      const Text(
+                        'Out of stock',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 20,
+                            color: AppColors.textSecondary),
+                      ),
+                    if (variant != null && variant.hasPrice)
                       Row(
                         children: [
                           Text(
-                            '₹${variant.sellingPrice.toStringAsFixed(0)}',
+                            '₹${variant.sellingPrice!.toStringAsFixed(0)}',
                             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22),
                           ),
-                          if (variant.mrp != null && variant.mrp! > variant.sellingPrice) ...[
+                          if (variant.mrp != null && variant.mrp! > variant.sellingPrice!) ...[
                             const SizedBox(width: 8),
                             Text(
                               '₹${variant.mrp!.toStringAsFixed(0)}',

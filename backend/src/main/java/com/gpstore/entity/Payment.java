@@ -75,6 +75,23 @@ private PaymentStatus paymentStatus;
     private PaymentProvider provider;
 
     /**
+     * WHO COLLECTED THIS MONEY, recorded when checkout was prepared.
+     *
+     * <p>DISTINCT FROM {@link #provider}, which is the gateway that processed
+     * the card. This is the settlement model: whether the rupees landed in
+     * GP-STORE's account or the merchant's. Today the answer is the same for
+     * every row, and recording it is still worth doing - the day it stops
+     * being the same, every payment taken before that day needs to be
+     * readable as what it was, and a column that only starts existing then
+     * answers nothing about the history it is supposed to explain.
+     *
+     * <p>NULL ON ROWS THAT PREDATE V63. Not backfilled: see the migration.
+     */
+    @Column(name = "collection_model", length = 30)
+    @Enumerated(EnumType.STRING)
+    private com.gpstore.payment.collection.PaymentCollectionModel collectionModel;
+
+    /**
      * The provider's id for the ORDER we asked it to collect - what we send.
      *
      * Unique at the database level (V14). Two of our orders can never share
@@ -292,6 +309,15 @@ public void setPaymentStatus(PaymentStatus paymentStatus) {
 
     public PaymentProvider getProvider() { return provider; }
     public void setProvider(PaymentProvider provider) { this.provider = provider; }
+
+    public com.gpstore.payment.collection.PaymentCollectionModel getCollectionModel() {
+        return collectionModel;
+    }
+
+    public void setCollectionModel(
+            com.gpstore.payment.collection.PaymentCollectionModel collectionModel) {
+        this.collectionModel = collectionModel;
+    }
 
     public String getProviderOrderId() { return providerOrderId; }
     public void setProviderOrderId(String providerOrderId) { this.providerOrderId = providerOrderId; }

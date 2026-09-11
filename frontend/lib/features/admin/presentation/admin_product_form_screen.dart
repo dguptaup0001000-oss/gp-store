@@ -270,8 +270,10 @@ class _VariantsSection extends ConsumerWidget {
                         children: [
                           Text('${_formatQty(variant.quantity)} ${variant.unit ?? ''}',
                               style: const TextStyle(fontWeight: FontWeight.w600)),
-                          Text('₹${variant.sellingPrice.toStringAsFixed(0)}'
-                              '${variant.mrp != null ? ' (MRP ₹${variant.mrp!.toStringAsFixed(0)})' : ''}'),
+                          Text(variant.hasPrice
+                              ? '₹${variant.sellingPrice!.toStringAsFixed(0)}'
+                                  '${variant.mrp != null ? ' (MRP ₹${variant.mrp!.toStringAsFixed(0)})' : ''}'
+                              : 'No price (out of stock)'),
                           Text(
                             variant.available ? 'In stock' : 'Out of stock',
                             style: TextStyle(

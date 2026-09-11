@@ -43,7 +43,23 @@ class ProductVariant with _$ProductVariant {
     /// "Out of stock", hides the price, and cannot be added.
     bool? inStock,
     double? mrp,
-    required double sellingPrice,
+
+    /// NULL WHEN THERE IS NO PRICE TO SHOW, which is not the same as free.
+    ///
+    /// Part 2 §10: a shop that lists an item and has run out keeps the card
+    /// on the shelf, says "Out of stock", disables Add - and HIDES THE PRICE.
+    /// The server enforces that by withholding the number rather than
+    /// trusting each client to decline to draw it, so this field arrives as
+    /// null for exactly those variants.
+    ///
+    /// IT WAS `required double` UNTIL THAT LANDED, and the mismatch was not a
+    /// cosmetic one: json_serializable throws on a null for a non-nullable
+    /// num, so the whole product list failed to parse the moment any one
+    /// variant in it was out of stock. The doc comment on [inStock] above has
+    /// described this behaviour since it was written; the type never followed.
+    ///
+    /// Read it through [hasPrice] rather than force-unwrapping.
+    double? sellingPrice,
     int? displayOrder,
 
     /// This variant's own photos, in order. First is the primary one.
@@ -71,6 +87,20 @@ class ProductVariant with _$ProductVariant {
   /// [inStock] reads as yes: it means the server did not report stock, not
   /// that there is none.
   bool get isBuyable => available && (inStock ?? true);
+
+  /// Whether there is a price to draw at all.
+  ///
+  /// A variant the shop has run out of has no price by design, and a screen
+  /// that shows "₹0" or an empty rupee sign for one is showing something
+  /// untrue. Every price widget asks this first.
+  bool get hasPrice => sellingPrice != null;
+
+  /// The price, or zero for arithmetic that must not crash on an empty shelf.
+  ///
+  /// NEVER use this to DISPLAY a price - that is what [hasPrice] guards. It
+  /// exists for comparisons and sorts, where "no price" has to fold into
+  /// something orderable.
+  double get priceOrZero => sellingPrice ?? 0;
 }
 
 @freezed
@@ -194,10 +224,16 @@ class Product with _$Product {
   /// no MRP set (nothing to discount against) or it's not actually a discount.
   int? get discountPercent {
     final variant = primaryVariant;
-    if (variant == null || variant.mrp == null || variant.mrp! <= variant.sellingPrice) {
+    // NO PRICE, NO DISCOUNT BADGE. An out-of-stock variant carries neither
+    // a price nor an MRP (Part 2 §10), and "40% off" over a card that cannot
+    // be bought is an advertisement for nothing.
+    if (variant == null
+        || !variant.hasPrice
+        || variant.mrp == null
+        || variant.mrp! <= variant.sellingPrice!) {
       return null;
     }
-    return (((variant.mrp! - variant.sellingPrice) / variant.mrp!) * 100).round();
+    return (((variant.mrp! - variant.sellingPrice!) / variant.mrp!) * 100).round();
   }
 }
 

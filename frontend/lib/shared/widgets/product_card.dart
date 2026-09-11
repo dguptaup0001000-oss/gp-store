@@ -392,20 +392,24 @@ class _ProductCardState extends State<ProductCard> {
                       // no way to buy at it is an offer the shop cannot honour,
                       // and it is the number a customer remembers and compares
                       // against the shop next door.
-                      child: variant == null || !isInStock
+                      // AND NOT WITHOUT A PRICE. isInStock already covers the
+                      // ordinary empty shelf; hasPrice covers the case where
+                      // the server withheld the number for any other reason,
+                      // so this row can never render "₹" with nothing after it.
+                      child: variant == null || !isInStock || !variant.hasPrice
                           ? const SizedBox.shrink()
                           : Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Flexible(
                                   child: Text(
-                                    '\u20b9${variant.sellingPrice.toStringAsFixed(0)}',
+                                    '\u20b9${variant.sellingPrice!.toStringAsFixed(0)}',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(fontWeight: FontWeight.w700, fontSize: priceSize),
                                   ),
                                 ),
-                                if (variant.mrp != null && variant.mrp! > variant.sellingPrice) ...[
+                                if (variant.mrp != null && variant.mrp! > variant.sellingPrice!) ...[
                                   const SizedBox(width: 4),
                                   Flexible(
                                     child: Text(
