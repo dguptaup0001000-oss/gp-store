@@ -537,6 +537,19 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/returns/pending", "/api/returns/pending/count")
                     .hasAuthority(AdminPermission.ORDERS_VIEW.authority())
 
+                // PART 2: THE CUSTOMER'S OWN DISCOVERY SURFACES.
+                //
+                // All of these read the signed-in customer - their preferred
+                // shops, their basket, their comparison - and none of them
+                // takes a customer id from the request. Stated explicitly
+                // rather than left to fall through to anyRequest(), because
+                // /api/preferred-shops is a list of a named person's shopping
+                // habits and a rule that is only correct because of what
+                // follows it is one reordering away from being wrong.
+                .requestMatchers("/api/preferred-shops", "/api/preferred-shops/**").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/discovery/**").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/carts/mine/by-shop").authenticated()
+
                 // SHOP RATINGS (§17-§22). Four audiences on one path prefix,
                 // and the rule is the only thing keeping them apart.
                 //

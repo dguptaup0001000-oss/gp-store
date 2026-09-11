@@ -254,7 +254,7 @@ class StorefrontHoursAndReachTest {
         JsonNode absurd = getJson(
                 "/api/marketplace/discovery?lat=" + LAT + "&lng=" + LNG + "&radiusKm=100000");
         assertEquals(0, new BigDecimal(absurd.get("radiusKm").asText())
-                        .compareTo(ShopDiscovery.MAX_SEARCH_RADIUS_KM),
+                        .compareTo(discovery.ladder().max()),
                 "A RADIUS ARRIVES FROM A CLIENT, so it is clamped by the server. Trusting it "
                         + "would turn a local marketplace into a national one from a query string.");
         assertTrue(absurd.get("nextRadiusKm").isNull());

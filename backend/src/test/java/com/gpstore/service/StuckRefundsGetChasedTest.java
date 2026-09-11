@@ -72,6 +72,34 @@ class StuckRefundsGetChasedTest {
     @Autowired private PaymentRepository paymentRepository;
     @Autowired private OrderRepository orderRepository;
     @Autowired private CustomerRepository customerRepository;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    /**
+     * THIS CLASS USED TO LEAVE EVERYTHING BEHIND, and it cost the suite a
+     * real failure.
+     *
+     * <p>Each run left about eight REFUND_PENDING payments in the test
+     * database, and nothing ever removed them. After a hundred-odd runs there
+     * were more than a thousand - and the sweep under test is deliberately
+     * BATCHED (maxRefundReconcileBatchesPerRun x refundReconcileBatchSize),
+     * so once the backlog grew past its reach, one run of the sweep no longer
+     * got as far as the refund the test had just inserted. theSweepFindsIt
+     * then failed, reproducibly, with nothing wrong in the code it tests.
+     *
+     * <p>A test that poisons the database it shares is a test that eventually
+     * fails somebody else's assertion, weeks later, for a reason nobody can
+     * see. So it tidies up after itself now, by the markers its own fixtures
+     * carry.
+     */
+    @org.junit.jupiter.api.AfterEach
+    void removeWhatThisTestLeftBehind() {
+        // PAYMENTS ONLY - see the sibling refund tests for why the orders
+        // and customers are deliberately left where they are.
+        jdbc.update("DELETE FROM refunds WHERE payment_id IN (SELECT p.id FROM payments p "
+                + "JOIN orders o ON o.id = p.order_id WHERE o.order_number LIKE 'STUCKREFUND-%')");
+        jdbc.update("DELETE FROM payments WHERE order_id IN "
+                + "(SELECT id FROM orders WHERE order_number LIKE 'STUCKREFUND-%')");
+    }
 
     @MockitoSpyBean private PaymentGateway gateway;
 

@@ -143,6 +143,24 @@ public class VariantResponse implements Serializable {
         if (variant == null) {
             return null;
         }
+        // §10 (PART 2): NO PRICE ON AN EMPTY SHELF.
+        //
+        // "Keep product visible. Show Out of stock. Disable Add to Cart. HIDE
+        // PRICE." The first three were already true - the card reads
+        // available && inStock and draws a grey "Sold out". The fourth was
+        // not: the price went on being sent, so every client was one styling
+        // decision away from showing "₹45" beside a button that refuses.
+        //
+        // WITHHELD HERE, IN THE RESPONSE, rather than by a screen choosing
+        // not to draw it. There are three clients and a public API; a rule
+        // enforced in one Dart widget is a rule the other two do not have.
+        //
+        // ONLY WHEN THE STOCK IS KNOWN TO BE ZERO. heldStock is null wherever
+        // there is no shop to count for - an admin catalogue screen, a
+        // platform-wide report - and null must keep its price, or the
+        // merchant's own product list goes blank.
+        boolean shelfIsEmpty = heldStock != null && heldStock <= 0;
+
         return new VariantResponse(
                 variant.getId(),
                 variant.getQuantity(),
@@ -155,8 +173,11 @@ public class VariantResponse implements Serializable {
                 // isOrderable() here would NPE on any catalogue variant whose
                 // available flag is null. Caught by RecommendationHygieneTest.
                 listing != null ? Boolean.valueOf(listing.isOrderable()) : variant.getAvailable(),
-                listing != null && listing.getMrp() != null ? listing.getMrp() : variant.getMrp(),
-                listing != null ? listing.getSellingPrice() : variant.getSellingPrice(),
+                shelfIsEmpty ? null
+                        : (listing != null && listing.getMrp() != null
+                                ? listing.getMrp() : variant.getMrp()),
+                shelfIsEmpty ? null
+                        : (listing != null ? listing.getSellingPrice() : variant.getSellingPrice()),
                 listing != null && listing.getDisplayOrder() != null
                         ? listing.getDisplayOrder() : variant.getDisplayOrder(),
                 java.util.List.of(),

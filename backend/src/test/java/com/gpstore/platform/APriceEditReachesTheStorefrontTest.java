@@ -113,6 +113,13 @@ class APriceEditReachesTheStorefrontTest {
             return listings.save(listing);
         });
 
+        // AND IT HAS STOCK. Without an inventory row the shelf is empty, and
+        // since §10 (Part 2) the storefront withholds the price of an item
+        // nobody can buy - so a fixture with no stock would be measuring the
+        // out-of-stock path while claiming to measure a reprice.
+        jdbc.update("INSERT INTO inventory (product_variant_id, shop_id, stock, "
+                + "minimum_stock, reserved_stock) VALUES (?, ?, 25, 1, 0)", variantId, shopId);
+
         // THE FIXTURE'S OWN WRITES GO STRAIGHT TO THE REPOSITORY, which is
         // not the path under test and does not evict. Clearing here means
         // each test starts from the database rather than from whatever the
@@ -134,6 +141,7 @@ class APriceEditReachesTheStorefrontTest {
     void tidyUp() {
         TenantContext.clear();
         clearBrowseCaches();
+        jdbc.update("DELETE FROM inventory WHERE product_variant_id = ?", variantId);
         jdbc.update("DELETE FROM shop_product_variants WHERE product_variant_id = ?", variantId);
         jdbc.update("DELETE FROM product_variants WHERE id = ?", variantId);
         jdbc.update("DELETE FROM products WHERE id = ?", productId);

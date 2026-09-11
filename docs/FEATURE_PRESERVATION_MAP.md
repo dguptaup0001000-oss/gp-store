@@ -114,6 +114,11 @@ belongs to the platform" stays one answer rather than a habit.*
 | Rating moderation (§20) | `HideReason`, `ReviewService.hideReview` | platform | Hidden, never deleted; closed reason list. |
 | Billing plans and ledger | `billing/` | platform | Append-only, enforced by a trigger. No commercial amount in the code. |
 | Merchant governance (§2) | `merchant_governance_actions`, `MerchantGovernance` | platform | `about_shop_id`, **not** `shop_id` — it is data, not a tenancy boundary. |
+| Preferred shops (Part 2 §4) | `customer_preferred_shops`, `PreferredShops` | customer-owned | Per CATEGORY, up to two, enforced by a two-slot unique index. Orders a list; never filters one. |
+| Discovery modes (Part 2 §3-§5) | `discovery/BestDeal`, `DiscoveryModesController` | central | Best Deal ranks on final cost. `ShopOffer` carries no billing field, so no merchant can pay for a position. |
+| Final cost + 25% rule (Part 2 §7-§8) | `discovery/ShopOffers`, `PriceGapRule` | central | Price + that shop's own delivery, compared on the final payable. Multiplier is configuration. |
+| Search radius ladder (Part 2 §6) | `platform/SearchRadiusLadder` | deployment-wide | `marketplace.search.radii-km`. Was a constant; a town and a city need different ladders. |
+| Basket by shop (Part 2 §13) | `cart/CartByShop` | customer-owned | Per-shop subtotal, delivery and total. The combined figure is named `informationalCombinedTotal`. |
 
 ## Cross-cutting
 

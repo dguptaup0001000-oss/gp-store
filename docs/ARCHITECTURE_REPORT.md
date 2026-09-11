@@ -372,6 +372,79 @@ be rated at all (the fault column again).
 
 `RatingTheShopIsNotRatingTheAttaTest` — 19 tests.
 
+## 18b. Discovery modes, preferences and final cost (Part 2)
+
+Part 2 arrived after Parts 3 and 4 and is built on the foundation rather than
+beside it.
+
+**§4 — preferences are per category, and there are two slots.** "My kirana" is
+not "my hardware shop": a single global preferred shop is the design that
+looks obvious and fails the first week somebody buys atta and screws. Up to
+two shops per category, and "up to two" is enforced by *shape* rather than by
+a count — each row occupies slot 1 or slot 2 under a unique index, so a third
+preference has nowhere to go. A service-layer `count() >= 2` check would be
+two concurrent requests away from being three.
+
+**And a preference orders a list; it never shortens one.** §4 requires that a
+customer in preferred mode can still see, compare, switch and buy elsewhere,
+so `preferredFirst` reorders and returns every shop it was given. There is no
+filter anywhere that consults a preference, and that absence is the feature.
+
+**§5 — Best Deal cannot be bought.** The ranking is a lexicographic sort over
+questions a customer would recognise, in the order they would ask them:
+can you actually buy it, is the delivery charge known, what is the final cost,
+which is nearer, which is more reliable. No weighted score, because weights
+are invented numbers and an invented number that decides whose shop appears
+first is exactly the thing that gets adjusted later for reasons nobody writes
+down. And the promise that a merchant cannot pay for a position is kept by an
+*absence*: `BestDeal` ranks `ShopOffer`s, and a `ShopOffer` has no commission,
+tier, ledger or billing component — there is no route by which what a merchant
+pays could reach the ranking. A reflection test fails if one is ever added.
+
+**§7 — the 25% rule, on the final cost.** A farther seller qualifies when the
+local final cost is at least 1.25× theirs. On the *product price* the brief's
+own example is a dead heat at exactly 1.25; on the final cost it is 1.33 and
+the farther shop wins comfortably. The dangerous case is the other direction —
+a cheap product behind an expensive delivery looks like a bargain on the
+product line and is not one — so the method takes finals and its parameters
+are named for them. The multiplier is configuration, and a value below 1 is
+rejected because that is not a relaxed rule, it is the opposite rule.
+
+**§6 — the ladder is configuration now.** It was `3, 5, 10, 15, 25` as a
+constant. A district where the next hardware shop is forty kilometres away and
+a city where four kiranas share a street cannot use the same ladder, and
+neither is wrong, so it is `marketplace.search.radii-km` with the old list as
+the default — making it configurable changes no running deployment. A search
+that finds nothing at the rung asked for climbs until it does and says so in
+the server's own words ("No shops within 8 km. Showing shops within 20 km."),
+because a client rebuilding that sentence from two numbers eventually rebuilds
+it as "no shops nearby" when there are twelve, two rungs out. A malformed
+ladder falls back whole rather than failing boot: a typo in one environment
+variable taking the marketplace offline is a worse failure than running on the
+default rungs.
+
+**§10 — the price is now actually hidden.** "Keep visible, show Out of stock,
+disable Add to Cart, hide price" — the first three were already true and the
+fourth was not. `VariantResponse` withholds the price and MRP when the stock
+is known to be zero, in the response rather than in a widget, because there
+are three clients and a public API and a rule enforced in one Dart file is a
+rule the other two do not have. Null stock — an admin catalogue screen, a
+platform report — keeps its price, or the merchant's own product list goes
+blank.
+
+**§12 — there is no price floor, and now there is a test saying so.** A scan
+of the whole main source tree for `PRICE_FLOOR`, `MIN_SELLING_PRICE` and their
+neighbours, plus a case asserting that a shop selling at ₹12 against a
+catalogue price of ₹500 is charged ₹12.
+
+**§13 — the basket is drawn as the several purchases it is.** Per-shop
+subtotal, delivery and total, with the combined figure named
+`informationalCombinedTotal` and `isSinglePayment` stated beside it. A field
+called `total` on a cart response is an invitation to draw it large and put a
+Pay button under it, so there isn't one. A shop that cannot quote delivery
+reports *unknown*, never zero — zero reads as free delivery and understates
+the basket.
+
 ## 19. Caching
 
 Redis, with shop-aware keys. `ShopHoursService` caches per shop and date range
@@ -435,8 +508,8 @@ have generated a hash-named duplicate (V54, V57).
 
 ## 23. What is tested, and how
 
-**1691 backend tests** at the last full green run, 0 failures, 1 skipped.
-253 test classes against a real Postgres — not an in-memory substitute, because
+**1727 backend tests** at the last full green run, 0 failures, 1 skipped.
+255 test classes against a real Postgres — not an in-memory substitute, because
 the filter behaviour, the check constraints and the append-only trigger are all
 things H2 would quietly not have.
 
@@ -460,7 +533,6 @@ builds. This section is why.**
 
 | # | What | Why it is yours |
 |---|---|---|
-| A1 | **Part 2 of the brief was never sent.** | You jumped from Part 1 to Part 3. Nothing from Part 2 is built, and I have not guessed at it. |
 | A2 | **Payment provider / direct-to-merchant settlement.** | Part 3 §7 and Part 4 §10 forbid inventing a provider architecture. Today one Cashfree account carries every shop's money, which makes GP-STORE a payment aggregator. That is a business and compliance decision, not a coding one. The abstraction boundary is built and waiting (`PaymentCollection`); the implementation behind it is not, on purpose. |
 | A3 | **Commercial amounts.** | Tiers, weekly fees, commission rates. Part 4 §5 says these are not decided. The billing machinery takes them as data and contains no number. |
 | A4 | **Cancellation fee ceiling.** | `platform.cancellation.max-fee-percent` defaults to 5 because §10 named 1–5%. If you want a different ceiling, it is one property. |

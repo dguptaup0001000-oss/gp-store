@@ -46,12 +46,15 @@ public class MarketplaceController {
     private final DeliveryScheduleService schedule;
     private final com.gpstore.platform.ShopReliability reliability;
     private final com.gpstore.platform.shopinfo.ShopPolicyRepository policies;
+    private final com.gpstore.rating.ShopRatingService ratings;
 
     public MarketplaceController(ShopDiscovery discovery, ShopRepository shops,
                                  PlatformProperties platform, ShopScopeSwitch shopScope,
                                  DeliveryScheduleService schedule,
                                  com.gpstore.platform.ShopReliability reliability,
-                                 com.gpstore.platform.shopinfo.ShopPolicyRepository policies) {
+                                 com.gpstore.platform.shopinfo.ShopPolicyRepository policies,
+                                 com.gpstore.rating.ShopRatingService ratings) {
+        this.ratings = ratings;
         this.reliability = reliability;
         this.policies = policies;
         this.discovery = discovery;
@@ -103,7 +106,23 @@ public class MarketplaceController {
     public record DiscoveryView(BigDecimal radiusKm,
                                 BigDecimal nextRadiusKm,
                                 BigDecimal maxRadiusKm,
-                                List<StorefrontView> shops) {}
+                                List<StorefrontView> shops,
+                                // §6: WHAT THE SERVER ACTUALLY DID. When the
+                                // rung the customer asked for was empty, the
+                                // search widened - and saying so is the
+                                // difference between "no shops near you" and
+                                // "no shops within 8 km, showing 20 km".
+                                // Null when nothing widened.
+                                BigDecimal askedRadiusKm,
+                                boolean widened,
+                                String message) {
+
+        /** The shape this route answered with before the ladder could widen. */
+        static DiscoveryView of(BigDecimal radiusKm, BigDecimal nextKm, BigDecimal maxKm,
+                                List<StorefrontView> shops) {
+            return new DiscoveryView(radiusKm, nextKm, maxKm, shops, radiusKm, false, null);
+        }
+    }
 
     /**
      * Shops that will deliver to a point, nearest first.
@@ -155,24 +174,29 @@ public class MarketplaceController {
                                   @RequestParam(required = false) Double lng,
                                   @RequestParam(required = false) BigDecimal radiusKm) {
         if (lat == null || lng == null) {
-            return new DiscoveryView(null, discovery.nextSearchRadius(null).orElse(null),
-                    ShopDiscovery.MAX_SEARCH_RADIUS_KM, List.of());
+            return DiscoveryView.of(null, discovery.nextSearchRadius(null).orElse(null),
+                    discovery.ladder().max(), List.of());
         }
-        // Clamped by the service, not here, so the bound holds for every
-        // caller rather than for this one route (§78: a client value may
-        // narrow, never widen).
-        BigDecimal searched = radiusKm == null ? null
-                : radiusKm.min(ShopDiscovery.MAX_SEARCH_RADIUS_KM);
 
-        List<ShopDiscovery.NearbyShop> found = searched == null
-                ? discovery.shopsServing(lat, lng)
-                : discovery.shopsWithin(lat, lng, searched);
+        // NO RADIUS IS STILL LOCAL-FIRST AND UNCHANGED: the shops that will
+        // actually deliver to this pin, which is the list a customer can order
+        // from. A released app parsing this route must keep getting that.
+        if (radiusKm == null) {
+            return DiscoveryView.of(null, discovery.nextSearchRadius(null).orElse(null),
+                    discovery.ladder().max(),
+                    discovery.shopsServing(lat, lng).stream().map(this::view).toList());
+        }
 
+        // A RADIUS MEANS "SEARCH FARTHER", and §6 says farther keeps going
+        // until it finds something rather than answering an empty screen at
+        // each rung in turn. Clamping happens in the ladder, not here, so the
+        // bound holds for every caller (§78: a client value may narrow it,
+        // never widen it).
+        ShopDiscovery.RadiusSearch search = discovery.searchOutwards(lat, lng, radiusKm);
         return new DiscoveryView(
-                searched,
-                discovery.nextSearchRadius(searched).orElse(null),
-                ShopDiscovery.MAX_SEARCH_RADIUS_KM,
-                found.stream().map(this::view).toList());
+                search.searchedKm(), search.nextKm(), search.maxKm(),
+                search.shops().stream().map(this::view).toList(),
+                search.askedKm(), search.widened(), search.message());
     }
 
     /**
@@ -198,13 +222,19 @@ public class MarketplaceController {
         // a customer opens when they are deciding whether to buy from a shop,
         // which is where the answer is worth a query.
         boolean trusted = shopScope.within(shopId, reliability::isTrusted);
+
+        // THE RATING IS READ IN THIS SHOP'S SCOPE, like the trading record
+        // above it, because shop_ratings is shop-owned - which is also what
+        // makes it impossible for this to return a competitor's stars.
+        com.gpstore.rating.ShopRatingSummary rating =
+                shopScope.within(shopId, ratings::summary);
         List<PolicyView> promises = shopScope.within(shopId,
                 () -> policies.findAllByOrderByKindAsc().stream()
                         .map(p -> new PolicyView(p.getKindName(), p.getBody()))
                         .toList());
 
         return new StorefrontDetail(view(shop, null, null), trusted, promises,
-                shop.getBusinessName());
+                shop.getBusinessName(), rating);
     }
 
     /**
@@ -216,7 +246,15 @@ public class MarketplaceController {
      *                merely expensive.
      */
     public record StorefrontDetail(StorefrontView shop, boolean trusted,
-                                   List<PolicyView> policies, String businessName) {}
+                                   List<PolicyView> policies, String businessName,
+                                   // PART 2 §2: A SHOP PROFILE CARRIES ITS
+                                   // RATING, and §19 of Part 3 says one
+                                   // number is not enough - lifetime, recent,
+                                   // and how many verified orders are behind
+                                   // them. All three come from one summary
+                                   // rather than three fields a screen has to
+                                   // reassemble.
+                                   com.gpstore.rating.ShopRatingSummary rating) {}
 
     /** A promise this shop makes, in its own words. */
     public record PolicyView(String kind, String body) {}

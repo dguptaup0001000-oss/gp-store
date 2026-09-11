@@ -34,9 +34,16 @@ public class ShopDiscovery {
     private static final double EARTH_RADIUS_KM = 6371.0;
 
     private final ShopRepository shops;
+    private final SearchRadiusLadder ladder;
 
-    public ShopDiscovery(ShopRepository shops) {
+    public ShopDiscovery(ShopRepository shops, SearchRadiusLadder ladder) {
         this.shops = shops;
+        this.ladder = ladder;
+    }
+
+    /** The configured ladder, for callers that need to label a button. */
+    public SearchRadiusLadder ladder() {
+        return ladder;
     }
 
     /**
@@ -49,23 +56,6 @@ public class ShopDiscovery {
      * checkout, or is hidden one that would have delivered.
      */
     public record NearbyShop(Shop shop, double distanceKm, boolean deliversHere) {}
-
-    /**
-     * How far "search farther" looks, one tap at a time.
-     *
-     * A LADDER, DECIDED HERE, and deliberately not in the app. The app asking
-     * for an arbitrary radius would make every client's idea of "farther"
-     * different, and a client that asked for 500 km would turn a local
-     * marketplace into a national one by accident. The rungs are also the
-     * honest shape of the question: in a town, 3 km is a walk, 25 km is
-     * another town, and there is nothing useful in between 25 and infinity.
-     */
-    public static final List<BigDecimal> SEARCH_RADII_KM = List.of(
-            new BigDecimal("3"), new BigDecimal("5"), new BigDecimal("10"),
-            new BigDecimal("15"), new BigDecimal("25"));
-
-    /** The widest a customer may look. Beyond this, "local" has stopped meaning anything. */
-    public static final BigDecimal MAX_SEARCH_RADIUS_KM = SEARCH_RADII_KM.get(SEARCH_RADII_KM.size() - 1);
 
     /**
      * Every visible shop whose own delivery radius covers this point,
@@ -114,7 +104,7 @@ public class ShopDiscovery {
      * fill a basket at one; that is checkout's answer, and it is unchanged.
      *
      * CLAMPED, not trusted. A radius arrives from a client, so it is bounded
-     * by MAX_SEARCH_RADIUS_KM here rather than wherever it was typed. It
+     * by the ladder's top rung here rather than wherever it was typed. It
      * narrows what is returned and can never widen a shop's promise, which is
      * the shape §78 asks for.
      */
@@ -123,7 +113,7 @@ public class ShopDiscovery {
         if (latitude == null || longitude == null || radiusKm == null) {
             return List.of();
         }
-        double limit = Math.min(radiusKm.doubleValue(), MAX_SEARCH_RADIUS_KM.doubleValue());
+        double limit = Math.min(radiusKm.doubleValue(), ladder.max().doubleValue());
         if (limit <= 0) {
             return List.of();
         }
@@ -141,19 +131,92 @@ public class ShopDiscovery {
         return List.copyOf(nearby);
     }
 
-    /**
-     * The next rung of the ladder above [radiusKm], or empty at the top.
-     *
-     * Null means "nothing has been searched yet", whose next step is the first
-     * rung - so the app can label its button without knowing the ladder.
-     */
+    /** Delegates, so the ladder cannot be described two different ways. */
     public Optional<BigDecimal> nextSearchRadius(BigDecimal radiusKm) {
-        for (BigDecimal rung : SEARCH_RADII_KM) {
-            if (radiusKm == null || rung.compareTo(radiusKm) > 0) {
-                return Optional.of(rung);
+        return ladder.next(radiusKm);
+    }
+
+    /**
+     * What a progressive search actually found, and how far it had to go (§6).
+     *
+     * @param askedKm    the rung the customer asked for, or null for
+     *                   "whoever will deliver to me"
+     * @param searchedKm the rung that produced {@code shops} - larger than
+     *                   askedKm when the search had to widen
+     * @param nextKm     the rung above, or null at the top of the ladder
+     * @param widened    whether the customer is being shown a wider circle
+     *                   than they asked for
+     */
+    public record RadiusSearch(BigDecimal askedKm, BigDecimal searchedKm,
+                               BigDecimal nextKm, BigDecimal maxKm,
+                               boolean widened, List<NearbyShop> shops) {
+
+        /**
+         * §6's sentence, built once here rather than in each client.
+         *
+         * <p>WHY THE SERVER WRITES IT. "No shops within 8 km. Showing shops
+         * within 20 km." is a statement about what the server did, and a
+         * client reconstructing it from two numbers will eventually
+         * reconstruct it wrongly - most likely by saying "no shops nearby"
+         * when there are twelve, three rungs out.
+         */
+        public String message() {
+            if (!widened) {
+                return null;
             }
+            return "No shops within " + plain(askedKm) + " km. Showing shops within "
+                    + plain(searchedKm) + " km.";
         }
-        return Optional.empty();
+
+        private static String plain(BigDecimal km) {
+            return km == null ? "?" : km.stripTrailingZeros().toPlainString();
+        }
+    }
+
+    /**
+     * LOCAL-FIRST, BUT NOT LOCAL-ONLY (§6): starts at the rung asked for and
+     * climbs until something is there.
+     *
+     * <p>WHY THE SERVER CLIMBS RATHER THAN THE APP. An app that widens for
+     * itself needs the ladder, needs to know when to stop, and needs to get
+     * the "no shops within 8 km" sentence right - three chances for two
+     * clients to behave differently. It also turns one empty screen into four
+     * round trips before the customer sees anything.
+     *
+     * <p>IT STOPS AT THE FIRST RUNG THAT HAS ANYTHING. Climbing to the top
+     * regardless would answer "the nearest hardware shop is 400 km away" to a
+     * customer who had a perfectly good one at 12 km, because the top rung's
+     * list is longer.
+     *
+     * @param fromKm where to start, or null to start at the bottom
+     */
+    @Transactional(readOnly = true)
+    public RadiusSearch searchOutwards(Double latitude, Double longitude, BigDecimal fromKm) {
+        BigDecimal asked = fromKm == null ? ladder.first() : ladder.clamp(fromKm);
+        if (latitude == null || longitude == null) {
+            return new RadiusSearch(asked, asked, ladder.next(asked).orElse(null),
+                    ladder.max(), false, List.of());
+        }
+
+        BigDecimal at = asked;
+        while (true) {
+            List<NearbyShop> found = shopsWithin(latitude, longitude, at);
+            boolean widened = at.compareTo(asked) > 0;
+            if (!found.isEmpty()) {
+                return new RadiusSearch(asked, at, ladder.next(at).orElse(null),
+                        ladder.max(), widened, found);
+            }
+            Optional<BigDecimal> next = ladder.next(at);
+            if (next.isEmpty()) {
+                // The top of the ladder with nothing on it. Said plainly,
+                // with the widest circle actually searched, rather than as
+                // "no shops near you" - which would be true of the first rung
+                // and misleading about the rest.
+                return new RadiusSearch(asked, at, null, ladder.max(),
+                        at.compareTo(asked) > 0, List.of());
+            }
+            at = next.get();
+        }
     }
 
     /** This shop's own promise, which the search radius never overrides. */
