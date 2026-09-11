@@ -508,8 +508,8 @@ have generated a hash-named duplicate (V54, V57).
 
 ## 23. What is tested, and how
 
-**1727 backend tests** at the last full green run, 0 failures, 1 skipped.
-255 test classes against a real Postgres — not an in-memory substitute, because
+**1743 backend tests** at the last full green run, 0 failures, 1 skipped,
+SpotBugs `BugInstance size is 0`. 250 test classes against a real Postgres — not an in-memory substitute, because
 the filter behaviour, the check constraints and the append-only trigger are all
 things H2 would quietly not have.
 
@@ -535,8 +535,8 @@ builds. This section is why.**
 |---|---|---|
 | A2 | **Payment provider / direct-to-merchant settlement.** | Part 3 §7 and Part 4 §10 forbid inventing a provider architecture. Today one Cashfree account carries every shop's money, which makes GP-STORE a payment aggregator. That is a business and compliance decision, not a coding one. The abstraction boundary is built and waiting (`PaymentCollection`); the implementation behind it is not, on purpose. |
 | A3 | **Commercial amounts.** | Tiers, weekly fees, commission rates. Part 4 §5 says these are not decided. The billing machinery takes them as data and contains no number. |
-| A4 | **Cancellation fee ceiling.** | `platform.cancellation.max-fee-percent` defaults to 5 because §10 named 1–5%. If you want a different ceiling, it is one property. |
-| A5 | **Governance thresholds.** | 90-day warning decay, 180-day final warning, and the reliability thresholds for TRUSTED (25 orders / 92% / 8%) are defensible defaults, not decisions you made. |
+| A4 | **Cancellation fee ceiling.** | There is now **no default**. `platform.cancellation.max-fee-percent` is unset, `CancellationPolicy.capIsDecided()` is false, every cancellation is free, and a merchant who tries to set fee terms is refused with an explanation. Set the property and fees become possible; until then GP-STORE charges nobody, because 5% was a number I invented, not one you approved. |
+| A5 | **Governance thresholds.** | 90-day warning decay, 180-day final warning, and the reliability thresholds for TRUSTED (25 orders / 92% / 8%) are defensible defaults, not decisions you made. They are no longer compile-time constants: `governance.warning-days`, `governance.final-warning-days`, `reliability.window-days`, `reliability.min-orders`, `reliability.min-completion-rate` and `reliability.max-return-rate` change them without a release. |
 
 ### B. Environment blockers — code is fine, this machine is not
 
@@ -546,23 +546,36 @@ builds. This section is why.**
 | B2 | `OpsStatusServiceTest.diskOnARealDirectoryIsHealthy` fails whenever the 2.4 GB Flutter SDK is resident — it pushes free disk under the 10% floor the test asserts. | The SDK is deleted before backend runs and re-fetched for Flutter runs; the two cannot pass in the same invocation on this box. |
 | B3 | `LazySerialisationTest` / `ReturnsTest` flake on a mobile-number collision from a `"9" + nanoTime % 1e9` fixture. | Pre-existing, not introduced here, and worth fixing. |
 
-### C. UNVERIFIED in this session
+### C. Verified in the hardening pass, and what is still unverified
 
-These are **not** claimed as passing. They were passing when last run, in an
-earlier session, against an earlier state of the code:
+**Verified, actually executed, on exactly the committed code:**
 
-- **The Flutter test suite** — not executed in this session.
+- Backend: full `mvn clean verify` - **1743 tests, 0 failures, 1 skipped**,
+  SpotBugs `BugInstance size is 0`.
+- Flutter, on the CI pin (**3.35.7 / Dart 3.9.2**, not `stable`):
+  `flutter analyze` -> **41 issues, every one `info`, 0 errors, 0 warnings**;
+  `flutter test` -> **682 tests, all passed, 0 failures**.
+- Mutation check on the newest tenancy work: removing `@Filter` from
+  `CustomerCancellationDue` made
+  `TheNewSurfacesAreAlsoScopedTest$Dues.theOutstandingListIsScoped` fail by
+  name; the filter was then restored.
+
+**Still NOT verified. These are not claimed as passing:**
+
 - **The real two-shop Flutter journey** against a `MULTI_SHOP_PRODUCTION`
-  backend (registration → address → discover both shops → A shelf only → B
-  shelf only → one basket → two shop orders → history → merchant → worker) —
-  not re-executed since the cancellation, ratings and governance work landed.
-  **The backend contracts it drives have changed.** Re-run it before release.
-- **Load testing (Part 4 §14)** — not performed. The per-request query budgets
-  are asserted (`CheckoutPerformanceTest`), which is not the same thing.
+  backend (registration -> address -> discover both shops -> A shelf only ->
+  B shelf only -> one basket -> two shop orders -> history -> merchant ->
+  worker). The two-shop behaviour is covered at the **backend** layer by named
+  tests (`MultiShopCheckoutTest`, `TheNewSurfacesAreAlsoScopedTest`,
+  `CrossTenantApiAccessTest`, `TwoWaysToFindAShopTest`); nobody has driven the
+  app itself through it. Re-run it before release.
+- **Load testing (Part 4 §14)** - not performed. The per-request query budgets
+  are asserted (`CheckoutPerformanceTest`), which is not the same thing. No
+  concurrency figure is claimed anywhere.
 - **A fresh-database bootstrap** (`DDL_AUTO=update`, then `validate`) covering
-  V59–V61 — the migrations ran forward against the existing test database and
+  V59-V63 - the migrations ran forward against the existing test database and
   their VERIFY blocks passed, but the empty-database path has not been
-  exercised for these three.
+  exercised for these five.
 
 ### D. Built to the shape, not to completion
 
@@ -571,7 +584,7 @@ earlier session, against an earlier state of the code:
 | D1 | **Merchant ETA (Part 3 §4)** | Not built. Delivery windows exist; an explicit merchant-set, explicitly-not-a-guarantee ETA does not. |
 | D2 | **Return pickup and replacement (§13, §14)** | Returns and refunds work. Merchant-arranged pickup and replacement-instead-of-refund are not built. |
 | D3 | **Refund enforcement (§15)** | The ledger can carry `INTERVENTION_RECOVERY`; nothing issues one yet. |
-| D4 | **Preferred Shops / Best Deal (Part 4 §4)** | Not built. Discovery is distance-first and there is **no pay-for-ranking anywhere** — which is the half of §4 that matters most, and is true by absence. |
+| D4 | **Preferred Shops / Best Deal (Part 4 §4)** | Built **on the backend only**: `/api/preferred-shops` (max 2 per category), `/api/marketplace/discovery`, `/api/discovery/*`, the 25%-of-final-cost comparison rule and `/api/carts/mine/by-shop` all exist and are tested. **The Flutter app does not call any of them yet** - it still calls `/api/marketplace/shops`, `/shops/{id}` and `/mode`. There is **no pay-for-ranking anywhere**, which is the half of §4 that matters most, and is true by absence. |
 | D5 | **Merchant notification of a governance action (§2)** | The action is recorded and the merchant can read it at `/api/shop/governance`. There is no push or email to the merchant, because there is no merchant notification channel in this system. A shopkeeper finds out by looking. |
 | D6 | **§7's fee-refund eligibility rules** | Two of them could not be answered from the data and were deliberately **not stubbed** — a stub that always returns true is worse than a gap, because it looks finished. |
 
