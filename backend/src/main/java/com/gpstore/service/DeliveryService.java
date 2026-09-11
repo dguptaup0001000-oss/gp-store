@@ -8,7 +8,9 @@ import com.gpstore.entity.DeliverySubzone;
 import com.gpstore.entity.Order;
 import com.gpstore.delivery.DeliveryStatusTransitions;
 import com.gpstore.enums.DeliveryStatus;
+import com.gpstore.enums.OrderActor;
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.order.OrderStatusChange;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
@@ -527,8 +529,42 @@ public class DeliveryService {
 
         Order order = delivery.getOrder();
 
+        // PACKING IS ONE EVENT SEEN FROM TWO SIDES, and only one side was
+        // recording it. DeliveryStatus.PACKED says so in its own comment -
+        // "deliberately the same word as OrderStatus.PACKED, because it is
+        // the same event" - but only the QR scan path ever wrote it onto the
+        // order. A shop that works the delivery screen instead left the order
+        // sitting at CONFIRMED and then jumped it to OUT_FOR_DELIVERY, which
+        // is a move the order's own table has always refused: a customer
+        // watching their order never saw it packed, and an order could be
+        // delivered while its status still said the shop had merely accepted
+        // it. Mirroring it here is what makes the two machines agree.
+        //
+        // GUARDED RATHER THAN THROWING, unlike the two below, and the
+        // difference is deliberate. This is a catch-up, not an assertion: an
+        // order already OUT_FOR_DELIVERY whose delivery row is re-marked
+        // PACKED is a harmless re-tap, and refusing it would break a benign
+        // request to record something the order has already been through.
+        // What the guard does prevent is the only dangerous direction -
+        // dragging a cancelled or finished order back to PACKED.
+        if (target == DeliveryStatus.PACKED && order != null
+                && OrderStatusChange.canMove(order, OrderStatus.PACKED,
+                        isAdmin ? OrderActor.PLATFORM : OrderActor.WORKER)) {
+            OrderStatusChange.move(order, OrderStatus.PACKED,
+                    isAdmin ? OrderActor.PLATFORM : OrderActor.WORKER);
+            orderRepository.save(order);
+        }
+
+        // THE ORDER MOVES THROUGH THE ORDER'S OWN RULES, not the delivery's.
+        //
+        // DeliveryStatusTransitions above decided what the DELIVERY may do.
+        // It says nothing about the order, and this used to write the order's
+        // status straight past OrderLifecycle - so a delivery marked
+        // out-for-delivery dragged a cancelled order back out of the grave
+        // with it. Both questions are now asked, in that order.
         if (target == DeliveryStatus.OUT_FOR_DELIVERY && order != null) {
-            order.setOrderStatus(OrderStatus.OUT_FOR_DELIVERY);
+            OrderStatusChange.move(order, OrderStatus.OUT_FOR_DELIVERY,
+                    isAdmin ? OrderActor.PLATFORM : OrderActor.WORKER);
             orderRepository.save(order);
             touchOrderForPush(order);
             afterCommitExecutor.runAfterCommit("Out-for-delivery notification", order.getId(),
@@ -552,7 +588,11 @@ public class DeliveryService {
             }
 
             if (order != null) {
-                order.setOrderStatus(OrderStatus.DELIVERED);
+                // Same rule, and the one that mattered most: an order that was
+                // cancelled and refunded must not become DELIVERED because
+                // somebody closed its delivery row afterwards.
+                OrderStatusChange.move(order, OrderStatus.DELIVERED,
+                        isAdmin ? OrderActor.PLATFORM : OrderActor.WORKER);
                 orderRepository.save(order);
                 touchOrderForPush(order);
                 afterCommitExecutor.runAfterCommit("Delivered notification", order.getId(),

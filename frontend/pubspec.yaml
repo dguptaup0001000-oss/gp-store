@@ -7,6 +7,18 @@ version: 1.0.0+2
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
+  # PINNED, AND PINNED HERE RATHER THAN ONLY IN CI.
+  #
+  # The three GitHub workflows all say flutter-version: '3.35.7' and nothing
+  # in the project itself did, so a developer who ran plain `flutter upgrade`
+  # got a newer Dart and found out through build_runner failing with
+  # "Missing implementation of visitDotShorthandPropertyAccess" - an error
+  # that looks like broken code and is not. Declaring the constraint makes
+  # `flutter pub get` say which SDK this project wants, before anything else
+  # has a chance to fail confusingly.
+  #
+  # Keep this in step with .github/workflows/*.yml.
+  flutter: '>=3.35.0 <3.36.0'
 
 dependencies:
   flutter:

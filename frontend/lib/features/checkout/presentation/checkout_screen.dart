@@ -14,6 +14,7 @@ import '../../support/presentation/support_providers.dart';
 import '../data/cashfree_checkout_service.dart';
 import 'checkout_coupon_list.dart';
 import '../domain/checkout_models.dart';
+import '../domain/orders_to_pay.dart';
 import 'checkout_providers.dart';
 import 'order_cancellation_countdown_screen.dart';
 import 'order_confirmation_screen.dart';
@@ -46,6 +47,13 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   /// "Verifying" in particular is the honest word for the moment after
   /// Cashfree returns and before this app has been told anything true.
   _PayPhase _phase = _PayPhase.idle;
+
+  /// Which shop is being paid, when there is more than one.
+  ///
+  /// A customer sent to the gateway twice has to be told why, or the second
+  /// payment screen looks like the first one having failed. Null for every
+  /// single-shop checkout, which is what keeps that label unchanged.
+  ({int index, int total})? _payingShop;
 
   /// Idempotency key for the checkout currently in progress. Held across
   /// retries on purpose (see _placeOrder) and cleared only once an order has
@@ -237,25 +245,59 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       // ONLINE runs the gateway before the confirmation screen, so the
       // customer lands on a screen that already knows the real answer
       // rather than one that says "confirmed" and is then contradicted.
+      // ONE PAYMENT PER SHOP, BECAUSE THERE IS ONE ORDER PER SHOP.
+      //
+      // THE BUG THIS FIXES. A basket spanning two kiranas becomes two orders
+      // with two payment rows, each owed to a different shop - that is what
+      // the server does and what it has always done. This screen paid
+      // `orderResult.orderId`, which is the FIRST shop's order and nothing
+      // else, and then showed a confirmation saying "2 orders placed". The
+      // customer paid one shop, believed they had paid both, and the second
+      // shop's order sat unpaid until it timed out.
+      //
+      // THERE IS STILL NO COMBINED PAYMENT and there must never be: each
+      // amount is owed to a different merchant, and merging them into one
+      // charge is the thing the whole payment boundary exists to prevent. So
+      // this is a sequence of separate gateway checkouts, not one bigger one.
+      //
+      // A SINGLE-SHOP CHECKOUT TAKES EXACTLY THE PATH IT ALWAYS DID: one
+      // order in the list, one trip to the gateway, the same verified status
+      // handed to the same confirmation screen.
+      final toPay = ordersToPay(orderResult);
+
       String? verifiedPaymentStatus;
+      int payingOrderId = createdOrderId;
       try {
         if (_effectivePaymentMethod() == 'ONLINE') {
-          verifiedPaymentStatus = await _payOnline(createdOrderId);
+          for (var i = 0; i < toPay.length; i++) {
+            payingOrderId = toPay[i];
+            if (toPay.length > 1) {
+              setState(() => _payingShop = (index: i + 1, total: toPay.length));
+            }
+            final status = await _payOnline(payingOrderId);
+            // The status reported onward is the FIRST shop's, which is what
+            // the confirmation screen has always been handed. Each shop's own
+            // status is on its own order and on the group screen.
+            verifiedPaymentStatus ??= status;
+          }
         }
       } catch (paymentError) {
-        // The ORDER exists. Losing it behind a snackbar is the failure this
+        // The ORDERS exist. Losing them behind a snackbar is the failure this
         // recovery path exists to prevent - take the customer to the order
-        // so they can tap Pay now.
+        // that was not paid, not to the first one, so they can tap Pay now on
+        // the shop that is actually still owed.
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(extractErrorMessage(paymentError))),
         );
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (_) => OrderDetailScreen(orderId: createdOrderId),
+            builder: (_) => OrderDetailScreen(orderId: payingOrderId),
           ),
         );
         return;
+      } finally {
+        if (mounted) setState(() => _payingShop = null);
       }
 
       if (!mounted) return;
@@ -501,7 +543,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2, color: Colors.white)),
                             const SizedBox(width: 10),
-                            Text(_phase.label),
+                            Text(_phase.labelFor(_payingShop)),
                           ],
                         )
                       : Text(_preview != null
@@ -685,4 +727,11 @@ enum _PayPhase {
         // and this app has not yet been told anything true about it.
         _PayPhase.verifying => 'Verifying payment...',
       };
+
+  /// The same label, saying which shop is being paid.
+  ///
+  /// "Opening payment... (shop 2 of 2)" rather than a second identical
+  /// screen the customer reads as the first one having gone wrong.
+  String labelFor(({int index, int total})? shop) =>
+      shop == null ? label : '$label (shop ${shop.index} of ${shop.total})';
 }

@@ -7,7 +7,9 @@ import com.gpstore.entity.OrderScanEvent;
 import com.gpstore.entity.SubzoneBackupPartner;
 import com.gpstore.delivery.DeliveryStatusTransitions;
 import com.gpstore.enums.DeliveryStatus;
+import com.gpstore.enums.OrderActor;
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.order.OrderStatusChange;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.DeliveryPartnerRepository;
@@ -386,7 +388,11 @@ public class WorkerScanService {
         order.setQrTokenUsedAt(now);
         order.setPackedByPartner(worker);
         order.setPackedAt(now);
-        order.setOrderStatus(OrderStatus.PACKED);
+        // Eligibility was checked above in the worker's own terms ("this order
+        // cannot be packed right now"); this asks the order's table the same
+        // question, so the two cannot drift apart and only one of them can be
+        // the authority.
+        OrderStatusChange.move(order, OrderStatus.PACKED, OrderActor.WORKER);
         orderRepository.save(order);
 
         // THE DELIVERY MOVES WITH THE ORDER, when there is one.
