@@ -397,9 +397,9 @@ class _OfferTile extends ConsumerWidget {
     if (category == null) return;
     final messenger = ScaffoldMessenger.of(context);
     try {
+      // The preferred-first list watches the preferences, so saving is all
+      // this has to do - see preferredFirstOffersProvider.
       await ref.read(preferredShopsEditorProvider).toggle(category, offer.shopId);
-      ref.invalidate(preferredFirstOffersProvider(
-          (variantId: offer.variantId ?? 0, categoryId: category)));
     } catch (error) {
       // THE CAP IS THE SERVER'S and it says so in its own words - a third
       // shop is refused there, not here, and the refusal is what the customer

@@ -176,9 +176,22 @@ final shopComparisonProvider = FutureProvider.autoDispose
       );
 });
 
+/// This customer's chosen shops for one category, and the cap on them.
+final preferredShopsProvider =
+    FutureProvider.autoDispose.family<PreferredShopChoice, int>((ref, categoryId) {
+  return ref.watch(marketplaceRepositoryProvider).preferredShops(categoryId);
+});
+
 /// The same offers with the customer's own shops first.
+///
+/// WATCHES THE PREFERENCES IT IS ORDERED BY. Starring a shop changes what
+/// this list means, so the dependency is declared rather than left to each
+/// caller to remember to invalidate - a list that kept saying "distance
+/// order" straight after the customer chose a shop would read as the choice
+/// not having been saved.
 final preferredFirstOffersProvider = FutureProvider.autoDispose
     .family<PreferredFirstOffers, ({int variantId, int categoryId})>((ref, key) {
+  ref.watch(preferredShopsProvider(key.categoryId));
   final pin = ref.watch(deliveryPinProvider);
   return ref.watch(marketplaceRepositoryProvider).preferredFirst(
         variantId: key.variantId,
@@ -186,12 +199,6 @@ final preferredFirstOffersProvider = FutureProvider.autoDispose
         latitude: pin?.lat,
         longitude: pin?.lng,
       );
-});
-
-/// This customer's chosen shops for one category, and the cap on them.
-final preferredShopsProvider =
-    FutureProvider.autoDispose.family<PreferredShopChoice, int>((ref, categoryId) {
-  return ref.watch(marketplaceRepositoryProvider).preferredShops(categoryId);
 });
 
 /// Adds or removes a shop from a category's preferences.
