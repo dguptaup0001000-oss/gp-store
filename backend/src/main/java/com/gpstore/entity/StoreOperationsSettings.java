@@ -130,7 +130,11 @@ public class StoreOperationsSettings implements ShopOwned {
      * <p>A shop may widen it. None may remove it below zero, and V59 bounds
      * it at an hour - past that it is not a countdown, it is a policy.
      */
-    @Column(name = "free_cancellation_seconds", nullable = false)
+    // columnDefinition CARRIES THE DEFAULT V59 GIVES THIS COLUMN, and it is
+    // not decoration - see cancellationChargesDelivery below for the empty
+    // database this exists to unbreak.
+    @Column(name = "free_cancellation_seconds", nullable = false,
+            columnDefinition = "INTEGER NOT NULL DEFAULT 5")
     private Integer freeCancellationSeconds = 5;
 
     /**
@@ -150,7 +154,34 @@ public class StoreOperationsSettings implements ShopOwned {
      * a journey that did not happen. A shop whose rider was already out has a
      * real case for it, which is why the switch exists at all.
      */
-    @Column(name = "cancellation_charges_delivery", nullable = false)
+    // WHY THIS DECLARES A DATABASE DEFAULT AND NOT JUST A JAVA ONE.
+    //
+    // On an existing database V59 added this column as
+    // "BOOLEAN NOT NULL DEFAULT FALSE" and everything worked. On an EMPTY one
+    // the order is reversed: Hibernate creates the table first, at the
+    // entity's current shape, and the migrations then run against it as
+    // though it were at its historical shape. V33 inserts the starting
+    // settings row naming only the columns that existed in V33's day - so
+    // this NOT NULL column, created by Hibernate with no default, took a null
+    // and the whole bootstrap died on:
+    //
+    //     V33__store_hours_and_delivery_scheduling.sql failed
+    //     null value in column "cancellation_charges_delivery" ... violates
+    //     not-null constraint
+    //
+    // which meant no new environment could be provisioned at all. Editing V33
+    // was not an option: Flyway validates the checksums of applied migrations,
+    // so changing it would stop the next production deploy booting - trading a
+    // failure nobody has hit for one everybody would (the same reasoning
+    // FlywayAfterSchemaConfig sets out).
+    //
+    // Declaring the default here makes Hibernate's fresh DDL match what V59
+    // would have produced, so the historical INSERT lands on a column that can
+    // fill itself in. Existing databases are untouched: the column is already
+    // there with exactly this definition, and validate compares type and
+    // nullability rather than defaults.
+    @Column(name = "cancellation_charges_delivery", nullable = false,
+            columnDefinition = "BOOLEAN NOT NULL DEFAULT FALSE")
     private Boolean cancellationChargesDelivery = Boolean.FALSE;
 
     @Column(name = "updated_at")

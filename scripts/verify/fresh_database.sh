@@ -9,10 +9,22 @@
 # added by hand passes every day of the year and fails exactly once - the day
 # somebody provisions a new environment.
 #
-# So this makes a genuinely empty database, runs V1 to the end into it, and
-# then boots the application under ddl-auto=validate, which is the check that
-# matters: Hibernate compares every entity against the schema Flyway just
-# produced and refuses to start if they disagree.
+# So this makes a genuinely empty database and brings it up the way a new
+# environment has to: Hibernate creates the entity tables under
+# ddl-auto=update, deferred Flyway then applies V2 to the head (there is no
+# V1 - see db/migration/README.md), and a SECOND boot under ddl-auto=validate
+# makes Hibernate compare every entity against the result and refuse to start
+# if they disagree.
+#
+# THIS FOUND THREE REASONS A NEW ENVIRONMENT COULD NOT BE PROVISIONED, all of
+# the same shape: Hibernate creates each table at the entity's CURRENT form,
+# and the historical migrations then run against it as though it were at its
+# form of the day. V33 and V46 insert seed rows naming only the columns that
+# existed when they were written, so NOT NULL columns added later - and
+# created by Hibernate without the DEFAULT the migration gives them - took
+# nulls and killed the bootstrap. V55 declares two CHECK constraints inside a
+# CREATE TABLE IF NOT EXISTS that Hibernate had already satisfied, so the
+# constraints were silently absent and V55's own VERIFY block caught it.
 #
 # IT IS DESTRUCTIVE TO ITS OWN DATABASE AND ONLY TO THAT ONE. The name is
 # fixed, it is dropped at the start, and the script refuses to run if it has
@@ -59,14 +71,21 @@ export DB_USERNAME="$DB_USER"
 export DB_PASSWORD="$DB_PASS"
 export FLYWAY_ENABLED=true
 
-say "Migrating V1 to head"
-mvn -o -q flyway:migrate \
-  -Dflyway.url="$DB_URL" -Dflyway.user="$DB_USER" -Dflyway.password="$DB_PASS" \
-  -Dflyway.locations=filesystem:src/main/resources/db/migration
+say "Phase 1: bootstrap an empty database the way a new environment does it"
+# THERE IS NO V1, AND THAT IS DELIBERATE - see db/migration/README.md. Flyway
+# owns the incremental changes from V2 onward; the entity tables themselves
+# come from Hibernate. So the order is Hibernate FIRST, then Flyway, which is
+# what FlywayAfterSchemaConfig arranges and what the CI schema-migrate job
+# runs. Pointing ddl-auto=validate at an empty database instead just fails on
+# V2 with 'relation "orders" does not exist', which is a correct failure of
+# the wrong procedure.
+DDL_AUTO=update FLYWAY_ENABLED=true mvn -o -q -Pschema-bootstrap \
+  -Dtest=EmptyDatabaseBootstrapTest -DexcludedGroups= test
 
 say "What Flyway applied"
 sudo -u postgres psql -qAt -d "$DB_NAME" -c \
-  "select count(*) || ' migrations, head = ' || max(version::numeric)
+  "select count(*) || ' migrations, head = V' || (select version from flyway_schema_history
+      where success order by installed_rank desc limit 1)
      from flyway_schema_history where success;"
 FAILED=$(sudo -u postgres psql -qAt -d "$DB_NAME" -c \
   "select count(*) from flyway_schema_history where not success;")
@@ -83,23 +102,31 @@ sudo -u postgres psql -qAt -d "$DB_NAME" -c \
 sudo -u postgres psql -qAt -d "$DB_NAME" -c \
   "select count(*) || ' foreign keys' from information_schema.table_constraints
      where constraint_schema='public' and constraint_type='FOREIGN KEY';"
+sudo -u postgres psql -qAt -d "$DB_NAME" -c \
+  "select count(*) || ' check constraints' from information_schema.table_constraints
+     where constraint_schema='public' and constraint_type='CHECK';"
 
-say "Tenant boundary: every shop-owned table has its shop_id"
-# NOT A HEADCOUNT - a list. A table that gained a shop_id column but never
-# got one on a fresh build is a tenancy hole that only exists in new
-# environments, which is the worst possible place for one to exist.
+say "Tenant boundary on a schema built from nothing"
+# NOT A HEADCOUNT ALONE - the list too. A table that gained a shop_id in a
+# later migration but never gets one on a fresh build is a tenancy hole that
+# exists only in new environments, which is the worst possible place for one.
 sudo -u postgres psql -qAt -d "$DB_NAME" -c \
   "select count(*) || ' tables carry shop_id'
      from information_schema.columns
     where table_schema='public' and column_name='shop_id';"
 
-say "Booting under ddl-auto=validate"
-# THE REAL TEST. Flyway succeeding says the scripts ran; validate says the
-# schema they produced is the one the code expects. A missing column, a
-# wrong type, a smallint where the entity wants an integer - all of them
-# stop the context here and nowhere earlier.
-DDL_AUTO=validate mvn -o -q \
-  -Dtest=com.gpstore.config.ApplicationStartsOnAFreshDatabaseTest \
-  -DfailIfNoTests=false test
+say "No leftovers: the run started from empty and nothing seeded rows behind it"
+sudo -u postgres psql -qAt -d "$DB_NAME" -c \
+  "select 'orders=' || (select count(*) from orders)
+       || ' payments=' || (select count(*) from payments)
+       || ' customers=' || (select count(*) from customers);"
 
-say "PASSED: V1..head builds this schema from empty, and the entities validate against it"
+say "Phase 2: boot again against the same database under ddl-auto=validate"
+# THE CHECK THAT MATTERS. Flyway succeeding says the scripts ran. validate
+# says the schema they produced is the one the entities expect - a missing
+# column, a wrong type, a SMALLINT where the entity wants an INTEGER all stop
+# the context here and nowhere earlier.
+DDL_AUTO=validate FLYWAY_ENABLED=true mvn -o -q -Pschema-bootstrap \
+  -Dtest=ProductionSchemaValidateTest -DexcludedGroups= test
+
+say "PASSED: an empty database reaches the current schema, and the entities validate against it"

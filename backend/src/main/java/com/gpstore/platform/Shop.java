@@ -137,7 +137,19 @@ public class Shop {
      * has no route that touches this, and PlatformMerchantController, which
      * has the only one that does.
      */
-    @Column(name = "verification_level", nullable = false, length = 30)
+    // THE DATABASE DEFAULT IS DECLARED HERE, not only in V55's ALTER TABLE.
+    //
+    // On an empty database Hibernate creates this table before the migrations
+    // run, at the entity's CURRENT shape - so a NOT NULL column with no
+    // default met V46's founding-shop INSERT, which names only the columns
+    // that existed in V46's day, and the whole bootstrap died on "null value
+    // in column verification_level of relation shops violates not-null
+    // constraint". The migration cannot be edited (Flyway checksums already
+    // applied scripts), so the fix is to make Hibernate's fresh DDL match
+    // what the migration would have produced. See StoreOperationsSettings for
+    // the same problem and the same reasoning.
+    @Column(name = "verification_level", nullable = false, length = 30,
+            columnDefinition = "VARCHAR(30) NOT NULL DEFAULT 'NONE'")
     @Enumerated(EnumType.STRING)
     private ShopVerificationLevel verificationLevel = ShopVerificationLevel.NONE;
 
