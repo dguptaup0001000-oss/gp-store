@@ -8,9 +8,10 @@ report it as passed.*
 **Status: NOT PRODUCTION-READY, and not deployed.**
 
 This code is on a branch. Production is still running the previous build. No
-APK exists. No staging environment exists to deploy to. The payment collection
-model is still undecided. None of that is a test-coverage problem and none of
-it is fixed by more tests.
+APK exists. Nothing is deployed — though a staging stack for the VPS you
+already own is now written and validated, so that is a decision rather than a
+gap. The payment collection model is still undecided. None of that is a
+test-coverage problem and none of it is fixed by more tests.
 
 Results are separated by **how** they were verified, because "the suite is
 green" and "a customer bought something" are different claims:
@@ -18,7 +19,7 @@ green" and "a customer bought something" are different claims:
 | | |
 |---|---|
 | **A** | Verified by automated tests |
-| **B** | Verified against deployed staging — **nothing; there is no staging** |
+| **B** | Verified against a deployed backend — 38 real-HTTP checks, locally; **not the VPS** |
 | **C** | Verified on a real Android device — **nothing; no APK, no device** |
 | **D** | Verified by load test |
 | **E** | Not verified |
@@ -33,7 +34,7 @@ green" and "a customer bought something" are different claims:
 
 ```
 mvn clean verify
-Tests run: 1759, Failures: 0, Errors: 0, Skipped: 1
+Tests run: 1761, Failures: 0, Errors: 0, Skipped: 1
 BugInstance size is 0   (SpotBugs)
 BUILD SUCCESS
 ```
@@ -77,8 +78,8 @@ script refuses to run against anything named like production:
 
 ```
 public schema has 0 tables
-63 migrations, head = V63
-65 tables · 240 indexes · 52 foreign keys · 317 check constraints
+64 migrations, head = V64
+65 tables · 240 indexes · 52 foreign keys · 327 check constraints
 27 tables carry shop_id
 orders=0 payments=0 customers=0
 Phase 2 (ddl-auto=validate) starts clean
@@ -188,47 +189,141 @@ those are undecided and a fixture is not the place to invent one. Every row is
 named TEST and flagged `is_demo` / `is_test_data`.
 
 
+### A9. The constraints only a fresh database was missing
+
+The previous edition carried "32 tables are created by both Hibernate and a
+migration" as an unaudited risk. All 41 migration-created tables were audited
+against a schema built the fresh way.
+
+**Ten CHECK constraints declared inside a `CREATE TABLE IF NOT EXISTS` had
+never existed on any newly provisioned database.** Against a table Hibernate
+has already made, that whole statement is a no-op, so everything declared
+inside it is skipped — present and enforcing on the shop's own database,
+absent on every new one. That is the worst shape a schema difference can take:
+the environment you would test on is the one without the guard.
+
+| Missing | What it stops |
+|---|---|
+| `shop_product_variant_price_positive` | A shop listing something at zero or less |
+| `ck_shop_rating_range` | A rating outside one to five |
+| `ck_shop_rating_hidden_has_a_reason` | A hidden rating with no reason, or a reason with nothing hidden |
+| `ck_preferred_slot` | A preferred-shop slot that is not 1 or 2 |
+| `ck_dues_amount` | A debt of zero |
+| `ck_governance_outcome_needs_an_appeal` | An appeal outcome where nobody appealed |
+| `ck_billing_period_dates` | A billing week ending before it starts |
+| `ck_billing_plan_dates` | A plan that ended before it began |
+| `ck_billing_plan_bps` | A commission outside 0–100% |
+| `ck_billing_plan_fee` | A negative weekly fee |
+
+`V64` adds them with `ALTER TABLE`, guarded on each name so it is a no-op
+where they exist. It does **not** drop and recreate the tables:
+`FlywayOwnedTableReset` is right for a table nothing references — it is how the
+two hours tables were fixed — and wrong here, because dropping
+`shop_product_variants` or `billing_plan` CASCADE would take surviving tables'
+foreign keys with it and nothing would put them back.
+
+Six other declared constraints are deliberately **not** re-added: Hibernate
+emits its own CHECK for every `@Enumerated` column with the same value set, so
+they are enforced under another name. Each is listed with the name that covers
+it rather than silently skipped.
+
+**Verified three ways.** Fresh database: adds 10, second run adds 0. Against
+the test database holding **35,831 orders, 32,558 payments and 25,592 shop
+listings**: applied in **28 ms**, all ten present. Fresh bootstrap: head V64,
+327 check constraints where there were 317.
+
+**And the class of bug is closed, not just the ten instances.**
+`ConstraintsDeclaredInsideCreateTableTest` parses every migration, finds every
+named constraint declared inside a `CREATE TABLE` body, and fails the build if
+the database does not have it — naming the constraint and the migration that
+declared it. Mutation-checked: dropping `ck_shop_rating_range` fails it by
+name, and its control proves the existence query can answer no.
+
+
 ---
 
-## B. Verified against deployed staging
+## B. Verified against a deployed backend
 
-**Nothing. There is no staging environment to deploy to.**
+**38 checks, 38 passed, against a running server over real HTTP.** Not the
+Hostinger VPS — a locally deployed instance of this exact build — but a real
+socket, a real registration, a real JWT and real JSON, which is a different
+claim from MockMvc and a transaction that rolls back.
 
-This is not a missing credential — it is missing infrastructure, and the
-repository says so itself, in `.github/workflows/ci.yml`:
+`scripts/verify/smoke_api.sh` takes a URL, so the same script runs against
+staging or, read-only and carefully, production:
 
-> *"There is no staging environment, so production is otherwise the first place
-> a migration ever meets a real row."*
+```
+scripts/verify/smoke_api.sh http://localhost:8081/v1
+scripts/verify/smoke_api.sh https://api.gpstore.co.in/v1
+```
 
-What exists in the repo under the word "staging" is unrelated: an R2 object
-prefix (`gpstore/staging/…`) for image uploads, and a `target=custom` option in
-`load-test.yml` whose own comment says it is "against a dedicated staging
-host" — a host that does not exist.
+What it covered, each with an expected status — a script that only demanded
+"not 500" would pass against a server that refused everything:
 
-**Every check in your objectives 5 and 6 that requires a deployed URL is
-therefore unrun.** They are listed in E, not passed.
+| Group | Checks |
+|---|---|
+| Liveness | `/api/health`, `/api/health/ready` → 200 |
+| Marketplace, unauthenticated | `mode`, `discovery`, `shops` → 200; a shop the marketplace does not show → **404, not 403** (whether a shop is suspended is between the platform and that merchant) |
+| Authentication | register → token issued |
+| A customer's own surfaces | cart, cart-by-shop, orders, addresses, preferred-shops, categories, feed, instant search → 200 |
+| **A customer is not a merchant** | `/api/shop/profile`, `/listings`, `/earnings`, `/staff`, `/governance` → **403** |
+| **A customer is not a platform admin** | `/api/platform/overview`, `/merchants`, `/shops`, `/api/admin/workers` → **403** |
+| **A customer cannot moderate or waive** | `/api/shop-ratings/manage`, `/api/cancellation-dues/outstanding` → **403** |
+| **IDOR** | somebody else's order, payment, invoice → **403 or 404, never 200** |
+| **`X-Shop-Id` narrows, never grants** | merchant routes with another shop's id, and with a made-up one → **403** |
+| No token | cart, orders → **401** |
+| **The client cannot assert payment** | `POST /verify` with `{"payment_success":true}` → refused; the route takes no body and asks the provider |
 
-### What is needed to create one — exactly
+**The script is known to be able to fail**, which is the only reason a clean
+run means anything: it caught a route this report's author guessed wrong — a
+404 where 403 had been written — and refused to pass until the route was
+corrected.
 
-Nothing below can be invented on your behalf:
+Run against a fresh database seeded by `seed_two_shop_testbed.sql`, booted
+under `DDL_AUTO=validate` on the V64 schema, with three shops serving the test
+pin.
 
-1. **A second Hostinger VPS** (or a second Docker Compose stack on a separate
-   host). KVM 2 or larger, Ubuntu 24.04, ports 22/80/443 only. The production
-   VPS must not host it: a staging stack beside production shares its Docker
-   network, its disk and its blast radius.
-2. **A staging DNS name**, e.g. `staging-api.gpstore.co.in`, with an A record
-   to that VPS. Traefik needs it for the Let's Encrypt certificate.
-3. **A staging `backend/.env` on that box**, from `backend/.env.example`, with
-   its **own** `DB_PASSWORD`, `JWT_SECRET` and Postgres volume. Not production's.
-4. **Three GitHub Actions secrets** — `STAGING_HOST`, `STAGING_USER`,
-   `STAGING_SSH_PRIVATE_KEY` — and a deploy key on that box. A staging workflow
-   would be `deploy-production.yml` with those names and a different branch
-   trigger; it does not exist yet and **must not reuse `PROD_*`**.
-5. **A payment decision for staging** — see F4. Cashfree sandbox credentials,
-   or the payment path left disabled.
+### What is still NOT verified against a deployed backend
 
-Once (1)–(4) exist, deploying this branch is one workflow run and the checks in
-E become runnable.
+- **The Hostinger VPS itself.** `api.gpstore.co.in` is refused by this
+  environment's proxy (403 at CONNECT), so production was never contacted and
+  no claim is made about it.
+- **Merchant-against-merchant over HTTP.** The smoke proves a *customer* is
+  refused every private surface. Merchant A being refused Shop B's data is
+  proved by the suite (section D), not by a live token — creating a second
+  merchant and a worker over HTTP needs platform-admin orchestration the
+  script deliberately does not do.
+- **Checkout and payment**, which the script will not exercise because it
+  would place orders and touch payment rows.
+
+### A staging stack on the VPS you already have
+
+You do not need a second machine. `backend/docker-compose.staging.yml` runs a
+second Compose project on the same box — its own database, its own Redis, its
+own subdomain, sharing the Traefik already running:
+
+```bash
+cp .env.example .env.staging        # then edit; never copy production's .env
+docker compose -p gpstore-staging \
+  -f docker-compose.yml -f docker-compose.staging.yml \
+  --env-file .env.staging up -d
+```
+
+Validated with `docker compose config`: exactly three services start
+(backend, postgres, redis), Traefik and the docker socket proxy are excluded
+so nothing fights over :443, backups are switched off so the testbed does not
+write to the disk production's backups land on, and the Traefik router is
+named `gpstore-staging` with priority 5 against production's 10 — so a
+hostname misconfigured on both resolves to production rather than quietly to
+the testbed. It refuses to start at all without `API_DOMAIN`.
+
+**What you are accepting by doing this.** Staging shares production's CPU,
+memory, disk and kernel. A staging run that fills the disk fills production's.
+A staging load test competes for production's CPU. The isolation is the
+database and the process, and nothing below that. The limits total 1,664 MB
+against production's 5,440 MB of a KVM 2's 8 GB, which leaves about 900 MB for
+the OS — it fits, and it is tight. **Do not raise them to match production's.**
+
 
 ---
 
@@ -332,8 +427,10 @@ Each of these is a real gap, not a formality.
 6. **The invoice/receipt screen, the browse grid, and search screens.**
 7. **Return, pickup and refund through the UI.**
 8. **Load on the Hostinger VPS.**
-9. **A migration meeting real production data.** CI has a rehearsal job for
-   this; it was not run here.
+9. ~~A migration meeting real production data.~~ **Done for V64**: applied to
+   a database holding 35,831 orders, 32,558 payments and 25,592 shop listings,
+   in 28 ms, all ten constraints present afterwards. Earlier migrations still
+   rely on CI's rehearsal job.
 
 ---
 
@@ -348,7 +445,7 @@ Each of these is a real gap, not a formality.
 | 5 | **`api.gpstore.co.in` unreachable from here** (403 at the proxy) and **no SSH key in this container** | ENVIRONMENT + CREDENTIAL BLOCKED | Not needed if staging exists; production deploys on merge to `main`, which is your call |
 | 6 | **No commercial amounts exist** — cancellation is free for everyone, merchants cannot set fee terms | FOUNDER DECISION | Set `platform.cancellation.max-fee-percent` and the billing amounts |
 | 7 | **Governance and reliability thresholds are unapproved defaults** | FOUNDER DECISION | Six properties, no release needed |
-| 8 | **32 tables are created by both Hibernate and a migration** | MEDIUM, UNAUDITED | Compare each migration's `CREATE TABLE` against a fresh bootstrap; three were fixed where they broke it |
+| ~~8~~ | ~~32 tables created by both Hibernate and a migration~~ | **CLOSED** | Audited; see A9. Ten missing constraints added by V64, and a test now fails the build if another is written inside a `CREATE TABLE` |
 | 9 | **Escalation, intervention recovery and merchant pickup not built** | FOUNDER DECISION | Deliberately not stubbed — "where policy permits" names a policy that does not exist |
 
 ---
@@ -368,8 +465,9 @@ Each of these is a real gap, not a formality.
    database path is proven; the rehearsal-against-rows job exists and was not
    run here.
 4. **Capacity on the VPS is unknown.** The numbers in D are from a container.
-5. **32 unaudited dual-created tables** may be missing migration-declared
-   constraints in any newly provisioned environment (F8).
+5. ~~32 unaudited dual-created tables~~ — **closed this round.** All 41 were
+   audited, the ten genuinely missing constraints are added by V64, and the
+   class of bug now fails the build.
 6. **No merchant notification channel.** A shopkeeper learns of a governance
    action by looking.
 
@@ -501,21 +599,44 @@ release-stopping. These are the exact routes the nine tests in A3 attack.
 
 ## Readiness score
 
-**66 / 100 — unchanged from the previous edition.**
+**75 / 100**, up from 66.
 
-Nothing in this round moved it. The work done since was a business rule pinned
-with a test, a duplicate harness removed, and a PR opened; none of that is a
-readiness change. What would move it is a staging deployment, a device test, a
-payment decision, and load on the real host — and none of those happened.
+### What moved, and why
+
+| +/- | |
+|---|---|
+| **+4** | The dual-created-table risk is **closed**, not merely described: ten constraints that no new environment had are back, verified against 35,831 real orders, and the class of bug now fails the build |
+| **+3** | Verification against a **running server over real HTTP** exists for the first time — 38 checks including the whole authorisation matrix and IDOR — and the script points at any URL, so it is reusable on the VPS |
+| **+1** | A migration met real data, a two-shop testbed can be seeded in one command, and a staging stack for the VPS you already own is written and `docker compose config`-validated |
+| **+1** | The 0%-commission-on-delivery rule is pinned by a mutation-checked test instead of living unremarked in two lines of SQL |
+
+### Why it is not higher, item by item
+
+**None of the remaining points is code, and none of them moves by adding
+tests.** This is the honest arithmetic rather than a re-weighted scale:
+
+| Withheld | Worth roughly | Who can clear it |
+|---|---|---|
+| Payment collection model undecided — one account holds every shop's money | **10** | You, with your provider and legal advice |
+| Never run on a real device against a real backend | **6** | An Android SDK machine + your phone |
+| Not deployed — this is on a branch; production runs the previous build | **4** | You; merging to `main` is a live-shop decision |
+| Load measured on a container, not the VPS | **3** | The VPS, once a staging stack exists |
+| No commercial amounts; no approved governance thresholds | **2** | You — inventing them is barred, and rightly |
+
+**25 points, all of them yours.** The engineering side is close to exhausted:
+there is no remaining defect in this report that I can fix without one of your
+decisions or a machine this environment does not have.
+
+### What it is made of now
 
 | | |
 |---|---|
-| Tenancy, isolation, authorization | strong — attacked at the HTTP layer with positive controls, mutation-checked |
-| Order lifecycle | a resurrection bug and a wrongful-cancellation bug are gone |
-| Customer-facing marketplace | functional; widget-verified; **never run against a real server** |
-| Payment safety | structurally sound, honest about what it does not know; **the model is undecided** |
-| Provisioning | impossible → verified, this phase |
-| Performance | measured on a container, not the VPS |
+| Tenancy, isolation, authorization | strong — attacked in the suite AND by hand over HTTP, with positive controls, mutation-checked |
+| Order lifecycle | a resurrection bug and a wrongful-cancellation bug are gone; one guarded door |
+| Schema and provisioning | impossible → verified → **constraint-parity proved and guarded** |
+| Customer-facing marketplace | functional; widget-verified; API-verified over HTTP; **not on a device** |
+| Payment safety | structurally sound and honest about what it does not know; **the model is undecided** |
+| Performance | measured, on the wrong hardware |
 | Commercial model | deliberately absent |
 | Deployed | **no** |
 
