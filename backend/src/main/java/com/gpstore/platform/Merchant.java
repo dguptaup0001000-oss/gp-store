@@ -87,6 +87,18 @@ public class Merchant {
     @Column(nullable = false)
     private Boolean active = Boolean.TRUE;
 
+    /**
+     * Which billing band this merchant is on (Part 4 §5).
+     *
+     * <p>NULL FOR EVERY MERCHANT TODAY, and that is not an oversight: a
+     * merchant with no tier is not billed at all, and Part 4 is explicit that
+     * the commercial amounts are not decided. A tier assigned by a migration
+     * would be a merchant put on a price list nobody showed them.
+     */
+    @Column(name = "tier", length = 20)
+    @Enumerated(EnumType.STRING)
+    private com.gpstore.billing.MerchantTier tier;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -140,6 +152,9 @@ public class Merchant {
 
     public Boolean getActive() { return active; }
     public void setActive(Boolean active) { this.active = active; }
+
+    public com.gpstore.billing.MerchantTier getTier() { return tier; }
+    public void setTier(com.gpstore.billing.MerchantTier tier) { this.tier = tier; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
