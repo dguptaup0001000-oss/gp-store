@@ -1,5 +1,6 @@
 package com.gpstore.platform;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.catalog.shop.ShopProductVariant;
 import com.gpstore.catalog.shop.ShopProductVariantRepository;
 import com.gpstore.dto.request.PlaceOrderRequest;
@@ -117,7 +118,7 @@ class MultiShopCheckoutTest {
         Customer customer = new Customer();
         customer.setFullName("Split customer " + tag);
         customer.setEmail(tag + "@example.test");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("not-a-real-hash");
         customer.setEnabled(true);
         customer.setActive(true);

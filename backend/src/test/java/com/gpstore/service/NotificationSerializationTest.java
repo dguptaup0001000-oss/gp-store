@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gpstore.dto.response.NotificationResponse;
@@ -152,7 +153,7 @@ class NotificationSerializationTest {
         Customer customer = new Customer();
         customer.setFullName("Notification Test " + tag);
         customer.setEmail("notif-" + tag + "-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

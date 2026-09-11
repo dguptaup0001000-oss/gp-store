@@ -1,5 +1,6 @@
 package com.gpstore.perf;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.dto.request.PlaceOrderRequest;
 import com.gpstore.entity.Address;
 import com.gpstore.entity.Cart;
@@ -486,7 +487,7 @@ class CheckoutPerformanceTest {
         Customer customer = new Customer();
         customer.setFullName("Perf Test Customer");
         customer.setEmail("perf-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

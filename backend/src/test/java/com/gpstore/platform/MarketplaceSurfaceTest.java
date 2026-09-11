@@ -1,5 +1,6 @@
 package com.gpstore.platform;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.entity.Role;
 import com.gpstore.ordergroup.OrderGroup;
 import com.gpstore.ordergroup.OrderGroupRepository;
@@ -311,7 +312,7 @@ class MarketplaceSurfaceTest {
                 INSERT INTO customers (full_name, email, mobile_number, password, role, active)
                 VALUES (?, ?, ?, 'not-a-real-hash', 'CUSTOMER', true)
                 """, kind + " " + tag, email,
-                "9" + String.valueOf(System.nanoTime()).substring(0, 9));
+                TestMobileNumbers.unique());
         return jdbc.queryForObject("SELECT id FROM customers WHERE email = ?", Long.class, email);
     }
 

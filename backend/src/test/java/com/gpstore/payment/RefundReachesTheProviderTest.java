@@ -1,5 +1,6 @@
 package com.gpstore.payment;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.Order;
 import com.gpstore.entity.Payment;
@@ -354,7 +355,7 @@ class RefundReachesTheProviderTest {
         Customer customer = new Customer();
         customer.setFullName("Refund Test Customer");
         customer.setEmail("refund-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

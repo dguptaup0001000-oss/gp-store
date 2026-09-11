@@ -1,5 +1,6 @@
 package com.gpstore.platform;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.entity.Cart;
 import com.gpstore.entity.CartItem;
 import com.gpstore.entity.Customer;
@@ -119,7 +120,7 @@ class ShopStaffAndRidersTest {
         Customer customer = new Customer();
         customer.setFullName("Basket " + tag);
         customer.setEmail(tag + "@example.test");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("not-a-real-hash");
         customer.setEnabled(true);
         customer.setActive(true);

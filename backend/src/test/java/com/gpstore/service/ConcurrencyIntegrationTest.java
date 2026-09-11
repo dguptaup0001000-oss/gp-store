@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.entity.Category;
 import com.gpstore.entity.Cart;
 import com.gpstore.entity.CartItem;
@@ -521,7 +522,7 @@ class ConcurrencyIntegrationTest {
         Customer customer = new Customer();
         customer.setFullName("Concurrency Test Customer");
         customer.setEmail("concurrency-test-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

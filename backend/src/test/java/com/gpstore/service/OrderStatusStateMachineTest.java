@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.entity.*;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.enums.PaymentMethod;
@@ -298,7 +299,7 @@ class OrderStatusStateMachineTest {
         Customer customer = new Customer();
         customer.setFullName("State Machine Customer");
         customer.setEmail("state-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);
