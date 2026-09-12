@@ -1,0 +1,132 @@
+# The production smoke test, run from somewhere that can actually reach
+# production.
+#
+# WHY THIS EXISTS. scripts/verify/smoke_api.sh walks the marketplace over real
+# HTTP and then tries to break the tenant boundary by hand, which is exactly
+# what you want after a deploy - but it has to run from a machine that can
+# open a socket to api.gpstore.co.in. A restricted build environment cannot:
+# its egress proxy answers 403 to CONNECT for that host, so the script was
+# written, reviewed and never actually pointed at production. A GitHub runner
+# has no such restriction - the Uptime alert workflow has been probing the
+# same public hostname every ten minutes for weeks - so the smoke test runs
+# here instead.
+#
+# MANUAL ONLY, DELIBERATELY. There is no push or schedule trigger. This talks
+# to the live system that has real customers and real money on it, and the
+# full run writes one row (see below); neither belongs on every commit.
+#
+# IT USES NO SECRETS AND CANNOT LEAK ONE. Every endpoint it touches is either
+# public or is being probed precisely because it must refuse an ordinary
+# customer. There is no token, key or password anywhere in this workflow, so
+# there is nothing here to print by accident.
+#
+# WHAT A FULL RUN WRITES TO PRODUCTION, EXACTLY: one row in `customers` -
+# name "SMOKE TEST", a 9999xxxxxxx phone, an @example.invalid email, role
+# CUSTOMER, verified=false. Nothing else. No order, no payment, no cart
+# content, no shop, no merchant, no worker. The application offers no other
+# way to obtain a customer token, and without a token the authorization
+# matrix - the part that proves a customer cannot read a merchant's earnings
+# - cannot be tested at all. Choose read_only if even that row is too much;
+# it writes nothing and tests correspondingly less.
+name: Production smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: 'API base URL including the version prefix'
+        required: false
+        default: 'https://api.gpstore.co.in/v1'
+      expect_sha:
+        description: 'Full 40-char commit that /api/version must report (empty = do not check)'
+        required: false
+        default: ''
+      read_only:
+        description: 'Write nothing at all: skips registration and every signed-in check'
+        required: false
+        type: boolean
+        default: false
+
+# One at a time. Two concurrent runs would register two throwaway customers
+# and interleave their output for no benefit.
+concurrency:
+  group: gpstore-production-smoke
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke the deployed API
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Refuse a URL that is not the versioned API
+        env:
+          API_BASE_URL: ${{ inputs.api_base_url }}
+        run: |
+          set -Eeuo pipefail
+          # A base without /v1 makes every route 404 and the whole run reads
+          # as "production is down" when it is only the URL that is wrong.
+          case "$API_BASE_URL" in
+            https://*/v1) : ;;
+            *) echo "::error::api_base_url must be https and end in /v1 (got '$API_BASE_URL')"; exit 1 ;;
+          esac
+
+      - name: Run the smoke test
+        id: smoke
+        env:
+          API_BASE_URL: ${{ inputs.api_base_url }}
+          EXPECT_SHA: ${{ inputs.expect_sha }}
+          SMOKE_READ_ONLY: ${{ inputs.read_only && '1' || '0' }}
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/verify/smoke_api.sh
+          mkdir -p smoke-out
+          # Captured AND echoed: the artifact is the record, the job log is
+          # what a person reads first. Never `|| true` - the script's exit
+          # code is the result and swallowing it is how a smoke test starts
+          # passing while production is broken.
+          set +e
+          scripts/verify/smoke_api.sh "$API_BASE_URL" 2>&1 | tee smoke-out/smoke.log
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Summarise on the run itself
+        if: always()
+        run: |
+          {
+            echo "## Production smoke test"
+            echo
+            echo "- API: \`${{ inputs.api_base_url }}\`"
+            echo "- Read-only: \`${{ inputs.read_only }}\`"
+            echo "- Expected commit: \`${{ inputs.expect_sha || 'not checked' }}\`"
+            echo
+            echo '```'
+            # Strip the ANSI colour the script writes for a terminal.
+            sed -e 's/\x1b\[[0-9;]*m//g' smoke-out/smoke.log 2>/dev/null || echo "no output captured"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the smoke output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-smoke-output
+          path: smoke-out/
+          retention-days: 30
+
+      - name: What a failure here means
+        if: failure()
+        run: |
+          echo "::error::The production smoke test failed. Read the job summary above."
+          echo "A 200 where a 403 was expected is a tenant-boundary defect and is"
+          echo "release-stopping. A 000 everywhere usually means the API is down -"
+          echo "check the Uptime alert workflow before assuming this is a code fault."
