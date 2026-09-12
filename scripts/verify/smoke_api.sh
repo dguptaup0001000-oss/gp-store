@@ -225,6 +225,21 @@ check "GET /api/admin/workers (platform admin)"       403 "${AUTH[@]}" "$BASE/ap
 check "GET /api/cancellation-dues/outstanding"       403 "${AUTH[@]}" "$BASE/api/cancellation-dues/outstanding"
 check "GET /api/shop-ratings/manage"                 403 "${AUTH[@]}" "$BASE/api/shop-ratings/manage"
 
+# A CUSTOMER MUST NOT BE ABLE TO OPEN A STAFF LOGIN. These two routes are
+# the only ones in the system that mint an ADMIN account and hand back a
+# usable password, so a missing SecurityConfig rule here would let anybody
+# who can register make themselves a shop administrator. Probed with a real
+# body on purpose: a refusal that only holds for a malformed request is not
+# a refusal. Nothing is created either way - a 403 happens before the
+# controller - and a 404 would mean the route is not deployed at all, which
+# is why it is not accepted.
+check "POST /api/platform/staff (mints an ADMIN login)" 403 \
+  -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"fullName":"Smoke Probe","email":"smoke-probe@example.invalid","role":"ADMIN"}' \
+  "$BASE/api/platform/staff"
+check "POST /api/platform/staff/1/reset-password" 403 \
+  -X POST "${AUTH[@]}" "$BASE/api/platform/staff/1/reset-password"
+
 say "IDOR: naming somebody else's row does not fetch it"
 # Not 200. 403 or 404 are both correct - refusing to say whether the row
 # exists is itself a defensible answer.

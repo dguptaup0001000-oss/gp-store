@@ -16,7 +16,7 @@ round an untested claim up to a passing one.*
 | Backend suite | 1836 tests, 0 failures, 0 errors, 1 skipped |
 | Flutter suite | 702 tests, all passing |
 | `flutter analyze --no-fatal-infos` | clean — 41 infos, 0 warnings, 0 errors |
-| Production smoke | 38 checks, 38 passed, with the deployed SHA asserted |
+| Production smoke | 40 checks, 40 passed, with the deployed SHA asserted |
 | Deployment | automated on merge to `main`, with the smoke running inside the same workflow run |
 
 The role model the owner specified is now what the code does, and each of its
@@ -322,7 +322,7 @@ shipped in that change could not fire; see section 3.
 
 ## 10. PRODUCTION SMOKE RESULT
 
-**38 checks, 38 passed**, against `api.gpstore.co.in`, from a GitHub runner,
+**40 checks, 40 passed**, against `api.gpstore.co.in`, from a GitHub runner,
 with `EXPECT_SHA` asserted against `/api/version` so a smoke run cannot pass
 against the *previous* build.
 
@@ -338,6 +338,7 @@ Every check asserts an expected status code. A script that only demanded "not
 | A customer's own surfaces | cart, cart-by-shop, orders, addresses, preferred-shops, categories, feed, **instant search** → 200 |
 | A customer is not a merchant | `/api/shop/profile`, `/listings`, `/earnings`, `/staff`, `/governance` → **403** |
 | A customer is not the platform | `/api/platform/overview`, `/merchants`, `/shops`, `/api/admin/workers` → **403** |
+| A customer cannot open a staff login | `POST /api/platform/staff` with a well-formed body, and `POST /api/platform/staff/{id}/reset-password` → **403 exactly** — these are the only routes that mint an `ADMIN` account and return a usable password, and a 404 would mean the route is not deployed rather than refused |
 | A customer cannot moderate or waive | `/api/shop-ratings/manage`, `/api/cancellation-dues/outstanding` → **403** |
 | IDOR | somebody else's order, payment, invoice → **403 or 404, never 200** |
 | `X-Shop-Id` narrows, never grants | merchant routes with another shop's id, and with a made-up one → **403** |
