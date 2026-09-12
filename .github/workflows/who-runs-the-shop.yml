@@ -1,0 +1,140 @@
+# Who holds which role in production, and can they reach a shop?
+#
+# READ-ONLY, AND MANUAL ONLY. Every statement in the SQL is a SELECT and
+# there is no schedule: this is a question you ask, not a watchdog.
+#
+# WHY IT IS A WORKFLOW AND NOT A NOTE IN A DOCUMENT. The readiness report
+# used to say "run this SQL on the VPS" for exactly this question. Anything
+# that needs a person to open a terminal is a thing that does not get done -
+# and this particular question cost three rounds of guessing at a phone
+# screenshot, because the two causes of a missing menu look identical from
+# the phone.
+#
+# WHAT IT WILL NOT PRINT. No email, no phone, no name. Emails are masked to
+# their first two characters and domain in the SQL itself, because this lands
+# in an Actions log GitHub keeps for ninety days.
+name: Who runs the shop
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: gpstore-prod-ssh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  roles:
+    name: Report roles and shop membership
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Prove the retry logic first
+        run: |
+          set -Eeuo pipefail
+          SSH_RETRY_SELFTEST=1 bash deploy/production/ssh_retry.sh
+
+      - name: Refuse a SQL file that could change anything
+        run: |
+          set -Eeuo pipefail
+          # A GUARD, NOT A COMMENT. This file is run against production with
+          # no review step in front of it, so the promise that it only reads
+          # is enforced here rather than trusted.
+          if grep -inE '\\b(insert|update|delete|drop|alter|truncate|grant|create)\\b' \
+               deploy/production/who-runs-the-shop.sql; then
+            echo "::error::who-runs-the-shop.sql must contain only SELECTs."
+            exit 1
+          fi
+          echo "Read-only check passed."
+
+      - name: Require VPS SSH secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for v in PROD_HOST PROD_USER PROD_SSH_PRIVATE_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Ask the database
+        id: ask
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+          PROD_APP_DIR: ${{ secrets.PROD_APP_DIR }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          KEY="$(mktemp)"
+          trap 'rm -f "$KEY"' EXIT
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$KEY"
+          chmod 600 "$KEY"
+          APP_DIR="${PROD_APP_DIR:-/opt/gp-store}"
+
+          ./.github/scripts/log_runner_egress.sh || true
+
+          bash deploy/production/ssh_retry.sh \
+            --output /tmp/roles.txt \
+            --stdin deploy/production/who-runs-the-shop.sql \
+            -- ssh -i "$KEY" \
+              -p "${PROD_PORT:-22}" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o ConnectTimeout=20 \
+              -o StrictHostKeyChecking=accept-new \
+              "${PROD_USER}@${PROD_HOST}" \
+              "cd '$APP_DIR/backend' && docker compose -f docker-compose.yml exec -T postgres \
+                 sh -c 'psql -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -f -'"
+
+          cat /tmp/roles.txt
+
+      - name: What this means
+        if: always() && steps.ask.outcome == 'success'
+        run: |
+          {
+            echo "## Who runs the shop"
+            echo
+            echo '```'
+            cat /tmp/roles.txt
+            echo '```'
+            echo
+            echo "### Reading it"
+            echo
+            echo "- **SUPER_ADMIN** is the platform owner. Exactly one account"
+            echo "  should hold it, and it is the only role that sees"
+            echo "  **Marketplace -> Merchants & Shops** in the admin app."
+            echo "- **ADMIN** is a shop owner. It must also have"
+            echo "  \`shops_on_staff_of\` >= 1 and \`has_home_shop\` = 1, or the"
+            echo "  account resolves to no shop and its console is empty for a"
+            echo "  different reason entirely."
+            echo "- **PLATFORM_ADMIN**, if any row still holds it, works exactly"
+            echo "  like SUPER_ADMIN - it is a compatibility alias. Moving those"
+            echo "  accounts to SUPER_ADMIN is tidiness, not a fix."
+            echo
+            echo "If your own account shows ADMIN and you expected the"
+            echo "marketplace console, that is the answer: the role, not the app."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Could not ask
+        if: always() && steps.ask.outcome == 'failure'
+        run: |
+          echo "::error::Could not reach production to read the roles. NOTHING WAS"
+          echo "READ - this says nothing about who holds what. ssh failed on every"
+          echo "attempt; the runner's egress address is printed above. Re-run it."
+          exit 1
