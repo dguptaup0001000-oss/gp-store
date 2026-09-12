@@ -27,6 +27,15 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Same convention as the money evaluator: a retry whose logic was
+      # never exercised is a retry nobody should trust with a verdict about
+      # production. Runs in about a second - the delay is zeroed in the
+      # self-test, not slept through.
+      - name: Prove the retry logic first
+        run: |
+          set -Eeuo pipefail
+          SSH_RETRY_SELFTEST=1 bash deploy/production/ssh_retry.sh
+
       - name: Require VPS SSH secrets
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
@@ -69,13 +78,23 @@ jobs:
           trap 'rm -f "$KEY"' EXIT
           printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$KEY"
           chmod 600 "$KEY"
-          ssh -i "$KEY" \
-            -p "${PROD_PORT:-22}" \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o PreferredAuthentications=publickey \
-            -o PasswordAuthentication=no \
-            -o StrictHostKeyChecking=accept-new \
-            "${PROD_USER}@${PROD_HOST}" \
-            'echo SSH_OK; id; hostname; pwd; test -d /opt/gp-store/.git && echo CHECKOUT_OK; test -f /opt/gp-store/backend/.env && echo ENV_OK'
+          # Retried on a connection failure, like the deploy already is. A
+          # single GitHub runner whose egress address cannot reach the box
+          # used to fail this probe and report "SSH access is broken" while
+          # the deploy, on another runner minutes later, worked fine.
+          # RUN VIA bash, NOT chmod+exec. See the note in
+          # deploy-production.yml: a chmod on a repository file has killed
+          # this kind of step before, and the retry must not be able to
+          # break the thing it exists to make reliable.
+          bash deploy/production/ssh_retry.sh \
+            -- ssh -i "$KEY" \
+              -p "${PROD_PORT:-22}" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o ConnectTimeout=20 \
+              -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no \
+              -o StrictHostKeyChecking=accept-new \
+              "${PROD_USER}@${PROD_HOST}" \
+              'echo SSH_OK; id; hostname; pwd; test -d /opt/gp-store/.git && echo CHECKOUT_OK; test -f /opt/gp-store/backend/.env && echo ENV_OK'
           echo "SSH probe succeeded. This workflow did not deploy."

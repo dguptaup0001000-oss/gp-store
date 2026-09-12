@@ -55,6 +55,15 @@ jobs:
           chmod +x deploy/production/evaluate-money-health.sh
           MONEY_HEALTH_SELFTEST=1 deploy/production/evaluate-money-health.sh
 
+      # Same convention as the money evaluator: a retry whose logic was
+      # never exercised is a retry nobody should trust with a verdict about
+      # production. Runs in about a second - the delay is zeroed in the
+      # self-test, not slept through.
+      - name: Prove the retry logic first
+        run: |
+          set -Eeuo pipefail
+          SSH_RETRY_SELFTEST=1 bash deploy/production/ssh_retry.sh
+
       - name: Require VPS SSH secrets
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
@@ -71,7 +80,14 @@ jobs:
           done
           exit "$missing"
 
-      - name: Collect the counts and evaluate them
+      # SPLIT FROM THE EVALUATION DELIBERATELY. These two steps fail for
+      # completely different reasons and must not share a message: one means
+      # somebody's money is stuck, the other means this runner could not
+      # reach the box and NOTHING WAS MEASURED. Reporting the second as the
+      # first is what this workflow did on 12 September 2026, and an alert
+      # that cries wolf about money is worse than no alert at all.
+      - name: Collect the counts
+        id: collect
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
           PROD_USER: ${{ secrets.PROD_USER }}
@@ -87,30 +103,53 @@ jobs:
           chmod 600 "$KEY"
           APP_DIR="${PROD_APP_DIR:-/opt/gp-store}"
 
+          # NO chmod, AND `|| true`, both deliberate. deploy-production.yml
+          # records six consecutive releases killed by `chmod +x` failing on
+          # this very file. A diagnostic must never be able to break the
+          # thing it was added to diagnose - so if this cannot run, the
+          # alert still checks the money.
+          ./.github/scripts/log_runner_egress.sh || true
+
           # The SQL travels over stdin rather than being written to the box:
           # nothing to leave behind, and the query under review in this repo
           # is provably the one that ran. psql inside the container connects
           # over the local socket as POSTGRES_USER, so no database password
           # crosses the wire or appears in a process list.
-          ssh -i "$KEY" \
-            -p "${PROD_PORT:-22}" \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=accept-new \
-            "${PROD_USER}@${PROD_HOST}" \
-            "cd '$APP_DIR/backend' && docker compose -f docker-compose.yml exec -T postgres \
-               sh -c 'psql -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At -f -'" \
-            < deploy/production/money-health.sql \
-            > /tmp/money.txt
+          #
+          # ssh_retry owns the output file: a connection that dies halfway
+          # through a result must not leave its half joined to the retry's,
+          # which the evaluator would read as unparseable and alert on.
+          # RUN VIA bash, NOT chmod+exec. See the note in
+          # deploy-production.yml: a chmod on a repository file has killed
+          # this kind of step before, and the retry must not be able to
+          # break the thing it exists to make reliable.
+          bash deploy/production/ssh_retry.sh \
+            --output /tmp/money.txt \
+            --stdin deploy/production/money-health.sql \
+            -- ssh -i "$KEY" \
+              -p "${PROD_PORT:-22}" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o ConnectTimeout=20 \
+              -o StrictHostKeyChecking=accept-new \
+              "${PROD_USER}@${PROD_HOST}" \
+              "cd '$APP_DIR/backend' && docker compose -f docker-compose.yml exec -T postgres \
+                 sh -c 'psql -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At -f -'"
 
           echo "Collected (counts and ages only, by design):"
           cat /tmp/money.txt
 
+      - name: Is the money where it should be?
+        id: evaluate
+        run: |
+          set -Eeuo pipefail
           chmod +x deploy/production/evaluate-money-health.sh
           deploy/production/evaluate-money-health.sh /tmp/money.txt
 
-      - name: What to do when this fails
-        if: failure()
+      # THE ONLY MESSAGE THAT SAYS MONEY IS STUCK, and it is reachable only
+      # when the counts were actually read and the evaluator judged them.
+      - name: What to do when money is stuck
+        if: always() && steps.evaluate.outcome == 'failure'
         run: |
           echo "::error::GP-STORE has money that has not reached a customer."
           echo "REFUND_STUCK  - the provider took the refund and has not settled it."
@@ -121,5 +160,29 @@ jobs:
           echo "REFUND_REJECTED - the provider refused it. refund_failure_reason on"
           echo "                the payment row carries their words. The customer is"
           echo "                still owed; this needs a person, not a retry."
-          echo "UNREADABLE/MISSING - the query itself failed. Check the postgres"
-          echo "                container is up before assuming the money is fine."
+          echo "UNREADABLE      - the counts came back but did not parse. Check the"
+          echo "                postgres container before assuming the money is fine."
+          exit 1
+
+      # NOT A CLAIM ABOUT MONEY. Says so in the first line, because the
+      # reader's next action is completely different: nobody needs to open
+      # the Cashfree dashboard over this.
+      - name: Could not check the money
+        if: always() && steps.collect.outcome == 'failure'
+        run: |
+          echo "::error::Could not reach production to CHECK the money. NOTHING WAS"
+          echo "MEASURED - this says nothing about whether a refund is stuck."
+          echo ""
+          echo "ssh could not connect, on every attempt. The runner's egress address"
+          echo "is printed above; compare it with a run that succeeded, because a"
+          echo "single blocked GitHub runner IP looks exactly like this."
+          echo ""
+          echo "Check, in this order:"
+          echo "  1. Did the deploy or the backup alert succeed around the same time?"
+          echo "     If either did, SSH works and this was one bad runner."
+          echo "  2. The VPS firewall and fail2ban, for the address above."
+          echo "  3. That the box is up at all - the uptime alert answers that"
+          echo "     without SSH, over the public health endpoint."
+          echo ""
+          echo "The money will be checked again on the next hourly run."
+          exit 1
