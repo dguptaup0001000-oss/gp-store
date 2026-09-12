@@ -344,15 +344,58 @@ Every check asserts an expected status code. A script that only demanded "not
 | No token | cart, orders → **401** |
 | The client cannot assert payment | `POST /verify` with `{"payment_success":true}` → refused; the route takes no body and asks the provider |
 
-**Read-only and non-destructive.** `SMOKE_READ_ONLY` is set: no order is
-placed, no payment is created, no merchant or worker account is made, and
-nothing is deleted. The only write is registering one throwaway customer,
-which is what makes the authenticated half of the suite possible at all.
+**What it writes, exactly: one row.** The in-deploy run leaves
+`SMOKE_READ_ONLY` at `0`, so the authenticated half runs, and the single
+write it costs is one `customers` row — name `SMOKE TEST`, a `9999xxxxxx`
+phone, an `@example.invalid` email, role `CUSTOMER`, unverified. No order,
+no payment, no cart content, no shop, no merchant, no worker, and nothing
+deleted. The app offers no other way to obtain a customer token, so that row
+is the minimum any signed-in check can cost.
+
+`SMOKE_READ_ONLY=1` is available and costs nothing, but it skips
+*everything that needs a token* — registration, the signed-in surfaces, the
+customer-is-not-a-merchant matrix, the IDOR probes, the `X-Shop-Id` probes
+and the payment-assertion probe. That is most of what makes this suite worth
+running, so the deploy pays the one row.
 
 **The script is known to be able to fail**, which is the only reason a clean
 run means anything: it caught a route whose expected status had been guessed
 wrong, and refused to pass until the expectation was corrected against the
 actual mapping.
+
+**And it says when a check is weaker than it looks.** The run prints:
+
+```
+shops serving (27.16231, 83.940468): 1
+NOTE: fewer than two shops reach this pin, so the two-shop checks below
+      cannot mean much.
+shop A=1  shop B=
+```
+
+That is the honest state of the marketplace: **one real shop**. So the
+live two-shop checks — shop A's storefront resolving and shop B's not
+leaking into it — are degenerate, and the marketplace-discovery half of the
+suite is confirming plumbing rather than isolation. Cross-tenant isolation
+itself is proved by the suite, over real HTTP, with two real merchants and
+two real shops; what production cannot yet confirm is the same thing with
+production data. Section 11, risk 2, and section 12, item 1.
+
+The one live check that this release specifically needed, and got:
+
+```
+PASS  GET /api/products/search/instant                200
+```
+
+Instant search returned 500 for every query before this work. That line is
+the fix confirmed on the running server, not in a test.
+
+The deployed build was confirmed by identity, not by timing:
+
+```
+PASS  GET /api/version                                200
+      deployed gitCommit: 34fdf3445aa7f9c984331c6677fd2718c37a277c
+PASS  /api/version matches expected commit            34fdf3445aa7
+```
 
 ---
 
