@@ -26,6 +26,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -251,12 +252,25 @@ class AShopStocksItsOwnShelfTest {
 
             assertEquals(50, stockRowFor(shopA), "Shop B's stock-take moved Shop A's number");
             assertEquals(7, stockRowFor(shopB));
-            assertEquals(2, jdbc.queryForObject(
-                    "SELECT count(*) FROM inventory WHERE product_variant_id = ?",
-                    Integer.class, variantId),
-                    "two shops stocking the same catalogue item must hold two rows - if this "
-                            + "is 1, inventory is unique on the variant alone and a marketplace "
-                            + "cannot work");
+
+            // ONE ROW EACH, COUNTED PER SHOP - not one count across the whole
+            // table. The first version of this asserted that the variant had
+            // exactly two inventory rows in total, which says nothing about
+            // this test's two shops and everything about whoever else happens
+            // to stock that catalogue item: it read 3 the moment another shop
+            // in the database held the same item. Asserting over rows the test
+            // does not own is the same mistake as deleting them.
+            assertEquals(1, rowsFor(shopA), "Shop A must hold exactly one row for this item");
+            assertEquals(1, rowsFor(shopB), "Shop B must hold exactly one row for this item");
+            // And they are genuinely separate rows, which is the property that
+            // matters: if inventory were unique on the variant alone, one of
+            // these two writes could not have existed at all.
+            assertNotEquals(
+                    jdbc.queryForObject("SELECT id FROM inventory WHERE shop_id = ? "
+                            + "AND product_variant_id = ?", Long.class, shopA, variantId),
+                    jdbc.queryForObject("SELECT id FROM inventory WHERE shop_id = ? "
+                            + "AND product_variant_id = ?", Long.class, shopB, variantId),
+                    "both shops are pointing at the same stock row");
         }
 
         @Test
@@ -354,6 +368,12 @@ class AShopStocksItsOwnShelfTest {
         perform(put("/api/shop/listings/" + variantId), owner,
                 "{\"sellingPrice\":%s,\"mrp\":%s,\"available\":true,\"active\":true}"
                         .formatted(price, price + 15), 200);
+    }
+
+    private Integer rowsFor(long shop) {
+        return jdbc.queryForObject(
+                "SELECT count(*) FROM inventory WHERE shop_id = ? AND product_variant_id = ?",
+                Integer.class, shop, variantId);
     }
 
     private Integer stockRowFor(long shop) {
