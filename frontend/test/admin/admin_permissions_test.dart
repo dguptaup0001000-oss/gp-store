@@ -67,18 +67,32 @@ void main() {
       final shopPermissions = AdminPermission.values
           .where((p) =>
               p != AdminPermission.platformAdmin &&
-              p != AdminPermission.catalogDefine)
+              p != AdminPermission.catalogDefine &&
+              p != AdminPermission.platformObservability)
           .toSet();
       expect(AdminRoles.permissionsFor(AdminRoles.admin), shopPermissions);
-      expect(AdminRoles.permissionsFor(AdminRoles.superAdmin), shopPermissions);
+
+      // SUPER_ADMIN IS NOT A SHOP ROLE. It is the platform owner, and it is
+      // required to EXCEED the shopkeeper rather than equal them. The two used
+      // to be the same set, which handed the shopkeeper the marketplace's
+      // observability and withheld the cross-shop scope from the owner.
+      final ownerPermissions =
+          AdminRoles.permissionsFor(AdminRoles.superAdmin);
+      expect(ownerPermissions, containsAll(shopPermissions));
+      expect(ownerPermissions.length, greaterThan(shopPermissions.length));
+      expect(ownerPermissions, contains(AdminPermission.platformAdmin));
+      expect(ownerPermissions, contains(AdminPermission.platformObservability));
     });
 
     test('a shop role never holds a platform permission', () {
       // The client mirror of the backend's most dangerous line. If this ever
       // passes for a shop role, the admin console is offering a shopkeeper a
       // screen that acts on every merchant on the platform.
+      // superAdmin is the platform OWNER and holds these by design; the
+      // dangerous role is admin, which is asserted explicitly below.
       for (final role in AdminRoles.all) {
-        final isPlatform = role == AdminRoles.platformAdmin;
+        final isPlatform = role == AdminRoles.platformAdmin ||
+            role == AdminRoles.superAdmin;
         expect(
           AdminRoles.permissionsFor(role).contains(AdminPermission.platformAdmin),
           isPlatform,
@@ -89,7 +103,21 @@ void main() {
           isPlatform,
           reason: role,
         );
+        expect(
+          AdminRoles.permissionsFor(role)
+              .contains(AdminPermission.platformObservability),
+          isPlatform,
+          reason: role,
+        );
       }
+
+      // The shopkeeper, named rather than inferred: these three are what
+      // separate running a shop from running the marketplace.
+      final shopkeeper = AdminRoles.permissionsFor(AdminRoles.admin);
+      expect(shopkeeper, isNot(contains(AdminPermission.platformAdmin)));
+      expect(shopkeeper, isNot(contains(AdminPermission.catalogDefine)));
+      expect(
+          shopkeeper, isNot(contains(AdminPermission.platformObservability)));
     });
   });
 
@@ -166,7 +194,10 @@ void main() {
         final labels = [
           for (final g in groups) ...g.destinations.map((d) => d.label)
         ];
-        if (role == AdminRoles.platformAdmin) {
+        // superAdmin is the platform OWNER, not a shop role, so the
+        // marketplace console is exactly its job.
+        if (role == AdminRoles.platformAdmin ||
+            role == AdminRoles.superAdmin) {
           expect(labels, contains('Merchants & Shops'), reason: role);
         } else {
           expect(labels, isNot(contains('Merchants & Shops')), reason: role);

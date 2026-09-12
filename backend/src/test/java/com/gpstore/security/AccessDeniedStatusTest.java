@@ -66,6 +66,7 @@ class AccessDeniedStatusTest {
 
     private static String customerToken;
     private static String adminToken;
+    private static String ownerToken;
 
     private String url(String path) {
         return "http://localhost:" + port + "/v1" + path;
@@ -98,6 +99,7 @@ class AccessDeniedStatusTest {
     static void reset() {
         customerToken = null;
         adminToken = null;
+        ownerToken = null;
     }
 
     private void ensureIdentities() {
@@ -117,6 +119,17 @@ class AccessDeniedStatusTest {
                      """.formatted(adminEmail)),
                 java.util.Map.class);
         adminToken = (String) login.getBody().get("token");
+
+        // The platform owner. Same trick: nothing in the application
+        // grants this role either, so it is set directly as production does.
+        String ownerEmail = "authz-owner-" + stamp + "@example.com";
+        register(ownerEmail, phone());
+        jdbc.update("UPDATE customers SET role = 'SUPER_ADMIN' WHERE email = ?", ownerEmail);
+        ResponseEntity<java.util.Map> ownerLogin = rest.postForEntity(
+                url("/api/auth/login"),
+                json("{\"email\":\"" + ownerEmail + "\",\"password\":\"Passw0rd!23\"}"),
+                java.util.Map.class);
+        ownerToken = (String) ownerLogin.getBody().get("token");
     }
 
     private static String phone() {
@@ -219,7 +232,7 @@ class AccessDeniedStatusTest {
     }
 
     @Test
-    @DisplayName("prometheus and metrics are not public")
+    @DisplayName("prometheus and metrics belong to the platform, not to a shop")
     void actuatorMetricsRequireAdmin() {
         ResponseEntity<String> anonMetrics = rest.getForEntity(
                 "http://localhost:" + port + "/v1/actuator/metrics", String.class);
@@ -235,24 +248,42 @@ class AccessDeniedStatusTest {
                 HttpMethod.GET, bearer(customerToken), String.class);
         assertEquals(HttpStatus.FORBIDDEN, customerMetrics.getStatusCode(), customerMetrics.getBody());
 
-        ResponseEntity<String> adminMetrics = rest.exchange(
+        // A SHOP OWNER IS NOT THE PLATFORM. These meters cover every tenant
+        // at once and every shop owner is an ADMIN, so serving them here
+        // hands one merchant an estimate of every other merchant's volume.
+        ResponseEntity<String> shopOwnerMetrics = rest.exchange(
                 "http://localhost:" + port + "/v1/actuator/metrics",
                 HttpMethod.GET, bearer(adminToken), String.class);
-        assertEquals(HttpStatus.OK, adminMetrics.getStatusCode(), adminMetrics.getBody());
-        assertNotNull(adminMetrics.getBody());
-        assertTrue(adminMetrics.getBody().contains("jvm")
-                        || adminMetrics.getBody().contains("names"),
-                "metrics scrape should list JVM meters. Body starts: "
-                        + adminMetrics.getBody().substring(0, Math.min(200, adminMetrics.getBody().length())));
+        assertEquals(HttpStatus.FORBIDDEN, shopOwnerMetrics.getStatusCode(),
+                "a shop ADMIN was served platform-wide metrics: " + shopOwnerMetrics.getBody());
 
-        ResponseEntity<String> adminProm = rest.exchange(
+        ResponseEntity<String> shopOwnerProm = rest.exchange(
                 "http://localhost:" + port + "/v1/actuator/prometheus",
                 HttpMethod.GET, bearer(adminToken), String.class);
-        assertEquals(HttpStatus.OK, adminProm.getStatusCode(), adminProm.getBody());
-        assertNotNull(adminProm.getBody());
-        assertTrue(adminProm.getBody().contains("jvm")
-                        || adminProm.getBody().contains("http_server_requests")
-                        || adminProm.getBody().contains("gpstore_backup"),
+        assertEquals(HttpStatus.FORBIDDEN, shopOwnerProm.getStatusCode(),
+                "a shop ADMIN was served the prometheus scrape: " + shopOwnerProm.getBody());
+
+        // AND THE PLATFORM OWNER STILL GETS THEM. Without this the refusals
+        // above would pass just as well if observability had been switched
+        // off for everybody, which is not the fix.
+        ResponseEntity<String> ownerMetrics = rest.exchange(
+                "http://localhost:" + port + "/v1/actuator/metrics",
+                HttpMethod.GET, bearer(ownerToken), String.class);
+        assertEquals(HttpStatus.OK, ownerMetrics.getStatusCode(), ownerMetrics.getBody());
+        assertNotNull(ownerMetrics.getBody());
+        assertTrue(ownerMetrics.getBody().contains("jvm")
+                        || ownerMetrics.getBody().contains("names"),
+                "metrics scrape should list JVM meters. Body starts: "
+                        + ownerMetrics.getBody().substring(0, Math.min(200, ownerMetrics.getBody().length())));
+
+        ResponseEntity<String> ownerProm = rest.exchange(
+                "http://localhost:" + port + "/v1/actuator/prometheus",
+                HttpMethod.GET, bearer(ownerToken), String.class);
+        assertEquals(HttpStatus.OK, ownerProm.getStatusCode(), ownerProm.getBody());
+        assertNotNull(ownerProm.getBody());
+        assertTrue(ownerProm.getBody().contains("jvm")
+                        || ownerProm.getBody().contains("http_server_requests")
+                        || ownerProm.getBody().contains("gpstore_backup"),
                 "prometheus scrape should include JVM, HTTP, or backup metrics");
     }
 

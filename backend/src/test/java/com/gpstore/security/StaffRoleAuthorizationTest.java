@@ -141,8 +141,16 @@ class StaffRoleAuthorizationTest {
         allowed(CUSTOMERS);
         allowed(INVENTORY);
         allowed(ADMIN_PRODUCTS);
-        allowed(ACTUATOR);
         allowed(DELIVERY_PARTNERS);
+
+        // NOT the actuator, and that is the one deliberate subtraction from
+        // "everything it did before roles existed". /actuator/prometheus and
+        // /actuator/metrics report every shop's traffic at once, which under
+        // one shop was the shopkeeper's own and under a marketplace is every
+        // other merchant's. It moved to PLATFORM_OBSERVABILITY, which the
+        // platform owner holds and a shop owner does not -
+        // superAdminReachesSystemSurface asserts the other half.
+        forbidden(ACTUATOR);
     }
 
     @Test

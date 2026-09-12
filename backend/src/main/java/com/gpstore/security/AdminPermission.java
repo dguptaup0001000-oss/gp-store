@@ -92,6 +92,27 @@ public enum AdminPermission {
     SYSTEM_ADMIN,
 
     /**
+     * THE MARKETPLACE'S OWN NUMBERS, which are not any one shop's business.
+     *
+     * <p>{@code /actuator/prometheus} and {@code /actuator/metrics} report the
+     * whole deployment: http_server_requests counts and timings tagged by URI,
+     * connection-pool depth, outbox backlog, refunds awaiting the provider.
+     * Under one shop that was the shopkeeper's own traffic and telling them was
+     * right. Under a marketplace it is EVERY shop's traffic, so it hands any
+     * merchant a usable estimate of platform-wide order volume.
+     *
+     * <p>SYSTEM_ADMIN could not express that: every shop owner holds it,
+     * because ADMIN is granted the shop permission set and SYSTEM_ADMIN is in
+     * it. This is the permission that separates "runs a shop" from "runs the
+     * platform", and it is deliberately NOT part of
+     * {@code EVERY_SHOP_PERMISSION}.
+     *
+     * <p>Held by {@link com.gpstore.entity.Role#SUPER_ADMIN} - the platform
+     * owner - and by {@link com.gpstore.entity.Role#PLATFORM_ADMIN}.
+     */
+    PLATFORM_OBSERVABILITY,
+
+    /**
      * Acts for the MARKETPLACE rather than for one shop.
      *
      * <p>THIS IS THE PERMISSION THAT GRANTS A CROSS-SHOP SCOPE, and it is the

@@ -42,7 +42,13 @@ enum AdminPermission {
   /// to what this shop charges for it. Under a single-shop deployment the
   /// backend grants it to whoever holds catalogManage, because with one
   /// merchant the shopkeeper is the platform.
-  catalogDefine;
+  catalogDefine,
+
+  /// The MARKETPLACE's own numbers - /actuator/prometheus and
+  /// /actuator/metrics, which report every shop's traffic at once. A merchant
+  /// holding this could estimate platform-wide order volume from inside their
+  /// own shop, so no shop role holds it: the platform owner does.
+  platformObservability;
 
   /// The backend enum constant this mirrors, e.g. ORDERS_VIEW.
   String get backendName =>
@@ -75,7 +81,9 @@ class AdminRoles {
     AdminPermission.values.where(
       (p) =>
           p != AdminPermission.platformAdmin &&
-          p != AdminPermission.catalogDefine,
+          p != AdminPermission.catalogDefine &&
+          // Every shop's traffic at once. See the enum member.
+          p != AdminPermission.platformObservability,
     ),
   );
 
@@ -84,7 +92,11 @@ class AdminRoles {
   // `final`, not `const`: _all is built from AdminPermission.values, and a
   // const map cannot reference it. Nothing here mutates.
   static final Map<String, Set<AdminPermission>> _byRole = {
-    superAdmin: _all,
+    // THE PLATFORM OWNER, which is not the same thing as the largest shop
+    // role. superAdmin used to be `_all` - byte-identical to admin - which
+    // both handed the shopkeeper the marketplace's observability and withheld
+    // the cross-shop scope from the person who owns the marketplace.
+    superAdmin: Set.unmodifiable(AdminPermission.values),
     admin: _all,
     manager: {
       AdminPermission.ordersView,
@@ -135,6 +147,7 @@ class AdminRoles {
     },
     platformAdmin: {
       AdminPermission.platformAdmin,
+      AdminPermission.platformObservability,
       AdminPermission.catalogDefine,
       AdminPermission.catalogView,
       AdminPermission.catalogManage,
