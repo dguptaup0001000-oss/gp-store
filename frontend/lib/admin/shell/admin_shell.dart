@@ -101,6 +101,14 @@ class _AdminShellState extends State<AdminShell> {
           child: _AdminNavList(
             groups: _groups,
             selectedId: _selectedId,
+            // THE ONLY PLACE A PHONE CAN SAY WHO YOU ARE. The wide layout has
+            // _AdminTopBar for this; the compact one is a bare AppBar reading
+            // "Dashboard", so until now the role appeared nowhere on a phone
+            // at all - and the role is what decides which of these groups
+            // exist. Somebody looking for a destination they cannot see had
+            // no way to find out why.
+            operatorName: widget.operatorName,
+            role: widget.role,
             onSelect: (destination) {
               Navigator.of(context).pop();
               _select(destination, wide: false);
@@ -307,6 +315,8 @@ class _AdminNavList extends StatelessWidget {
     required this.selectedId,
     required this.onSelect,
     this.showBrand = true,
+    this.operatorName,
+    this.role,
   });
 
   final List<AdminNavGroup> groups;
@@ -314,18 +324,57 @@ class _AdminNavList extends StatelessWidget {
   final ValueChanged<AdminDestination> onSelect;
   final bool showBrand;
 
+  /// Shown under the brand, and ONLY when the brand is (i.e. in the phone
+  /// drawer). The wide layout already names both in its top bar, and saying
+  /// it twice on one screen is clutter rather than clarity.
+  final String? operatorName;
+  final String? role;
+
   @override
   Widget build(BuildContext context) {
     final children = <Widget>[];
     if (showBrand) {
-      children.add(const Padding(
-        padding: EdgeInsets.fromLTRB(
+      children.add(Padding(
+        padding: const EdgeInsets.fromLTRB(
           AdminSpacing.lg,
           AdminSpacing.xl,
           AdminSpacing.lg,
           AdminSpacing.lg,
         ),
-        child: _AdminBrand(onDarkGround: true),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _AdminBrand(onDarkGround: true),
+            // WHICH HAT YOU ARE WEARING, beside the menu it decides the
+            // shape of. "Why can I not see Merchants & Shops" is answered by
+            // this line and by nothing else on a phone: the destinations are
+            // filtered by the role's permissions, so a group that is missing
+            // is missing BECAUSE of what this says.
+            //
+            // The role is rendered even when the name is absent - the name is
+            // the decoration here and the role is the information.
+            if (role != null || operatorName != null)
+              Padding(
+                padding: const EdgeInsets.only(top: AdminSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (operatorName?.trim().isNotEmpty == true)
+                      Text(
+                        operatorName!.trim(),
+                        style: AdminText.caption.copyWith(
+                            color: AdminColors.sidebarTextActive),
+                      ),
+                    Text(
+                      AdminRoles.humanize(role),
+                      style: AdminText.caption
+                          .copyWith(color: AdminColors.sidebarText),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ));
     } else {
       children.add(const SizedBox(height: AdminSpacing.lg));
