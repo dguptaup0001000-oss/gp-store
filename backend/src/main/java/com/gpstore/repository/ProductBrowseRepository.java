@@ -395,20 +395,70 @@ public class ProductBrowseRepository {
      */
     public SearchPage searchInstant(String keyword, int page, int size) {
         String likePattern = toLikePattern(keyword);
-        if (Boolean.FALSE.equals(trigramUsable)) {
+        if (!trigramIsVisible()) {
             return searchInstantIlike(keyword, likePattern, page, size);
         }
+        return searchInstantTrigram(keyword, likePattern, page, size);
+    }
+
+    /**
+     * Can this connection resolve {@code %} and {@code similarity()} unqualified?
+     *
+     * <p>WHY THIS IS ASKED RATHER THAN DISCOVERED BY FAILING. The previous
+     * version ran the trigram query, caught the error, and retried with ILIKE.
+     * That cannot work, and production proved it: PostgreSQL aborts the whole
+     * transaction when a statement errors, so the retry died on SQLSTATE 25P02
+     * ("current transaction is aborted, commands ignored until end of
+     * transaction block") and the customer got HTTP 500 with the fallback
+     * sitting right there in the code looking like it handled the case.
+     *
+     * <p>It only shows up where pg_trgm is installed somewhere other than the
+     * search_path. On this project's production database that is exactly the
+     * situation - pg_trgm lives in schema {@code extensions}, which is the same
+     * fact V28 exists to accommodate for the INDEX. A developer database has it
+     * in {@code public}, the trigram query succeeds, and nothing looks wrong.
+     * So: every instant search on production 500'd while every test passed.
+     *
+     * <p>{@code pg_operator_is_visible} answers precisely the question that
+     * matters - not "is pg_trgm installed" but "does this operator resolve
+     * without a schema qualifier right now" - and it is an ordinary catalogue
+     * read, so asking it can never poison the caller's transaction.
+     *
+     * <p>The operand types are pinned to text because {@code %} is also
+     * PostgreSQL's built-in numeric modulo; without them this answers yes on
+     * any database at all.
+     */
+    private boolean trigramIsVisible() {
+        Boolean alreadyKnown = trigramUsable;
+        if (alreadyKnown != null) {
+            return alreadyKnown;
+        }
+        boolean visible;
         try {
-            SearchPage result = searchInstantTrigram(keyword, likePattern, page, size);
-            trigramUsable = true;
-            return result;
-        } catch (RuntimeException ex) {
-            log.warn("Trigram search failed; falling back to ILIKE ranking: {}", ex.toString());
-            if (looksLikeMissingTrigram(ex)) {
-                trigramUsable = false;
-            }
-            return searchInstantIlike(keyword, likePattern, page, size);
+            Object answer = entityManager.createNativeQuery("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_operator o
+                         WHERE o.oprname = '%'
+                           AND o.oprleft = 'text'::regtype
+                           AND o.oprright = 'text'::regtype
+                           AND pg_catalog.pg_operator_is_visible(o.oid))
+                    """).getSingleResult();
+            visible = Boolean.TRUE.equals(answer);
+        } catch (RuntimeException cannotTell) {
+            // Never seen in practice - it is a catalogue read. If it ever
+            // happens, the safe answer is the ranking that needs no extension.
+            log.warn("Could not determine whether pg_trgm is on the search_path; "
+                    + "ranking instant search with ILIKE: {}", cannotTell.toString());
+            visible = false;
         }
+        if (!visible) {
+            log.warn("pg_trgm is not resolvable on this connection's search_path, so instant "
+                    + "search is ranked with ILIKE rather than trigram similarity. Results are "
+                    + "still correct but fuzzy matching is off. Put the extension's schema on "
+                    + "the search_path to restore it.");
+        }
+        trigramUsable = visible;
+        return visible;
     }
 
     public record SearchPage(List<Long> productIds, long totalElements) {}
@@ -551,21 +601,4 @@ public class ProductBrowseRepository {
                 + "WHERE " + String.join(" AND ", conditions);
     }
 
-    static boolean looksLikeMissingTrigram(Throwable error) {
-        Throwable cursor = error;
-        while (cursor != null) {
-            String message = cursor.getMessage();
-            if (message != null) {
-                String lower = message.toLowerCase();
-                if (lower.contains("similarity")
-                        || lower.contains("operator does not exist")
-                        || lower.contains("pg_trgm")
-                        || lower.contains("42883")) {
-                    return true;
-                }
-            }
-            cursor = cursor.getCause();
-        }
-        return false;
-    }
 }
