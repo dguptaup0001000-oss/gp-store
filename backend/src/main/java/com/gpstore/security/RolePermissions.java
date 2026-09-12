@@ -97,26 +97,27 @@ public final class RolePermissions {
             // Runs the marketplace: merchants, shop lifecycle, the shared
             // catalogue, and the reporting that spans shops.
             //
-            // NARROWER THAN ADMIN INSIDE ANY ONE SHOP, on purpose. Reading an
-            // order to settle a dispute is the platform's business; advancing
-            // it, refunding it, or editing that shop's rider roster is the
-            // merchant's. §103: the shops stay independent, and the platform
-            // provides the technology.
+            // A LEGACY ALIAS FOR SUPER_ADMIN, AND NOT A SECOND AUTHORITY.
             //
-            // No SYSTEM_ADMIN either: /actuator, the API docs and bulk seeding
-            // belong to whoever runs the deployment, which is a third job again.
-            Role.PLATFORM_ADMIN, unmodifiable(
-                    AdminPermission.PLATFORM_ADMIN,
-                    // Runs the marketplace, so its numbers are their business.
-                    AdminPermission.PLATFORM_OBSERVABILITY,
-                    AdminPermission.CATALOG_DEFINE,
-                    AdminPermission.CATALOG_VIEW,
-                    AdminPermission.CATALOG_MANAGE,
-                    AdminPermission.ORDERS_VIEW,
-                    AdminPermission.PAYMENTS_VIEW,
-                    AdminPermission.CUSTOMERS_VIEW,
-                    AdminPermission.ANALYTICS_VIEW,
-                    AdminPermission.AUDIT_VIEW),
+            // This used to be its own authority level - narrower than ADMIN
+            // inside any one shop, wider across shops - on the theory that
+            // running the market and running a shop were different jobs. The
+            // owner has since decided otherwise: SUPER_ADMIN is the single
+            // highest authority, and PLATFORM_ADMIN is not a separate business
+            // role.
+            //
+            // KEPT AS A CONSTANT RATHER THAN DELETED because customers.role is
+            // a plain string under a CHECK constraint that V50 taught to accept
+            // 'PLATFORM_ADMIN'. Removing the enum value would make Role.valueOf
+            // throw on any row still holding it - an outage for that account,
+            // on a database this code cannot inspect from here. Aliasing costs
+            // nothing and cannot strand anybody.
+            //
+            // GRANTED THE SAME SET AS SUPER_ADMIN, deliberately and by
+            // reference, so the two cannot drift apart: there is no second list
+            // to forget to update. TheGpStoreRoleModelTest asserts the equality
+            // rather than trusting this comment.
+            Role.PLATFORM_ADMIN, EVERY_PERMISSION,
 
             // Runs the shop day to day. Everything operational, including
             // refunds, but NOT the system surface: actuator, API docs and

@@ -67,9 +67,15 @@ class AdminRoles {
   static const deliveryManager = 'DELIVERY_MANAGER';
   static const support = 'SUPPORT';
 
-  /// Runs the marketplace, not a shop. Narrower than [admin] inside any one
-  /// shop: it can read an order to settle a dispute but cannot advance it,
-  /// refund it, or touch that shop's roster.
+  /// A LEGACY ALIAS FOR [superAdmin], and not a role of its own.
+  ///
+  /// GP-STORE has four business roles: CUSTOMER, DELIVERY_BOY, ADMIN (a shop
+  /// owner) and SUPER_ADMIN (the platform owner). This was once a third
+  /// authority level - wider across shops, narrower inside one - and is not
+  /// any more. It survives because `customers.role` is a string under a CHECK
+  /// constraint that accepts it, so an account could still be carrying it.
+  /// [_byRole] grants it exactly [superAdmin]'s set, and
+  /// admin_permissions_test asserts that equality.
   static const platformAdmin = 'PLATFORM_ADMIN';
 
   /// Every permission a SHOP role can hold.
@@ -87,16 +93,20 @@ class AdminRoles {
     ),
   );
 
-  /// Mirrors backend RolePermissions. ADMIN holds everything - see that
-  /// file for why that guarantee matters more than a tidy hierarchy.
-  // `final`, not `const`: _all is built from AdminPermission.values, and a
-  // const map cannot reference it. Nothing here mutates.
+  /// Every permission there is: the platform owner's set, shared BY REFERENCE
+  /// with the [platformAdmin] alias so the two cannot drift apart.
+  ///
+  /// `final`, not `const`, because it is built from AdminPermission.values and
+  /// a const initializer cannot reference that. Nothing here mutates.
+  static final Set<AdminPermission> _everything =
+      Set.unmodifiable(AdminPermission.values);
+
   static final Map<String, Set<AdminPermission>> _byRole = {
     // THE PLATFORM OWNER, which is not the same thing as the largest shop
     // role. superAdmin used to be `_all` - byte-identical to admin - which
     // both handed the shopkeeper the marketplace's observability and withheld
     // the cross-shop scope from the person who owns the marketplace.
-    superAdmin: Set.unmodifiable(AdminPermission.values),
+    superAdmin: _everything,
     admin: _all,
     manager: {
       AdminPermission.ordersView,
@@ -145,18 +155,13 @@ class AdminRoles {
       AdminPermission.customersView,
       AdminPermission.reviewsModerate,
     },
-    platformAdmin: {
-      AdminPermission.platformAdmin,
-      AdminPermission.platformObservability,
-      AdminPermission.catalogDefine,
-      AdminPermission.catalogView,
-      AdminPermission.catalogManage,
-      AdminPermission.ordersView,
-      AdminPermission.paymentsView,
-      AdminPermission.customersView,
-      AdminPermission.analyticsView,
-      AdminPermission.auditView,
-    },
+    // A LEGACY ALIAS FOR superAdmin, AND NOT A SECOND AUTHORITY.
+    //
+    // This was once its own authority level. The owner has since decided that
+    // SUPER_ADMIN is the single highest role and PLATFORM_ADMIN is not a
+    // separate business role, so it is granted the same set BY REFERENCE -
+    // there is no second list here to forget to update either.
+    platformAdmin: _everything,
   };
 
   /// Permissions for a role name from the profile endpoint.

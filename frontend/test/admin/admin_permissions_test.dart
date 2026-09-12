@@ -153,9 +153,16 @@ void main() {
     });
 
     test('only the owner sees the system surface', () {
+      // platformAdmin is in this set because it is a LEGACY ALIAS for
+      // superAdmin rather than a role of its own - GP-STORE has exactly one
+      // highest authority, and this list names the same three roles the
+      // backend's RolePermissions does. It is spelled out role by role
+      // instead of derived, so a NEW role cannot arrive holding the system
+      // surface without somebody editing this line.
       for (final role in AdminRoles.all) {
-        final expected =
-            role == AdminRoles.admin || role == AdminRoles.superAdmin;
+        final expected = role == AdminRoles.admin ||
+            role == AdminRoles.superAdmin ||
+            role == AdminRoles.platformAdmin;
         expect(
           AdminRoles.permissionsFor(role).contains(AdminPermission.systemAdmin),
           expected,

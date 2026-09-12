@@ -334,29 +334,117 @@ class MarketplaceIdentityTest {
     }
 
     @Test
-    @DisplayName("a platform admin is not a shop admin - they cannot work a shop's orders")
-    void platformAdminIsNotAShopAdmin() {
-        assertFalse(RolePermissions.forRole(Role.PLATFORM_ADMIN)
-                        .contains(AdminPermission.ORDERS_MANAGE),
-                "running the market is not the same job as running a shop (§103)");
-        assertFalse(RolePermissions.forRole(Role.PLATFORM_ADMIN)
-                        .contains(AdminPermission.PAYMENTS_REFUND));
+    @DisplayName("the platform owner is not fenced out of a shop - the refusal runs one way only")
+    void theRefusalRunsOneWayOnly() {
+        // THIS TEST USED TO ASSERT THE OPPOSITE, AND THE CHANGE IS A BUSINESS
+        // DECISION RATHER THAN A WEAKENING.
+        //
+        // The old model had PLATFORM_ADMIN as a third authority: wider than a
+        // shop admin across the market, deliberately NARROWER inside any one
+        // shop, on the theory that running the market and running a shop were
+        // different jobs. The owner of GP-STORE has settled it otherwise -
+        // SUPER_ADMIN runs the whole app and takes every decision about it,
+        // and PLATFORM_ADMIN is a legacy alias for that one authority, not a
+        // second one. See TheGpStoreRoleModelTest, which pins the equality.
+        //
+        // So the asymmetry this test now guards is the one that still matters
+        // and is the only one that ever protected anybody: a MERCHANT must not
+        // reach the marketplace. That direction is asserted by
+        // merchantsCannotRunTheMarketplace above, and is unchanged.
+        assertTrue(RolePermissions.forRole(Role.PLATFORM_ADMIN)
+                        .contains(AdminPermission.PLATFORM_ADMIN),
+                "the platform owner must still hold the permission that spans shops");
+        assertEquals(RolePermissions.forRole(Role.SUPER_ADMIN),
+                RolePermissions.forRole(Role.PLATFORM_ADMIN),
+                "PLATFORM_ADMIN has become a second authority again");
 
-        // And over HTTP: the platform console is open to them, a shop's money
-        // is not.
+        // Over HTTP: the platform console answers them.
         assertEquals(200, statusOf(get("/api/platform/merchants"), platformAdminId, Role.PLATFORM_ADMIN));
 
-        // A route that exists and needs a shop permission the platform
-        // operator does not hold. 403, not 404: the point is the refusal, so
-        // the assertion has to be on a real mapping or it proves nothing.
-        assertEquals(403, statusOf(put("/api/admin/delivery-pricing"), platformAdminId, Role.PLATFORM_ADMIN),
-                "a platform operator reached a shop's delivery pricing, which is the shop's own "
-                        + "commercial decision");
-        assertEquals(403, statusOf(post("/api/coupons")
+        // And a shop route no longer REFUSES them. Asserted as "not 403"
+        // rather than as a success code on purpose: these requests carry no
+        // body, so what comes back past the authorization layer is a 400 from
+        // the controller. The claim under test is about the refusal, and a
+        // 400 proves the request got past authorization to the handler -
+        // which a 403 would not.
+        assertNotEquals(403, statusOf(put("/api/admin/delivery-pricing"), platformAdminId, Role.PLATFORM_ADMIN),
+                "the person who owns the marketplace was refused a shop's delivery pricing");
+        assertNotEquals(403, statusOf(post("/api/coupons")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"couponCode\":\"NOPE\",\"discountValue\":10}"),
                 platformAdminId, Role.PLATFORM_ADMIN),
-                "a platform operator created a discount a merchant will have to honour");
+                "the person who owns the marketplace was refused a coupon route");
+    }
+
+    // ------------------- §17 TEST 1, 2, 3. the app admin, by their real name
+
+    @Test
+    @DisplayName("§17 TEST 1: SUPER_ADMIN reaches the platform-wide resources")
+    void superAdminReachesPlatformWideResources() {
+        // ASSERTED ON SUPER_ADMIN AND NOT ON PLATFORM_ADMIN, which is the
+        // whole point of these three. Every other platform test in this class
+        // signs in as PLATFORM_ADMIN, a legacy alias nobody should be given
+        // any more. If the alias were ever the only role wired to the platform
+        // console, the role real accounts actually hold would be locked out of
+        // it and every test here would still pass.
+        assertEquals(200, statusOf(get("/api/platform/merchants"), platformAdminId, Role.SUPER_ADMIN),
+                "the platform owner cannot list the merchants on their own marketplace");
+        assertEquals(200, statusOf(get("/api/platform/overview"), platformAdminId, Role.SUPER_ADMIN),
+                "the platform owner cannot read the marketplace's own figures");
+        assertEquals(200, statusOf(get("/api/platform/shops"), platformAdminId, Role.SUPER_ADMIN));
+    }
+
+    @Test
+    @DisplayName("§17 TEST 2: SUPER_ADMIN may work in ANY shop, not one of them")
+    void superAdminCanManageAnyShop() {
+        signedInAs(platformAdminId, Role.SUPER_ADMIN);
+
+        assertTrue(resolver.resolve().isPlatform(),
+                "the app admin's default scope is the whole app - resolved to one shop they "
+                        + "could not answer a dispute about any other");
+
+        // Three different merchants' storefronts, each reached by name. A
+        // shopkeeper gets IllegalStateException on any shop but their own -
+        // merchantACannotSelectShopB asserts that half.
+        assertEquals(shopA, resolver.select(shopA).requireShopId());
+        assertEquals(shopB, resolver.select(shopB).requireShopId());
+        assertEquals(shopB2, resolver.select(shopB2).requireShopId());
+    }
+
+    @Test
+    @DisplayName("§17 TEST 3: SUPER_ADMIN manages the workers of every shop")
+    void superAdminCanManageAnyShopWorker() throws Exception {
+        String riderAtA = "Rider A " + tag;
+        String riderAtB = "Rider B " + tag;
+        newRider(riderAtA, shopA);
+        newRider(riderAtB, shopB);
+        try {
+            MvcResult roster = mockMvc.perform(get("/api/admin/workers")
+                            .with(authentication(tokenFor(platformAdminId, Role.SUPER_ADMIN))))
+                    .andReturn();
+            assertEquals(200, roster.getResponse().getStatus(),
+                    "the platform owner was refused the worker roster");
+
+            String body = roster.getResponse().getContentAsString();
+            assertTrue(body.contains(riderAtA) && body.contains(riderAtB),
+                    "the app admin must see BOTH shops' riders - a platform scope that still "
+                            + "carried one shop's filter would silently show half the platform "
+                            + "and look perfectly healthy: " + body);
+
+            // And the other direction in the same breath, because "sees
+            // everything" is only safe if "sees only mine" still holds for a
+            // merchant. Shop A's owner must not find Shop B's rider here.
+            MvcResult merchantRoster = mockMvc.perform(get("/api/admin/workers")
+                            .with(authentication(tokenFor(ownerA, Role.ADMIN))))
+                    .andReturn();
+            assertEquals(200, merchantRoster.getResponse().getStatus());
+            String mine = merchantRoster.getResponse().getContentAsString();
+            assertTrue(mine.contains(riderAtA), mine);
+            assertFalse(mine.contains(riderAtB),
+                    "§17 TEST 7: one merchant read another merchant's rider off the roster: " + mine);
+        } finally {
+            jdbc.update("DELETE FROM delivery_partners WHERE name in (?, ?)", riderAtA, riderAtB);
+        }
     }
 
     // ---------------------------- 10, 11, 12. catalogue write split
@@ -518,6 +606,14 @@ class MarketplaceIdentityTest {
     }
 
     // ------------------------------------------------------------ fixtures
+
+    /** A rider on one shop's roster. Their shop comes off this row (V46). */
+    private void newRider(String name, long shopId) {
+        jdbc.update("""
+                INSERT INTO delivery_partners (name, mobile, available, active, shop_id)
+                VALUES (?, ?, false, true, ?)
+                """, name, "7" + String.valueOf(System.nanoTime()).substring(0, 9), shopId);
+    }
 
     private Long newAccount(String kind, Role role) {
         String email = tag + "-" + kind + "@example.test";
