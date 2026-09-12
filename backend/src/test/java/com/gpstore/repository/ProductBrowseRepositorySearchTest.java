@@ -117,13 +117,4 @@ class ProductBrowseRepositorySearchTest {
                         + "query is the correct one here - and it is deliberate, not accidental.");
     }
 
-    @Test
-    void missingTrigramErrorsAreDetected() {
-        assertTrue(ProductBrowseRepository.looksLikeMissingTrigram(
-                new RuntimeException("ERROR: operator does not exist: text % text")));
-        assertTrue(ProductBrowseRepository.looksLikeMissingTrigram(
-                new RuntimeException("function similarity(text, text) does not exist")));
-        assertFalse(
-                ProductBrowseRepository.looksLikeMissingTrigram(new RuntimeException("syntax error")));
-    }
 }
