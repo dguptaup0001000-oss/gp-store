@@ -35,13 +35,54 @@ public final class RolePermissions {
     private static final Set<AdminPermission> NONE =
             Collections.unmodifiableSet(EnumSet.noneOf(AdminPermission.class));
 
-    /** Everything. Used by both SUPER_ADMIN and ADMIN - see the class note. */
-    private static final Set<AdminPermission> EVERYTHING =
-            Collections.unmodifiableSet(EnumSet.allOf(AdminPermission.class));
+    /**
+     * Everything a SHOP role can hold. Used by both SUPER_ADMIN and ADMIN.
+     *
+     * <p>WRITTEN AS A SUBTRACTION, NOT AS allOf(), and the difference is the
+     * whole of the platform/shop split. allOf() means "ADMIN gets whatever
+     * anybody adds to the enum next" - so the moment PLATFORM_ADMIN existed,
+     * every shopkeeper in the marketplace would have silently become a
+     * platform operator with a scope spanning every merchant. Nobody would
+     * have edited a line to make that happen.
+     *
+     * <p>It still keeps the guarantee this file rests on: ADMIN loses nothing
+     * it had. The permissions removed here are ones no shop role has ever
+     * held, and StaffRolePermissionsTest pins the full set by name.
+     */
+    private static final Set<AdminPermission> EVERY_SHOP_PERMISSION =
+            Collections.unmodifiableSet(EnumSet.complementOf(EnumSet.of(
+                    // Runs the marketplace. See Role.PLATFORM_ADMIN.
+                    AdminPermission.PLATFORM_ADMIN,
+                    // Writes the SHARED catalogue. Under one shop
+                    // CatalogDefinition hands this to whoever holds
+                    // CATALOG_MANAGE, so the shopkeeper is unaffected today.
+                    AdminPermission.CATALOG_DEFINE)));
 
     private static final Map<Role, Set<AdminPermission>> BY_ROLE = Map.of(
-            Role.SUPER_ADMIN, EVERYTHING,
-            Role.ADMIN, EVERYTHING,
+            Role.SUPER_ADMIN, EVERY_SHOP_PERMISSION,
+            Role.ADMIN, EVERY_SHOP_PERMISSION,
+
+            // Runs the marketplace: merchants, shop lifecycle, the shared
+            // catalogue, and the reporting that spans shops.
+            //
+            // NARROWER THAN ADMIN INSIDE ANY ONE SHOP, on purpose. Reading an
+            // order to settle a dispute is the platform's business; advancing
+            // it, refunding it, or editing that shop's rider roster is the
+            // merchant's. §103: the shops stay independent, and the platform
+            // provides the technology.
+            //
+            // No SYSTEM_ADMIN either: /actuator, the API docs and bulk seeding
+            // belong to whoever runs the deployment, which is a third job again.
+            Role.PLATFORM_ADMIN, unmodifiable(
+                    AdminPermission.PLATFORM_ADMIN,
+                    AdminPermission.CATALOG_DEFINE,
+                    AdminPermission.CATALOG_VIEW,
+                    AdminPermission.CATALOG_MANAGE,
+                    AdminPermission.ORDERS_VIEW,
+                    AdminPermission.PAYMENTS_VIEW,
+                    AdminPermission.CUSTOMERS_VIEW,
+                    AdminPermission.ANALYTICS_VIEW,
+                    AdminPermission.AUDIT_VIEW),
 
             // Runs the shop day to day. Everything operational, including
             // refunds, but NOT the system surface: actuator, API docs and

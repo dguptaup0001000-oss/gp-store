@@ -31,15 +31,38 @@ public class ProductService {
 
     private final com.gpstore.repository.CategoryRepository categoryRepository;
 
+    private final com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue;
+    private final com.gpstore.catalog.shop.ShopStock shopStock;
+    private final com.gpstore.platform.PlatformProperties platform;
+
     public ProductService(
             ProductRepository productRepository,
             ProductBrowseRepository productBrowseRepository,
             com.gpstore.repository.ProductImageRepository productImageRepository,
-            com.gpstore.repository.CategoryRepository categoryRepository) {
+            com.gpstore.repository.CategoryRepository categoryRepository,
+            com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue,
+            com.gpstore.catalog.shop.ShopStock shopStock,
+            com.gpstore.platform.PlatformProperties platform) {
+        this.shopStock = shopStock;
         this.productRepository = productRepository;
         this.productImageRepository = productImageRepository;
         this.productBrowseRepository = productBrowseRepository;
         this.categoryRepository = categoryRepository;
+        this.shopPricedCatalogue = shopPricedCatalogue;
+        this.platform = platform;
+    }
+
+    /**
+     * Whether a product has to be on THIS shop's shelf to be shown.
+     *
+     * Under one shop it does not: the catalogue and the shelf are the same
+     * thing, and requiring a listing would hide any variant that was priced
+     * without being listed - a live product disappearing from a working shop
+     * (§12). Under a marketplace it does: a storefront shows what that shop
+     * sells.
+     */
+    private boolean requireListing() {
+        return platform.getMode().isMultiShop();
     }
 
     /**
@@ -100,7 +123,8 @@ public class ProductService {
         // has to show them the privacy settings they just set - a
         // customer-shaped response would silently drop them and make the
         // toggle look like it had not saved.
-        return ProductResponse.forAdmin(productRepository.save(product));
+        Product savedProduct = productRepository.save(product);
+        return ProductResponse.forAdmin(savedProduct, shopPricedCatalogue.termsFor(savedProduct));
     }
 
     // A public, unauthenticated GET endpoint backs each of the three methods
@@ -117,7 +141,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable(value = "products", sync = true)
     public List<ProductResponse> getAllProducts(org.springframework.data.domain.Pageable pageable) {
-        return batchFetchWithVariants(productRepository.findSellable(pageable)).getContent();
+        return batchFetchWithVariants(productRepository.findSellable(requireListing(), pageable)).getContent();
     }
 
     /** Admin management view - includes inactive/deactivated products too, unlike the customer-facing list above. */
@@ -125,7 +149,7 @@ public class ProductService {
     public List<ProductResponse> getAllForAdmin() {
         return productRepository
                 .findAllByOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, ADMIN_UNPAGINATED_CAP))
-                .map(ProductResponse::forAdmin)
+                .map(p -> ProductResponse.forAdmin(p, shopPricedCatalogue.termsFor(p)))
                 .toList();
     }
 
@@ -136,7 +160,7 @@ public class ProductService {
         return productRepository
                 .findByNameContainingIgnoreCase(keyword, org.springframework.data.domain.PageRequest.of(0, ADMIN_UNPAGINATED_CAP))
                 .stream()
-                .map(ProductResponse::fromCard)
+                .map(p -> ProductResponse.fromCard(p, shopPricedCatalogue.termsFor(p)))
                 .toList();
     }
 
@@ -199,7 +223,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable(value = "productFeed", sync = true)
     public Page<ProductResponse> browseAll(Pageable pageable) {
-        return batchFetchWithVariants(productRepository.findSellable(pageable));
+        return batchFetchWithVariants(productRepository.findSellable(requireListing(), pageable));
     }
 
     /**
@@ -259,7 +283,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     @Cacheable(value = "categoryProducts", sync = true)
     public Page<ProductResponse> browseByCategory(Long categoryId, Pageable pageable) {
-        return batchFetchWithVariants(productRepository.findSellableByCategoryId(categoryId, pageable));
+        return batchFetchWithVariants(productRepository.findSellableByCategoryId(categoryId, requireListing(), pageable));
     }
 
     /**
@@ -280,6 +304,7 @@ public class ProductService {
     @Cacheable(value = "newArrivals", sync = true)
     public Page<ProductResponse> getNewArrivals(Pageable pageable) {
         return batchFetchWithVariants(productRepository.findSellable(
+                requireListing(),
                 org.springframework.data.domain.PageRequest.of(
                         pageable.getPageNumber(),
                         pageable.getPageSize(),
@@ -330,20 +355,40 @@ public class ProductService {
             byId.put(product.getId(), product);
         }
 
+        // One lookup for this shop's price on every variant on the page, in the
+        // same spirit as the batch above: a twenty-product grid is one query,
+        // not one per size. The prices are this shop's, and the cache entry
+        // they end up in is keyed by shop (see CacheConfig.keyGenerator).
+        Map<Long, com.gpstore.catalog.shop.ShopProductVariant> shopTerms =
+                shopPricedCatalogue.termsFor(byId.values());
+
+        // AND ONE FOR STOCK, batched the same way and for the same reason.
+        // Without it every card on the grid says "add to basket" for a size
+        // this shop has run out of, and the customer is refused at the moment
+        // they tap it - the refusal has always been there (§7 STATE 2), the
+        // card simply had no way to know.
+        Map<Long, Integer> held = shopStock.heldFor(byId.values());
+
         List<ProductResponse> content = new ArrayList<>(orderedIds.size());
         for (Long id : orderedIds) {
             Product product = byId.get(id);
             if (product != null) {
-                content.add(ProductResponse.fromCard(product));
+                content.add(ProductResponse.fromCard(product, shopTerms, held));
             }
         }
         return content;
     }
 
-    /** Only brands with at least one active product - guaranteed by the underlying GROUP BY query. */
+    /**
+     * Only brands with at least one active product - guaranteed by the
+     * underlying GROUP BY query - and, under a marketplace, only brands this
+     * shop actually lists. The cache entry is keyed by shop
+     * (CacheConfig.keyGenerator), so two storefronts do not share one answer.
+     */
+    @Transactional(readOnly = true)
     @Cacheable(value = "brands", sync = true)
     public List<com.gpstore.dto.response.BrandSummary> getBrandsWithCounts() {
-        return productRepository.findBrandsWithProductCounts().stream()
+        return productRepository.findBrandsWithProductCounts(requireListing()).stream()
                 .map(row -> new com.gpstore.dto.response.BrandSummary((String) row[0], (Long) row[1]))
                 .toList();
     }
@@ -397,7 +442,31 @@ public class ProductService {
             return null;
         }
 
-        ProductResponse product = ProductResponse.from(entity);
+        Map<Long, com.gpstore.catalog.shop.ShopProductVariant> terms =
+                shopPricedCatalogue.termsFor(entity);
+
+        // NOT ON THIS SHOP'S SHELF IS NOT FOUND, under a marketplace.
+        //
+        // Detail is reached by id, so it is the one browse surface a
+        // customer can land on without having browsed: a deep link, a
+        // shared card, a stale home screen from before they switched shops,
+        // or simply an id typed into the URL. Every list around it is
+        // narrowed to the shelf; if this one is not, the narrowing is
+        // decoration - anybody can read any shop's catalogue one id at a
+        // time. termsFor is shop-filtered (ShopCatalog), so an empty answer
+        // means this shop does not list the product.
+        //
+        // Returning null rather than throwing gives it exactly the answer an
+        // id that does not exist already gets, which is the right answer:
+        // as far as this storefront is concerned, it does not. The cache is
+        // keyed by shop (CacheConfig.keyGenerator), so this shop's "no" is
+        // never served to a customer standing in another one.
+        if (requireListing() && terms.values().stream().noneMatch(
+                com.gpstore.catalog.shop.ShopProductVariant::isOrderable)) {
+            return null;
+        }
+
+        ProductResponse product = ProductResponse.from(entity, terms, shopStock.heldFor(entity));
 
         // The 3D model, like the gallery below, is attached ONLY here.
         // ProductResponse.from deliberately leaves it null so that no list
@@ -495,7 +564,8 @@ public class ProductService {
         // Empty string clears it. A javascript: or http:// URL is refused.
         applyModel3dUrl(existing, updated.getModel3dUrl(), false);
 
-        return ProductResponse.forAdmin(productRepository.save(existing));
+        Product savedExisting = productRepository.save(existing);
+        return ProductResponse.forAdmin(savedExisting, shopPricedCatalogue.termsFor(savedExisting));
     }
 
     private static void applyModel3dUrl(Product product, String url, boolean always) {

@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.entity.*;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.enums.PaymentMethod;
@@ -115,16 +116,32 @@ class OrderStatusStateMachineTest {
     }
 
     @Test
-    @DisplayName("Delivered is terminal - nothing moves it, in any direction")
-    void deliveredIsTerminal() {
+    @DisplayName("A delivered order goes only forward, to COMPLETED")
+    void deliveredGoesOnlyForward() {
+        // CHANGED BY PART 3 §1, deliberately and with the reason written down:
+        // the lifecycle now ends at COMPLETED, and DELIVERED -> COMPLETED is
+        // the step that gets there. Everything else about DELIVERED is
+        // unchanged - it still cannot go back on the van, and it still cannot
+        // be cancelled, because an order that reached the customer is returned
+        // or refunded rather than cancelled.
         Long orderId = newOrder(OrderStatus.DELIVERED);
 
         for (OrderStatus target : EnumSet.allOf(OrderStatus.class)) {
+            if (target == OrderStatus.COMPLETED) continue;
             assertThrows(ConflictException.class,
                     () -> orderService.updateOrderStatus(orderId, target),
                     "Delivered must not be movable to " + target);
         }
         assertEquals(OrderStatus.DELIVERED, statusOf(orderId));
+
+        orderService.updateOrderStatus(orderId, OrderStatus.COMPLETED);
+        assertEquals(OrderStatus.COMPLETED, statusOf(orderId));
+
+        for (OrderStatus target : EnumSet.allOf(OrderStatus.class)) {
+            assertThrows(ConflictException.class,
+                    () -> orderService.updateOrderStatus(orderId, target),
+                    "and COMPLETED really is the end - not movable to " + target);
+        }
     }
 
     @Test
@@ -156,6 +173,25 @@ class OrderStatusStateMachineTest {
 
         orderService.cancelOrder(orderId, customerId, true);
         assertEquals(OrderStatus.CANCELLED, statusOf(orderId));
+    }
+
+    @Test
+    @DisplayName("Ending an order is not a status edit")
+    void cancellingThroughTheStatusEndpointIsRefused() {
+        // THE GUARD THIS TEST EXISTS FOR, and it caught a real regression the
+        // day the transition table made CANCELLED reachable. Cancelling and
+        // rejecting both have to give the stock back and start the refund;
+        // reaching them through the status endpoint would set the column and
+        // do neither, leaving goods off the shelf and a customer out of
+        // pocket.
+        for (OrderStatus ending : EnumSet.of(OrderStatus.CANCELLED, OrderStatus.REJECTED)) {
+            Long orderId = newOrder(OrderStatus.PENDING_CONFIRMATION);
+            ConflictException refused = assertThrows(ConflictException.class,
+                    () -> orderService.updateOrderStatus(orderId, ending),
+                    "the status endpoint must not be a back door to " + ending);
+            assertTrue(refused.getMessage().contains("own endpoint"), refused.getMessage());
+            assertEquals(OrderStatus.PENDING_CONFIRMATION, statusOf(orderId));
+        }
     }
 
     @Test
@@ -235,18 +271,24 @@ class OrderStatusStateMachineTest {
      * names, and an admin correcting one to the other is not a mistake worth
      * refusing.
      */
+    /**
+     * What the STATUS ENDPOINT will allow.
+     *
+     * <p>Asks OrderLifecycle rather than restating it. That is not circular:
+     * OrderLifecycleTest pins the table's contents by hand, case by case, and
+     * this asks whether the SERVICE honours the table it claims to use - which
+     * is the only thing a hand-written copy here could tell us, and a copy
+     * would drift the first time somebody edited one of the two.
+     *
+     * <p>Ending states are excluded because the service deliberately refuses
+     * them here: cancelling and rejecting have to return the stock and start
+     * the refund, so they go through their own endpoint (see
+     * cancellingThroughTheStatusEndpointIsRefused).
+     */
     private static boolean isTheOneLegalStep(OrderStatus from, OrderStatus to) {
-        return (from == OrderStatus.PENDING_CONFIRMATION && to == OrderStatus.CONFIRMED)
-                || (from == OrderStatus.CONFIRMED && to == OrderStatus.PACKING)
-                || (from == OrderStatus.PACKING && to == OrderStatus.READY_TO_DISPATCH)
-                || (from == OrderStatus.READY_TO_DISPATCH && to == OrderStatus.OUT_FOR_DELIVERY)
-                || (from == OrderStatus.OUT_FOR_DELIVERY && to == OrderStatus.DELIVERED)
-                // The worker pack-scan path.
-                || (from == OrderStatus.CONFIRMED && to == OrderStatus.PACKED)
-                || (from == OrderStatus.PACKING && to == OrderStatus.PACKED)
-                || (from == OrderStatus.READY_TO_DISPATCH && to == OrderStatus.PACKED)
-                || (from == OrderStatus.PACKED && to == OrderStatus.OUT_FOR_DELIVERY)
-                || (from == OrderStatus.PACKED && to == OrderStatus.READY_TO_DISPATCH);
+        return com.gpstore.order.OrderLifecycle.allows(from, to)
+                && to != OrderStatus.CANCELLED
+                && to != OrderStatus.REJECTED;
     }
 
     private OrderStatus statusOf(Long orderId) {
@@ -257,7 +299,7 @@ class OrderStatusStateMachineTest {
         Customer customer = new Customer();
         customer.setFullName("State Machine Customer");
         customer.setEmail("state-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

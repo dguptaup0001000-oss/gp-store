@@ -6,6 +6,8 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../orders/domain/payment_status.dart';
 import '../../orders/presentation/order_detail_screen.dart';
+import '../../orders/presentation/order_group_screen.dart';
+import '../domain/checkout_models.dart';
 
 class OrderConfirmationScreen extends StatelessWidget {
   const OrderConfirmationScreen({
@@ -15,12 +17,24 @@ class OrderConfirmationScreen extends StatelessWidget {
     this.orderId,
     this.upiPaymentLink,
     this.verifiedPaymentStatus,
+    this.orderGroupId,
+    this.shopOrders = const [],
   });
 
   final int? orderId;
   final String orderNumber;
   final String paymentMethod;
   final String? upiPaymentLink;
+
+  /// The checkout these orders belong to, and its parts.
+  ///
+  /// EMPTY OR ONE ENTRY IS THE ORDINARY CASE and renders nothing new - a
+  /// single-shop checkout's confirmation is unchanged. More than one entry
+  /// means the customer's basket was split (§16), and saying so HERE is the
+  /// last honest moment: after this screen they are looking at a history with
+  /// two rows in it and no explanation of why.
+  final int? orderGroupId;
+  final List<PlacedShopOrder> shopOrders;
 
   /// The BACKEND's verdict for an online payment, or null for COD/UPI.
   ///
@@ -77,11 +91,51 @@ class OrderConfirmationScreen extends StatelessWidget {
                 const Icon(Icons.check_circle,
                     color: AppColors.success, size: 72),
                 const SizedBox(height: 16),
-                Text('Order Placed!',
+                Text(
+                    shopOrders.length > 1
+                        ? '${shopOrders.length} orders placed'
+                        : 'Order Placed!',
                     style: Theme.of(context).textTheme.headlineSmall),
                 const SizedBox(height: 8),
-                Text('Order #$orderNumber',
-                    style: Theme.of(context).textTheme.bodyMedium),
+                if (shopOrders.length > 1)
+                  // SAID PLAINLY, AND SAID HERE. The customer pressed one
+                  // button and now has two orders with two numbers. If this
+                  // screen does not tell them, the next place they find out
+                  // is a history with two rows in it.
+                  Text(
+                    'Your basket came from ${shopOrders.length} shops, so each '
+                    'shop is packing and delivering its own order.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  )
+                else
+                  Text('Order #$orderNumber',
+                      style: Theme.of(context).textTheme.bodyMedium),
+                if (shopOrders.length > 1) ...[
+                  const SizedBox(height: 12),
+                  for (final shopOrder in shopOrders)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '#${shopOrder.orderNumber ?? shopOrder.orderId}'
+                        '${shopOrder.totalAmount == null ? '' : ' · ₹${shopOrder.totalAmount!.toStringAsFixed(0)}'}',
+                        style: const TextStyle(
+                            fontSize: 12.5, color: AppColors.textSecondary),
+                      ),
+                    ),
+                  if (orderGroupId != null) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: hapticize(() => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  OrderGroupScreen(groupId: orderGroupId!),
+                            ),
+                          )),
+                      child: const Text('See this checkout'),
+                    ),
+                  ],
+                ],
                 const SizedBox(height: 24),
                 if (isUpi) ...[
                   Container(

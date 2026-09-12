@@ -77,13 +77,22 @@ class WishlistScreen extends ConsumerWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(product.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                            if (variant != null)
-                              Text('₹${variant.sellingPrice.toStringAsFixed(0)}',
+                            // A WISHLIST IS FULL OF THINGS THAT ARE OUT OF
+                            // STOCK - that is half the reason people save
+                            // them - so this row has to say so rather than
+                            // print a rupee sign with nothing after it.
+                            if (variant != null && variant.hasPrice)
+                              Text('₹${variant.sellingPrice!.toStringAsFixed(0)}',
                                   style: const TextStyle(fontWeight: FontWeight.w600)),
+                            if (variant != null && !variant.hasPrice)
+                              const Text('Out of stock',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.textSecondary)),
                           ],
                         ),
                       ),
-                      if (variant != null && variant.available)
+                      if (variant != null && variant.isBuyable)
                         IconButton(
                           icon: const Icon(Icons.add_shopping_cart_outlined, color: AppColors.primary),
                           tooltip: 'Add to cart',

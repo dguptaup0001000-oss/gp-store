@@ -398,4 +398,34 @@ class WorkerLifecycleEndToEndTest {
                         .content(form(MARKER + unique(), "sneaky-" + unique() + "@gmail.com", null, PASSWORD)))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    @DisplayName("a signed-in worker can read their own assignments")
+    void aWorkerCanSeeTheirOwnRound() throws Exception {
+        String email = "rider-" + unique() + "@gmail.com";
+        hire(email, null);
+        String workerAuth = signIn(email);
+
+        // THE ENDPOINT THE RIDER'S ROUND COMES FROM. It resolved the roster
+        // row from the caller's CUSTOMER id, and a worker session has none -
+        // so the one caller this exists for was refused with "Sign in with a
+        // worker login to use the worker app." while already signed in with
+        // a worker login. A brand-new rider has an empty round, and an empty
+        // list is the correct answer; a 400 is not.
+        mvc.perform(get("/api/deliveries/my-assignments").header("Authorization", workerAuth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    @Test
+    @DisplayName("a staff account's own id is not read as a rider's roster id")
+    void staffDoNotInheritSomebodyElsesRound() throws Exception {
+        // The other half of the same mistake. SecurityConfig admits DELIVERY_VIEW
+        // here as well, and a customer id passed into a roster lookup names
+        // whichever RIDER happens to hold that number - somebody else's round,
+        // shown as "mine". Resolving from the worker id means a staff token,
+        // which carries none, is refused instead.
+        mvc.perform(get("/api/deliveries/my-assignments").header("Authorization", adminAuth))
+                .andExpect(status().isBadRequest());
+    }
 }

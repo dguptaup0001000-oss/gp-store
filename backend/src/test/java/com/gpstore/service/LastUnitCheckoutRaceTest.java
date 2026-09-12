@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.dto.request.PlaceOrderRequest;
 import com.gpstore.dto.response.PlaceOrderResponse;
 import com.gpstore.entity.*;
@@ -189,7 +190,7 @@ class LastUnitCheckoutRaceTest {
         Customer customer = new Customer();
         customer.setFullName("Race Buyer");
         customer.setEmail("race-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

@@ -57,6 +57,21 @@ class WorkerPackScanTest {
     private static final double ADDR_LAT = 27.162;
     private static final double ADDR_LNG = 83.940;
 
+    /**
+     * A point well outside the square above - a real hole in the map.
+     *
+     * Needed since Slice 9. The territory an order is packed in is now
+     * RESOLVED in the shop's own map rather than read off the address's
+     * subzone_id, because under a marketplace that one column may hold another
+     * shop's territory. So "this address has no stamp" stopped being the same
+     * thing as "this address is in no territory": an unstamped address inside
+     * a drawn polygon now resolves into it, which is the more truthful answer
+     * and is what the shop would want. To test a hole in the map the address
+     * has to actually be in one.
+     */
+    private static final double UNMAPPED_LAT = 20.000;
+    private static final double UNMAPPED_LNG = 70.000;
+
     @Autowired private WorkerScanService scanService;
     @Autowired private OrderRepository orderRepository;
     @Autowired private OrderScanEventRepository scanRepository;
@@ -209,6 +224,11 @@ class WorkerPackScanTest {
     }
 
     private Order newOrder(Customer customer, DeliverySubzone subzone, OrderStatus status) {
+        return newOrder(customer, subzone, status, ADDR_LAT, ADDR_LNG);
+    }
+
+    private Order newOrder(Customer customer, DeliverySubzone subzone, OrderStatus status,
+                           double latitude, double longitude) {
         Address address = new Address();
         address.setFullName(MARKER + "-address");
         address.setMobileNumber("9100000000");
@@ -216,8 +236,8 @@ class WorkerPackScanTest {
         address.setArea("Test");
         address.setCity("Malhia");
         address.setPincode("274401");
-        address.setLatitude(ADDR_LAT);
-        address.setLongitude(ADDR_LNG);
+        address.setLatitude(latitude);
+        address.setLongitude(longitude);
         address.setCustomer(customer);
         address.setSubzone(subzone);
         address = addressRepository.save(address);
@@ -645,7 +665,11 @@ class WorkerPackScanTest {
         // Refusing here would leave a real packed order at a real counter over
         // a hole in the map. It is allowed, and the reason says exactly that
         // so the gap is visible rather than silently normal.
-        Order unmapped = newOrder(shopper, null, OrderStatus.PACKING);
+        // Outside every drawn outline, which is what "no territory" means now
+        // that the territory is resolved from the coordinates in this shop's
+        // own map rather than read off the address's stamp.
+        Order unmapped = newOrder(shopper, null, OrderStatus.PACKING,
+                UNMAPPED_LAT, UNMAPPED_LNG);
         DeliveryPartner anyone = newWorker("anyone");
 
         var result = scanService.packScan(sessionOf(anyone), issue(unmapped), "req-1");

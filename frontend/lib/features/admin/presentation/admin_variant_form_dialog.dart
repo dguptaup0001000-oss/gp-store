@@ -62,7 +62,7 @@ class _AdminVariantFormDialogState
     _unitController = TextEditingController(text: v?.unit ?? '');
     _mrpController = TextEditingController(text: v?.mrp?.toString() ?? '');
     _sellingPriceController =
-        TextEditingController(text: v?.sellingPrice.toString() ?? '');
+        TextEditingController(text: v?.sellingPrice?.toString() ?? '');
     // costPrice is deliberately never populated for edit - the backend never
     // returns it (WRITE_ONLY, see ProductVariant.costPrice), so there's
     // nothing to prefill. Leaving it blank means "no change" is NOT what

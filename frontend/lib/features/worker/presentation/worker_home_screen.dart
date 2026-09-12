@@ -38,6 +38,29 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
   late final WorkerLocationService _location =
       WorkerLocationService(repository: widget.repository);
 
+  /// Whether a duty change is in flight, so the switch cannot be double-tapped
+  /// into two conflicting requests.
+  bool _changingDuty = false;
+
+  /// AVAILABLE is the only status a rider sets themselves. The others -
+  /// OFFLINE, SUSPENDED - are the server's, so this reads the profile rather
+  /// than keeping its own idea of what duty means.
+  bool get _onDuty => _profile.status != 'OFFLINE';
+
+  Future<void> _setDuty(bool available) async {
+    setState(() => _changingDuty = true);
+    try {
+      await widget.repository.setAvailable(available);
+      // Re-read rather than assume: the server decides the resulting status,
+      // and a suspended rider switching themselves on must not appear on.
+      await _refresh();
+    } catch (error) {
+      if (mounted) _tell(extractErrorMessage(error));
+    } finally {
+      if (mounted) setState(() => _changingDuty = false);
+    }
+  }
+
   /// Why location is not being shared, when it is not. Shown once, in place.
   String? _locationProblem;
 
@@ -290,6 +313,25 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
                           label: 'Status',
                           value: _statusLabel(_profile.status))),
                 ],
+              ),
+
+              // GOING OFF DUTY, which the old delivery console had as a switch
+              // and this screen showed only as a word. WorkerRepository.
+              // setAvailable and the route behind it were already here; the
+              // control that calls them was not, so a rider finishing their
+              // shift had no way to say so and auto-assignment kept giving
+              // them work. Read-only status beside an unusable state is worse
+              // than no status at all.
+              const SizedBox(height: 12),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                title: Text(_onDuty ? 'On duty' : 'Off duty',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(_onDuty
+                    ? 'You can be given new deliveries'
+                    : 'You will not be given new deliveries'),
+                value: _onDuty,
+                onChanged: _changingDuty ? null : _setDuty,
               ),
 
               if (_pending > 0) ...[

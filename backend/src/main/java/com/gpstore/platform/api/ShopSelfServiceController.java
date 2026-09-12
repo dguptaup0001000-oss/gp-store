@@ -1,0 +1,607 @@
+package com.gpstore.platform.api;
+
+import com.gpstore.catalog.shop.ShopProductVariant;
+import com.gpstore.catalog.shop.ShopProductVariantRepository;
+import com.gpstore.exception.BadRequestException;
+import com.gpstore.exception.ResourceNotFoundException;
+import com.gpstore.platform.*;
+import com.gpstore.platform.shopinfo.ShopPolicy;
+import com.gpstore.platform.shopinfo.ShopPolicyKind;
+import com.gpstore.security.AdminPermission;
+import com.gpstore.security.CurrentUser;
+import org.springframework.web.bind.annotation.*;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+/**
+ * A shopkeeper's own shop: its profile, its price list, and who is on its staff.
+ *
+ * THERE IS NO SHOP ID IN ANY PATH HERE, and that is the design rather than an
+ * omission. Every route acts on "the shop this request is for", which
+ * TenantContextFilter established from the credential before the controller
+ * ran. A /api/shops/{id}/listings shape would put a shop id in front of a
+ * caller, and then the only thing standing between a merchant and a
+ * competitor's price list would be a check somebody has to remember to write
+ * on every route.
+ *
+ * WHAT A SHOPKEEPER MAY CHANGE HERE. Their own listing rows: price, cost,
+ * whether the item is on their shelf, their own shelf order. What they may NOT
+ * change from here is what the product IS - its name, pack size, category,
+ * photo - because that row is shared with every other shop selling it. That
+ * lives under /api/products and is gated by CatalogDefinitionAuthorization.
+ */
+@RestController
+@RequestMapping("/api/shop")
+public class ShopSelfServiceController {
+
+    private final ShopRepository shops;
+    private final ShopLifecycleService shopLifecycle;
+    private final ShopProductVariantRepository listings;
+    private final ShopStaffRepository staff;
+    private final CurrentUser currentUser;
+    private final ShopMembership membership;
+    private final MerchantRepository merchants;
+    private final com.gpstore.repository.CustomerRepository customers;
+    private final com.gpstore.service.AuditLogService auditLog;
+    private final com.gpstore.money.ShopEarnings earnings;
+    private final ShopReadiness readiness;
+    private final com.gpstore.catalog.shop.ShopShelfCache shelfCache;
+    private final com.gpstore.platform.shopinfo.ShopPolicyRepository policies;
+    private final com.gpstore.platform.ShopReliability reliabilityService;
+    private final com.gpstore.payment.collection.PaymentCollection paymentCollection;
+    private final com.gpstore.repository.InventoryRepository inventory;
+    private final com.gpstore.repository.ProductVariantRepository variants;
+
+    public ShopSelfServiceController(ShopRepository shops, ShopLifecycleService shopLifecycle,
+                                     ShopProductVariantRepository listings,
+                                     ShopStaffRepository staff, CurrentUser currentUser,
+                                     ShopMembership membership, MerchantRepository merchants,
+                                     com.gpstore.repository.CustomerRepository customers,
+                                     com.gpstore.service.AuditLogService auditLog,
+                                     com.gpstore.money.ShopEarnings earnings,
+                                     ShopReadiness readiness,
+                                     com.gpstore.catalog.shop.ShopShelfCache shelfCache,
+                                     com.gpstore.platform.shopinfo.ShopPolicyRepository policies,
+                                     com.gpstore.platform.ShopReliability reliabilityService,
+                                     com.gpstore.payment.collection.PaymentCollection paymentCollection,
+                                     com.gpstore.repository.InventoryRepository inventory,
+                                     com.gpstore.repository.ProductVariantRepository variants) {
+        this.paymentCollection = paymentCollection;
+        this.inventory = inventory;
+        this.variants = variants;
+        this.shelfCache = shelfCache;
+        this.policies = policies;
+        this.reliabilityService = reliabilityService;
+        this.earnings = earnings;
+        this.readiness = readiness;
+        this.membership = membership;
+        this.merchants = merchants;
+        this.customers = customers;
+        this.auditLog = auditLog;
+        this.shops = shops;
+        this.shopLifecycle = shopLifecycle;
+        this.listings = listings;
+        this.currentUser = currentUser;
+        this.staff = staff;
+    }
+
+    public record ShopProfile(Long id, String code, String displayName, ShopStatus status,
+                              String statusReason, Double latitude, Double longitude,
+                              BigDecimal maxDeliveryRadiusKm, String timeZone,
+                              String supportPhone, String supportEmail, String supportWhatsapp,
+                              String logoUrl, String businessName, String gstin,
+                              String fssaiLicence,
+                              // READ-ONLY HERE. The shopkeeper sees what the
+                              // platform has confirmed about them; they cannot
+                              // set it - see updateProfile, which has no branch
+                              // that touches it (§10).
+                              com.gpstore.platform.ShopVerificationLevel verificationLevel,
+                              java.time.LocalDateTime verifiedAt) {
+        static ShopProfile of(Shop s) {
+            return new ShopProfile(s.getId(), s.getCode(), s.getDisplayName(), s.getStatus(),
+                    s.getStatusReason(), s.getLatitude(), s.getLongitude(),
+                    s.getMaxDeliveryRadiusKm(), s.getTimeZone(),
+                    s.getSupportPhone(), s.getSupportEmail(), s.getSupportWhatsapp(),
+                    s.getLogoUrl(), s.getBusinessName(), s.getGstin(), s.getFssaiLicence(),
+                    s.getVerificationLevel(), s.getVerifiedAt());
+        }
+    }
+
+    public record ProfileUpdate(String displayName, String supportPhone, String supportEmail,
+                                String supportWhatsapp, Double latitude, Double longitude,
+                                BigDecimal maxDeliveryRadiusKm, String timeZone,
+                                String logoUrl, String businessName, String gstin,
+                                String fssaiLicence) {}
+
+    public record PauseRequest(String status, String reason) {}
+
+    public record ListingView(Long id, Long productVariantId, BigDecimal sellingPrice,
+                              BigDecimal costPrice, BigDecimal mrp, Boolean available,
+                              Boolean active, Integer displayOrder) {
+        static ListingView of(ShopProductVariant l) {
+            return new ListingView(l.getId(), l.getProductVariantId(), l.getSellingPrice(),
+                    l.getCostPrice(), l.getMrp(), l.getAvailable(), l.getActive(),
+                    l.getDisplayOrder());
+        }
+    }
+
+    public record ListingUpdate(BigDecimal sellingPrice, BigDecimal costPrice, BigDecimal mrp,
+                                Boolean available, Boolean active, Integer displayOrder) {}
+
+    /**
+     * What a shopkeeper says is on the shelf.
+     *
+     * <p>COUNTED STOCK ONLY. There is deliberately no reservedStock here: that
+     * number belongs to baskets and orders in flight, and a shopkeeper doing a
+     * stock-take is counting sacks of atta, not carts. Letting this route set
+     * it would let a correction quietly release stock somebody has already
+     * paid for.
+     */
+    public record StockUpdate(Integer stock, Integer minimumStock, Integer maximumStock) {}
+
+    public record StockView(Long productVariantId, Integer stock, Integer reservedStock,
+                            Integer availableStock, Integer minimumStock, Integer maximumStock) {}
+
+    /** The shop this request is for. Which shop that is came from the credential. */
+    @GetMapping("/profile")
+    public ShopProfile profile() {
+        return ShopProfile.of(currentShop());
+    }
+
+    /**
+     * Every shop this account may work in, and which one it is working in now.
+     *
+     * <p>WHAT THE SWITCHER NEEDS, and the missing half of §4. One merchant
+     * owning several shops was already true in the data and already enforced
+     * on the way in - TenantResolver.select accepts an X-Shop-Id naming any
+     * shop the credential permits, and refuses every other - but nothing told
+     * the app WHICH shops those were, so a merchant with three kiranas had no
+     * way to reach the second and third.
+     *
+     * <p>THIS IS NOT AN AUTHORIZATION, it is a list of ones already granted.
+     * The ids come from this account's staff rows; sending one back as
+     * X-Shop-Id narrows to a shop it already permits and can never widen
+     * (§13). A shop the account is not staff of is not in this list and is
+     * refused if named anyway.
+     *
+     * <p>It also answers the case that used to be a hard error: an account on
+     * two rosters with no default could not resolve a shop at all, because
+     * choosing one for them would have been choosing one merchant's data over
+     * another's. Now the app can ask, show them both, and let them pick.
+     */
+    @GetMapping("/my-shops")
+    public MyShops myShops() {
+        Long accountId = currentUser.customerId();
+        List<Long> permitted = membership.shopIdsFor(accountId);
+        Long active = TenantContext.current() == null ? null : TenantContext.current().shopId();
+
+        List<ShopChoice> choices = permitted.stream()
+                .map(shops::findById)
+                .flatMap(java.util.Optional::stream)
+                .map(shop -> new ShopChoice(shop.getId(), shop.getCode(), shop.getDisplayName(),
+                        shop.getStatus(), shop.getLogoUrl(),
+                        // OPERABLE, not merely listed: a shop that is closed,
+                        // or whose merchant has been removed, has nothing left
+                        // to administer, and offering it in a switcher would
+                        // be offering a screen that errors on arrival.
+                        membership.isOperable(shop.getId()),
+                        shop.getId().equals(active)))
+                .toList();
+
+        return new MyShops(choices, active);
+    }
+
+    /**
+     * @param shops  every shop this account is on the staff list of
+     * @param acting the one this request was scoped to, so a switcher can show
+     *               which is selected without guessing
+     */
+    public record MyShops(List<ShopChoice> shops, Long acting) {}
+
+    public record ShopChoice(Long shopId, String code, String displayName, ShopStatus status,
+                             String logoUrl, boolean operable, boolean acting) {}
+
+    @PutMapping("/profile")
+    public ShopProfile updateProfile(@RequestBody ProfileUpdate update) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        Shop shop = currentShop();
+
+        // Status is NOT here. A shop pauses itself through /status below,
+        // which goes through the transition table; letting a profile PUT carry
+        // a status would be a second, unchecked way to change one.
+        if (update.displayName() != null && !update.displayName().isBlank()) {
+            shop.setDisplayName(update.displayName().trim());
+        }
+        if (update.supportPhone() != null) shop.setSupportPhone(blankToNull(update.supportPhone()));
+        if (update.supportEmail() != null) shop.setSupportEmail(blankToNull(update.supportEmail()));
+        if (update.supportWhatsapp() != null) shop.setSupportWhatsapp(blankToNull(update.supportWhatsapp()));
+        if (update.latitude() != null) shop.setLatitude(update.latitude());
+        if (update.longitude() != null) shop.setLongitude(update.longitude());
+        if (update.maxDeliveryRadiusKm() != null) shop.setMaxDeliveryRadiusKm(update.maxDeliveryRadiusKm());
+        if (update.timeZone() != null && !update.timeZone().isBlank()) {
+            shop.setTimeZone(update.timeZone().trim());
+        }
+        if (update.logoUrl() != null) shop.setLogoUrl(blankToNull(update.logoUrl()));
+        if (update.businessName() != null) shop.setBusinessName(blankToNull(update.businessName()));
+        if (update.gstin() != null) shop.setGstin(blankToNull(update.gstin()));
+        if (update.fssaiLicence() != null) shop.setFssaiLicence(blankToNull(update.fssaiLicence()));
+
+        // VERIFICATION IS NOT HERE, and its absence is the feature. A merchant
+        // who could set their own verification level has been verified by
+        // nobody; the badge is the platform's to grant (§10), through
+        // PlatformMerchantController and nowhere else. Business details ARE
+        // here - a shopkeeper states them, and the platform checks them.
+        return ShopProfile.of(shops.save(shop));
+    }
+
+    // --------------------------------------------------- what the shop promises
+
+    /** This shop's policies, in the shopkeeper's own words. */
+    @GetMapping("/policies")
+    public List<PolicyView> policies() {
+        return policies.findAllByOrderByKindAsc().stream().map(PolicyView::of).toList();
+    }
+
+    /**
+     * Writes one policy.
+     *
+     * <p>An empty body REMOVES it rather than storing an empty promise: a
+     * heading with nothing under it reads to a customer as a policy they
+     * cannot find, which is worse than a shop that has not written one.
+     */
+    @PutMapping("/policies/{kind}")
+    public List<PolicyView> setPolicy(@PathVariable String kind, @RequestBody PolicyUpdate update) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        ShopPolicyKind parsed;
+        try {
+            parsed = ShopPolicyKind.valueOf(kind.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            throw new BadRequestException("Unknown policy: " + kind
+                    + ". This shop can state its DELIVERY, CANCELLATION and RETURNS policies.");
+        }
+
+        ShopPolicy row = policies.findByKind(parsed.name()).orElse(null);
+        if (update.body() == null || update.body().isBlank()) {
+            if (row != null) {
+                policies.delete(row);
+                auditLog.log("SHOP_POLICY_REMOVED", "ShopPolicy", row.getId(), parsed.name());
+            }
+            return policies();
+        }
+
+        if (row == null) {
+            row = new ShopPolicy();
+            row.setKind(parsed);
+        }
+        row.setBody(update.body().trim());
+        row.setUpdatedBy("shop:" + currentUser.customerId());
+        ShopPolicy saved = policies.save(row);
+        auditLog.log("SHOP_POLICY_SET", "ShopPolicy", saved.getId(), parsed.name());
+        return policies();
+    }
+
+    /**
+     * This shop's own trading record, and what stands between it and TRUSTED.
+     *
+     * <p>THE MERCHANT'S OWN, and only their own - it is computed for the shop
+     * in scope. A badge a shopkeeper cannot find out how to earn is a badge
+     * that looks bought, so the answer includes why it is not showing.
+     */
+    @GetMapping("/reliability")
+    public com.gpstore.platform.ShopReliability.Record reliability() {
+        return reliabilityService.forCurrentShop();
+    }
+
+    /**
+     * Where this shop's online money actually goes.
+     *
+     * <p>SAID OUT LOUD, because it is currently GP-STORE's account and a
+     * shopkeeper is entitled to know that rather than to infer it from an
+     * earnings screen that says "awaiting collection". Decision W1 already
+     * says a merchant's product proceeds are the merchant's, so this endpoint
+     * is a known gap reported honestly rather than an open question put to
+     * the shopkeeper - see PaymentCollectionModel. §17 keeps the seam behind
+     * it provider-agnostic until the provider, onboarding/KYC, settlement,
+     * fee and refund decisions are made.
+     */
+    @GetMapping("/payment-collection")
+    public com.gpstore.payment.collection.PaymentCollection.Collector paymentCollection() {
+        return paymentCollection.forShop(currentShop().getId());
+    }
+
+    public record PolicyUpdate(String body) {}
+
+    public record PolicyView(String kind, String body, java.time.LocalDateTime updatedAt) {
+        static PolicyView of(ShopPolicy policy) {
+            return new PolicyView(policy.getKindName(), policy.getBody(), policy.getUpdatedAt());
+        }
+    }
+
+    /**
+     * The shopkeeper's own pause and reopen.
+     *
+     * Refuses anything else - lifting a platform suspension, or closing for
+     * good - through ShopLifecycleService, so the rule holds whatever route
+     * reaches it.
+     */
+    @PutMapping("/status")
+    public ShopProfile setStatus(@RequestBody PauseRequest request) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        ShopStatus next;
+        try {
+            next = ShopStatus.valueOf(String.valueOf(request.status()).trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException | NullPointerException unknown) {
+            throw new BadRequestException("Unknown shop status: " + request.status());
+        }
+        return ShopProfile.of(shopLifecycle.transitionAsMerchant(
+                currentShop().getId(), next, request.reason()));
+    }
+
+    // --------------------------------------------------------- the price list
+
+    @GetMapping("/listings")
+    public List<ListingView> listings(@RequestParam(defaultValue = "0") int page,
+                                      @RequestParam(defaultValue = "100") int size) {
+        return listings.findAllByOrderByIdAsc(com.gpstore.config.PageRequests.of(page, size))
+                .map(ListingView::of).toList();
+    }
+
+    /**
+     * Sets what this shop charges for one catalogue item.
+     *
+     * THE SHOP IS NOT A PARAMETER. The row is found through the shop-scoped
+     * repository and stamped by the tenant listener on insert, so this method
+     * has no way to write into another shop even if a caller wanted it to.
+     */
+    @PutMapping("/listings/{productVariantId}")
+    public ListingView upsertListing(@PathVariable Long productVariantId,
+                                     @RequestBody ListingUpdate update) {
+        if (update.sellingPrice() == null || update.sellingPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("A listing needs a selling price greater than 0.");
+        }
+        ShopProductVariant listing = listings.findByProductVariantId(productVariantId)
+                .orElseGet(ShopProductVariant::new);
+        listing.setProductVariantId(productVariantId);
+        listing.setSellingPrice(update.sellingPrice());
+        listing.setCostPrice(update.costPrice());
+        listing.setMrp(update.mrp());
+        listing.setAvailable(update.available() == null ? Boolean.TRUE : update.available());
+        listing.setActive(update.active() == null ? Boolean.TRUE : update.active());
+        listing.setDisplayOrder(update.displayOrder());
+        ListingView saved = ListingView.of(listings.save(listing));
+        // The customer app was showing the old price until the cache TTL
+        // drained - see ShopShelfCache. A price screen whose changes do not
+        // reach the storefront is decoration.
+        shelfCache.changed();
+        return saved;
+    }
+
+    @DeleteMapping("/listings/{productVariantId}")
+    public void delistItem(@PathVariable Long productVariantId) {
+        ShopProductVariant listing = listings.findByProductVariantId(productVariantId)
+                .orElseThrow(() -> new ResourceNotFoundException("This shop does not list that item"));
+        listing.setAvailable(Boolean.FALSE);
+        listing.setActive(Boolean.FALSE);
+        listings.save(listing);
+        shelfCache.changed();
+    }
+
+    /**
+     * How much of a listed item this shop actually has.
+     *
+     * <p>THE STEP THAT HAD NO ROUTE. A shop could set its price here and could
+     * not put stock behind it: /api/inventory takes a raw Inventory entity and
+     * needs the stock row's own id, which a brand-new listing does not have
+     * yet. The result was that the only way to open a shelf was to write to
+     * the inventory table directly - which is what the second-merchant
+     * onboarding test did, with a jdbc INSERT, because nothing else worked.
+     * A flow that cannot be completed through the API is not an onboarding
+     * flow, so this is the missing half of {@link #upsertListing}.
+     *
+     * <p>REFUSES STOCK FOR SOMETHING THIS SHOP DOES NOT SELL. The listing is
+     * looked up first, through the shop-scoped repository. Without that, a
+     * shop could create inventory rows for catalogue items it has never
+     * listed - rows that no storefront would ever show and no stock-take would
+     * ever reconcile.
+     *
+     * <p>THE SHOP IS NOT A PARAMETER, exactly as in {@link #upsertListing}.
+     * The row is read through the shop-scoped repository and stamped by the
+     * tenant listener on insert, so two shops holding stock of the same
+     * catalogue variant get two rows and neither can see the other's -
+     * inventory is unique on (shop_id, product_variant_id), not on the variant
+     * alone (V48).
+     */
+    @PutMapping("/listings/{productVariantId}/stock")
+    public StockView setStock(@PathVariable Long productVariantId,
+                              @RequestBody StockUpdate update) {
+        requirePermission(AdminPermission.INVENTORY_MANAGE);
+        if (update.stock() == null || update.stock() < 0) {
+            throw new BadRequestException("Stock cannot be negative, and has to be given.");
+        }
+        listings.findByProductVariantId(productVariantId).orElseThrow(
+                () -> new ResourceNotFoundException(
+                        "This shop does not list that item. Put it on the shelf with a price "
+                                + "first, then say how much of it there is."));
+
+        com.gpstore.entity.Inventory row = inventory.findByProductVariantId(productVariantId)
+                .orElseGet(() -> {
+                    com.gpstore.entity.Inventory fresh = new com.gpstore.entity.Inventory();
+                    fresh.setProductVariant(variants.getReferenceById(productVariantId));
+                    // NOT NULL: a new row has nothing reserved, and leaving it
+                    // null would make availableStock() arithmetic on a null.
+                    fresh.setReservedStock(0);
+                    return fresh;
+                });
+
+        Integer wasStock = row.getStock();
+        row.setStock(update.stock());
+        if (update.minimumStock() != null) {
+            row.setMinimumStock(update.minimumStock());
+        }
+        if (update.maximumStock() != null) {
+            row.setMaximumStock(update.maximumStock());
+        }
+        // reservedStock is deliberately untouched - see StockUpdate.
+
+        com.gpstore.entity.Inventory saved = inventory.save(row);
+        auditLog.log("SHOP_STOCK_SET", "Inventory", saved.getId(),
+                "variant=" + productVariantId + ", " + wasStock + " -> " + update.stock());
+        // The storefront caches what is on the shelf, and a shelf that still
+        // says "out of stock" after a delivery arrived is the same bug the
+        // price path had.
+        shelfCache.changed();
+
+        int reserved = saved.getReservedStock() == null ? 0 : saved.getReservedStock();
+        int stock = saved.getStock() == null ? 0 : saved.getStock();
+        return new StockView(productVariantId, saved.getStock(), saved.getReservedStock(),
+                Math.max(0, stock - reserved), saved.getMinimumStock(), saved.getMaximumStock());
+    }
+
+    /** What this shop has on the shelf for one item it lists. */
+    @GetMapping("/listings/{productVariantId}/stock")
+    public StockView stock(@PathVariable Long productVariantId) {
+        requirePermission(AdminPermission.INVENTORY_MANAGE);
+        listings.findByProductVariantId(productVariantId).orElseThrow(
+                () -> new ResourceNotFoundException("This shop does not list that item"));
+        com.gpstore.entity.Inventory row = inventory.findByProductVariantId(productVariantId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "No stock has been recorded for that item yet."));
+        int reserved = row.getReservedStock() == null ? 0 : row.getReservedStock();
+        int stock = row.getStock() == null ? 0 : row.getStock();
+        return new StockView(productVariantId, row.getStock(), row.getReservedStock(),
+                Math.max(0, stock - reserved), row.getMinimumStock(), row.getMaximumStock());
+    }
+
+    /**
+     * What still stands between this shop and its first order.
+     *
+     * CATALOG_VIEW, the same as the rest of the read surface - this is the
+     * screen a shopkeeper opens when nothing is selling and they want to know
+     * why. It reports; ShopTradingGate still decides.
+     *
+     * Never shown to a customer. The customer's version of this answer is
+     * deliberately one sentence with no detail in it.
+     */
+    @GetMapping("/readiness")
+    public ShopReadiness.Readiness readiness() {
+        return readiness.forCurrentShop();
+    }
+
+    // ------------------------------------------------------------ the money
+
+    /**
+     * What this shop took, and in what form.
+     *
+     * ANALYTICS_VIEW, deliberately - the same permission that opens the
+     * dashboard, because this is the dashboard's money half rather than a
+     * separate privilege. A shopkeeper who may see how many orders they had
+     * may see what those orders were worth.
+     *
+     * NO SHOP ID, again. The statement is about the shop the credential
+     * resolved to, so there is no id for anyone to change - and no route that
+     * would answer with somebody else's takings if they did.
+     */
+    @GetMapping("/earnings")
+    public com.gpstore.money.ShopEarnings.Statement earnings(
+            @RequestParam(defaultValue = "30") int days) {
+        requirePermission(AdminPermission.ANALYTICS_VIEW);
+        return earnings.forCurrentShop(days);
+    }
+
+    /** What is waiting to be done, by order status, for this shop only. */
+    @GetMapping("/open-work")
+    public java.util.Map<String, Long> openWork() {
+        requirePermission(AdminPermission.ORDERS_VIEW);
+        return earnings.openWorkForCurrentShop();
+    }
+
+    // -------------------------------------------------------------- the staff
+
+    public record StaffView(Long customerId, Boolean isDefault, Boolean active) {}
+
+    /** Who works here. Shop-scoped, so it can only ever be this shop's list. */
+    @GetMapping("/staff")
+    public List<StaffView> staff() {
+        return staff.findAll().stream()
+                .map(s -> new StaffView(s.getCustomerId(), s.getIsDefault(), s.getActive()))
+                .toList();
+    }
+
+    /**
+     * Adds somebody to THIS shop's staff.
+     *
+     * NO SHOP ID IN THE PATH, like everything else here - the shop is the one
+     * the credential resolved to, so a shopkeeper cannot add staff to a
+     * competitor's roster by changing a number. The limits on WHO may be added
+     * are in ShopMembership.addToOwnShop, where they belong: they are the same
+     * limits whatever route reaches them.
+     *
+     * CUSTOMERS_MANAGE, not CATALOG_MANAGE. Hiring is a people decision, and
+     * the role that stocks the shelves has no business making it.
+     */
+    @PostMapping("/staff")
+    public StaffView addStaff(@RequestBody AddStaffRequest request) {
+        requirePermission(AdminPermission.CUSTOMERS_MANAGE);
+        Long shopId = TenantContext.require().requireShopId();
+        ShopStaff added = membership.addToOwnShop(shopId, request.customerId(),
+                accountId -> customers.findById(accountId)
+                        .map(c -> c.getRole() == null ? null : c.getRole().name())
+                        .orElse(null));
+        auditLog.log("SHOP_STAFF_ADDED", "ShopStaff", added.getId(),
+                "shop=" + shopId + ", account=" + request.customerId());
+        return new StaffView(added.getCustomerId(), added.getIsDefault(), added.getActive());
+    }
+
+    /**
+     * Takes somebody off this shop's staff.
+     *
+     * DEACTIVATES RATHER THAN DELETES (§91) - who worked here and when is part
+     * of the record behind every order they touched. And a shop cannot remove
+     * the merchant's own owner, because an owner who could be removed by their
+     * own manager is a shop that can be locked away from the person
+     * answerable for it.
+     */
+    @DeleteMapping("/staff/{customerId}")
+    public void removeStaff(@PathVariable Long customerId) {
+        requirePermission(AdminPermission.CUSTOMERS_MANAGE);
+        Shop shop = currentShop();
+        Long owner = merchants.findById(shop.getMerchantId())
+                .map(com.gpstore.platform.Merchant::getOwnerCustomerId)
+                .orElse(null);
+        if (customerId != null && customerId.equals(owner)) {
+            throw new com.gpstore.exception.ConflictException(
+                    "The merchant's owner cannot be removed from their own shop's staff.");
+        }
+        membership.revoke(shop.getId(), customerId);
+        auditLog.log("SHOP_STAFF_REMOVED", "ShopStaff", shop.getId(),
+                "account=" + customerId);
+    }
+
+    public record AddStaffRequest(Long customerId) {}
+
+    private Shop currentShop() {
+        Long shopId = TenantContext.require().requireShopId();
+        return shops.findById(shopId)
+                .orElseThrow(() -> new ResourceNotFoundException("Shop not found"));
+    }
+
+    /**
+     * A second check beside the route's.
+     *
+     * /api/shop/** is gated on CATALOG_VIEW so that read routes are open to
+     * every staff role that can see the catalogue. The write routes need more,
+     * and asking here keeps the two rules in the file that knows which is
+     * which rather than in a path pattern nobody re-reads.
+     */
+    private void requirePermission(AdminPermission permission) {
+        if (!currentUser.has(permission)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "This account may not change the shop's " + permission.name().toLowerCase(java.util.Locale.ROOT));
+        }
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+}

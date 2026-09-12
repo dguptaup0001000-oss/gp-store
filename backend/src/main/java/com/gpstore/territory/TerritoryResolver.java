@@ -11,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Answers one question: which permanent territory is this point in?
@@ -75,16 +74,50 @@ public class TerritoryResolver {
 
     private final DeliverySubzoneRepository subzoneRepository;
     private final ObjectMapper objectMapper;
-    private final AtomicReference<Snapshot> snapshot = new AtomicReference<>(null);
+
+    /**
+     * ONE CACHED MAP PER SHOP, and the plural is the whole of this slice's
+     * change to this class.
+     *
+     * It used to be a single AtomicReference. Under one shop that was exactly
+     * right; under a marketplace it is the same silent leak the catalogue
+     * caches had before Slice 4 - the FIRST shop to resolve an address fills
+     * the map, and every other shop is then answered from it with no query
+     * run. Which for territories does not merely show wrong data: it decides
+     * which rider a competitor's order goes to.
+     *
+     * Keyed on the shop id, with the platform scope keyed separately under
+     * null - a marketplace-wide sweep legitimately sees every map, and must
+     * not be served one shop's.
+     *
+     * A ConcurrentHashMap rather than one reference: entries are added the
+     * first time each shop resolves anything, and a shop that never resolves
+     * costs nothing. Twenty-six polygons is a few kilobytes, so a few dozen
+     * shops is still nothing.
+     */
+    private final java.util.concurrent.ConcurrentMap<Long, Snapshot> byShop =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The key for the platform scope, which has no shop id of its own. */
+    private static final Long EVERY_SHOP = -1L;
 
     public TerritoryResolver(DeliverySubzoneRepository subzoneRepository, ObjectMapper objectMapper) {
         this.subzoneRepository = subzoneRepository;
         this.objectMapper = objectMapper;
     }
 
-    /** Drops the cached map so the next resolution reloads it. */
+    /**
+     * Drops the cached map so the next resolution reloads it.
+     *
+     * EVERY SHOP'S, not just the caller's. An administrator redrawing a
+     * boundary invalidates their own map; a platform-level change - a shop
+     * opened, a merchant suspended - can move more than one. Clearing all of
+     * them costs one reload per shop that is actually being used, a few times
+     * a year, and removes a whole class of "the other instance still had the
+     * old map" bug that would be very hard to see.
+     */
     public void invalidate() {
-        snapshot.set(null);
+        byShop.clear();
     }
 
     /**
@@ -144,20 +177,82 @@ public class TerritoryResolver {
         return codes;
     }
 
+    /**
+     * The territory THIS SHOP will dispatch an order to, for this address.
+     *
+     * THE CHAIN W4 ASKS FOR STARTS HERE: shop-scoped territory, then
+     * shop-scoped rider, then the shop's own order. Everything downstream
+     * follows from getting this one answer inside the right shop.
+     *
+     * Two sources, in this order, and the order is what preserves the
+     * single-shop behaviour exactly:
+     *
+     *   1. THE STAMP ON THE ADDRESS, if it belongs to this shop. Under
+     *      SINGLE_SHOP it always does - it was written by this same resolver
+     *      from these same coordinates - so nothing about dispatch changes.
+     *      It is preferred rather than recomputed because an administrator may
+     *      have PINNED it (subzoneLocked): the block whose only gate opens
+     *      into the next territory is knowledge no polygon has, and it must
+     *      outrank the map.
+     *
+     *   2. THIS SHOP'S OWN MAP, from the coordinates, when the stamp belongs
+     *      to another shop or there is none. A pin is an instruction about the
+     *      map it was made on; it says nothing about a different shop's map,
+     *      so a second merchant resolves their own rather than inheriting a
+     *      competitor's decision.
+     *
+     * FAILS CLOSED, like resolve(): no coordinates, no drawn map, or a point
+     * in a gap all return empty, and the caller falls back to load-based
+     * assignment with the reason recorded. A rider sent to the wrong territory
+     * is worse than a rider sent without local knowledge.
+     */
+    @Transactional(readOnly = true)
+    public Optional<DeliverySubzone> territoryForDelivery(com.gpstore.entity.Address address) {
+        if (address == null) {
+            return Optional.empty();
+        }
+        if (address.getId() != null) {
+            Optional<DeliverySubzone> stamped =
+                    subzoneRepository.findStampedOnAddressIfInScope(address.getId());
+            if (stamped.isPresent()) {
+                return stamped;
+            }
+        }
+        return resolveSubzoneId(address.getLatitude(), address.getLongitude())
+                .flatMap(subzoneRepository::findInScope);
+    }
+
     /** How many territories currently have a usable outline. */
     @Transactional(readOnly = true)
     public int mappedTerritoryCount() {
         return currentMap().size();
     }
 
+    /**
+     * Which map this thread is entitled to, from the scope rather than from
+     * anything a caller passed.
+     */
+    private static Long currentMapKey() {
+        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+        if (scope == null || scope.isPlatform()) {
+            return EVERY_SHOP;
+        }
+        return scope.shopId();
+    }
+
     private List<Territory> currentMap() {
-        Snapshot current = snapshot.get();
+        Long key = currentMapKey();
+        Snapshot current = byShop.get(key);
         if (current != null && System.currentTimeMillis() - current.loadedAtMs() < REFRESH_MS) {
             return current.territories();
         }
 
+        // Loaded under the scope already on the thread, so the subzone filter
+        // decides what goes into this shop's map. The key is read from the
+        // same scope, so a map can never be filed under a shop that did not
+        // load it.
         List<Territory> loaded = load();
-        snapshot.set(new Snapshot(loaded, System.currentTimeMillis()));
+        byShop.put(key, new Snapshot(loaded, System.currentTimeMillis()));
         return loaded;
     }
 

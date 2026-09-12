@@ -17,6 +17,13 @@ jobs:
       run:
         working-directory: backend
 
+    # pull-requests: write is for ONE step - "Report the failing tests on the
+    # PR", below. contents: read is spelled out because naming any permission
+    # drops the job to that set alone, and the checkout needs it.
+    permissions:
+      contents: read
+      pull-requests: write
+
     # A REAL Postgres, provided by GitHub Actions - this is exactly what
     # Termux couldn't give us, and it's why BackendApplicationTests.contextLoads
     # can finally pass here even though it couldn't run locally on-device.
@@ -141,19 +148,29 @@ jobs:
           REDIS_PORT: 6379
         run: ./mvnw -B clean verify
 
-      # WHAT ACTUALLY FAILED, at the end of the log where it can be found.
+      # WHAT ACTUALLY FAILED, where it can actually be found.
       #
       # Postgres and Redis service-container logs are dumped at job teardown,
       # and they are thousands of lines. They bury Maven's own summary so
       # completely that reading the tail of a failed run shows only database
       # chatter - which is how a red build ends up diagnosed by guesswork.
       # Surefire has already written the answer to XML; this prints it last.
+      #
+      # AND WRITES IT TO THE JOB SUMMARY, which is the half that was missing.
+      # Printing last is not enough when the reader cannot reach the raw log:
+      # the GitHub API's job-log endpoint hands back that same teardown dump,
+      # and the log archive and the surefire artifact are both plain downloads
+      # that a restricted network may refuse. This build was red for two
+      # commits with no way to see which test failed, from a machine that
+      # could reach the API and nothing else. $GITHUB_STEP_SUMMARY is served
+      # by the API, so the answer now travels with the check itself.
       - name: Name the failing tests
         if: failure()
         working-directory: backend
         run: |
           python3 - <<'PY'
           import glob
+          import os
           import xml.etree.ElementTree as ET
 
           bad = []
@@ -174,14 +191,123 @@ jobs:
                       )
           print("=" * 70)
           if bad:
-              print(f"{len(bad)} failing test(s):")
-              for line in bad:
-                  print(line)
+              headline = f"{len(bad)} failing test(s):"
           else:
-              print("No failing testcase in surefire XML - the failure is not a")
-              print("test body. Look at the Maven step itself (compile, enforcer,")
-              print("a plugin, or the JVM crashing).")
+              headline = (
+                  "No failing testcase in surefire XML - the failure is not a\n"
+                  "test body. Look at the Maven step itself (compile, enforcer,\n"
+                  "a plugin, or the JVM crashing)."
+              )
+          print(headline)
+          for line in bad:
+              print(line)
           print("=" * 70)
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as out:
+                  out.write("## Failing tests\n\n")
+                  out.write("```\n")
+                  out.write(headline + "\n")
+                  for line in bad:
+                      out.write(line + "\n")
+                  out.write("```\n")
+          PY
+
+      # A THIRD CHANNEL, AND THE ONLY ONE THAT SURVIVES A RESTRICTED NETWORK.
+      #
+      # The step above prints the failing tests and writes them to the job
+      # summary. Neither reaches a reader who has the GitHub API and nothing
+      # else: the API's job-log endpoint returns the service-container teardown
+      # dump rather than Maven's output, the check-run output comes back empty,
+      # and the log archive and the surefire artifact are plain file downloads
+      # that a locked-down egress proxy refuses. This branch sat red for three
+      # commits for exactly that reason - the answer existed in three places
+      # and was reachable from none of them.
+      #
+      # A PR comment is readable wherever the API is. Only on failure, only on
+      # pull_request, and it edits one comment rather than adding another on
+      # every run, so a long red streak does not bury the conversation.
+      - name: Report the failing tests on the PR
+        if: failure() && github.event_name == 'pull_request'
+        working-directory: backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import glob, json, os, urllib.request
+          import xml.etree.ElementTree as ET
+
+          bad = []
+          for path in glob.glob("target/surefire-reports/*.xml"):
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  continue
+              for case in root.iter("testcase"):
+                  for kind in ("failure", "error"):
+                      node = case.find(kind)
+                      if node is None:
+                          continue
+                      msg = (node.get("message") or node.get("type") or "").strip()
+                      # THE FIRST FRAME IN OUR OWN CODE. A message like
+                      # "Incorrect result size: expected 1, actual 0" names the
+                      # symptom and not the line, and five tests sharing a
+                      # fixture all report it identically - which is a whole
+                      # round of guessing unless the frame comes with it.
+                      frame = ""
+                      for line in (node.text or "").splitlines():
+                          line = line.strip()
+                          if line.startswith("at com.gpstore.") and "(" in line:
+                              frame = line[3:]
+                              break
+                      bad.append(f"{kind.upper()}  {case.get('classname')}.{case.get('name')}\n"
+                                 f"        {msg.splitlines()[0] if msg.splitlines() else ''}"
+                                 + (f"\n        at {frame}" if frame else ""))
+
+          marker = "<!-- ci-failing-tests -->"
+          if bad:
+              body = (f"{marker}\n### CI: {len(bad)} failing test(s)\n\n```\n"
+                      + "\n".join(sorted(bad)[:60]) + "\n```\n")
+              if len(bad) > 60:
+                  body += f"\n...and {len(bad) - 60} more.\n"
+          else:
+              body = (f"{marker}\n### CI failed before any test body\n\n"
+                      "No failing testcase in the surefire XML, so this is not a test "
+                      "assertion: look at compile, the enforcer, a plugin, or the JVM.\n")
+          body += f"\n[Full run]({os.environ['RUN_URL']})\n"
+
+          repo, pr, token = os.environ["REPO"], os.environ["PR"], os.environ["GH_TOKEN"]
+          api = f"https://api.github.com/repos/{repo}"
+          headers = {"Authorization": f"Bearer {token}",
+                     "Accept": "application/vnd.github+json",
+                     "User-Agent": "gpstore-ci"}
+
+          def call(url, data=None, method="GET"):
+              req = urllib.request.Request(
+                  url, method=method,
+                  data=json.dumps(data).encode() if data else None,
+                  headers={**headers, "Content-Type": "application/json"})
+              with urllib.request.urlopen(req) as r:
+                  return json.loads(r.read() or "null")
+
+          try:
+              existing = next(
+                  (c for c in call(f"{api}/issues/{pr}/comments?per_page=100")
+                   if marker in (c.get("body") or "")), None)
+              if existing:
+                  call(f"{api}/issues/comments/{existing['id']}", {"body": body}, "PATCH")
+                  print("updated the existing failing-tests comment")
+              else:
+                  call(f"{api}/issues/{pr}/comments", {"body": body}, "POST")
+                  print("posted a failing-tests comment")
+          except Exception as e:
+              # Never turn a reporting problem into a second failure - the job
+              # is already red for the reason that matters.
+              print(f"could not post the failing-tests comment: {e}")
           PY
 
       - name: Upload test results

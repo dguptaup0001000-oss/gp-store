@@ -1,5 +1,6 @@
 package com.gpstore.perf;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.auth.OtpPurpose;
 import com.gpstore.exception.TooManyRequestsException;
 import com.gpstore.otp.OtpProvider;
@@ -56,7 +57,7 @@ class OtpSendBoundaryTest {
     @MockitoSpyBean private OtpProvider otpProvider;
 
     private static String freshNumber() {
-        return "9" + String.valueOf(System.nanoTime()).substring(0, 9);
+        return TestMobileNumbers.unique();
     }
 
     @Test

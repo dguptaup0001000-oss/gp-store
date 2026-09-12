@@ -248,7 +248,12 @@ public class ProductResponse implements Serializable {
      * site that picks the wrong one should be obvious in review.
      */
     public static ProductResponse forAdmin(Product product) {
-        ProductResponse base = from(product);
+        return forAdmin(product, java.util.Map.of());
+    }
+
+    public static ProductResponse forAdmin(Product product,
+            java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings) {
+        ProductResponse base = from(product, listings);
         if (base == null) return null;
         return base.withPrivacy(product.getIsPrivateProduct(), product.getCustomerDisplayName());
     }
@@ -263,13 +268,41 @@ public class ProductResponse implements Serializable {
     public String getCustomerDisplayName() { return customerDisplayName; }
 
     public static ProductResponse from(Product product) {
+        return from(product, java.util.Map.of());
+    }
+
+    /**
+     * @param listings this shop's terms for each variant, keyed by variant id.
+     *                 Empty means "no shop context" and the catalogue defaults
+     *                 stand - see VariantResponse.from.
+     */
+    public static ProductResponse from(Product product,
+            java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings) {
+        return from(product, listings, java.util.Map.of());
+    }
+
+    /**
+     * @param listings this shop's terms for each variant, keyed by variant id
+     * @param stock    this shop's holding for each variant. An EMPTY map means
+     *                 "no shop whose stock this could be" - an admin catalogue
+     *                 screen, a platform report - and leaves inStock null
+     *                 rather than reporting a false zero, which would hide a
+     *                 product the shop is selling.
+     */
+    public static ProductResponse from(Product product,
+            java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings,
+            java.util.Map<Long, Integer> stock) {
         if (product == null) {
             return null;
         }
+        java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> shopTerms =
+                listings == null ? java.util.Map.of() : listings;
+        java.util.Map<Long, Integer> held = stock == null ? java.util.Map.of() : stock;
         List<VariantResponse> variants = product.getVariants() == null
                 ? List.of()
                 : product.getVariants().stream()
-                        .map(VariantResponse::from)
+                        .map(v -> VariantResponse.from(v, shopTerms.get(v.getId()),
+                                held.get(v.getId())))
                         .collect(Collectors.toList());
 
         return new ProductResponse(
@@ -303,7 +336,26 @@ public class ProductResponse implements Serializable {
      * the product still loads the full variant list.
      */
     public static ProductResponse fromCard(Product product) {
-        ProductResponse full = from(product);
+        return fromCard(product, java.util.Map.of());
+    }
+
+    /**
+     * The card, priced by this shop.
+     *
+     * The listings are applied BEFORE the cheapest-size pick, not after: which
+     * pack is cheapest is a question about this shop's prices, and answering it
+     * from the catalogue would put the wrong size on the card.
+     */
+    public static ProductResponse fromCard(Product product,
+            java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings) {
+        return fromCard(product, listings, java.util.Map.of());
+    }
+
+    /** The card, priced AND stocked by this shop. */
+    public static ProductResponse fromCard(Product product,
+            java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings,
+            java.util.Map<Long, Integer> stock) {
+        ProductResponse full = from(product, listings, stock);
         if (full == null) {
             return null;
         }
@@ -311,11 +363,24 @@ public class ProductResponse implements Serializable {
         if (variants == null || variants.size() <= 1) {
             return full;
         }
-        VariantResponse pick = variants.stream()
+        // THE CHEAPEST SIZE THE CUSTOMER CAN ACTUALLY BUY.
+        //
+        // An out-of-stock size must not make the sizes beside it unbuyable
+        // (§7): a shop that has run out of 1 kg but has 5 kg is selling
+        // 5 kg, and a card that offers the empty shelf because it is cheaper
+        // is a card that cannot be tapped. So the pick prefers what is in
+        // stock, and falls back to any listed size when the whole product is
+        // out - because the card still has to appear, saying so.
+        java.util.Comparator<VariantResponse> byPrice =
+                java.util.Comparator.comparing(VariantResponse::getSellingPrice,
+                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
+        List<VariantResponse> listed = variants.stream()
                 .filter(v -> Boolean.TRUE.equals(v.getAvailable()))
-                .min(java.util.Comparator.comparing(VariantResponse::getSellingPrice,
-                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
-                .orElse(variants.get(0));
+                .toList();
+        VariantResponse pick = listed.stream()
+                .filter(v -> !Boolean.FALSE.equals(v.getInStock()))
+                .min(byPrice)
+                .orElseGet(() -> listed.stream().min(byPrice).orElse(variants.get(0)));
         return new ProductResponse(
                 full.getId(), full.getName(), full.getBrand(), full.getCategory(),
                 List.of(pick), full.getActive(), full.getImages(), full.getModel3dUrl(),

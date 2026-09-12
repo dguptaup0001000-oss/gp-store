@@ -1,5 +1,10 @@
 package com.gpstore.entity;
 
+import com.gpstore.platform.ShopOwned;
+import com.gpstore.platform.TenantEntityListener;
+import com.gpstore.platform.ShopScopeFilter;
+import org.hibernate.annotations.Filter;
+
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import java.math.BigDecimal;
@@ -13,7 +18,89 @@ import java.util.List;
 
 @Entity
 @Table(name = "orders")
-public class Order {
+@Filter(name = ShopScopeFilter.NAME, condition = ShopScopeFilter.CONDITION)
+@EntityListeners(TenantEntityListener.class)
+public class Order implements ShopOwned {
+    // ------------------------------------------------------- which shop
+    //
+    // Written once, at insert time, by TenantEntityListener - never by a
+    // request. Read back through the "shopScope" filter (see the @Filter
+    // above), which Hibernate turns into an extra "and shop_id = ?" on
+    // every query against this table while a shop scope is active.
+    //
+    // Nullable in the column definition only because V46 added it to
+    // tables that already had rows; every row is backfilled and the
+    // migration refuses to complete otherwise.
+    /**
+     * HOW THIS ORDER ENDED, recorded rather than encoded in the status.
+     *
+     * <p>WHY NOT CUSTOMER_CANCELLED / MERCHANT_CANCELLED AS STATES. Every
+     * report, dashboard count, index, screen and test in this application asks
+     * {@code order_status = 'CANCELLED'}. Splitting that into three states is
+     * the tidy-looking change that silently makes all of them miss two thirds
+     * of the cancellations. Recording WHO beside the state answers everything
+     * Part 3 asks and keeps every existing query correct (§19).
+     *
+     * <p>AND FAULT IS A SEPARATE COLUMN FROM WHO, which is the whole of §12. A
+     * customer who cancels because the shop rang to say the atta never arrived
+     * cancelled it and is not at fault for it; billing them for the shop's
+     * stock-out is exactly the unfairness §12 exists to prevent. One column
+     * cannot say both.
+     */
+    @Column(name = "ended_by", length = 20)
+    @Enumerated(EnumType.STRING)
+    private com.gpstore.enums.OrderActor endedBy;
+
+    /** In the ender's own words, and shown to the other side. */
+    @Column(name = "ended_reason", length = 500)
+    private String endedReason;
+
+    @Column(name = "ended_at")
+    private LocalDateTime endedAt;
+
+    /** Null means nobody has decided yet - which is different from NOBODY. */
+    @Column(name = "fault", length = 20)
+    @Enumerated(EnumType.STRING)
+    private com.gpstore.enums.OrderFault fault;
+
+    /**
+     * What the customer was actually charged for cancelling (§10).
+     *
+     * <p>WRITTEN DOWN BECAUSE A CHARGE NOBODY CAN POINT AT IS A CHARGE THAT
+     * GETS DISPUTED. Recomputing it later from the shop's current settings
+     * would answer a different question - settings get edited - and the
+     * customer was charged what they were charged.
+     *
+     * <p>Null means none was applied, which is every cancellation before this
+     * column existed, every one inside the free window, and every one where
+     * the shop was at fault.
+     */
+    @Column(name = "cancellation_fee", precision = 12, scale = 2)
+    private java.math.BigDecimal cancellationFee;
+
+    @Column(name = "shop_id")
+    private Long shopId;
+
+    /**
+     * The checkout this order was one shop's part of.
+     *
+     * A PLAIN ID, not a @ManyToOne: the group spans shops and this order does
+     * not, so loading one from the other would drag a cross-shop row into
+     * every order read for no benefit. Null on every order placed before
+     * Slice 6, and inventing a group for those would be inventing a checkout
+     * that never happened.
+     */
+    @Column(name = "order_group_id")
+    private Long orderGroupId;
+
+    public Long getOrderGroupId() {
+        return orderGroupId;
+    }
+
+    public void setOrderGroupId(Long orderGroupId) {
+        this.orderGroupId = orderGroupId;
+    }
+
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -651,5 +738,49 @@ public void setTotalAmount(BigDecimal totalAmount) {
 
     public void setInventoryRestored(Boolean inventoryRestored) {
         this.inventoryRestored = inventoryRestored;
+    }
+
+    public com.gpstore.enums.OrderActor getEndedBy() { return endedBy; }
+    public void setEndedBy(com.gpstore.enums.OrderActor endedBy) { this.endedBy = endedBy; }
+
+    public String getEndedReason() { return endedReason; }
+    public void setEndedReason(String endedReason) { this.endedReason = endedReason; }
+
+    public LocalDateTime getEndedAt() { return endedAt; }
+    public void setEndedAt(LocalDateTime endedAt) { this.endedAt = endedAt; }
+
+    public com.gpstore.enums.OrderFault getFault() { return fault; }
+    public void setFault(com.gpstore.enums.OrderFault fault) { this.fault = fault; }
+
+    public java.math.BigDecimal getCancellationFee() { return cancellationFee; }
+    public void setCancellationFee(java.math.BigDecimal cancellationFee) {
+        this.cancellationFee = cancellationFee;
+    }
+
+    /**
+     * Records who ended this order and why, in one call.
+     *
+     * <p>One method rather than four setters at each call site, because the
+     * four belong together: an order with an ender and no time, or a fault and
+     * no ender, is a half-written record that the charge logic (§10) and the
+     * dispute trail (§15) then have to guess at.
+     */
+    public void endedBy(com.gpstore.enums.OrderActor actor,
+                        com.gpstore.enums.OrderFault whoseFault,
+                        String reason) {
+        this.endedBy = actor;
+        this.fault = whoseFault;
+        this.endedReason = reason == null || reason.isBlank() ? null : reason.trim();
+        this.endedAt = LocalDateTime.now();
+    }
+
+    @Override
+    public Long getShopId() {
+        return shopId;
+    }
+
+    @Override
+    public void setShopId(Long shopId) {
+        this.shopId = shopId;
     }
 }

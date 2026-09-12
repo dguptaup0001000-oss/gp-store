@@ -36,9 +36,39 @@ class PlaceOrderResult with _$PlaceOrderResult {
     /// Generated locally server-side (no gateway call), which is why it can
     /// come back with the order rather than needing its own request.
     String? upiPaymentLink,
+
+    /// THE CHECKOUT, as opposed to the first order in it.
+    ///
+    /// orderId and orderNumber above still describe ONE order, because that
+    /// is what every APK already on a customer's phone reads. These are
+    /// beside them: under one shop a checkout is one order and shopOrders has
+    /// a single entry, so the confirmation screen renders exactly as it
+    /// always did. Under a marketplace they are what stops a customer who
+    /// paid two kiranas being shown one order number.
+    int? orderGroupId,
+    String? orderGroupNumber,
+    @Default([]) List<PlacedShopOrder> shopOrders,
   }) = _PlaceOrderResult;
 
   factory PlaceOrderResult.fromJson(Map<String, dynamic> json) => _$PlaceOrderResultFromJson(json);
+}
+
+/// One shop's order inside a checkout, as PlaceOrderResponse.ShopOrderSummary
+/// sends it.
+@freezed
+class PlacedShopOrder with _$PlacedShopOrder {
+  const factory PlacedShopOrder({
+    required int orderId,
+    String? orderNumber,
+    int? shopId,
+    double? totalAmount,
+    double? deliveryFee,
+    String? paymentStatus,
+    String? upiPaymentLink,
+  }) = _PlacedShopOrder;
+
+  factory PlacedShopOrder.fromJson(Map<String, dynamic> json) =>
+      _$PlacedShopOrderFromJson(json);
 }
 
 /// Mirrors backend's PaymentInitiationResponse exactly - it nests a full

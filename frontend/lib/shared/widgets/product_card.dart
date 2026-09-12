@@ -85,7 +85,13 @@ class _ProductCardState extends State<ProductCard> {
     final hasOptions = onOptionsPressed != null;
 
     final variant = product.primaryVariant;
-    final isInStock = variant?.available ?? false;
+    // LISTED **AND** HELD. available is the shop's listing flag - "we sell
+    // this" - and reading it alone is what drew a live ADD button on a size
+    // the shop had run out of, so the customer found out at the moment they
+    // tapped it. inStock is null on an older backend and on responses with no
+    // shop behind them, and null has to read as yes: assuming no would grey
+    // out the whole catalogue over a missing field.
+    final isInStock = variant?.isBuyable ?? false;
     final discount = product.discountPercent;
 
     final packSize = (variant?.quantity != null && variant?.unit != null)
@@ -382,20 +388,28 @@ class _ProductCardState extends State<ProductCard> {
                 Row(
                   children: [
                     Expanded(
-                      child: variant == null
+                      // NO PRICE ON AN EMPTY SHELF (§7 STATE 2). A price with
+                      // no way to buy at it is an offer the shop cannot honour,
+                      // and it is the number a customer remembers and compares
+                      // against the shop next door.
+                      // AND NOT WITHOUT A PRICE. isInStock already covers the
+                      // ordinary empty shelf; hasPrice covers the case where
+                      // the server withheld the number for any other reason,
+                      // so this row can never render "₹" with nothing after it.
+                      child: variant == null || !isInStock || !variant.hasPrice
                           ? const SizedBox.shrink()
                           : Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Flexible(
                                   child: Text(
-                                    '\u20b9${variant.sellingPrice.toStringAsFixed(0)}',
+                                    '\u20b9${variant.sellingPrice!.toStringAsFixed(0)}',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(fontWeight: FontWeight.w700, fontSize: priceSize),
                                   ),
                                 ),
-                                if (variant.mrp != null && variant.mrp! > variant.sellingPrice) ...[
+                                if (variant.mrp != null && variant.mrp! > variant.sellingPrice!) ...[
                                   const SizedBox(width: 4),
                                   Flexible(
                                     child: Text(

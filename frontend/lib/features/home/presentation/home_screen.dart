@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/app_haptics.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -13,6 +14,7 @@ import '../../products/presentation/category_products_screen.dart';
 import '../../products/presentation/product_detail_screen.dart';
 import '../../products/presentation/product_feed_provider.dart';
 import '../../products/presentation/products_providers.dart';
+import '../../marketplace/presentation/shop_picker_screen.dart';
 import 'home_feed_section.dart';
 import 'home_load_stage.dart';
 import '../../products/presentation/search_screen.dart';
@@ -62,8 +64,15 @@ class HomeScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('GP-Store',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        // WHOSE SHOP THIS IS, and only when there is a choice to make.
+        //
+        // Under SINGLE_SHOP this is the same title bar it has always been:
+        // the shop's name, no chevron, nothing to tap. The switcher appears
+        // only once the backend has said this deployment is a marketplace
+        // (isMarketplaceProvider, which reads /api/marketplace/mode and
+        // defaults to single-shop if it cannot). §2: an existing customer
+        // must not have to learn that a multi-shop architecture exists.
+        title: const _ShopTitle(),
         actions: [
           IconButton(
             icon: const Icon(Icons.receipt_long_outlined),
@@ -426,6 +435,52 @@ class HomeScreen extends ConsumerWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The app bar's title: a plain name under one shop, a switcher under many.
+class _ShopTitle extends ConsumerWidget {
+  const _ShopTitle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    const plain = Text('GP-Store', style: TextStyle(fontWeight: FontWeight.w800));
+
+    // NOT ON THE FIRST FRAME. Asking whether this deployment is a marketplace
+    // is one more request on the critical path, and under SINGLE_SHOP - which
+    // is every deployment today - the answer is always the same and the
+    // switcher never appears. So it waits behind the same gate the rest of
+    // the below-the-fold work waits behind: the customer sees the shop's name
+    // immediately, and on a marketplace it becomes a switcher a moment later.
+    if (!ref.watch(homeBelowFoldReadyProvider)) return plain;
+
+    if (!ref.watch(isMarketplaceProvider)) return plain;
+
+    // The shop the app is acting for, named. Null means the customer has not
+    // chosen one and the backend is picking their nearest - which is a real
+    // and correct state, so it is labelled rather than hidden.
+    final storefront = ref.watch(selectedStorefrontProvider).valueOrNull;
+    final label = storefront?.shop.displayName ?? 'Choose a shop';
+
+    return InkWell(
+      onTap: hapticize(() => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ShopPickerScreen()),
+          )),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+            ),
+          ),
+          const SizedBox(width: 2),
+          const Icon(Icons.keyboard_arrow_down, size: 20),
+        ],
       ),
     );
   }

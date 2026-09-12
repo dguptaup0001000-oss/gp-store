@@ -34,7 +34,19 @@ final storeStatusRepositoryProvider = Provider<StoreStatusRepository>((ref) {
 /// FAILS OPEN. A dropped request yields [StoreStatus.unknown], which says the
 /// shop is open and makes no delivery promise — see that constructor for why
 /// assuming "closed" is the far worse error to make.
-final storeStatusProvider = StreamProvider<StoreStatus>((ref) async* {
+/// REGISTERED SYNCHRONOUSLY, WHICH IS WHY THIS IS NOT ONE `async*` CLOSURE.
+///
+/// The disposal bookkeeping below used to live inside the generator. A
+/// generator body does not run until the stream is listened to, so a provider
+/// created and then invalidated in the same frame - which is exactly what
+/// ShopSwitch does when a customer changes shop the moment a screen mounts -
+/// reached `ref.onDispose` AFTER disposal and threw
+/// `Bad state: Cannot call onDispose after a provider was disposed`.
+///
+/// Splitting the plain callback from the generator makes the registration
+/// part of provider creation, where it cannot lose that race. The loop itself
+/// is unchanged.
+final storeStatusProvider = StreamProvider<StoreStatus>((ref) {
   final repository = ref.watch(storeStatusRepositoryProvider);
 
   // THE POLL MUST DIE WITH THE PROVIDER. `await Future.delayed(...)` inside
@@ -56,7 +68,15 @@ final storeStatusProvider = StreamProvider<StoreStatus>((ref) async* {
     if (!disposal.isCompleted) disposal.complete();
   });
 
-  while (!disposed) {
+  return _pollStoreStatus(repository, disposal, () => disposed);
+});
+
+Stream<StoreStatus> _pollStoreStatus(
+  StoreStatusRepository repository,
+  Completer<void> disposal,
+  bool Function() isDisposed,
+) async* {
+  while (!isDisposed()) {
     StoreStatus status;
     try {
       status = await repository.fetch();
@@ -66,7 +86,7 @@ final storeStatusProvider = StreamProvider<StoreStatus>((ref) async* {
       // a catalogue the customer can still browse.
       status = StoreStatus.unknown();
     }
-    if (disposed) return;
+    if (isDisposed()) return;
     yield status;
 
     // Five seconds while the closing countdown runs, thirty otherwise. The
@@ -84,4 +104,4 @@ final storeStatusProvider = StreamProvider<StoreStatus>((ref) async* {
     await Future.any<void>(<Future<void>>[tick.future, disposal.future]);
     timer.cancel();
   }
-});
+}

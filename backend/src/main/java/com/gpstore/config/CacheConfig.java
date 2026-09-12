@@ -46,6 +46,41 @@ public class CacheConfig implements CachingConfigurer {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CacheConfig.class);
 
+    /**
+     * Every cache key carries the shop it was computed for.
+     *
+     * WITHOUT THIS THE CACHE IS A CROSS-SHOP LEAK, and a quiet one. The
+     * catalogue endpoints are @Cacheable on their arguments alone -
+     * getAllProducts(page, size), browseByCategory(id, page), productDetail(id).
+     * Once a price is per-shop, the first shop to ask for page 1 fills the
+     * entry and every other shop is then served ITS prices and ITS
+     * availability, with no query run and nothing in any log to show for it.
+     * The Hibernate filter cannot help: the query never happens.
+     *
+     * So the shop becomes part of the key. Platform-wide work gets its own
+     * namespace rather than sharing one shop's, and an unscoped caller (a
+     * scheduled job warming something) gets a third - three separate
+     * namespaces, none of which can hand a caller another shop's answer.
+     *
+     * ONE GENERATOR FOR EVERY CACHE, deliberately. A per-cache opt-in is a
+     * list somebody has to remember to add to, and the cost of forgetting is
+     * a competitor's price list.
+     */
+    @Override
+    @Bean
+    public org.springframework.cache.interceptor.KeyGenerator keyGenerator() {
+        return (target, method, params) -> {
+            com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+            String namespace = scope == null
+                    ? "unscoped"
+                    : (scope.isPlatform() ? "platform" : "shop:" + scope.shopId());
+            Object[] keyParts = new Object[params.length + 1];
+            keyParts[0] = namespace;
+            System.arraycopy(params, 0, keyParts, 1, params.length);
+            return new org.springframework.cache.interceptor.SimpleKey(keyParts);
+        };
+    }
+
     @Override
     @Bean
     public CacheErrorHandler errorHandler() {

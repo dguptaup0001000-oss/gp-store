@@ -24,9 +24,13 @@ public interface StoreClosureRepository extends JpaRepository<StoreClosure, Long
 
     Optional<StoreClosure> findByClosedOn(LocalDate closedOn);
 
-    /** Upcoming closures for the admin screen, oldest first. */
+    /**
+     * Upcoming closures for the admin screen, oldest first.
+     *
+     * <p>Both queries here are JPQL, so the shop filter narrows them to the
+     * shop in scope - which is the whole reason StoreClosure is ShopOwned
+     * rather than carrying a shopId this file would have to remember to name.
+     */
     @Query("select c from StoreClosure c where c.closedOn >= :from order by c.closedOn asc")
     List<StoreClosure> findUpcoming(@Param("from") LocalDate from);
-
-    void deleteByClosedOn(LocalDate closedOn);
 }

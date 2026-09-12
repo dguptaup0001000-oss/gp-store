@@ -25,6 +25,12 @@ class CartItemModel with _$CartItemModel {
     required double totalPrice,
     double? mrp,
     bool? available,
+
+    /// Which shop this line came off the shelf of.
+    ///
+    /// Sent by the backend (CartResponse.CartItemResponse.shopId), never
+    /// chosen here. Nullable for a line saved before baskets carried a shop.
+    int? shopId,
   }) = _CartItemModel;
 
   factory CartItemModel.fromJson(Map<String, dynamic> json) => _$CartItemModelFromJson(json);
@@ -37,7 +43,24 @@ class CartModel with _$CartModel {
     @Default([]) List<CartItemModel> items,
     @Default(0) double totalAmount,
     @Default(0) int totalItems,
+
+    /// The shops this basket spans, named by the server.
+    ///
+    /// Empty on an older backend, which is fine: the ids are on the lines, so
+    /// grouping still works and only the labels are missing.
+    @Default([]) List<CartShopRef> shops,
   }) = _CartModel;
 
   factory CartModel.fromJson(Map<String, dynamic> json) => _$CartModelFromJson(json);
+}
+
+/// One shop a basket has lines from, as `CartResponse.CartShop` sends it.
+@freezed
+class CartShopRef with _$CartShopRef {
+  const factory CartShopRef({
+    required int shopId,
+    String? shopName,
+  }) = _CartShopRef;
+
+  factory CartShopRef.fromJson(Map<String, dynamic> json) => _$CartShopRefFromJson(json);
 }

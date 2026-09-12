@@ -127,4 +127,35 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
             + "where p.refundId is not null and p.refundedAt is null")
     LocalDateTime oldestRefundAwaitingProvider();
 
+    /**
+     * How the money actually arrived, for one shop, in a window.
+     *
+     * ROOTED ON Payment, WHICH IS SHOP-OWNED - so this one genuinely is
+     * filtered and needs no shop parameter. The window is taken from the
+     * ORDER's date rather than the payment's: a COD payment is created at
+     * checkout and settled when the rider hands the money over, so keying on
+     * paymentDate would put an order and its cash in different weeks and the
+     * statement would not reconcile with the revenue figure beside it.
+     *
+     * THE COD SPLIT IS SEPARATE FROM THE AMOUNT. A rider can be handed part
+     * of a bill in cash and part by UPI on the doorstep, so the payment
+     * carries both; summing the amount alone answers "how much was collected"
+     * but not "how much of it is cash somebody is now carrying", which is the
+     * number a shopkeeper reconciles at the end of the day.
+     */
+    @Query("""
+           select p.paymentMethod as method,
+                  p.paymentStatus as status,
+                  coalesce(sum(p.amount), 0) as amount,
+                  coalesce(sum(p.codCashAmount), 0) as cash,
+                  coalesce(sum(p.codUpiAmount), 0) as upi,
+                  count(p) as paymentCount
+           from Payment p
+           where p.order.orderDate >= :from and p.order.orderDate <= :to
+             and p.order.orderStatus <> com.gpstore.enums.OrderStatus.CANCELLED
+           group by p.paymentMethod, p.paymentStatus
+           """)
+    List<Object[]> collectionsBetween(@Param("from") java.time.LocalDateTime from,
+                                      @Param("to") java.time.LocalDateTime to);
+
 }

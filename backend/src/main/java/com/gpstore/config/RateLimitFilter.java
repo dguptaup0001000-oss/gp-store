@@ -213,7 +213,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             case UPLOAD -> uploadPerMinute;
         };
 
-        String clientKey = "ratelimit:" + identity(bucket, request) + ":" + limitPath(request.getServletPath());
+        String clientKey = "ratelimit:" + identity(bucket, request) + ":" + limitPath(com.gpstore.config.RequestPath.of(request));
 
         if (!allow(bucket, clientKey, limit)) {
             writeTooManyRequests(response);
@@ -262,7 +262,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     Bucket classify(HttpServletRequest request) {
-        String path = request.getServletPath();
+        String path = com.gpstore.config.RequestPath.of(request);
         String method = request.getMethod();
 
         if (path.equals("/api/auth/login")

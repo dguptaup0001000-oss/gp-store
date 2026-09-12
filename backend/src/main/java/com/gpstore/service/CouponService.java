@@ -121,16 +121,34 @@ public class CouponService {
     }
 
     /**
-     * Locks the coupon row, re-validates, computes the discount, and increments
-     * usedCount - all inside the caller's transaction. This is what prevents two
-     * concurrent checkouts from both squeezing past a limited-use coupon.
+     * Whether the shop in scope offers this code at all.
+     *
+     * A CODE IS UNIQUE WITHIN A SHOP, NOT ACROSS THE MARKETPLACE. Two kiranas
+     * may both run a "DIWALI10", and they are different offers with different
+     * money behind them - so checkout asks each shop in the basket separately
+     * and applies the discount to the one that actually issued it.
+     *
+     * READ ONLY, and deliberately outside the redeem path's annotations below:
+     * asking whether a coupon exists must not evict a cache or open the write
+     * transaction that redeeming one needs.
      */
+    @Transactional(readOnly = true)
+    public boolean isOfferedHere(String couponCode) {
+        return couponCode != null && !couponCode.isBlank()
+                && couponRepository.findByCouponCodeIgnoreCase(couponCode.trim()).isPresent();
+    }
+
     @CacheEvict(value = "activeCoupons", allEntries = true)
     @Transactional
     public BigDecimal redeem(String couponCode, BigDecimal orderAmount) {
         return redeem(couponCode, orderAmount, BigDecimal.ZERO).merchandiseDiscount();
     }
 
+    /**
+     * Locks the coupon row, re-validates, computes the discount, and increments
+     * usedCount - all inside the caller's transaction. This is what prevents two
+     * concurrent checkouts from both squeezing past a limited-use coupon.
+     */
     @CacheEvict(value = "activeCoupons", allEntries = true)
     @Transactional
     public AppliedCoupon redeem(String couponCode, BigDecimal merchandiseSubtotal, BigDecimal deliveryFee) {

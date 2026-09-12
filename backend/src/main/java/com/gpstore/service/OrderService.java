@@ -20,6 +20,7 @@ import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.PaymentRepository;
 
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.order.OrderLifecycle;
 
 import com.gpstore.repository.OrderItemRepository;
 import com.gpstore.repository.OrderRepository;
@@ -60,6 +61,14 @@ public class OrderService {
     private final AuditLogService auditLogService;
     private final InvoiceService invoiceService;
     private final TaxService taxService;
+    private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
+    private final com.gpstore.platform.ShopTradingGate shopTradingGate;
+    private final com.gpstore.ordergroup.OrderGroupRepository orderGroupRepository;
+    private final com.gpstore.platform.ShopRepository shopRepository;
+    private final com.gpstore.platform.ShopScopeSwitch shopScopeSwitch;
+    private final com.gpstore.platform.CustomerOwnedRead customerOwnedRead;
+    private final com.gpstore.order.cancellation.CancellationPolicy cancellationPolicy;
+    private final com.gpstore.order.cancellation.CancellationDues cancellationDues;
     private final com.gpstore.repository.DeliveryRepository deliveryRepository;
     private final DeliveryService deliveryService;
     private final com.gpstore.repository.IdempotencyRecordRepository idempotencyRecordRepository;
@@ -104,7 +113,15 @@ public class OrderService {
             @org.springframework.context.annotation.Lazy PaymentService paymentService,
             com.gpstore.store.DeliveryScheduleService deliveryScheduleService,
             @org.springframework.beans.factory.annotation.Value("${orders.require-idempotency-key:true}")
-            boolean requireIdempotencyKey) {
+            boolean requireIdempotencyKey,
+            com.gpstore.catalog.shop.ShopCatalog shopCatalog,
+            com.gpstore.platform.ShopTradingGate shopTradingGate,
+            com.gpstore.ordergroup.OrderGroupRepository orderGroupRepository,
+            com.gpstore.platform.ShopRepository shopRepository,
+            com.gpstore.platform.ShopScopeSwitch shopScopeSwitch,
+            com.gpstore.platform.CustomerOwnedRead customerOwnedRead,
+            com.gpstore.order.cancellation.CancellationPolicy cancellationPolicy,
+            com.gpstore.order.cancellation.CancellationDues cancellationDues) {
 
         this.repository = repository;
         this.deliveryScheduleService = deliveryScheduleService;
@@ -130,6 +147,14 @@ public class OrderService {
         this.outboxEventRepository = outboxEventRepository;
         this.paymentService = paymentService;
         this.requireIdempotencyKey = requireIdempotencyKey;
+        this.shopCatalog = shopCatalog;
+        this.shopTradingGate = shopTradingGate;
+        this.orderGroupRepository = orderGroupRepository;
+        this.shopRepository = shopRepository;
+        this.shopScopeSwitch = shopScopeSwitch;
+        this.customerOwnedRead = customerOwnedRead;
+        this.cancellationPolicy = cancellationPolicy;
+        this.cancellationDues = cancellationDues;
     }
 
 
@@ -196,6 +221,82 @@ public class OrderService {
             throw new BadRequestException("Cart is empty");
         }
 
+        // THE PREVIEW IS PER SHOP, AND THEN ADDED UP (§16). A basket spanning
+        // two kiranas is two deliveries, two delivery fees and two shops that
+        // each have to reach the address - so the customer is shown that
+        // breakdown before they commit, rather than one blended number that
+        // hides which half is the expensive one.
+        //
+        // Each shop's half is computed INSIDE that shop's scope, so its
+        // prices, its stock, its delivery pricing settings and its distance
+        // from the address are all its own.
+        java.util.Map<Long, List<CartItem>> byShop = groupByShop(cartItems);
+
+        // Which shop's offer this code is, if any - see shopIssuingCoupon.
+        Long couponShopId = shopIssuingCoupon(couponCode, byShop.keySet());
+        String couponError = null;
+        if (couponCode != null && !couponCode.isBlank() && couponShopId == null) {
+            couponError = "That coupon is not offered by any of the shops in your basket.";
+        }
+
+        List<com.gpstore.dto.response.CheckoutPreviewResponse.ShopBreakdown> perShop =
+                new ArrayList<>();
+        BigDecimal subtotal = BigDecimal.ZERO;
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        BigDecimal effectiveDeliveryFee = BigDecimal.ZERO;
+        boolean deliverable = true;
+        boolean freeDeliveryApplied = false;
+        Integer estimatedMinutes = null;
+
+        for (java.util.Map.Entry<Long, List<CartItem>> shopBasket : byShop.entrySet()) {
+            final Long shopId = shopBasket.getKey();
+            final List<CartItem> shopItems = shopBasket.getValue();
+            final boolean couponHere = shopId.equals(couponShopId);
+            final String code = couponCode;
+
+            var shopPreview = shopScopeSwitch.within(shopId,
+                    () -> previewOneShop(shopId, shopItems, address, couponHere ? code : null));
+
+            perShop.add(shopPreview);
+            subtotal = subtotal.add(shopPreview.subtotal());
+            discountAmount = discountAmount.add(shopPreview.discountAmount());
+            effectiveDeliveryFee = effectiveDeliveryFee.add(shopPreview.deliveryFee());
+            deliverable = deliverable && shopPreview.deliverable();
+            freeDeliveryApplied = freeDeliveryApplied || shopPreview.freeDeliveryApplied();
+            if (shopPreview.estimatedDeliveryMinutes() != null) {
+                // The whole basket is there when the SLOWEST shop has arrived.
+                estimatedMinutes = estimatedMinutes == null
+                        ? shopPreview.estimatedDeliveryMinutes()
+                        : Math.max(estimatedMinutes, shopPreview.estimatedDeliveryMinutes());
+            }
+            if (couponHere && shopPreview.couponError() != null) {
+                couponError = shopPreview.couponError();
+            }
+        }
+
+        BigDecimal estimatedTotal = subtotal.subtract(discountAmount).add(effectiveDeliveryFee);
+
+        return new com.gpstore.dto.response.CheckoutPreviewResponse(
+                subtotal, discountAmount, effectiveDeliveryFee, estimatedTotal,
+                freeDeliveryApplied, deliverable, estimatedMinutes, couponError, perShop);
+    }
+
+    /**
+     * One shop's half of a checkout preview.
+     *
+     * Runs inside that shop's scope, so every number it produces - the prices,
+     * the delivery quote, the distance, the coupon - belongs to that shop.
+     * Under one shop this is the whole preview, computed exactly as it always
+     * was.
+     */
+    private com.gpstore.dto.response.CheckoutPreviewResponse.ShopBreakdown previewOneShop(
+            Long shopId, List<CartItem> cartItems, Address address, String couponCode) {
+
+        java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings =
+                shopCatalog.listingsForShop(shopId, cartItems.stream()
+                        .map(i -> i.getProductVariant() == null ? null : i.getProductVariant().getId())
+                        .toList());
+
         BigDecimal subtotal = BigDecimal.ZERO;
         for (CartItem item : cartItems) {
             // Same check as placeOrder - surfaced here too so the customer
@@ -210,13 +311,9 @@ public class OrderService {
                         (variant.getProduct() != null ? variant.getProduct().getName() : "An item")
                                 + " is no longer available - please remove it from your cart.");
             }
-
-            subtotal = subtotal.add(
-                    item.getProductVariant().getSellingPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+            subtotal = subtotal.add(shopPriceOf(variant, listings)
+                    .multiply(BigDecimal.valueOf(item.getQuantity())));
         }
-
-        BigDecimal discountAmount = BigDecimal.ZERO;
-        String couponError = null;
 
         boolean deliverable = deliveryEstimateService.isWithinServiceableRadius(
                 address.getLatitude(), address.getLongitude());
@@ -224,18 +321,21 @@ public class OrderService {
         BigDecimal deliveryFee = BigDecimal.ZERO;
         boolean freeDeliveryApplied = false;
         Integer estimatedMinutes = null;
+        String couponError = null;
+        BigDecimal discountAmount = BigDecimal.ZERO;
 
         if (deliverable) {
             // ONE CALL, ONE PRICE. The distance tiers, the weight surcharge and
             // the margin subsidy are all decided together in
-            // DeliveryPricingService - the preview and the real order below
-            // both go through it, so the number a customer is shown at
-            // checkout is produced by the same code that charges them.
+            // DeliveryPricingService - the preview and the real order both go
+            // through it, so the number a customer is shown at checkout is
+            // produced by the same code that charges them.
             com.gpstore.pricing.DeliveryQuote quote =
                     deliveryPricingService.quoteForCart(cartItems, address);
             deliveryFee = quote.finalCharge();
             freeDeliveryApplied = quote.freeDelivery();
-            estimatedMinutes = deliveryEstimateService.estimateMinutes(address.getLatitude(), address.getLongitude());
+            estimatedMinutes = deliveryEstimateService.estimateMinutes(
+                    address.getLatitude(), address.getLongitude());
         }
 
         if (couponCode != null && !couponCode.isBlank()) {
@@ -251,14 +351,12 @@ public class OrderService {
             }
         }
 
-        // finalCharge is already zero when delivery is free - the quote applies
-        // the rule, rather than the caller re-deciding it and risking the two
-        // disagreeing. A DELIVERY_FLAT coupon may still reduce a non-zero quote.
-        BigDecimal effectiveDeliveryFee = deliveryFee;
-        BigDecimal estimatedTotal = subtotal.subtract(discountAmount).add(effectiveDeliveryFee);
+        String shopName = shopRepository.findById(shopId)
+                .map(com.gpstore.platform.Shop::getDisplayName).orElse(null);
 
-        return new com.gpstore.dto.response.CheckoutPreviewResponse(
-                subtotal, discountAmount, effectiveDeliveryFee, estimatedTotal,
+        return new com.gpstore.dto.response.CheckoutPreviewResponse.ShopBreakdown(
+                shopId, shopName, cartItems.size(), subtotal, discountAmount, deliveryFee,
+                subtotal.subtract(discountAmount).add(deliveryFee),
                 freeDeliveryApplied, deliverable, estimatedMinutes, couponError);
     }
 
@@ -287,6 +385,9 @@ public class OrderService {
     public PlaceOrderResponse placeOrder(PlaceOrderRequest request, Long customerId, String idempotencyKey) {
         try {
             return transactionTemplate.execute(status -> placeOrderInTransaction(request, customerId, idempotencyKey));
+        } catch (IdempotentReplayException replay) {
+            // An ordinary retry of a checkout that already completed.
+            return replayAcrossShops(customerId, replay.orderId());
         } catch (IdempotencyRaceException raced) {
             // The insert TX is already rolled back. Reading the winner here
             // is a new transaction, so a completed checkout can replay
@@ -300,6 +401,13 @@ public class OrderService {
         if (request == null) {
             throw new BadRequestException("Request cannot be null");
         }
+
+        // Can this storefront trade at all? Suspended by the platform, closed
+        // for good, or under a merchant who has been removed - none of those
+        // may take a customer's money, whatever the shop's own open/closed
+        // switch says. See ShopTradingGate for why the two are separate
+        // questions.
+        shopTradingGate.requireCanAcceptOrders();
 
         if (requireIdempotencyKey && (idempotencyKey == null || idempotencyKey.isBlank())) {
             throw new BadRequestException(
@@ -377,8 +485,21 @@ public class OrderService {
 
                 if (record.getOrderId() != null) {
                     // Genuine replay: same checkout attempt, already completed.
-                    // Return the original result rather than processing again.
-                    return buildReplayResponse(record.getOrderId());
+                    //
+                    // ANSWERED OUTSIDE THIS TRANSACTION, not here. A replay
+                    // describes a checkout that may span several shops, and a
+                    // Hibernate filter is fixed when the session opens - this
+                    // session's is this request's ONE shop. Building the
+                    // answer here therefore returned the caller's own shop's
+                    // order and silently dropped every other shop's, which is
+                    // half a purchase reported as the whole of it.
+                    //
+                    // So the request is thrown out of the checkout
+                    // transaction and re-read across the customer's shops.
+                    // Nothing has been written at this point - the replay path
+                    // reads a cart and a fingerprint and nothing else - so
+                    // there is nothing for the rollback to lose.
+                    throw new IdempotentReplayException(record.getOrderId());
                 }
                 // A record exists with no order yet - a duplicate is either
                 // still being processed right now, or a prior attempt crashed
@@ -435,30 +556,22 @@ public class OrderService {
         // the same instant and the same settings read, so they cannot describe
         // three slightly different moments, and checkout costs one closures
         // query rather than three.
-        final com.gpstore.store.StoreStatus storeStatus =
-                deliveryScheduleService.getStoreStatusAt(placedAt);
-
-        if (!storeStatus.acceptingOrders()) {
-            String message = storeStatus.closureReason();
-            throw new ConflictException(
-                    message != null && !message.isBlank()
-                            ? message
-                            : "The shop has paused new orders for the moment. "
-                                    + "You can keep browsing, and your cart will be waiting.");
-        }
+        // WHETHER THE SHOP IS TAKING ORDERS IS ASKED PER SHOP, in the loop
+        // below, against that shop's own hours and its own closure message.
+        // It used to be asked once here, of whichever shop the request
+        // resolved to - which under a marketplace is the wrong shop for every
+        // other half of the basket, and which read the settings a second time
+        // for the shop it was right about.
 
         // Throws if the address doesn't belong to this customer.
         Address address = addressService.getOwnedAddress(request.getAddressId(), customerId);
 
-        // Business rule: one store, not a dark-store network - don't accept an
-        // order we can't realistically deliver. Fails closed if the address has
-        // no coordinates at all, rather than silently accepting an unverified order.
-        if (!deliveryEstimateService.isWithinServiceableRadius(address.getLatitude(), address.getLongitude())) {
-            throw new BadRequestException(
-                    "This address is outside our delivery range (" +
-                            deliveryEstimateService.getMaxDeliveryRadiusKm() + " km). " +
-                            "Please choose a different address or add location coordinates to this one.");
-        }
+        // Serviceability is checked PER SHOP, below, once the basket has been
+        // grouped - see requireShopDelivers. The check that used to be here
+        // asked the same question of one configured store, which under a
+        // marketplace is the wrong store for every shop but one; asking it
+        // twice would also be a second round trip on the checkout path for an
+        // answer already obtained.
 
         if (customer.getCart() == null) {
             throw new BadRequestException("Customer cart not found");
@@ -474,6 +587,294 @@ public class OrderService {
             throw new BadRequestException("Cart is empty");
         }
 
+        // ---------------------------------------------------------------
+        // THE SPLIT (§16).
+        //
+        // One basket becomes one order PER SHOP, under one group. Each shop
+        // packs, prices, delivers and is paid for its own half, and each of
+        // those orders then has its own lifecycle - one can be cancelled or
+        // refunded while the other is out for delivery.
+        //
+        // GROUPED BY THE LINE'S OWN shop_id, which CartService stamped from
+        // the shop the add-to-cart request resolved to. Not by anything in
+        // this request: a shop id a customer could send would be a shop id
+        // that moves an item into another shop's order.
+        //
+        // A SINGLE-SHOP BASKET TAKES EXACTLY THIS PATH and produces exactly
+        // one order, which is the order it always produced. There is no
+        // "if more than one shop" branch anywhere, because a rare branch is
+        // one nobody exercises until the day it matters.
+        // ---------------------------------------------------------------
+        java.util.Map<Long, List<CartItem>> byShop = groupByShop(cartItems);
+
+        // EVERY SHOP IN THE BASKET HAS TO REACH THIS ADDRESS, and each one is
+        // asked separately against its own radius. A basket spanning two
+        // kiranas where only one delivers to the customer is not an order
+        // somebody can fulfil, and finding that out after the money moved
+        // would be finding it out too late.
+        for (Long shopId : byShop.keySet()) {
+            requireShopDelivers(shopId, address);
+        }
+
+        // A COUPON BELONGS TO ONE SHOP, so it comes off one shop's half of the
+        // basket - the shop that issued it. Applying it to every shop would
+        // have the other merchants funding a discount they never offered, and
+        // applying it to whichever shop happened to be first would be worse
+        // still: arbitrary, and different on the next checkout.
+        Long couponShopId = shopIssuingCoupon(request.getCouponCode(), byShop.keySet());
+        if (request.getCouponCode() != null && !request.getCouponCode().isBlank()
+                && couponShopId == null) {
+            throw new BadRequestException(
+                    "That coupon is not offered by any of the shops in your basket.");
+        }
+
+        com.gpstore.ordergroup.OrderGroup group = new com.gpstore.ordergroup.OrderGroup();
+        group.setGroupNumber(OrderNumberGenerator.generateGroupNumber(
+                repository.nextOrderNumberSequenceValue()));
+        group.setCustomerId(customerId);
+        group.setAddressId(address.getId());
+        group.setShopCount(byShop.size());
+        group.setTotalAmount(BigDecimal.ZERO);
+        group = orderGroupRepository.save(group);
+
+        List<ShopOrder> placed = new ArrayList<>();
+        BigDecimal groupTotal = BigDecimal.ZERO;
+
+        for (java.util.Map.Entry<Long, List<CartItem>> shopBasket : byShop.entrySet()) {
+            Long shopId = shopBasket.getKey();
+
+            // EACH SHOP'S ORDER IS BUILT INSIDE THAT SHOP'S SCOPE.
+            //
+            // Not for the read filter - a Hibernate filter is fixed when the
+            // persistence session opens, and a checkout that visits three
+            // shops is one session, which is why the prices and the stock rows
+            // below are named explicitly instead. It is for the WRITE side:
+            // TenantEntityListener stamps every shop-owned row from the scope
+            // on the thread, and the scope this request arrived with is the
+            // shop the customer was browsing. Without this, the second shop's
+            // order, its payment, its delivery and its invoice would all be
+            // stamped with the FIRST shop's id - which is one merchant's order
+            // filed in another merchant's books.
+            //
+            // The instant is the checkout's, so every shop's order carries the
+            // same "placed at". The store status is read per shop: when each
+            // kirana opens, and how long it needs to pack, is its own
+            // business, and a delivery promise borrowed from the shop next
+            // door is a promise nobody made.
+            final com.gpstore.ordergroup.OrderGroup thisGroup = group;
+            final boolean couponHere = couponShopId != null && couponShopId.equals(shopId);
+            ShopOrder shopOrder = shopScopeSwitch.within(shopId,
+                    () -> placeOneShopOrder(request, customer, address, shopBasket.getValue(),
+                            thisGroup, placedAt, requireAcceptingOrders(shopId, placedAt),
+                            couponHere));
+            placed.add(shopOrder);
+            groupTotal = groupTotal.add(shopOrder.order().getTotalAmount());
+        }
+
+        group.setTotalAmount(groupTotal);
+        group = orderGroupRepository.save(group);
+
+        // ONE record per checkout, pointing at the first shop's order.
+        //
+        // The key identifies the CHECKOUT, not one of its orders, so a replay
+        // has to find its way back to the whole group - which it does through
+        // that order's own group id. Storing the group id here as well would
+        // be a second copy of the same fact.
+        if (idempotencyRecord != null) {
+            idempotencyRecord.setOrderId(placed.get(0).order().getId());
+            idempotencyRecordRepository.save(idempotencyRecord);
+        }
+
+        // Cleared ONCE, after every shop's order is built. Clearing it inside
+        // the loop would empty the basket the second shop still has to read.
+        cartItemService.clearCart(cartId);
+
+        return respondWith(group, placed, paymentService.parsePaymentMethod(request.getPaymentMethod()));
+    }
+
+    /**
+     * Refuses a basket containing a shop that will not deliver to this address.
+     *
+     * Asked inside the shop's own scope so the radius and the coordinates are
+     * that shop's - see DeliveryEstimateService.origin. Under one shop this is
+     * the same check, against the same numbers, that checkout has always run.
+     */
+    private void requireShopDelivers(Long shopId, Address address) {
+        boolean deliverable = shopScopeSwitch.within(shopId,
+                () -> deliveryEstimateService.isWithinServiceableRadius(
+                        address.getLatitude(), address.getLongitude()));
+        if (!deliverable) {
+            double radius = shopScopeSwitch.within(shopId,
+                    deliveryEstimateService::getMaxDeliveryRadiusKm);
+            throw new BadRequestException(
+                    "This address is outside our delivery range (" + radius + " km). "
+                            + "Please choose a different address or add location coordinates to this one.");
+        }
+    }
+
+    /**
+     * Which shop in this basket offers that coupon, if any.
+     *
+     * Asked shop by shop, inside each shop's scope, because a coupon code is
+     * unique WITHIN a shop and not across the marketplace - two kiranas may
+     * both run a "DIWALI10", and they are different offers with different
+     * money behind them.
+     */
+    private Long shopIssuingCoupon(String couponCode, java.util.Collection<Long> shopIds) {
+        if (couponCode == null || couponCode.isBlank()) {
+            return null;
+        }
+        for (Long shopId : shopIds) {
+            boolean offered = shopScopeSwitch.within(shopId,
+                    () -> couponService.isOfferedHere(couponCode));
+            if (offered) {
+                return shopId;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * That shop's hours, and a refusal if it is not taking orders.
+     *
+     * ASKED OF EACH SHOP IN THE BASKET. One kirana closing early does not
+     * close the other, and the message a customer sees has to be the words
+     * that shop wrote - "back at 9am" reads very differently from a generic
+     * apology, and from the shop next door's.
+     */
+    private com.gpstore.store.StoreStatus requireAcceptingOrders(Long shopId, java.time.Instant placedAt) {
+        com.gpstore.store.StoreStatus status = storeStatusOf(shopId, placedAt);
+        if (!status.acceptingOrders()) {
+            String message = status.closureReason();
+            throw new ConflictException(
+                    message != null && !message.isBlank()
+                            ? message
+                            : "The shop has paused new orders for the moment. "
+                                    + "You can keep browsing, and your cart will be waiting.");
+        }
+        return status;
+    }
+
+    /**
+     * When that shop opens, and what it can promise.
+     *
+     * READ INSIDE THAT SHOP'S SCOPE, because the schedule and the operations
+     * settings behind it are per shop (V49) and are found by the shop in
+     * scope. Without this every shop's order in a group would inherit the
+     * hours of whichever shop the request happened to resolve to.
+     */
+    private com.gpstore.store.StoreStatus storeStatusOf(Long shopId, java.time.Instant placedAt) {
+        return shopScopeSwitch.within(shopId, () -> deliveryScheduleService.getStoreStatusAt(placedAt));
+    }
+
+    /**
+     * The basket, in shop order.
+     *
+     * SORTED BY SHOP ID, and that is not cosmetic. Two customers checking out
+     * baskets that overlap two shops must take that pair of shops in the same
+     * sequence, for the same reason inventory locks are taken in ascending
+     * variant id - opposite orders deadlock. A LinkedHashMap over a sorted key
+     * set is what makes the sequence deterministic.
+     *
+     * A LINE WITH NO SHOP CANNOT BE CHECKED OUT. V51 backfilled every existing
+     * line and CartService stamps every new one, so this is unreachable - and
+     * it refuses rather than guessing, because guessing would put somebody
+     * else's item into a shop's order.
+     */
+    private static java.util.Map<Long, List<CartItem>> groupByShop(List<CartItem> cartItems) {
+        java.util.Map<Long, List<CartItem>> byShop = new java.util.LinkedHashMap<>();
+        List<CartItem> sorted = cartItems.stream()
+                .sorted(java.util.Comparator.comparing(
+                        item -> item.getShopId() == null ? Long.MIN_VALUE : item.getShopId()))
+                .toList();
+        for (CartItem item : sorted) {
+            if (item.getShopId() == null) {
+                throw new ConflictException(
+                        "An item in your basket is no longer linked to a shop. Please remove and "
+                                + "add it again.");
+            }
+            byShop.computeIfAbsent(item.getShopId(), shop -> new ArrayList<>()).add(item);
+        }
+        return byShop;
+    }
+
+    /**
+     * One order, and the payment created with it.
+     *
+     * A record rather than a bare Order because the response needs the payment
+     * status and the UPI link, and re-reading the payment to get them would be
+     * a query for something this method already had in its hand.
+     */
+    private record ShopOrder(Order order, com.gpstore.entity.Payment payment) {}
+
+    /**
+     * The checkout's answer, shaped so an app that has never heard of groups
+     * still works.
+     *
+     * BACKWARD COMPATIBLE ON PURPOSE. orderId, orderNumber, paymentStatus and
+     * upiPaymentLink still describe ONE order - the first shop's - because
+     * that is what every APK already on a customer's phone reads, and those
+     * builds outnumber anything that knows about this change. The group and
+     * the per-shop breakdown are added beside them, so a single-shop checkout
+     * answers byte-for-byte what it always did.
+     */
+    private PlaceOrderResponse respondWith(com.gpstore.ordergroup.OrderGroup group,
+                                           List<ShopOrder> placed,
+                                           PaymentMethod paymentMethod) {
+        ShopOrder primary = placed.get(0);
+
+        PlaceOrderResponse response = new PlaceOrderResponse();
+        response.setSuccess(true);
+        response.setOrderId(primary.order().getId());
+        response.setOrderNumber(primary.order().getOrderNumber());
+        response.setMessage("Order placed successfully.");
+        response.setPaymentStatus(nameOf(primary.payment().getPaymentStatus()));
+        response.setUpiPaymentLink(paymentService.upiLinkFor(primary.order(), paymentMethod));
+
+        response.setOrderGroupId(group.getId());
+        response.setOrderGroupNumber(group.getGroupNumber());
+        response.setShopOrders(placed.stream()
+                .map(shopOrder -> new PlaceOrderResponse.ShopOrderSummary(
+                        shopOrder.order().getId(),
+                        shopOrder.order().getOrderNumber(),
+                        shopOrder.order().getShopId(),
+                        shopOrder.order().getTotalAmount(),
+                        shopOrder.order().getDeliveryFee(),
+                        nameOf(shopOrder.payment().getPaymentStatus()),
+                        paymentService.upiLinkFor(shopOrder.order(), paymentMethod)))
+                .toList());
+        return response;
+    }
+
+    /**
+     * Builds ONE shop's order out of the lines that came off that shop's shelf.
+     *
+     * THE WHOLE MULTI-SHOP SPLIT IS THE CALLER'S LOOP OVER THIS METHOD. There
+     * is no per-shop code anywhere: the same routine that placed the single
+     * shop's order before Slice 6 places each shop's order now, given a
+     * narrower list of cart lines. A basket from one shop runs it once, and
+     * that is the same order it always produced.
+     */
+    private ShopOrder placeOneShopOrder(PlaceOrderRequest request,
+                                        Customer customer,
+                                        Address address,
+                                        List<CartItem> cartItems,
+                                        com.gpstore.ordergroup.OrderGroup group,
+                                        java.time.Instant placedAt,
+                                        com.gpstore.store.StoreStatus storeStatus,
+                                        boolean applyCoupon) {
+        // Whose half this is, taken off the cart lines themselves. Every line
+        // handed to this method carries the same shop - groupByShop is what
+        // guarantees it - so reading the first is reading all of them.
+        final Long shopId = cartItems.get(0).getShopId();
+
+        // THIS SHOP'S HALF OF THE BASKET, and nothing else. Everything below
+        // reads `cartItems`, which the caller has already narrowed to the
+        // lines that came off this shop's shelf - so the stock it locks, the
+        // prices it charges, the delivery it quotes and the payment it creates
+        // are all that shop's, and nothing below branches on which shop it is.
+        // That is what stops there being one code path per shop.
+        //
         // Deadlock prevention: always acquire inventory locks in the same
         // global order (ascending variant ID), regardless of the order items
         // happened to be added to this particular cart. Without this, two
@@ -510,8 +911,13 @@ public class OrderService {
                                 + " is no longer available - please remove it from your cart.");
             }
 
+            // THIS SHOP'S STOCK ROW, NAMED. Same reason as the prices above:
+            // one transaction visits several shops, and the filter was fixed
+            // when the session opened. Without the shop id, the second shop's
+            // half of a basket would lock and decrement whichever row the
+            // query found first - which is the first shop's.
             Inventory inventory = inventoryService
-                    .getByProductVariantForUpdate(item.getProductVariant().getId());
+                    .getByProductVariantForUpdate(item.getProductVariant().getId(), shopId);
 
             if (inventory == null) {
                 throw new ResourceNotFoundException(
@@ -535,6 +941,12 @@ public class OrderService {
         order.setOrderNumber(OrderNumberGenerator.generate(repository.nextOrderNumberSequenceValue()));
         order.setCustomer(customer);
         order.setAddress(address);
+
+        // WHICH CHECKOUT THIS ORDER CAME FROM. The group is what the customer
+        // thinks they placed; this order is one shop's part of it, and it is
+        // the link that lets a customer see the whole thing while each shop
+        // works only its own.
+        order.setOrderGroupId(group.getId());
 
         // WHERE THIS ORDER GOES, COPIED NOW AND NEVER RE-READ.
         //
@@ -592,13 +1004,20 @@ public class OrderService {
 
         order.setActive(true);
 
+        // THE PRICE CHARGED IS THIS SHOP'S PRICE. Read once for the whole
+        // basket and reused for the order lines below, so the total and the
+        // lines cannot disagree - the two used to read the same catalogue
+        // field, and now read the same map.
+        java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings =
+                shopCatalog.listingsForShop(shopId, cartItems.stream()
+                        .map(i -> i.getProductVariant() == null ? null : i.getProductVariant().getId())
+                        .toList());
+
         BigDecimal totalAmount = BigDecimal.ZERO;
 
         for (CartItem item : cartItems) {
-            totalAmount = totalAmount.add(
-                    item.getProductVariant()
-                            .getSellingPrice()
-                            .multiply(BigDecimal.valueOf(item.getQuantity())));
+            totalAmount = totalAmount.add(shopPriceOf(item.getProductVariant(), listings)
+                    .multiply(BigDecimal.valueOf(item.getQuantity())));
         }
 
         // Coupon is validated and redeemed (usage count incremented, under a row
@@ -612,7 +1031,7 @@ public class OrderService {
         boolean freeDeliveryApplied = quote.freeDelivery();
 
         AppliedCoupon applied = AppliedCoupon.none();
-        if (request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
+        if (applyCoupon && request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
             applied = couponService.redeem(request.getCouponCode(), totalAmount, quotedDeliveryFee);
             order.setAppliedCouponCode(request.getCouponCode().toUpperCase());
             order.setDiscountAmount(applied.merchandiseDiscount());
@@ -647,14 +1066,6 @@ public class OrderService {
 
         order = repository.save(order);
 
-        if (idempotencyRecord != null) {
-            // Marks this key as completed, pointing at the real order - any
-            // repeat request with the same key from here on replays this
-            // result instead of running checkout again.
-            idempotencyRecord.setOrderId(order.getId());
-            idempotencyRecordRepository.save(idempotencyRecord);
-        }
-
         List<OrderItem> newOrderItems = new ArrayList<>();
 
         for (CartItem item : cartItems) {
@@ -664,9 +1075,9 @@ public class OrderService {
             orderItem.setOrder(order);
             orderItem.setProductVariant(item.getProductVariant());
             orderItem.setQuantity(item.getQuantity());
-            orderItem.setPrice(item.getProductVariant().getSellingPrice());
-            orderItem.setTotalPrice(item.getProductVariant().getSellingPrice()
-                    .multiply(BigDecimal.valueOf(item.getQuantity())));
+            BigDecimal linePrice = shopPriceOf(item.getProductVariant(), listings);
+            orderItem.setPrice(linePrice);
+            orderItem.setTotalPrice(linePrice.multiply(BigDecimal.valueOf(item.getQuantity())));
             orderItem.setGstRate(taxService.resolveGstRate(item.getProductVariant()));
             orderItem.setActive(true);
 
@@ -705,17 +1116,20 @@ public class OrderService {
             inventory.setStock(newStock);
         }
 
-        // Clear cart
-        cartItemService.clearCart(cartId);
-
         // Durable record of the post-order work that must not be lost.
         // INSERTed inside THIS transaction on purpose: it commits with the
         // order or not at all, so there is no window in which an order
         // exists but its invoice work was never recorded. Contrast the
         // executor below, which is in-memory and does not survive the
         // redeploys this service gets on every push.
+        // THE SHOP GOES ON THE EVENT. The worker that drains this runs on a
+        // background thread with no scope of its own; without the shop written
+        // down here, generating the invoice has nothing to stamp it with and
+        // the whole event dead-letters - no invoice, no rider, for every order
+        // in the marketplace. See V53.
         outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
-                OutboxWorker.AGGREGATE_ORDER, order.getId(), OutboxWorker.EVENT_ORDER_PLACED));
+                OutboxWorker.AGGREGATE_ORDER, order.getId(), OutboxWorker.EVENT_ORDER_PLACED,
+                order.getShopId()));
 
         // Payment row created HERE, inside the order transaction, instead of
         // leaving the client to make a second HTTP request for it.
@@ -809,33 +1223,69 @@ public class OrderService {
         // request thread.
         afterCommitExecutor.runAfterCommit("Post-order side effects", placedOrderId, afterCommitWork);
 
-        PlaceOrderResponse response = new PlaceOrderResponse();
-
-        response.setSuccess(true);
-        response.setOrderId(order.getId());
-        response.setOrderNumber(order.getOrderNumber());
-        response.setMessage("Order placed successfully.");
-        response.setPaymentStatus(nameOf(newPayment.getPaymentStatus()));
-        response.setUpiPaymentLink(paymentService.upiLinkFor(order, paymentMethod));
-
-        return response;
+        return new ShopOrder(order, newPayment);
     }
 
     private PlaceOrderResponse replayAfterIdempotencyRace(Long customerId, String idempotencyKey) {
-        return transactionTemplate.execute(status -> {
+        return customerOwnedRead.acrossShops(() -> transactionTemplate.execute(status -> {
             Optional<com.gpstore.entity.IdempotencyRecord> winner =
                     idempotencyRecordRepository.findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey);
             if (winner.isPresent() && winner.get().getOrderId() != null) {
-                return buildReplayResponse(winner.get().getOrderId());
+                return buildReplayResponse(customerId, winner.get().getOrderId());
             }
             throw new ConflictException(
                     "This order is already being processed. Please wait a moment and check your order history before trying again.");
-        });
+        }));
+    }
+
+    /**
+     * Re-reads a finished checkout, across every shop it touched.
+     *
+     * WHY THE SCOPE IS WIDENED, AND WHY THAT IS SAFE. A checkout is one
+     * customer's purchase from one to several merchants (§16). Read inside one
+     * shop's scope it comes back as that shop's order alone - so the customer
+     * whose retry replayed was shown one order for a basket they had paid two
+     * kiranas for, with no group id to open the rest with. CustomerOwnedRead
+     * is the mechanism this codebase already has for exactly that shape: it
+     * relaxes the MERCHANT boundary for a caller who is a party to every row
+     * on the other side of it, and relaxes no ownership check at all.
+     *
+     * IT WRAPS THE TRANSACTION RATHER THAN SITTING INSIDE IT, which is the
+     * whole requirement - a Hibernate filter is enabled when the session
+     * opens, so widening after the fact does nothing. placeOrder is not
+     * itself transactional (it drives a TransactionTemplate), which is what
+     * makes wrapping possible here.
+     *
+     * The ownership check inside buildReplayResponse is what keeps this
+     * honest: the widening crosses shops, never customers.
+     */
+    private PlaceOrderResponse replayAcrossShops(Long customerId, Long orderId) {
+        return customerOwnedRead.acrossShops(
+                () -> transactionTemplate.execute(
+                        status -> buildReplayResponse(customerId, orderId)));
     }
 
     private static final class IdempotencyRaceException extends RuntimeException {
         IdempotencyRaceException(Throwable cause) {
             super(cause);
+        }
+    }
+
+    /**
+     * Carries a completed checkout's order id out of the checkout transaction
+     * so the answer can be built across shops. Not an error - it never
+     * reaches a client.
+     */
+    private static final class IdempotentReplayException extends RuntimeException {
+        private final Long orderId;
+
+        IdempotentReplayException(Long orderId) {
+            super(null, null, false, false);
+            this.orderId = orderId;
+        }
+
+        Long orderId() {
+            return orderId;
         }
     }
 
@@ -1065,6 +1515,17 @@ public class OrderService {
             response.setCustomerName(order.getCustomer() != null ? order.getCustomer().getFullName() : null);
         }
 
+        // THE SELLER, NAMED. The id alone would leave the app showing a
+        // number; the name is read through the shop repository, which is
+        // platform-level - a customer's own order history legitimately spans
+        // shops (CustomerOwnedRead), so the name of a shop they bought from
+        // is not somebody else's data.
+        response.setShopId(order.getShopId());
+        if (order.getShopId() != null) {
+            shopRepository.findById(order.getShopId())
+                    .ifPresent(shop -> response.setShopName(shop.getDisplayName()));
+        }
+
         return response;
     }
 
@@ -1080,33 +1541,39 @@ public class OrderService {
         Order order = repository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
-        if (order.getOrderStatus() == OrderStatus.DELIVERED) {
-            throw new ConflictException("Delivered order status cannot be changed");
-        }
-
-        if (order.getOrderStatus() == OrderStatus.CANCELLED) {
-            throw new ConflictException("Cancelled order status cannot be changed");
+        // DELIVERED is terminal for STATUS PURPOSES but not for the order:
+        // DELIVERED -> COMPLETED is a real transition (§1), so the guard asks
+        // the lifecycle rather than naming states, which is also how REJECTED
+        // and COMPLETED became unmovable without a third and fourth branch.
+        if (OrderLifecycle.isTerminal(order.getOrderStatus())
+                && !OrderLifecycle.allows(order.getOrderStatus(), status)) {
+            throw new ConflictException(
+                    order.getOrderStatus() + " order status cannot be changed");
         }
 
         OrderStatus currentStatus = order.getOrderStatus();
 
-        boolean validTransition =
-                (currentStatus == OrderStatus.PENDING_CONFIRMATION && status == OrderStatus.CONFIRMED)
-                        || (currentStatus == OrderStatus.CONFIRMED && status == OrderStatus.PACKING)
-                        || (currentStatus == OrderStatus.PACKING && status == OrderStatus.READY_TO_DISPATCH)
-                        || (currentStatus == OrderStatus.READY_TO_DISPATCH && status == OrderStatus.OUT_FOR_DELIVERY)
-                        // PACKED is what a worker's QR scan writes. It sits
-                        // beside READY_TO_DISPATCH rather than replacing it:
-                        // the older state is still reachable from the admin
-                        // status dropdown and still on live orders, and
-                        // deleting a state that production rows hold is how a
-                        // deployment breaks every order mid-flight.
-                        || (currentStatus == OrderStatus.CONFIRMED && status == OrderStatus.PACKED)
-                        || (currentStatus == OrderStatus.PACKING && status == OrderStatus.PACKED)
-                        || (currentStatus == OrderStatus.READY_TO_DISPATCH && status == OrderStatus.PACKED)
-                        || (currentStatus == OrderStatus.PACKED && status == OrderStatus.OUT_FOR_DELIVERY)
-                        || (currentStatus == OrderStatus.PACKED && status == OrderStatus.READY_TO_DISPATCH)
-                        || (currentStatus == OrderStatus.OUT_FOR_DELIVERY && status == OrderStatus.DELIVERED);
+        // ENDING AN ORDER IS NOT A STATUS EDIT, and this is the guard that
+        // says so. CANCELLED and REJECTED both have to give the stock back
+        // and start the refund; reaching them through here would set the
+        // column and do neither, leaving a cancelled order whose goods are
+        // still off the shelf and whose customer is still out of pocket.
+        // OrderStatusStateMachineTest caught exactly that the moment the
+        // transition table made them reachable.
+        if (status == OrderStatus.CANCELLED || status == OrderStatus.REJECTED) {
+            throw new ConflictException(
+                    "An order is " + (status == OrderStatus.CANCELLED ? "cancelled" : "rejected")
+                            + " through its own endpoint, which returns the stock to the shelf "
+                            + "and starts the refund. Setting the status alone would do neither.");
+        }
+
+        // THE TABLE, NOT A CHAIN OF ORs. These rules used to be a fourteen
+        // clause boolean expression right here; they are now
+        // OrderLifecycle, which the merchant app can also ask "what can this
+        // order do next" instead of hard-coding a second copy that drifts.
+        // Every transition that worked before still works - the table was
+        // transcribed from the expression clause by clause.
+        boolean validTransition = OrderLifecycle.allows(currentStatus, status);
 
         if (!validTransition) {
             throw new ConflictException(
@@ -1186,6 +1653,93 @@ public class OrderService {
     @Transactional
     @io.micrometer.core.annotation.Timed(value = "order.cancel", description = "Order cancellation critical path", percentiles = {0.5, 0.95, 0.99})
     public com.gpstore.dto.response.OrderDetailResponse cancelOrder(Long orderId, Long callerCustomerId, boolean isAdmin) {
+        return endOrder(orderId, callerCustomerId, isAdmin, OrderStatus.CANCELLED, null, null);
+    }
+
+    /**
+     * What cancelling this order would cost, WITHOUT cancelling it (§10).
+     *
+     * <p>THE SAME QUOTE THE CANCELLATION APPLIES. It calls
+     * CancellationPolicy.quote with the same arguments endOrder does, so the
+     * number the customer agreed to and the number taken cannot drift apart -
+     * the alternative, a display calculation beside a charging calculation,
+     * is two implementations of one rule and eventually two answers.
+     *
+     * <p>Ownership is checked exactly as it is for cancelling: a customer who
+     * cannot cancel an order cannot price cancelling it either, and the 404
+     * is deliberately the same one, so probing ids tells an attacker nothing.
+     */
+    @Transactional(readOnly = true)
+    public com.gpstore.order.cancellation.CancellationQuoteResponse cancellationQuote(
+            Long orderId, Long callerCustomerId, boolean isAdmin) {
+
+        Order order = repository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        if (!isAdmin && (order.getCustomer() == null
+                || !order.getCustomer().getId().equals(callerCustomerId))) {
+            throw new ResourceNotFoundException("Order not found");
+        }
+
+        String blocked = null;
+        if (OrderLifecycle.isTerminal(order.getOrderStatus())) {
+            blocked = "This order has already ended.";
+        } else if (!OrderLifecycle.allows(order.getOrderStatus(), OrderStatus.CANCELLED)) {
+            blocked = "A " + order.getOrderStatus() + " order cannot be cancelled.";
+        } else if (!isAdmin && !customerMayCancel(order.getOrderStatus())) {
+            blocked = "This order can no longer be cancelled. Contact the shop if you need help.";
+        }
+
+        // The fault this cancellation WOULD carry, derived the same way
+        // endOrder derives it - an admin cancellation is PLATFORM, whose
+        // fault is undecided and therefore free (§12).
+        com.gpstore.enums.OrderFault wouldBeFault =
+                isAdmin ? null : com.gpstore.enums.OrderFault.CUSTOMER;
+
+        com.gpstore.order.cancellation.CancellationCharge charge =
+                cancellationPolicy.quote(order, wouldBeFault,
+                        java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+
+        Payment payment = paymentRepository.findByOrderId(orderId).orElse(null);
+        boolean cashOnDelivery = payment == null
+                || payment.getPaymentMethod() == PaymentMethod.COD
+                || payment.getPaymentStatus() != PaymentStatus.SUCCESS;
+
+        return com.gpstore.order.cancellation.CancellationQuoteResponse.of(
+                order.getId(), order.getOrderNumber(), blocked == null, blocked,
+                charge, cashOnDelivery);
+    }
+
+    /**
+     * The shop refuses an order it has not accepted (§1).
+     *
+     * <p>THE SAME MACHINERY AS A CANCELLATION, deliberately. A rejected order
+     * has to give its stock back and refund its payment exactly as a cancelled
+     * one does - the only differences are the word the customer sees and the
+     * fact that nobody is billed for it. Writing a second path would be
+     * writing a second chance to forget the refund.
+     *
+     * <p>ONLY BEFORE ACCEPTANCE. OrderLifecycle refuses PENDING_CONFIRMATION
+     * as the only origin, because §2 says a shop that has said yes owes the
+     * order; a shop that cannot fulfil one it accepted cancels it instead, at
+     * MERCHANT fault, and the customer is still not charged (§12).
+     */
+    @Transactional
+    public com.gpstore.dto.response.OrderDetailResponse rejectOrder(Long orderId, String reason) {
+        return endOrder(orderId, null, true, OrderStatus.REJECTED,
+                com.gpstore.enums.OrderActor.MERCHANT, reason);
+    }
+
+    /**
+     * Ends an order: cancelled or rejected, stock back, refund started.
+     *
+     * @param endState  CANCELLED or REJECTED - the word, not the mechanism
+     * @param asActor   who is ending it, or null to infer from isAdmin
+     * @param reason    in the ender's own words, shown to the other side
+     */
+    private com.gpstore.dto.response.OrderDetailResponse endOrder(
+            Long orderId, Long callerCustomerId, boolean isAdmin,
+            OrderStatus endState, com.gpstore.enums.OrderActor asActor, String reason) {
 
         // See OrderRepository.findByIdForUpdate's doc comment - this is the
         // fix for the exact race a double-tap on "Cancel order" (or two
@@ -1200,12 +1754,21 @@ public class OrderService {
             throw new ResourceNotFoundException("Order not found");
         }
 
-        if (order.getOrderStatus() == OrderStatus.DELIVERED) {
-            throw new ConflictException("Delivered order cannot be cancelled");
+        if (OrderLifecycle.isTerminal(order.getOrderStatus())) {
+            throw new ConflictException(
+                    order.getOrderStatus() == OrderStatus.CANCELLED
+                            ? "Order is already cancelled"
+                            : order.getOrderStatus() + " order cannot be cancelled");
         }
 
-        if (order.getOrderStatus() == OrderStatus.CANCELLED) {
-            throw new ConflictException("Order is already cancelled");
+        // §2 lives here as well as in the table: rejection is only available
+        // before the shop has accepted, so a shop looking for a way out of an
+        // order it took on is told to cancel it - which puts the fault, and
+        // therefore the refund, where §12 says it belongs.
+        if (!OrderLifecycle.allows(order.getOrderStatus(), endState)) {
+            throw new ConflictException(
+                    "A " + order.getOrderStatus() + " order cannot be "
+                            + endState.name().toLowerCase(java.util.Locale.ROOT) + ".");
         }
 
         if (!isAdmin && !customerMayCancel(order.getOrderStatus())) {
@@ -1213,7 +1776,45 @@ public class OrderService {
                     "This order can no longer be cancelled. Contact the shop if you need help.");
         }
 
-        order.setOrderStatus(OrderStatus.CANCELLED);
+        order.setOrderStatus(endState);
+
+        // WHO ENDED IT, written down at the moment it ends (§10/§12). A
+        // customer cancelling their own order is, by default, their own
+        // doing - it is the ordinary case, and the only case a cancellation
+        // charge may ever apply to. A REJECTION is the shop's own decision and
+        // the customer did not cause it, so the fault is the merchant's and
+        // nothing is billed. An admin cancelling during a dispute is PLATFORM
+        // with the fault left NULL, because "not decided yet" is the truth at
+        // that moment and guessing would decide somebody's refund on this
+        // method's behalf.
+        com.gpstore.enums.OrderActor actor = asActor != null
+                ? asActor
+                : (isAdmin ? com.gpstore.enums.OrderActor.PLATFORM
+                           : com.gpstore.enums.OrderActor.CUSTOMER);
+        com.gpstore.enums.OrderFault whoseFault = switch (actor) {
+            case CUSTOMER -> com.gpstore.enums.OrderFault.CUSTOMER;
+            case MERCHANT, WORKER -> com.gpstore.enums.OrderFault.MERCHANT;
+            case PLATFORM, SYSTEM -> null;
+        };
+        order.endedBy(actor, whoseFault, reason);
+
+        // WHAT THIS COSTS THE CUSTOMER (§10), decided once, here, and written
+        // onto the order rather than recomputed later. A shop may edit its
+        // terms tomorrow; the customer was charged what they were charged.
+        //
+        // THE QUOTE ENDPOINT RUNS THIS SAME METHOD, which is what makes
+        // "the customer must see the charge before confirming" true rather
+        // than aspirational - the number on the confirm dialog and the number
+        // taken are produced by one piece of code, not two that agree today.
+        //
+        // §9 and §12 are both inside the quote: the free window and a
+        // merchant-fault cancellation both come back as zero, and there is no
+        // arrangement of shop settings that can get past either.
+        com.gpstore.order.cancellation.CancellationCharge charge =
+                cancellationPolicy.quote(order, whoseFault,
+                        java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+        final java.math.BigDecimal cancellationFee = charge.isFree() ? null : charge.amount();
+        order.setCancellationFee(cancellationFee);
 
         // ORDER (already locked above) -> PAYMENT -> INVENTORY. Locking the
         // payment row rather than plain-reading it: the expiry sweep and the
@@ -1236,6 +1837,16 @@ public class OrderService {
 
                 payment.setPaymentStatus(PaymentStatus.FAILED);
 
+                // §11: A COD ORDER COLLECTED NOTHING, so a cancellation
+                // charge has nothing to come out of. It becomes a debt to
+                // this shop, shown to the customer and added to a later
+                // order here. Written in THIS transaction, so a debt cannot
+                // outlive a cancellation that rolled back.
+                if (cancellationFee != null) {
+                    cancellationDues.record(order, cancellationFee,
+                            "Cancellation charge on order " + order.getOrderNumber());
+                }
+
             } else if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
 
                 payment.setPaymentStatus(PaymentStatus.REFUND_PENDING);
@@ -1252,7 +1863,16 @@ public class OrderService {
                 payment.setRefundChannel(cash
                         ? Payment.RefundChannel.CASH
                         : Payment.RefundChannel.GATEWAY);
-                payment.setRefundAmount(payment.getAmount());
+                // THE FEE COMES OUT OF THE REFUND, which is the only place
+                // a prepaid cancellation can take it from - and the reason
+                // §11's debt mechanism is needed for COD and only for COD.
+                // Floored at zero: a fee larger than the payment would
+                // otherwise send a negative refund to the provider.
+                java.math.BigDecimal refundable = payment.getAmount();
+                if (cancellationFee != null) {
+                    refundable = refundable.subtract(cancellationFee).max(java.math.BigDecimal.ZERO);
+                }
+                payment.setRefundAmount(refundable);
                 refundNeedsSending = !cash;
 
             } else if (payment.getPaymentStatus() == PaymentStatus.PENDING) {
@@ -1278,8 +1898,13 @@ public class OrderService {
         // Audit stays in the transaction - one INSERT, and a cancellation is
         // exactly the kind of event that must not be missing from the record
         // if the process dies a moment later.
-        auditLogService.log("ORDER_CANCELLED", "Order", savedOrder.getId(),
-                "cancelled by " + (isAdmin ? "admin/staff" : "customer"));
+        auditLogService.log(
+                endState == OrderStatus.REJECTED ? "ORDER_REJECTED" : "ORDER_CANCELLED",
+                "Order", savedOrder.getId(),
+                endState.name().toLowerCase(java.util.Locale.ROOT) + " by " + actor
+                        + (reason == null ? "" : ": " + reason)
+                        + (cancellationFee == null
+                                ? "" : " [cancellation charge " + cancellationFee.toPlainString() + "]"));
 
         // Invoice cancellation is ACCOUNTING work, not a nicety: a cancelled
         // order whose invoice stays active still reads as a valid sale for
@@ -1290,7 +1915,8 @@ public class OrderService {
         // The row is written inside THIS transaction, so it commits with the
         // cancellation or not at all.
         outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
-                OutboxWorker.AGGREGATE_ORDER, savedOrder.getId(), OutboxWorker.EVENT_ORDER_CANCELLED));
+                OutboxWorker.AGGREGATE_ORDER, savedOrder.getId(),
+                OutboxWorker.EVENT_ORDER_CANCELLED, savedOrder.getShopId()));
 
         // THE MONEY, on the same terms as the invoice above and for a
         // stronger reason: it is the customer's. The row commits with the
@@ -1301,7 +1927,7 @@ public class OrderService {
         if (refundNeedsSending) {
             outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
                     OutboxWorker.AGGREGATE_ORDER, savedOrder.getId(),
-                    OutboxWorker.EVENT_REFUND_REQUESTED));
+                    OutboxWorker.EVENT_REFUND_REQUESTED, savedOrder.getShopId()));
         }
 
         // The push notification is genuinely best-effort and involves a
@@ -1338,8 +1964,9 @@ public class OrderService {
      * rider may already have the bag. Admin/staff can still cancel those
      * with the usual audit trail.
      */
+    /** Delegates, so the window cannot drift from the transition table (§9). */
     static boolean customerMayCancel(OrderStatus status) {
-        return status == OrderStatus.PENDING_CONFIRMATION || status == OrderStatus.CONFIRMED;
+        return OrderLifecycle.customerMayCancel(status);
     }
 
     /**
@@ -1426,10 +2053,21 @@ public class OrderService {
      * or the cart again - none of that should run a second time for the same
      * checkout attempt.
      */
-    private PlaceOrderResponse buildReplayResponse(Long orderId) {
+    private PlaceOrderResponse buildReplayResponse(Long customerId, Long orderId) {
         Order order = repository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Order not found for a completed idempotency record - data inconsistency, contact support"));
+
+        // THE ONE CHECK THE WIDENED SCOPE DOES NOT MAKE FOR US.
+        //
+        // Reading across shops turns off the merchant boundary, so the
+        // customer boundary has to be stated here rather than inherited. The
+        // id already came from an idempotency record looked up BY this
+        // customer, so this can only fire on a corrupted record - which is
+        // precisely when a silent cross-customer read would be worst.
+        if (order.getCustomer() == null || !order.getCustomer().getId().equals(customerId)) {
+            throw new ResourceNotFoundException("Order not found");
+        }
 
         PlaceOrderResponse response = new PlaceOrderResponse();
         response.setSuccess(true);
@@ -1467,6 +2105,48 @@ public class OrderService {
             // of the status so the client still gets a non-null value and
             // stays on the single-request path.
             response.setPaymentStatus(nameOf(order.getPaymentStatus()));
+        }
+
+        // A REPLAY MUST DESCRIBE THE SAME CHECKOUT, NOT ONE ORDER OF IT.
+        //
+        // This used to stop at the payment fields, and under one shop that was
+        // complete - a checkout was an order. Since Slice 6 it is a GROUP with
+        // one order per shop, and a customer whose retry replayed was handed
+        // the first shop's order with no group id and no sign that a second
+        // shop's order existed at all. Their app then showed one order for a
+        // two-shop basket they had paid for, and the group screen could not be
+        // opened because there was no id to open it with.
+        //
+        // Found by racing two identical checkouts rather than repeating one:
+        // both callers were answered, and only the winner's answer was whole.
+        // The sequential replay had exactly the same hole - the race is what
+        // made anybody look.
+        //
+        // Read back from the persisted orders, like everything else on this
+        // path. A replay reports what IS, not what was computed the first
+        // time.
+        if (order.getOrderGroupId() != null) {
+            orderGroupRepository.findById(order.getOrderGroupId()).ifPresent(group -> {
+                response.setOrderGroupId(group.getId());
+                response.setOrderGroupNumber(group.getGroupNumber());
+            });
+            List<Order> siblings =
+                    repository.findByOrderGroupIdOrderByShopIdAsc(order.getOrderGroupId());
+            response.setShopOrders(siblings.stream()
+                    .map(sibling -> new PlaceOrderResponse.ShopOrderSummary(
+                            sibling.getId(),
+                            sibling.getOrderNumber(),
+                            sibling.getShopId(),
+                            sibling.getTotalAmount(),
+                            sibling.getDeliveryFee(),
+                            nameOf(paymentRepository.findByOrderId(sibling.getId())
+                                    .map(Payment::getPaymentStatus)
+                                    .orElse(sibling.getPaymentStatus())),
+                            paymentService.upiLinkFor(sibling,
+                                    paymentRepository.findByOrderId(sibling.getId())
+                                            .map(Payment::getPaymentMethod)
+                                            .orElse(null))))
+                    .toList());
         }
 
         return response;
@@ -1549,7 +2229,15 @@ public class OrderService {
             if (item.getProductVariant() == null) {
                 continue;
             }
-            Inventory inventory = inventoryService.getByProductVariantForUpdate(item.getProductVariant().getId());
+            // THE ORDER'S OWN SHOP, read off the row we are restoring.
+            //
+            // This runs from the payment-expiry sweep, which spans shops and
+            // therefore has no filter enabled on its session - so the
+            // unqualified lookup would have been free to lock and credit
+            // whichever shop's stock row it found first. The shop is not a
+            // parameter anybody sends; it is a column on the order.
+            Inventory inventory = inventoryService.getByProductVariantForUpdate(
+                    item.getProductVariant().getId(), order.getShopId());
             if (inventory == null || item.getQuantity() == null) {
                 continue;
             }
@@ -1584,5 +2272,21 @@ public class OrderService {
     private static String truncate(String value, int max) {
         if (value == null) return null;
         return value.length() <= max ? value : value.substring(0, max - 3) + "...";
+    }
+
+    /**
+     * What this shop charges for one line, from listings already loaded.
+     *
+     * REFUSES RATHER THAN GUESSES. A cart line whose item this shop does not
+     * list is not something to price from the catalogue and charge for - it is
+     * an item the customer cannot buy here, and saying so is the only answer
+     * that cannot overcharge or undercharge somebody. Under one shop every
+     * priced variant is listed, so this never fires today.
+     */
+    private BigDecimal shopPriceOf(com.gpstore.entity.ProductVariant variant,
+                                   java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings) {
+        return shopCatalog.priceOf(variant, listings).orElseThrow(() -> new ConflictException(
+                (variant != null && variant.getProduct() != null ? variant.getProduct().getName() : "An item")
+                        + " is no longer available - please remove it from your cart."));
     }
 }

@@ -9,7 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DeliveryEstimateServiceTest {
 
     // Store at (0,0) for easy, exact distance math in tests.
-    private final DeliveryEstimateService service = new DeliveryEstimateService(0.0, 0.0, 8.0);
+    private final DeliveryEstimateService service = new DeliveryEstimateService(0.0, 0.0, 8.0,
+            // No shop in scope in a plain unit test, so the configured
+            // store coordinates are the origin - which is exactly the
+            // fallback this asserts.
+            org.mockito.Mockito.mock(com.gpstore.platform.ShopRepository.class));
 
     @Test
     void distanceToSamePointIsZero() {

@@ -1,5 +1,6 @@
 package com.gpstore.perf;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gpstore.entity.Address;
 import com.gpstore.entity.Customer;
@@ -109,7 +110,7 @@ class LazySerialisationTest {
         customer = new Customer();
         customer.setFullName(MARKER);
         customer.setEmail("lazy-serialisation-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

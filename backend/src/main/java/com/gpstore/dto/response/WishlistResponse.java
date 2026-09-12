@@ -46,12 +46,18 @@ public class WishlistResponse {
     }
 
     public static WishlistResponse from(Wishlist wishlist) {
+        return from(wishlist, java.util.Map.of());
+    }
+
+    /** @param shopTerms this shop's price for each variant - see ProductResponse.fromCard. */
+    public static WishlistResponse from(Wishlist wishlist,
+            java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> shopTerms) {
         var product = wishlist.getProduct();
         return new WishlistResponse(
                 wishlist.getId(),
                 product != null ? product.getId() : null,
                 product != null ? product.getName() : null,
-                ProductResponse.fromCard(product)
+                ProductResponse.fromCard(product, shopTerms)
         );
     }
 

@@ -25,6 +25,14 @@ class OrderSummary with _$OrderSummary {
     // Only populated on the admin "all orders" list - null for a
     // customer's own list, where it would be redundant.
     String? customerName,
+
+    // WHO THE CUSTOMER BOUGHT FROM. A split checkout is several orders placed
+    // at the same moment (§16), and they are indistinguishable in a list
+    // without this. Null on an older backend, and under one shop it is the
+    // same value on every row - which is why the screen only shows it when a
+    // customer has actually bought from more than one.
+    int? shopId,
+    String? shopName,
   }) = _OrderSummary;
 
   factory OrderSummary.fromJson(Map<String, dynamic> json) =>

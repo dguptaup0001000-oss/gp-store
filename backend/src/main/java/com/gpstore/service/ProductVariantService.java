@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.catalog.shop.ShopCatalog;
 import com.gpstore.entity.ProductVariant;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
@@ -15,21 +16,31 @@ public class ProductVariantService {
 
     private final ProductVariantRepository productVariantRepository;
     private final CatalogImageCleanup imageCleanup;
+    private final ShopCatalog shopCatalog;
 
     public ProductVariantService(ProductVariantRepository productVariantRepository,
-                                 CatalogImageCleanup imageCleanup) {
+                                 CatalogImageCleanup imageCleanup,
+                                 ShopCatalog shopCatalog) {
         this.productVariantRepository = productVariantRepository;
         this.imageCleanup = imageCleanup;
+        this.shopCatalog = shopCatalog;
     }
 
     // Evicts the "products" cache too - Product's response includes its
     // variants (price, availability), so a stale product listing would show
     // old prices after this change otherwise.
     @org.springframework.cache.annotation.CacheEvict(value = "products", allEntries = true)
+    @org.springframework.transaction.annotation.Transactional
     public ProductVariant saveProductVariant(ProductVariant productVariant, boolean allowBelowCost) {
         validatePrices(productVariant, allowBelowCost);
         applyImageUrl(productVariant, productVariant.getImageUrl());
-        return productVariantRepository.save(productVariant);
+        ProductVariant saved = productVariantRepository.save(productVariant);
+        // The catalogue row is the DEFAULT; what this shop charges is its own
+        // row. Writing both in one transaction is what keeps a single-shop
+        // deployment behaving exactly as it did - the admin edits one price
+        // and one price is what the customer pays.
+        shopCatalog.list(saved);
+        return saved;
     }
 
     // Unused by the current frontend (confirmed - product creation goes
@@ -54,6 +65,7 @@ public class ProductVariantService {
      * being able to set costPrice at creation time.
      */
     @org.springframework.cache.annotation.CacheEvict(value = "products", allEntries = true)
+    @org.springframework.transaction.annotation.Transactional
     public ProductVariant update(Long id, ProductVariant updated, boolean allowBelowCost) {
         ProductVariant existing = getById(id);
         String previousImage = existing.getImageUrl();
@@ -74,6 +86,7 @@ public class ProductVariantService {
         validatePrices(existing, allowBelowCost);
 
         ProductVariant saved = productVariantRepository.save(existing);
+        shopCatalog.list(saved);
         imageCleanup.deleteReplacedAfterCommit(previousImage, saved.getImageUrl());
         return saved;
     }

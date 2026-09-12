@@ -32,17 +32,32 @@ public class RecommendationService {
     private final OrderItemRepository orderItemRepository;
     private final ProductRepository productRepository;
 
-    public RecommendationService(OrderItemRepository orderItemRepository, ProductRepository productRepository) {
+    private final com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue;
+    private final com.gpstore.catalog.shop.ShopStock shopStock;
+    private final com.gpstore.platform.PlatformProperties platform;
+
+    public RecommendationService(OrderItemRepository orderItemRepository,
+                                 ProductRepository productRepository,
+                                 com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue,
+                                 com.gpstore.catalog.shop.ShopStock shopStock,
+                                 com.gpstore.platform.PlatformProperties platform) {
+        this.platform = platform;
+        this.shopStock = shopStock;
         this.orderItemRepository = orderItemRepository;
         this.productRepository = productRepository;
+        this.shopPricedCatalogue = shopPricedCatalogue;
     }
 
     /** "Customers who bought this also bought..." - ranked by real co-purchase count, not guessed. */
     @Transactional(readOnly = true)
     @Cacheable(value = "frequentlyBought", sync = true)
     public List<ProductResponse> frequentlyBoughtWith(Long productId, int limit) {
+        // THIS SHOP'S BASKETS. The query reaches Order through a join, and a
+        // join is exactly where Hibernate's filter stops - so the shop is
+        // named. It comes off the scope, never off the request.
         List<Object[]> rows = orderItemRepository.findFrequentlyBoughtWithProductId(
-                productId, PageRequest.of(0, candidatePoolFor(limit)));
+                productId, com.gpstore.platform.TenantContext.reportingShopId(),
+                PageRequest.of(0, candidatePoolFor(limit)));
         return resolveTopProducts(rows, limit);
     }
 
@@ -72,7 +87,8 @@ public class RecommendationService {
     public List<ProductResponse> trending(int days, int limit) {
         LocalDateTime since = LocalDateTime.now().minusDays(days);
         List<Object[]> rows = orderItemRepository.findTrendingProductIds(
-                since, PageRequest.of(0, candidatePoolFor(limit)));
+                since, com.gpstore.platform.TenantContext.reportingShopId(),
+                PageRequest.of(0, candidatePoolFor(limit)));
         return resolveTopProducts(rows, limit);
     }
 
@@ -183,10 +199,31 @@ public class RecommendationService {
             // "bought together" and "buy again" would all keep advertising
             // something the shop has deliberately withdrawn. Caching these
             // made that stick for the whole TTL rather than one request.
-            if (product != null && Boolean.TRUE.equals(product.getActive())) {
-                results.add(ProductResponse.from(product));
+            if (product == null || !Boolean.TRUE.equals(product.getActive())) {
+                continue;
             }
+            Map<Long, com.gpstore.catalog.shop.ShopProductVariant> terms =
+                    shopPricedCatalogue.termsFor(product);
+            // ON THIS SHOP'S SHELF ONLY, under a marketplace. The ranking
+            // above already comes from this shop's own order history, but
+            // "we sold it here once" is not "we sell it here now": a shop
+            // that has since delisted an item would go on recommending it,
+            // and the card would carry the catalogue's price because there
+            // is no listing behind it. termsFor is shop-filtered, so an
+            // empty answer IS the delisting.
+            if (requireListing() && terms.values().stream().noneMatch(
+                    com.gpstore.catalog.shop.ShopProductVariant::isOrderable)) {
+                continue;
+            }
+            // Stock too: a rail that recommends what the shop has run out of
+            // is the same defect as a grid that does (§7 STATE 2).
+            results.add(ProductResponse.from(product, terms, shopStock.heldFor(product)));
         }
         return results;
+    }
+
+    /** See ProductService.requireListing - the same rule, for the same reason. */
+    private boolean requireListing() {
+        return platform.getMode().isMultiShop();
     }
 }

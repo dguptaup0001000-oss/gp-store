@@ -72,6 +72,7 @@ public class CatalogSeedService {
     private final CategoryRepository categoryRepository;
     private final InventoryRepository inventoryRepository;
     private final ObjectMapper objectMapper;
+    private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
     private final CatalogSeedService self;
 
     public CatalogSeedService(ProductRepository productRepository,
@@ -79,12 +80,14 @@ public class CatalogSeedService {
                               CategoryRepository categoryRepository,
                               InventoryRepository inventoryRepository,
                               ObjectMapper objectMapper,
+                              com.gpstore.catalog.shop.ShopCatalog shopCatalog,
                               @org.springframework.context.annotation.Lazy CatalogSeedService self) {
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
         this.categoryRepository = categoryRepository;
         this.inventoryRepository = inventoryRepository;
         this.objectMapper = objectMapper;
+        this.shopCatalog = shopCatalog;
         this.self = self;
     }
 
@@ -202,6 +205,7 @@ public class CatalogSeedService {
         variant.setProduct(product);
         applyVariantFields(variant, record);
         variant = variantRepository.save(variant);
+        shopCatalog.list(variant);
 
         Inventory inventory = new Inventory();
         inventory.setProductVariant(variant);
@@ -219,7 +223,7 @@ public class CatalogSeedService {
             productRepository.save(product);
         }
         applyVariantFields(variant, record);
-        variantRepository.save(variant);
+        shopCatalog.list(variantRepository.save(variant));
         // Inventory deliberately untouched on update - see the class comment
         // on why re-running must not reset stock.
     }

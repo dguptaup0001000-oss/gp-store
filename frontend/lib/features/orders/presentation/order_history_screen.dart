@@ -7,6 +7,8 @@ import '../../auth/presentation/auth_providers.dart';
 import '../domain/order_models.dart';
 import '../domain/payment_status.dart';
 import 'order_detail_screen.dart';
+import 'order_group_providers.dart';
+import 'order_group_screen.dart';
 import 'orders_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
 
@@ -16,6 +18,12 @@ class OrderHistoryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ordersAsync = ref.watch(myOrdersProvider);
+    // WHICH ROWS ARE HALF OF SOMETHING BIGGER. Only checkouts that produced
+    // more than one order are in this map, so under a single shop it is
+    // always empty and every branch that reads it is dead - the history
+    // renders exactly as it always has (§2).
+    ref.watch(myCheckoutsProvider);
+    final checkoutForOrder = ref.watch(checkoutForOrderProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('My Orders')),
@@ -40,6 +48,14 @@ class OrderHistoryScreen extends ConsumerWidget {
         ),
         data: (page) {
           final orders = page.orders;
+          // More than one shop in this customer's own history is the only
+          // condition that makes a shop name worth the row space.
+          final showShopNames = orders
+                  .map((order) => order.shopId)
+                  .whereType<int>()
+                  .toSet()
+                  .length >
+              1;
           if (orders.isEmpty) {
             return const Center(
               child: Text('No orders yet',
@@ -100,6 +116,33 @@ class OrderHistoryScreen extends ConsumerWidget {
                             _StatusChip(status: order.orderStatus),
                           ],
                         ),
+                        // WHO IT WAS BOUGHT FROM. Sent by the server on every
+                        // order since Slice 12 and, until now, parsed and
+                        // thrown away. Rendered only when this customer has
+                        // actually bought from more than one shop: under one
+                        // shop it is the same name on every row, which is
+                        // noise rather than information.
+                        if (showShopNames && order.shopName != null) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.storefront_outlined,
+                                  size: 14, color: AppColors.primary),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  order.shopName!,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                         const SizedBox(height: 6),
                         Text(
                           _formatDate(order.orderDate),
@@ -151,6 +194,31 @@ class OrderHistoryScreen extends ConsumerWidget {
                               .bodyMedium
                               ?.copyWith(fontSize: 12),
                         ),
+                        // THE OTHER HALF OF THIS PURCHASE. Two kiranas is
+                        // two orders from one press of Place Order, and two
+                        // unexplained rows in a history reads as being
+                        // charged twice. Shown only for orders that really
+                        // are part of a multi-shop checkout.
+                        if (checkoutForOrder[order.orderId]
+                            case final checkout?) ...[
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: hapticize(
+                                  () => Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => OrderGroupScreen(
+                                              groupId: checkout.id),
+                                        ),
+                                      )),
+                              icon: const Icon(Icons.receipt_long_outlined,
+                                  size: 16),
+                              label: Text(
+                                  'Part of a ${checkout.shopCount}-shop checkout'),
+                            ),
+                          ),
+                        ],
                         if (order.needsOnlinePayment) ...[
                           const SizedBox(height: 8),
                           Align(

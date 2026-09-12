@@ -15,18 +15,51 @@ public class DeliveryEstimateService {
     private final double storeLatitude;
     private final double storeLongitude;
     private final double maxDeliveryRadiusKm;
+    private final com.gpstore.platform.ShopRepository shops;
 
     public DeliveryEstimateService(
             @Value("${store.latitude}") double storeLatitude,
             @Value("${store.longitude}") double storeLongitude,
-            @Value("${store.max-delivery-radius-km}") double maxDeliveryRadiusKm) {
+            @Value("${store.max-delivery-radius-km}") double maxDeliveryRadiusKm,
+            com.gpstore.platform.ShopRepository shops) {
         this.storeLatitude = storeLatitude;
         this.storeLongitude = storeLongitude;
         this.maxDeliveryRadiusKm = maxDeliveryRadiusKm;
+        this.shops = shops;
     }
 
+    /**
+     * Where "the store" is for the request in hand.
+     *
+     * THE SHOP IN SCOPE, FALLING BACK TO THE CONFIGURED ONE. Distance and
+     * radius decide what a customer is charged to deliver and whether they can
+     * order at all, so under a marketplace they have to be measured from the
+     * shop that is actually packing the order - not from whichever shop the
+     * deployment was originally configured around.
+     *
+     * IDENTICAL UNDER ONE SHOP. ShopBootstrap seeds Shop #1's coordinates and
+     * radius from the same store.* properties this class falls back to, so the
+     * numbers are the same ones and nothing about today's pricing moves.
+     */
+    private record Origin(double latitude, double longitude, double radiusKm) {}
+
+    private Origin origin() {
+        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+        if (scope != null && scope.isSingleShop()) {
+            java.util.Optional<com.gpstore.platform.Shop> shop = shops.findById(scope.requireShopId());
+            if (shop.isPresent() && shop.get().getLatitude() != null
+                    && shop.get().getLongitude() != null) {
+                java.math.BigDecimal radius = shop.get().getMaxDeliveryRadiusKm();
+                return new Origin(shop.get().getLatitude(), shop.get().getLongitude(),
+                        radius == null ? maxDeliveryRadiusKm : radius.doubleValue());
+            }
+        }
+        return new Origin(storeLatitude, storeLongitude, maxDeliveryRadiusKm);
+    }
+
+    /** The radius that applies to the shop in scope. */
     public double getMaxDeliveryRadiusKm() {
-        return maxDeliveryRadiusKm;
+        return origin().radiusKm();
     }
 
     /**
@@ -36,30 +69,30 @@ public class DeliveryEstimateService {
      * accepting an order we can't verify is deliverable.
      */
     public boolean isWithinServiceableRadius(Double destLat, Double destLng) {
-        double distanceKm = distanceFromStoreKm(destLat, destLng);
-        return !Double.isNaN(distanceKm) && distanceKm <= maxDeliveryRadiusKm;
+        Origin from = origin();
+        double distanceKm = distanceFrom(from, destLat, destLng);
+        return !Double.isNaN(distanceKm) && distanceKm <= from.radiusKm();
     }
 
-    /** Haversine great-circle distance in km between the store and a given point. */
+    /**
+     * Haversine great-circle distance in km from the shop in scope to a point.
+     *
+     * The name is kept because forty call sites read it and "the store" is
+     * still what it means - it is just that which store depends on whose order
+     * this is now. See origin().
+     */
     public double distanceFromStoreKm(Double destLat, Double destLng) {
+        return distanceFrom(origin(), destLat, destLng);
+    }
+
+    private static double distanceFrom(Origin from, Double destLat, Double destLng) {
         if (destLat == null || destLng == null) {
             // No coordinates on the address yet - fall back to the max window
             // rather than pretending we know the distance.
             return Double.NaN;
         }
-
-        double earthRadiusKm = 6371.0;
-
-        double latDistance = Math.toRadians(destLat - storeLatitude);
-        double lngDistance = Math.toRadians(destLng - storeLongitude);
-
-        double a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2)
-                + Math.cos(Math.toRadians(storeLatitude)) * Math.cos(Math.toRadians(destLat))
-                * Math.sin(lngDistance / 2) * Math.sin(lngDistance / 2);
-
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-        return earthRadiusKm * c;
+        return com.gpstore.platform.ShopDiscovery.distanceKm(
+                from.latitude(), from.longitude(), destLat, destLng);
     }
 
     /**

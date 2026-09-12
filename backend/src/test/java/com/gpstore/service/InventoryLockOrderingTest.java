@@ -1,5 +1,6 @@
 package com.gpstore.service;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.entity.Category;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.Inventory;
@@ -127,10 +128,19 @@ class InventoryLockOrderingTest {
                 "A no-op restore must not lock inventory rows it will not touch");
     }
 
+    /**
+     * Restoration now names the SHOP as well as the variant.
+     *
+     * It runs from the payment-expiry sweep, which spans shops and has no
+     * filter enabled, so the shop is read off the order being restored rather
+     * than left to whichever row the query found first. The two-argument
+     * overload is what the restore path calls; the ordering invariant this
+     * test exists for is unchanged.
+     */
     private List<Long> lockedVariantIdsInCallOrder() {
         ArgumentCaptor<Long> captor = ArgumentCaptor.forClass(Long.class);
         Mockito.verify(inventoryService, Mockito.atLeast(0))
-                .getByProductVariantForUpdate(captor.capture());
+                .getByProductVariantForUpdate(captor.capture(), Mockito.any());
         return captor.getAllValues();
     }
 
@@ -151,7 +161,7 @@ class InventoryLockOrderingTest {
         Customer customer = new Customer();
         customer.setFullName("Lock Order Customer");
         customer.setEmail("lock-order-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

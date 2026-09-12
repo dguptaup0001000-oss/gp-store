@@ -20,12 +20,16 @@ public class WishlistService {
     private final ProductRepository productRepository;
     private final CustomerService customerService;
 
+    private final com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue;
+
     public WishlistService(WishlistRepository wishlistRepository,
                             ProductRepository productRepository,
-                            CustomerService customerService) {
+                            CustomerService customerService,
+                            com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue) {
         this.wishlistRepository = wishlistRepository;
         this.productRepository = productRepository;
         this.customerService = customerService;
+        this.shopPricedCatalogue = shopPricedCatalogue;
     }
 
     @Transactional
@@ -39,13 +43,15 @@ public class WishlistService {
         wishlist.setProduct(product);
         wishlist.setActive(true);
 
-        return WishlistResponse.from(wishlistRepository.save(wishlist));
+        Wishlist saved = wishlistRepository.save(wishlist);
+        return WishlistResponse.from(saved, shopPricedCatalogue.termsFor(saved.getProduct()));
     }
 
     @Transactional(readOnly = true)
     public org.springframework.data.domain.Page<WishlistResponse> getAllWishlists(
             org.springframework.data.domain.Pageable pageable) {
-        return wishlistRepository.findAll(pageable).map(WishlistResponse::from);
+        return wishlistRepository.findAll(pageable)
+                .map(w -> WishlistResponse.from(w, shopPricedCatalogue.termsFor(w.getProduct())));
     }
 
     private static final int MY_WISHLIST_CAP = 100;
@@ -56,7 +62,9 @@ public class WishlistService {
         if (rows.size() > MY_WISHLIST_CAP) {
             rows = rows.subList(0, MY_WISHLIST_CAP);
         }
-        return rows.stream().map(WishlistResponse::from).toList();
+        return rows.stream()
+                .map(w -> WishlistResponse.from(w, shopPricedCatalogue.termsFor(w.getProduct())))
+                .toList();
     }
 
     public void removeFromWishlist(Long id, Long customerId) {

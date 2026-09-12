@@ -1,5 +1,10 @@
 package com.gpstore.entity;
 
+import com.gpstore.platform.ShopOwned;
+import com.gpstore.platform.TenantEntityListener;
+import com.gpstore.platform.ShopScopeFilter;
+import org.hibernate.annotations.Filter;
+
 import com.gpstore.enums.InvoiceStatus;
 import jakarta.persistence.*;
 
@@ -8,7 +13,22 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "invoices")
-public class Invoice {
+@Filter(name = ShopScopeFilter.NAME, condition = ShopScopeFilter.CONDITION)
+@EntityListeners(TenantEntityListener.class)
+public class Invoice implements ShopOwned {
+    // ------------------------------------------------------- which shop
+    //
+    // Written once, at insert time, by TenantEntityListener - never by a
+    // request. Read back through the "shopScope" filter (see the @Filter
+    // above), which Hibernate turns into an extra "and shop_id = ?" on
+    // every query against this table while a shop scope is active.
+    //
+    // Nullable in the column definition only because V46 added it to
+    // tables that already had rows; every row is backfilled and the
+    // migration refuses to complete otherwise.
+    @Column(name = "shop_id")
+    private Long shopId;
+
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -142,5 +162,15 @@ public class Invoice {
 
     public void setActive(Boolean active) {
         this.active = active;
+    }
+
+    @Override
+    public Long getShopId() {
+        return shopId;
+    }
+
+    @Override
+    public void setShopId(Long shopId) {
+        this.shopId = shopId;
     }
 }

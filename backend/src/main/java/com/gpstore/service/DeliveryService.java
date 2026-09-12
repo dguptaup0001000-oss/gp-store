@@ -8,7 +8,9 @@ import com.gpstore.entity.DeliverySubzone;
 import com.gpstore.entity.Order;
 import com.gpstore.delivery.DeliveryStatusTransitions;
 import com.gpstore.enums.DeliveryStatus;
+import com.gpstore.enums.OrderActor;
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.order.OrderStatusChange;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
@@ -39,6 +41,7 @@ public class DeliveryService {
     private final AuditLogService auditLogService;
     private final PaymentService paymentService;
     private final TerritoryDispatchService territoryDispatchService;
+    private final com.gpstore.territory.TerritoryResolver territoryResolver;
     private final com.gpstore.config.AfterCommitExecutor afterCommitExecutor;
     private final int bulkOrderItemThreshold;
 
@@ -53,6 +56,7 @@ public class DeliveryService {
             AuditLogService auditLogService,
             PaymentService paymentService,
             TerritoryDispatchService territoryDispatchService,
+            com.gpstore.territory.TerritoryResolver territoryResolver,
             com.gpstore.config.AfterCommitExecutor afterCommitExecutor,
             @org.springframework.beans.factory.annotation.Value("${delivery.bulk-order-item-threshold}") int bulkOrderItemThreshold) {
 
@@ -66,6 +70,7 @@ public class DeliveryService {
         this.auditLogService = auditLogService;
         this.paymentService = paymentService;
         this.territoryDispatchService = territoryDispatchService;
+        this.territoryResolver = territoryResolver;
         this.afterCommitExecutor = afterCommitExecutor;
         this.bulkOrderItemThreshold = bulkOrderItemThreshold;
     }
@@ -121,7 +126,17 @@ public class DeliveryService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
-        DeliverySubzone subzone = order.getAddress() == null ? null : order.getAddress().getSubzone();
+        // THE TERRITORY IS THIS SHOP'S, resolved rather than read off the
+        // address (W4). One address sits in every shop's map that covers it,
+        // but addresses.subzone_id holds one value - so under a marketplace
+        // the stamp may belong to a shop that has nothing to do with this
+        // order, and traversing it would load another shop's row and fail the
+        // whole dispatch. territoryForDelivery prefers the stamp when it is
+        // ours (which under SINGLE_SHOP it always is, so nothing changes) and
+        // otherwise reads this shop's own map.
+        DeliverySubzone subzone = territoryResolver
+                .territoryForDelivery(order.getAddress())
+                .orElse(null);
         Double lat = order.getAddress() == null ? null : order.getAddress().getLatitude();
         Double lng = order.getAddress() == null ? null : order.getAddress().getLongitude();
 
@@ -206,7 +221,23 @@ public class DeliveryService {
             Long orderId, Long deliveryPartnerId,
             TerritoryDispatchService.DispatchDecision decision) {
 
-        Order order = orderRepository.findById(orderId)
+        // LOCKED, so the question below has a true answer by the time the
+        // insert runs.
+        //
+        // Two things assign riders and they do not know about each other: the
+        // outbox worker does it automatically moments after checkout commits,
+        // and a shopkeeper does it by hand from the admin screen. Both used to
+        // read "does this order already have a delivery?" without a lock, so
+        // both could read "no" and both insert. The database refused the
+        // second one - deliveries.order_id is unique because the mapping is
+        // one-to-one - which meant the DATA was never wrong, but the person
+        // who lost got a generic data-integrity failure instead of the
+        // sentence below, and went looking for a bug that was not there.
+        //
+        // The order row is the lock every path that touches this order already
+        // takes first (ORDER -> PAYMENT -> INVENTORY, ORDER -> DELIVERY in the
+        // pack scan), so taking it here adds no new ordering to reason about.
+        Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
         if (deliveryRepository.findByOrderId(orderId).isPresent()) {
@@ -216,7 +247,28 @@ public class DeliveryService {
         DeliveryPartner partner = deliveryPartnerRepository.findById(deliveryPartnerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found"));
 
-        DeliverySubzone subzone = order.getAddress() == null ? null : order.getAddress().getSubzone();
+        // W4: A RIDER WORKS FOR ONE SHOP, AND IT MUST BE THIS ORDER'S.
+        //
+        // Saying it here rather than relying on the filter alone. The filter
+        // already makes another shop's rider un-loadable, so in practice the
+        // line above throws first - but "the rider on a shop's order belongs
+        // to that shop" is the rule this slice exists to enforce, and a rule
+        // nothing states is a rule the next refactor can remove without
+        // noticing. It is also the one check that still holds if this method
+        // is ever called from platform-scoped work, where the filter is off.
+        if (partner.getShopId() != null && order.getShopId() != null
+                && !partner.getShopId().equals(order.getShopId())) {
+            throw new com.gpstore.platform.CrossShopAccessException(
+                    "That rider works for a different shop.");
+        }
+
+        // The order's territory in ITS shop's map - not whatever is stamped on
+        // the address, which under a marketplace may be another shop's. Same
+        // resolution autoAssignDelivery uses, so a hand assignment and an
+        // automatic one record the same territory.
+        DeliverySubzone subzone = territoryResolver
+                .territoryForDelivery(order.getAddress())
+                .orElse(null);
 
         // Batching key. A subzone is a row in a table; the old area string was
         // whatever the customer typed, matched with =, so "Sector 12",
@@ -391,6 +443,35 @@ public class DeliveryService {
     @Transactional
     public com.gpstore.dto.response.DeliveryResponse updateDeliveryStatus(Long deliveryId, String status, Long callerWorkerId, boolean isAdmin) {
 
+        // THE ORDER ROW IS TAKEN BEFORE ANYTHING IS READ. Not for the order's
+        // sake - for the delivery's.
+        //
+        // This method is a read-check-write over the delivery: read the
+        // status, ask the transition table whether the move is legal, write
+        // the new status and, for DELIVERED, stamp deliveredAt, move the order
+        // and settle the cash. With no lock anywhere in it, two people doing
+        // that at once both read OUT_FOR_DELIVERY, both are told their move is
+        // legal, and both run their half of the consequences. Proved by
+        // DeliveryStateUnderConcurrencyTest: two riders both pressing
+        // Delivered settled the same COD payment twice and recorded the same
+        // delivery as completed twice, and DELIVERED racing CANCELLED could
+        // leave a cancelled delivery beside a delivered order and cash marked
+        // collected - money in the books that is not in the till.
+        //
+        // The lock is on the ORDER, not on the delivery, and deliberately so.
+        // Every other path that touches any part of this order - cancellation,
+        // the status dropdown, the pack scan, COD completion, the expiry sweep
+        // - already takes that row first, so this joins the queue they are
+        // all standing in rather than starting a second one that could
+        // deadlock against it. A delivery belongs to exactly one order, so
+        // that row is a complete gate on everything below.
+        //
+        // Read through a scalar projection so the Delivery is NOT in the
+        // session yet: see DeliveryRepository.findOrderIdById for why an
+        // unlocked read taken before a lock outlives it.
+        deliveryRepository.findOrderIdById(deliveryId)
+                .ifPresent(orderRepository::findByIdForUpdate);
+
         Delivery delivery = deliveryRepository.findById(deliveryId)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery not found"));
 
@@ -448,8 +529,42 @@ public class DeliveryService {
 
         Order order = delivery.getOrder();
 
+        // PACKING IS ONE EVENT SEEN FROM TWO SIDES, and only one side was
+        // recording it. DeliveryStatus.PACKED says so in its own comment -
+        // "deliberately the same word as OrderStatus.PACKED, because it is
+        // the same event" - but only the QR scan path ever wrote it onto the
+        // order. A shop that works the delivery screen instead left the order
+        // sitting at CONFIRMED and then jumped it to OUT_FOR_DELIVERY, which
+        // is a move the order's own table has always refused: a customer
+        // watching their order never saw it packed, and an order could be
+        // delivered while its status still said the shop had merely accepted
+        // it. Mirroring it here is what makes the two machines agree.
+        //
+        // GUARDED RATHER THAN THROWING, unlike the two below, and the
+        // difference is deliberate. This is a catch-up, not an assertion: an
+        // order already OUT_FOR_DELIVERY whose delivery row is re-marked
+        // PACKED is a harmless re-tap, and refusing it would break a benign
+        // request to record something the order has already been through.
+        // What the guard does prevent is the only dangerous direction -
+        // dragging a cancelled or finished order back to PACKED.
+        if (target == DeliveryStatus.PACKED && order != null
+                && OrderStatusChange.canMove(order, OrderStatus.PACKED,
+                        isAdmin ? OrderActor.PLATFORM : OrderActor.WORKER)) {
+            OrderStatusChange.move(order, OrderStatus.PACKED,
+                    isAdmin ? OrderActor.PLATFORM : OrderActor.WORKER);
+            orderRepository.save(order);
+        }
+
+        // THE ORDER MOVES THROUGH THE ORDER'S OWN RULES, not the delivery's.
+        //
+        // DeliveryStatusTransitions above decided what the DELIVERY may do.
+        // It says nothing about the order, and this used to write the order's
+        // status straight past OrderLifecycle - so a delivery marked
+        // out-for-delivery dragged a cancelled order back out of the grave
+        // with it. Both questions are now asked, in that order.
         if (target == DeliveryStatus.OUT_FOR_DELIVERY && order != null) {
-            order.setOrderStatus(OrderStatus.OUT_FOR_DELIVERY);
+            OrderStatusChange.move(order, OrderStatus.OUT_FOR_DELIVERY,
+                    isAdmin ? OrderActor.PLATFORM : OrderActor.WORKER);
             orderRepository.save(order);
             touchOrderForPush(order);
             afterCommitExecutor.runAfterCommit("Out-for-delivery notification", order.getId(),
@@ -473,7 +588,11 @@ public class DeliveryService {
             }
 
             if (order != null) {
-                order.setOrderStatus(OrderStatus.DELIVERED);
+                // Same rule, and the one that mattered most: an order that was
+                // cancelled and refunded must not become DELIVERED because
+                // somebody closed its delivery row afterwards.
+                OrderStatusChange.move(order, OrderStatus.DELIVERED,
+                        isAdmin ? OrderActor.PLATFORM : OrderActor.WORKER);
                 orderRepository.save(order);
                 touchOrderForPush(order);
                 afterCommitExecutor.runAfterCommit("Delivered notification", order.getId(),

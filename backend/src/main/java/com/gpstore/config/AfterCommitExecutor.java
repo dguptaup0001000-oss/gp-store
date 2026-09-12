@@ -45,14 +45,29 @@ public class AfterCommitExecutor {
     }
 
     public void runAfterCommit(String description, Long entityId, Runnable work) {
-        Runnable guarded = () -> {
+        // THE SCOPE IS CAPTURED HERE, ON THE REQUEST THREAD, WHILE IT IS STILL
+        // SET. A tenant scope is a ThreadLocal and this work finishes on a pool
+        // thread, so without capturing it the continuation runs with no scope
+        // at all - reads spanning every shop, and an insert of a shop-owned row
+        // failing outright once there is more than one shop to choose between.
+        //
+        // AND IT IS THE REQUEST'S SCOPE, NOT THE PLATFORM'S. Sending the
+        // notification for an order is part of placing that order, and belongs
+        // to that order's shop. Widening it to the platform would let a
+        // continuation write into a shop the request itself had no business in,
+        // which is the opposite of what this whole boundary is for. A scheduled
+        // sweep is the case that legitimately spans shops, and it gets its
+        // answer somewhere else - see BackgroundWorkScope.
+        com.gpstore.platform.TenantScope captured = com.gpstore.platform.TenantContext.current();
+
+        Runnable guarded = com.gpstore.platform.BackgroundWorkScope.carrying(captured, () -> {
             try {
                 work.run();
             } catch (Throwable t) {
                 log.error("{} failed for id {} - the committed work itself is unaffected",
                         description, entityId, t);
             }
-        };
+        });
 
         try {
             if (TransactionSynchronizationManager.isSynchronizationActive()) {

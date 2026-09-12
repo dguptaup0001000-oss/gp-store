@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
+import '../../marketplace/presentation/compare_shops_sheet.dart';
 import '../../../shared/widgets/horizontal_product_section.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
@@ -72,7 +74,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     final loaded = ref.watch(productDetailProvider(widget.product.id)).valueOrNull;
     final product = loaded ?? widget.product;
     final variant = _selectedVariant;
-    final isInStock = variant?.available ?? false;
+    // Listed AND held - see ProductCard for why null reads as yes.
+    final isInStock = variant?.isBuyable ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -181,14 +184,26 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                       const SizedBox(height: 16),
                     ],
 
-                    if (variant != null)
+                    // NO PRICE ON AN EMPTY SHELF (Part 2 §10). The detail
+                    // screen says it in words rather than leaving a gap,
+                    // because this is the screen a customer opens to find
+                    // out whether they can buy the thing.
+                    if (variant != null && !variant.hasPrice)
+                      const Text(
+                        'Out of stock',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 20,
+                            color: AppColors.textSecondary),
+                      ),
+                    if (variant != null && variant.hasPrice)
                       Row(
                         children: [
                           Text(
-                            '₹${variant.sellingPrice.toStringAsFixed(0)}',
+                            '₹${variant.sellingPrice!.toStringAsFixed(0)}',
                             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22),
                           ),
-                          if (variant.mrp != null && variant.mrp! > variant.sellingPrice) ...[
+                          if (variant.mrp != null && variant.mrp! > variant.sellingPrice!) ...[
                             const SizedBox(width: 8),
                             Text(
                               '₹${variant.mrp!.toStringAsFixed(0)}',
@@ -209,6 +224,30 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    // COMPARE OTHER SHOPS (Part 2 §8), and it is worth the
+                    // most on exactly the screen where the answer is "this
+                    // shop hasn't got it": an empty shelf here does not mean
+                    // an empty shelf in the next street. On a single-shop
+                    // deployment there is nothing to compare against and the
+                    // button is absent, not disabled.
+                    if (variant != null && ref.watch(isMarketplaceProvider)) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: hapticize(() => CompareShopsSheet.show(
+                                context,
+                                variantId: variant.id,
+                                categoryId: product.category?.id,
+                                productName: product.name,
+                              )),
+                          icon: const Icon(Icons.compare_arrows, size: 18),
+                          label: Text(isInStock
+                              ? 'Compare other shops'
+                              : 'Find this at another shop'),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 24),
                     HorizontalProductSection(
                       title: 'Frequently Bought Together',

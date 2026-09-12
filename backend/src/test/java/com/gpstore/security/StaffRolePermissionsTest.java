@@ -40,15 +40,71 @@ class StaffRolePermissionsTest {
     @Autowired private CustomerRepository customerRepository;
 
     @Test
-    @DisplayName("ADMIN keeps every permission - nobody loses access they had yesterday")
+    @DisplayName("ADMIN keeps every permission it had - nobody loses access they had yesterday")
     void adminKeepsEverything() {
         // THE GUARANTEE THIS WHOLE CHANGE RESTS ON. Every staff account in
         // the shop today is an ADMIN and can reach all forty-one staff-gated
         // routes. If this ever fails, the change has quietly demoted real
         // people, and they will find out when something they do daily starts
         // returning 403.
-        assertThat(RolePermissions.forRole(Role.ADMIN))
-                .containsExactlyInAnyOrderElementsOf(EnumSet.allOf(AdminPermission.class));
+        //
+        // PINNED BY NAME, NOT BY allOf(). This used to assert equality with
+        // every constant in the enum, which reads like a stronger statement
+        // and is a weaker one: it says "ADMIN gets whatever anybody adds
+        // next", so the day PLATFORM_ADMIN was added every shopkeeper in the
+        // marketplace would have silently become a platform operator with a
+        // scope spanning every merchant, and this test would have gone green.
+        // The list below is the set ADMIN actually held, written out, so
+        // taking one away fails here and adding a new one is a decision
+        // somebody has to make on purpose.
+        assertThat(RolePermissions.forRole(Role.ADMIN)).containsExactlyInAnyOrder(
+                AdminPermission.ORDERS_VIEW,
+                AdminPermission.ORDERS_MANAGE,
+                AdminPermission.PAYMENTS_VIEW,
+                AdminPermission.PAYMENTS_MANAGE,
+                AdminPermission.PAYMENTS_REFUND,
+                AdminPermission.CATALOG_VIEW,
+                AdminPermission.CATALOG_MANAGE,
+                AdminPermission.INVENTORY_MANAGE,
+                AdminPermission.COUPONS_MANAGE,
+                AdminPermission.CUSTOMERS_VIEW,
+                AdminPermission.CUSTOMERS_MANAGE,
+                AdminPermission.DELIVERY_VIEW,
+                AdminPermission.DELIVERY_MANAGE,
+                AdminPermission.REVIEWS_MODERATE,
+                AdminPermission.BROADCAST_SEND,
+                AdminPermission.ANALYTICS_VIEW,
+                AdminPermission.AUDIT_VIEW,
+                AdminPermission.SYSTEM_ADMIN);
+    }
+
+    @Test
+    @DisplayName("a shop owner is not a platform operator")
+    void adminIsNotPlatformAdmin() {
+        // The single most dangerous line in the marketplace design. Every
+        // staff account that exists today is an ADMIN; if ADMIN carried
+        // PLATFORM_ADMIN, TenantResolver would hand every one of them a scope
+        // spanning every merchant on the platform.
+        for (Role role : Role.values()) {
+            boolean expected = role == Role.PLATFORM_ADMIN;
+            assertThat(RolePermissions.forRole(role).contains(AdminPermission.PLATFORM_ADMIN))
+                    .as("PLATFORM_ADMIN for %s", role)
+                    .isEqualTo(expected);
+        }
+    }
+
+    @Test
+    @DisplayName("a shop role cannot write the shared catalogue definition")
+    void shopRolesCannotDefineTheCatalogue() {
+        // CATALOG_MANAGE is a shopkeeper's own price and stock. CATALOG_DEFINE
+        // is what a product IS, shared by every shop selling it - so one
+        // merchant holding it would be editing every other merchant's shelf.
+        for (Role role : Role.values()) {
+            boolean expected = role == Role.PLATFORM_ADMIN;
+            assertThat(RolePermissions.forRole(role).contains(AdminPermission.CATALOG_DEFINE))
+                    .as("CATALOG_DEFINE for %s", role)
+                    .isEqualTo(expected);
+        }
     }
 
     @Test
@@ -139,15 +195,41 @@ class StaffRolePermissionsTest {
     @Test
     @DisplayName("every new role is a subset of ADMIN")
     void everyRoleIsASubsetOfAdmin() {
-        // Guards against a future edit granting a role something ADMIN itself
-        // does not have, which would make ADMIN no longer the superset the
-        // rest of this design assumes.
+        // Guards against a future edit granting a SHOP role something ADMIN
+        // itself does not have, which would make ADMIN no longer the superset
+        // the rest of this design assumes.
+        //
+        // PLATFORM_ADMIN IS EXCLUDED BECAUSE IT IS NOT A SHOP ROLE. It is the
+        // other axis: it governs merchants, shop lifecycle and the shared
+        // catalogue, and it is deliberately NARROWER than ADMIN inside any one
+        // shop - it can read an order to settle a dispute but cannot advance
+        // it, refund it, or touch that shop's roster. Asserting it as a subset
+        // of a shopkeeper's permissions would be asserting that running the
+        // market is a smaller version of running a shop, which is exactly the
+        // conflation this role exists to end.
         Set<AdminPermission> admin = RolePermissions.forRole(Role.ADMIN);
         for (Role role : Role.values()) {
+            if (role == Role.PLATFORM_ADMIN) {
+                continue;
+            }
             assertThat(admin)
                     .as("%s must not exceed ADMIN", role)
                     .containsAll(RolePermissions.forRole(role));
         }
+
+        // ...and the part of that claim that IS about shops, asserted rather
+        // than waved at: inside a shop, the platform operator can do strictly
+        // less than the shopkeeper.
+        Set<AdminPermission> platform = RolePermissions.forRole(Role.PLATFORM_ADMIN);
+        assertThat(platform)
+                .as("a platform operator must not be able to work a shop's orders or money")
+                .doesNotContain(AdminPermission.ORDERS_MANAGE,
+                        AdminPermission.PAYMENTS_MANAGE,
+                        AdminPermission.PAYMENTS_REFUND,
+                        AdminPermission.DELIVERY_MANAGE,
+                        AdminPermission.COUPONS_MANAGE,
+                        AdminPermission.CUSTOMERS_MANAGE,
+                        AdminPermission.SYSTEM_ADMIN);
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.gpstore.perf;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.dto.request.PlaceOrderRequest;
 import com.gpstore.entity.Address;
 import com.gpstore.entity.Cart;
@@ -198,7 +199,27 @@ class CheckoutPerformanceTest {
         // trip. Budget = CART_SIZE (the per-item inventory lock, which is
         // required and must not be optimised away) + 20 fixed = 30 at
         // CART_SIZE=10, above the current 24 but well under the old 33.
-        assertTrue(result.queryCount() <= CART_SIZE + 20,
+        // Slice 6 (the multi-shop split) moved this from 24 to 32, and the
+        // budget's FIXED part goes 20 -> 24 to match. What the eight extra
+        // statements buy, none of which grows with cart size:
+        //
+        //   the shop row - its coordinates and its radius, which is what makes
+        //   the delivery fee and the serviceability check belong to the shop
+        //   that is actually packing the order rather than to whichever shop
+        //   the deployment was configured around;
+        //
+        //   a sequence value, an INSERT and an UPDATE for the order group -
+        //   the thing the customer thinks they placed, whose total is only
+        //   known once every shop's order under it exists;
+        //
+        //   and the per-shop reads of that shop's hours and price list.
+        //
+        // THE SHAPE OF THE BUDGET IS WHAT MATTERS, and it is unchanged:
+        // CART_SIZE + a constant. The added cost is per SHOP, and a basket
+        // from one shop pays it once. A count that grew with the number of
+        // ITEMS would still fail here, which is the regression this test
+        // exists to catch.
+        assertTrue(result.queryCount() <= CART_SIZE + 24,
                 "Place order exceeded its query budget. Inventory locking is per-item by design; "
                         + "anything beyond that is avoidable work. Was: " + result);
     }
@@ -466,7 +487,7 @@ class CheckoutPerformanceTest {
         Customer customer = new Customer();
         customer.setFullName("Perf Test Customer");
         customer.setEmail("perf-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

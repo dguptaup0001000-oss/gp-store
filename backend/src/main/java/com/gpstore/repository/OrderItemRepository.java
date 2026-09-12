@@ -9,6 +9,26 @@ import org.springframework.data.repository.query.Param;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Order lines.
+ *
+ * EVERY AGGREGATE HERE NAMES ITS SHOP, and the reason is the single most
+ * surprising thing found in this transformation: <b>Hibernate's {@code @Filter}
+ * does not follow a join.</b> It restricts the entity a query is rooted on. It
+ * does not restrict an entity the query reaches through an association.
+ *
+ * OrderItem is not shop-owned - a line has no shop of its own, it belongs to
+ * the order that has one. So {@code from OrderItem oi where oi.order.orderDate
+ * >= :since} reads like a scoped query, compiles like a scoped query, and
+ * aggregates <em>every shop in the marketplace</em>. Measured, not assumed: a
+ * probe put 3 units in Shop A and 9 in Shop B, and both shops' leaderboards
+ * reported 12.
+ *
+ * A null shopId means platform-wide, which is a real answer for a marketplace
+ * operator and is what a single-shop deployment's own reporting already gets.
+ * It is a parameter rather than something a caller chooses: the services read
+ * it off the tenant scope, which came from the credential.
+ */
 public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
 
     /**
@@ -33,9 +53,16 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
             // its real name - out of the database and into a response
             // somebody could forget to filter.
             "and oi2.productVariant.product.isPrivateProduct = false " +
+            // ONE SHOP'S BASKETS, not the marketplace's. "People also bought"
+            // built from every shop's orders would recommend a product this
+            // shop does not stock, and would tell anyone who looked what
+            // sells next door.
+            "and (:shopId is null or oi1.order.shopId = :shopId) " +
             "group by oi2.productVariant.product.id " +
             "order by cnt desc")
-    List<Object[]> findFrequentlyBoughtWithProductId(@Param("productId") Long productId, Pageable pageable);
+    List<Object[]> findFrequentlyBoughtWithProductId(@Param("productId") Long productId,
+                                                     @Param("shopId") Long shopId,
+                                                     Pageable pageable);
 
     /**
      * Trending: most-ordered products since a given cutoff. Deliberately
@@ -56,9 +83,15 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
             // Same rule as frequently-bought-together above: a private
             // product never appears in a list the customer did not ask for.
             "and oi.productVariant.product.isPrivateProduct = false " +
+            // What is trending IN THIS SHOP. A marketplace-wide leaderboard
+            // on a shop's home screen promotes items the customer cannot buy
+            // from the shop they are standing in.
+            "and (:shopId is null or oi.order.shopId = :shopId) " +
             "group by oi.productVariant.product.id " +
             "order by cnt desc")
-    List<Object[]> findTrendingProductIds(@Param("since") LocalDateTime since, Pageable pageable);
+    List<Object[]> findTrendingProductIds(@Param("since") LocalDateTime since,
+                                          @Param("shopId") Long shopId,
+                                          Pageable pageable);
 
     /**
      * Top products for the ADMIN dashboard: real units sold and real revenue.
@@ -83,9 +116,15 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
             + "where oi.order.orderDate >= :since "
             + "and oi.order.orderStatus <> 'CANCELLED' "
             + "and oi.productVariant.product.isPrivateProduct = false "
+            // THE DASHBOARD NUMBER A SHOPKEEPER READS AS THEIRS. Without this
+            // clause it is the marketplace's, and a kirana owner's "top
+            // products" screen is a report on their competitors' sales.
+            + "and (:shopId is null or oi.order.shopId = :shopId) "
             + "group by oi.productVariant.product.id "
             + "order by units desc")
-    List<Object[]> findTopProductsByUnits(@Param("since") LocalDateTime since, Pageable pageable);
+    List<Object[]> findTopProductsByUnits(@Param("since") LocalDateTime since,
+                                          @Param("shopId") Long shopId,
+                                          Pageable pageable);
 
     /**
      * A customer's recent purchase history, most recent order first,

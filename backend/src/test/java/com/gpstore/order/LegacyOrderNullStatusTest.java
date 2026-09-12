@@ -72,14 +72,25 @@ class LegacyOrderNullStatusTest {
                 Long.class);
         assertNotNull(customerId, "failed to create the fixture customer");
 
+        // WITH A SHOP, because every order has one since the marketplace work
+        // and the customer's order list is shop-scoped. A row with a null
+        // shop_id is invisible to that list - correctly - so a fixture without
+        // one is a fixture whose order nobody can see, and the assertion below
+        // would be passing on somebody else's row.
+        Long shopId = jdbc.queryForObject(
+                "SELECT id FROM shops ORDER BY id ASC LIMIT 1", Long.class);
         jdbc.update("""
                 INSERT INTO orders (customer_id, order_number, total_amount, order_status,
-                                    payment_status, order_date)
-                VALUES (?, ?, ?, 'PENDING_CONFIRMATION', NULL, now())
-                """, customerId, "LEGACY-" + System.nanoTime(), new java.math.BigDecimal("249.00"));
+                                    payment_status, order_date, shop_id)
+                VALUES (?, ?, ?, 'PENDING_CONFIRMATION', NULL, now(), ?)
+                """, customerId, "LEGACY-" + System.nanoTime(),
+                new java.math.BigDecimal("249.00"), shopId);
 
+        // BY THIS CUSTOMER, not "the newest order with no payment status
+        // anywhere". The old query could pick up a row another test left
+        // behind, and then the teardown below would delete somebody else's.
         legacyOrderId = jdbc.queryForObject(
-                "SELECT max(id) FROM orders WHERE payment_status IS NULL", Long.class);
+                "SELECT max(id) FROM orders WHERE customer_id = ?", Long.class, customerId);
         assertNotNull(legacyOrderId);
     }
 
@@ -125,7 +136,14 @@ class LegacyOrderNullStatusTest {
     void nullStatusIsReportedHonestly() throws Exception {
         insertLegacyOrder();
 
-        MvcResult result = mockMvc.perform(get("/api/orders/admin/all?page=0&size=100")).andReturn();
+        // THIS CUSTOMER'S OWN LIST, not page 0 of every order on the platform.
+        // The assertion is about one row, and the shared test database holds
+        // tens of thousands of orders - so scanning "the newest hundred" made
+        // this test pass or fail on how many orders the tests before it
+        // happened to create. It is the same mapper either way; what changes
+        // is whether the row being asserted on is reliably in the answer.
+        MvcResult result = mockMvc.perform(
+                get("/api/orders/customer/" + customerId + "?page=0&size=20")).andReturn();
         String body = result.getResponse().getContentAsString();
 
         assertEquals(200, result.getResponse().getStatus());

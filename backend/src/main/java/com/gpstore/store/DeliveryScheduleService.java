@@ -4,6 +4,8 @@ import com.gpstore.entity.StoreClosure;
 import com.gpstore.entity.StoreOperationsSettings;
 import com.gpstore.repository.StoreClosureRepository;
 import com.gpstore.repository.StoreOperationsSettingsRepository;
+import com.gpstore.store.hours.ShopHours;
+import com.gpstore.store.hours.ShopHoursService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -48,16 +50,19 @@ public class DeliveryScheduleService {
     private final StoreScheduleProperties properties;
     private final StoreOperationsSettingsRepository settingsRepository;
     private final StoreClosureRepository closureRepository;
+    private final ShopHoursService shopHours;
     private final Clock clock;
 
     public DeliveryScheduleService(
             StoreScheduleProperties properties,
             StoreOperationsSettingsRepository settingsRepository,
             StoreClosureRepository closureRepository,
+            ShopHoursService shopHours,
             ObjectProvider<Clock> clocks) {
         this.properties = properties;
         this.settingsRepository = settingsRepository;
         this.closureRepository = closureRepository;
+        this.shopHours = shopHours;
         this.clock = clocks.getIfAvailable(Clock::systemUTC);
     }
 
@@ -130,7 +135,10 @@ public class DeliveryScheduleService {
      * path calls this and rejects, whatever the client believed.
      */
     public boolean isStoreAcceptingOrders() {
-        return schedule().acceptingOrders(now(), acceptance());
+        DeliverySchedule schedule = schedule();
+        Instant at = now();
+        return schedule.acceptingOrders(at,
+                settings().effectiveAcceptance(at.atZone(schedule.zone()).toLocalDateTime()));
     }
 
     /** Everything at once, for the status endpoint - one settings read, one query. */
@@ -153,7 +161,53 @@ public class DeliveryScheduleService {
      */
     public StoreStatus getStoreStatusAt(Instant at) {
         StoreOperationsSettings settings = settings();
-        return schedule().status(at, settings.acceptanceOrDefault(), settings.getClosureMessage());
+        DeliverySchedule schedule = schedule();
+        // effectiveAcceptance, not acceptanceOrDefault: a pause with a time on
+        // it has already lifted by the time it runs out, without a scheduled
+        // job to lift it. See StoreOperationsSettings.effectiveAcceptance.
+        java.time.LocalDateTime local = at.atZone(schedule.zone()).toLocalDateTime();
+        return schedule.status(at, settings.effectiveAcceptance(local),
+                settings.getClosureMessage(), settings.pauseEndsAt(local));
+    }
+
+    /** The zone this shop keeps its clock in. */
+    public java.time.ZoneId shopZone() {
+        return schedule().zone();
+    }
+
+    /**
+     * Now, in the SHOP's zone.
+     *
+     * <p>Exposed because the pause controls reason in local time - "back at
+     * four" means four o'clock where the shop is - and every other class in
+     * the application is forbidden from working that out for itself.
+     */
+    public java.time.LocalDateTime localNow() {
+        DeliverySchedule schedule = schedule();
+        return now().atZone(schedule.zone()).toLocalDateTime();
+    }
+
+    /**
+     * When this shop's last run of a given day ends, or null if it does not
+     * trade that day.
+     *
+     * <p>What "no more orders today" pauses until. It is the LAST session's
+     * close, not the first's: a shop that shuts for lunch has not finished
+     * for the day at one o'clock.
+     */
+    public java.time.LocalDateTime closingTimeOn(LocalDate date) {
+        DeliverySchedule schedule = schedule();
+        List<DeliveryWindow> windows = schedule.windowsOn(date);
+        if (windows.isEmpty()) {
+            return null;
+        }
+        return windows.get(windows.size() - 1).end()
+                .atZone(schedule.zone()).toLocalDateTime();
+    }
+
+    /** This shop's runs on a date, earliest first. Empty when it does not trade. */
+    public List<DeliveryWindow> windowsOn(LocalDate date) {
+        return schedule().windowsOn(date);
     }
 
     /** The window a given order's delivery date belongs to, for display. */
@@ -180,10 +234,19 @@ public class DeliveryScheduleService {
      * started at the UTC today would miss it.
      */
     private DeliverySchedule schedule() {
-        LocalDate today = now().atZone(properties.getZone()).toLocalDate();
+        // THE SHOP'S HOURS, and therefore the shop's ZONE - which is why the
+        // range below is computed from them rather than from the deployment's
+        // configured zone. A shop in a zone six hours away from the
+        // configuration's would otherwise scan a window that is a day out.
+        LocalDate probe = now().atZone(properties.getZone()).toLocalDate();
+        LocalDate from = probe.minusDays(1);
+        LocalDate to = probe.plusDays(properties.getMaxClosureLookaheadDays() + 1L);
+
+        ShopHours hours = shopHours.forCurrentShop(from, to);
+        LocalDate today = now().atZone(hours.zone()).toLocalDate();
         Set<LocalDate> closed = closedDatesFrom(today.minusDays(1),
                 today.plusDays(properties.getMaxClosureLookaheadDays() + 1L));
-        return new DeliverySchedule(properties, closed::contains);
+        return new DeliverySchedule(properties, hours, closed::contains);
     }
 
     private Set<LocalDate> closedDatesFrom(LocalDate from, LocalDate to) {
@@ -219,11 +282,10 @@ public class DeliveryScheduleService {
      */
     @Transactional(readOnly = true)
     public StoreOperationsSettings settings() {
-        return settingsRepository.findById(StoreOperationsSettings.SINGLETON_ID)
+        return settingsRepository
+                .findByShopId(com.gpstore.platform.TenantDefaults
+                        .shopIdForCurrentWork(StoreOperationsSettings.class))
                 .orElseGet(StoreOperationsSettings::new);
     }
 
-    private StoreOrderAcceptance acceptance() {
-        return settings().acceptanceOrDefault();
-    }
 }

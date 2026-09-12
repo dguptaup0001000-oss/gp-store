@@ -7,7 +7,9 @@ import com.gpstore.entity.OrderScanEvent;
 import com.gpstore.entity.SubzoneBackupPartner;
 import com.gpstore.delivery.DeliveryStatusTransitions;
 import com.gpstore.enums.DeliveryStatus;
+import com.gpstore.enums.OrderActor;
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.order.OrderStatusChange;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.DeliveryPartnerRepository;
@@ -136,9 +138,11 @@ public class WorkerScanService {
     private final SubzoneBackupPartnerRepository backupRepository;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
+    private final com.gpstore.territory.TerritoryResolver territoryResolver;
     private final com.gpstore.config.AfterCommitExecutor afterCommitExecutor;
 
-    public WorkerScanService(OrderRepository orderRepository,
+    public WorkerScanService(com.gpstore.territory.TerritoryResolver territoryResolver,
+                             OrderRepository orderRepository,
                              OrderScanEventRepository scanRepository,
                              DeliveryPartnerRepository partnerRepository,
                              com.gpstore.repository.DeliveryRepository deliveryRepository,
@@ -148,6 +152,7 @@ public class WorkerScanService {
                              NotificationService notificationService,
                              AuditLogService auditLogService,
                              com.gpstore.config.AfterCommitExecutor afterCommitExecutor) {
+        this.territoryResolver = territoryResolver;
         this.orderRepository = orderRepository;
         this.scanRepository = scanRepository;
         this.partnerRepository = partnerRepository;
@@ -365,7 +370,14 @@ public class WorkerScanService {
         }
 
         // ---- Authorisation, decided here and nowhere else ---------------
-        DeliverySubzone subzone = order.getAddress() == null ? null : order.getAddress().getSubzone();
+        //
+        // THE TERRITORY IS THE ONE THIS RIDER'S SHOP DREW (W4). A rider works
+        // for exactly one shop, and the order is that shop's; reading the
+        // stamp off the address would ask a different shop's map who is
+        // allowed to pack this - and under a marketplace would load that
+        // shop's row and fail the scan outright.
+        DeliverySubzone subzone = territoryResolver
+                .territoryForDelivery(order.getAddress()).orElse(null);
         Authorisation auth = authorise(worker, order, subzone);
         if (!auth.allowed()) {
             return reject(order, worker, clientRequestId, "NOT_AUTHORISED", auth.reason());
@@ -376,7 +388,11 @@ public class WorkerScanService {
         order.setQrTokenUsedAt(now);
         order.setPackedByPartner(worker);
         order.setPackedAt(now);
-        order.setOrderStatus(OrderStatus.PACKED);
+        // Eligibility was checked above in the worker's own terms ("this order
+        // cannot be packed right now"); this asks the order's table the same
+        // question, so the two cannot drift apart and only one of them can be
+        // the authority.
+        OrderStatusChange.move(order, OrderStatus.PACKED, OrderActor.WORKER);
         orderRepository.save(order);
 
         // THE DELIVERY MOVES WITH THE ORDER, when there is one.
@@ -526,8 +542,9 @@ public class WorkerScanService {
 
     private ScanResult reject(Order order, DeliveryPartner worker, String clientRequestId,
                               String outcome, String message) {
-        DeliverySubzone subzone = order == null || order.getAddress() == null
-                ? null : order.getAddress().getSubzone();
+        DeliverySubzone subzone = order == null
+                ? null
+                : territoryResolver.territoryForDelivery(order.getAddress()).orElse(null);
 
         OrderScanEvent event = newEvent(order, worker, clientRequestId, subzone);
         event.setOutcome(outcome);

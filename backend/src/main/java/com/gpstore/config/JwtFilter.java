@@ -108,7 +108,7 @@ public class JwtFilter extends OncePerRequestFilter {
                 // leave a banned user unable to drop their session. Other
                 // /api/auth/** calls (change-password) must still reject
                 // an inactive account.
-                String path = request.getServletPath();
+                String path = com.gpstore.config.RequestPath.of(request);
                 if (!isSessionLifecycleAuthPath(path)) {
                     CustomerAccountStatusService.Snapshot snapshot = accountIsLive(customerId);
                     if (!snapshot.usable()

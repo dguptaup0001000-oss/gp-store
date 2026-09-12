@@ -53,16 +53,43 @@ void main() {
       expect(AdminRoles.all.toSet(), expectedStaff);
     });
 
-    test('ADMIN holds every permission here too', () {
-      // The backend guarantees this (RolePermissions maps ADMIN to the
-      // complete set). If the client disagreed, an existing admin would open
-      // the console and find menu items missing.
+    test('ADMIN holds every shop permission here too', () {
+      // The backend guarantees this (RolePermissions maps ADMIN to every
+      // permission a SHOP role can hold). If the client disagreed, an
+      // existing admin would open the console and find menu items missing.
+      //
+      // NOT "every permission in the enum". PLATFORM_ADMIN and CATALOG_DEFINE
+      // belong to the marketplace operator, and a shopkeeper holding either
+      // would be a shopkeeper with a scope spanning every other merchant.
       expect(rolePermissionsJava.readAsStringSync(),
-          contains('Role.ADMIN, EVERYTHING'));
-      expect(AdminRoles.permissionsFor(AdminRoles.admin),
-          AdminPermission.values.toSet());
-      expect(AdminRoles.permissionsFor(AdminRoles.superAdmin),
-          AdminPermission.values.toSet());
+          contains('Role.ADMIN, EVERY_SHOP_PERMISSION'));
+
+      final shopPermissions = AdminPermission.values
+          .where((p) =>
+              p != AdminPermission.platformAdmin &&
+              p != AdminPermission.catalogDefine)
+          .toSet();
+      expect(AdminRoles.permissionsFor(AdminRoles.admin), shopPermissions);
+      expect(AdminRoles.permissionsFor(AdminRoles.superAdmin), shopPermissions);
+    });
+
+    test('a shop role never holds a platform permission', () {
+      // The client mirror of the backend's most dangerous line. If this ever
+      // passes for a shop role, the admin console is offering a shopkeeper a
+      // screen that acts on every merchant on the platform.
+      for (final role in AdminRoles.all) {
+        final isPlatform = role == AdminRoles.platformAdmin;
+        expect(
+          AdminRoles.permissionsFor(role).contains(AdminPermission.platformAdmin),
+          isPlatform,
+          reason: role,
+        );
+        expect(
+          AdminRoles.permissionsFor(role).contains(AdminPermission.catalogDefine),
+          isPlatform,
+          reason: role,
+        );
+      }
     });
   });
 
@@ -111,13 +138,40 @@ void main() {
   });
 
   group('navigation filtering', () {
-    test('an admin sees every destination', () {
+    test('an admin sees every destination that belongs to a shop', () {
       final groups =
           AdminNav.groupsFor(AdminRoles.permissionsFor(AdminRoles.admin));
       final labels = [
         for (final g in groups) ...g.destinations.map((d) => d.label)
       ];
-      expect(labels.toSet(), AdminNav.all.map((d) => d.label).toSet());
+      // EVERYTHING EXCEPT THE MARKETPLACE. platformAdmin is the one
+      // permission no shop role holds - RolePermissions builds each shop role
+      // by SUBTRACTING it - so a shop owner with every permission their own
+      // shop can grant still does not run the market. The exception is named
+      // rather than the set loosened, so adding a second platform-only
+      // destination fails here until somebody decides it belongs.
+      final shopDestinations = AdminNav.all
+          .where((d) => d.requires != AdminPermission.platformAdmin)
+          .map((d) => d.label)
+          .toSet();
+      expect(labels.toSet(), shopDestinations);
+    });
+
+    test('no SHOP role can see the marketplace console, and the platform role can', () {
+      // The server refuses /api/platform/** regardless; this is the other
+      // half - not offering a shopkeeper a door that only ever answers 403,
+      // and not hiding it from the one person whose job it is.
+      for (final role in AdminRoles.all) {
+        final groups = AdminNav.groupsFor(AdminRoles.permissionsFor(role));
+        final labels = [
+          for (final g in groups) ...g.destinations.map((d) => d.label)
+        ];
+        if (role == AdminRoles.platformAdmin) {
+          expect(labels, contains('Merchants & Shops'), reason: role);
+        } else {
+          expect(labels, isNot(contains('Merchants & Shops')), reason: role);
+        }
+      }
     });
 
     test('support sees a short menu and no inventory or coupons', () {

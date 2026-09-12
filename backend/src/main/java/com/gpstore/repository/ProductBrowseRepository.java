@@ -1,5 +1,6 @@
 package com.gpstore.repository;
 
+import com.gpstore.catalog.shop.Storefront;
 import com.gpstore.entity.Product;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -26,12 +27,30 @@ import java.util.List;
  * The ORDER BY fragment and WHERE conditions are built from a fixed
  * whitelist keyed off the sort/filter enum values - never from raw request
  * strings - so this stays injection-safe despite being string-built SQL.
+ *
+ * NATIVE SQL IS THE ONE PLACE @Filter DOES NOT REACH. Every query in this
+ * class is native, so Hibernate's shop filter narrows none of them: left
+ * alone they answer from the whole marketplace's catalogue, which is exactly
+ * how one shop's storefront ends up showing another shop's stock. {@link
+ * Storefront} supplies the missing predicate, and it is asked here on every
+ * browse surface - browse, bestseller tiles, and both search paths.
+ *
+ * INERT UNDER SINGLE_SHOP BY CONSTRUCTION. When {@link Storefront#applies()}
+ * is false the fragments below are the character-for-character SQL this class
+ * has always run, and no parameter is bound - see the tests that assert the
+ * generated SQL, not merely its results.
  */
 @Repository
 public class ProductBrowseRepository {
 
     @PersistenceContext
     private EntityManager entityManager;
+
+    private final Storefront storefront;
+
+    public ProductBrowseRepository(Storefront storefront) {
+        this.storefront = storefront;
+    }
 
     public record BrowseResult(List<Product> products, long totalElements) {}
 
@@ -47,6 +66,9 @@ public class ProductBrowseRepository {
 
         List<String> conditions = new ArrayList<>();
         conditions.add("p.active = true");
+        // Under a storefront this is already the shelf question: the v
+        // aggregate below is built from shop_product_variants, so "sellable"
+        // means "this shop lists it, at a price it can charge".
         conditions.add("COALESCE(v.sellable, false) = true");
         conditions.add(brand != null ? "LOWER(p.brand) = LOWER(:brand)" : "p.category_id = :categoryId");
 
@@ -58,7 +80,7 @@ public class ProductBrowseRepository {
             conditions.add("COALESCE(v.in_stock, false) = true");
         }
 
-        // NOTE: this text block deliberately ends right after the last JOIN,
+        // NOTE: these fragments deliberately end right after the last JOIN,
         // with no trailing WHERE - Java text blocks strip trailing
         // whitespace from every line, so a "WHERE " written at the end of
         // the block here previously lost its space at runtime and produced
@@ -66,35 +88,11 @@ public class ProductBrowseRepository {
         // The WHERE clause is built and joined separately below instead,
         // as a plain string literal (not a text block), where trailing
         // spaces are preserved exactly as written.
-        String fromAndJoins = """
-                FROM products p
-                LEFT JOIN (
-                    SELECT product_id,
-                           MIN(CASE WHEN available = true AND selling_price IS NOT NULL
-                                         AND selling_price > 0 THEN selling_price END) AS min_price,
-                           MAX(CASE WHEN mrp IS NOT NULL AND mrp > 0 AND mrp > selling_price
-                                    THEN (mrp - selling_price) / mrp ELSE 0 END) AS max_discount,
-                           BOOL_OR(available = true AND selling_price IS NOT NULL
-                                    AND selling_price > 0) AS in_stock,
-                           BOOL_OR(available = true AND selling_price IS NOT NULL
-                                    AND selling_price > 0
-                                    AND (active IS NULL OR active = true)) AS sellable
-                    FROM product_variants
-                    GROUP BY product_id
-                ) v ON v.product_id = p.id
-                LEFT JOIN (
-                    SELECT pv.product_id, SUM(oi.quantity) AS units_sold
-                    FROM order_items oi
-                    JOIN product_variants pv ON pv.id = oi.product_variant_id
-                    GROUP BY pv.product_id
-                ) bs ON bs.product_id = p.id
-                LEFT JOIN (
-                    SELECT product_id, AVG(rating) AS avg_rating
-                    FROM reviews
-                    WHERE active = true
-                    GROUP BY product_id
-                ) rt ON rt.product_id = p.id
-                """ + "WHERE " + String.join(" AND ", conditions);
+        String fromAndJoins = "FROM products p\n"
+                + priceAggregate()
+                + unitsSoldAggregate()
+                + ratingAggregate()
+                + "WHERE " + String.join(" AND ", conditions);
 
         String orderBy = switch (sort == null ? "" : sort.toUpperCase()) {
             case "PRICE_LOW_HIGH" -> "COALESCE(v.min_price, 0) ASC";
@@ -122,6 +120,7 @@ public class ProductBrowseRepository {
             if (hasKeyword) {
                 q.setParameter("keyword", keyword.trim());
             }
+            storefront.bind(q);
         }
         dataQuery.setParameter("limit", size);
         dataQuery.setParameter("offset", (long) page * size);
@@ -131,6 +130,123 @@ public class ProductBrowseRepository {
         long totalElements = ((Number) countQuery.getSingleResult()).longValue();
 
         return new BrowseResult(products, totalElements);
+    }
+
+    /**
+     * The price / discount / in-stock / sellable aggregate every sort and
+     * filter on this screen reads, one row per product.
+     *
+     * UNDER A STOREFRONT IT IS BUILT FROM THAT SHOP'S SHELF, not from the
+     * shared catalogue, and that is more than hiding rows. "Sort by price
+     * low to high" has to order by the price THIS shop charges - reading
+     * product_variants would sort Shop A's grid by whatever Shop B priced
+     * the same item at - and "in stock only" has to mean this shop lists it.
+     * Making the aggregate itself shop-scoped answers all three at once:
+     * a product this shop does not list produces no row here, so
+     * COALESCE(v.sellable, false) = true excludes it without a second
+     * predicate that could drift away from this one.
+     *
+     * The catalogue variant still has to be live: a shop cannot go on selling
+     * an item the platform has deactivated. mrp falls back to the catalogue's
+     * printed price, because a shop overrides it only when its own differs
+     * (see ShopProductVariant.mrp).
+     */
+    private String priceAggregate() {
+        if (!storefront.applies()) {
+            return """
+                    LEFT JOIN (
+                        SELECT product_id,
+                               MIN(CASE WHEN available = true AND selling_price IS NOT NULL
+                                             AND selling_price > 0 THEN selling_price END) AS min_price,
+                               MAX(CASE WHEN mrp IS NOT NULL AND mrp > 0 AND mrp > selling_price
+                                        THEN (mrp - selling_price) / mrp ELSE 0 END) AS max_discount,
+                               BOOL_OR(available = true AND selling_price IS NOT NULL
+                                        AND selling_price > 0) AS in_stock,
+                               BOOL_OR(available = true AND selling_price IS NOT NULL
+                                        AND selling_price > 0
+                                        AND (active IS NULL OR active = true)) AS sellable
+                        FROM product_variants
+                        GROUP BY product_id
+                    ) v ON v.product_id = p.id
+                    """;
+        }
+        return """
+                LEFT JOIN (
+                    SELECT pv.product_id AS product_id,
+                           MIN(CASE WHEN sp.available = true AND sp.selling_price IS NOT NULL
+                                         AND sp.selling_price > 0 THEN sp.selling_price END) AS min_price,
+                           MAX(CASE WHEN COALESCE(sp.mrp, pv.mrp) IS NOT NULL
+                                         AND COALESCE(sp.mrp, pv.mrp) > 0
+                                         AND COALESCE(sp.mrp, pv.mrp) > sp.selling_price
+                                    THEN (COALESCE(sp.mrp, pv.mrp) - sp.selling_price)
+                                             / COALESCE(sp.mrp, pv.mrp) ELSE 0 END) AS max_discount,
+                           BOOL_OR(sp.available = true AND sp.selling_price IS NOT NULL
+                                    AND sp.selling_price > 0) AS in_stock,
+                           BOOL_OR(sp.available = true AND sp.selling_price IS NOT NULL
+                                    AND sp.selling_price > 0
+                                    AND (sp.active IS NULL OR sp.active = true)) AS sellable
+                    FROM shop_product_variants sp
+                    JOIN product_variants pv ON pv.id = sp.product_variant_id
+                    WHERE sp.shop_id = :storefrontShopId
+                      AND pv.available = true
+                      AND (pv.active IS NULL OR pv.active = true)
+                    GROUP BY pv.product_id
+                ) v ON v.product_id = p.id
+                """;
+    }
+
+    /**
+     * Units sold, which is what "Best Selling" orders by.
+     *
+     * SCOPED TO THIS SHOP'S OWN ORDERS under a storefront. A bestseller list
+     * assembled from the whole marketplace's order history is a leak of the
+     * plainest kind - it tells one merchant what sells for the shop down the
+     * road - and it is also simply wrong for the customer, who is being shown
+     * "popular here" ranked by somebody else's counter.
+     */
+    private String unitsSoldAggregate() {
+        if (!storefront.applies()) {
+            return """
+                    LEFT JOIN (
+                        SELECT pv.product_id, SUM(oi.quantity) AS units_sold
+                        FROM order_items oi
+                        JOIN product_variants pv ON pv.id = oi.product_variant_id
+                        GROUP BY pv.product_id
+                    ) bs ON bs.product_id = p.id
+                    """;
+        }
+        return """
+                LEFT JOIN (
+                    SELECT pv.product_id, SUM(oi.quantity) AS units_sold
+                    FROM order_items oi
+                    JOIN product_variants pv ON pv.id = oi.product_variant_id
+                    JOIN orders o ON o.id = oi.order_id
+                    WHERE o.shop_id = :storefrontShopId
+                    GROUP BY pv.product_id
+                ) bs ON bs.product_id = p.id
+                """;
+    }
+
+    /**
+     * Average rating, and it stays MARKETPLACE-WIDE on purpose.
+     *
+     * A review is about the product, not about the shop that sold it: 4.6
+     * stars on a brand of atta is the same fact in both kiranas, and
+     * splitting it per shop would leave every new shop's catalogue unrated
+     * for no benefit to anybody. It reveals nothing about another shop -
+     * only about the item - which is the line this file draws everywhere
+     * else. Shop-specific judgement is the delivery rating, which is
+     * separate and already shop-owned.
+     */
+    private String ratingAggregate() {
+        return """
+                LEFT JOIN (
+                    SELECT product_id, AVG(rating) AS avg_rating
+                    FROM reviews
+                    WHERE active = true
+                    GROUP BY product_id
+                ) rt ON rt.product_id = p.id
+                """;
     }
 
     /**
@@ -169,16 +285,13 @@ public class ProductBrowseRepository {
      *
      * Categories with no active products are excluded by the inner join: a
      * Bestsellers tile showing four grey placeholders is not a bestseller.
-     */
-    /**
-     * categoryTotal is how many active products the category holds ALTOGETHER,
-     * not how many came back in this row set - it is what the tile's "+N more"
-     * counts. Repeated identically on every row of a category, because a
-     * window function is the cheapest place to get it: the CTE has already
-     * scanned those rows to rank them, so COUNT(*) OVER the same partition
-     * costs no extra scan and no second query. Counting in Java would instead
-     * count the four rows that survived the rank filter and cheerfully report
-     * "+0 more" for a category of two hundred.
+     *
+     * UNDER A STOREFRONT both halves are narrowed to the shop's shelf: the
+     * products it lists, and - in the lateral - the thumbnail of a variant it
+     * actually sells, so the tile does not advertise the 5 kg pack when this
+     * shop only stocks the 1 kg. categoryTotal then counts what this shop
+     * has in the category, which is what "+N more" must mean for the tap that
+     * follows it to show N more things.
      */
     public record BestsellerRow(Long categoryId, String categoryName, Long productId,
                                 String imageUrl, long categoryTotal) {}
@@ -199,6 +312,12 @@ public class ProductBrowseRepository {
 
         boolean filterByIds = categoryIds != null && !categoryIds.isEmpty();
         String categoryFilter = filterByIds ? " AND c.id IN (:categoryIds)" : "";
+        String shelfFilter = storefront.applies()
+                ? " AND " + storefront.productIsOnTheShelf("p")
+                : "";
+        String lateralShelfFilter = storefront.applies()
+                ? " AND " + storefront.variantIsOnTheShelf("v")
+                : "";
 
         Query query = entityManager.createNativeQuery("""
                 WITH ranked AS (
@@ -212,11 +331,13 @@ public class ProductBrowseRepository {
                     FROM categories c
                     JOIN products p
                       ON p.category_id = c.id
-                     AND p.active = true
+                     AND p.active = true""" + shelfFilter + """
+
                     LEFT JOIN LATERAL (
                         SELECT v.image_url
                         FROM product_variants v
-                        WHERE v.product_id = p.id
+                        WHERE v.product_id = p.id""" + lateralShelfFilter + """
+
                         ORDER BY COALESCE(v.available, false) DESC,
                                  COALESCE(v.display_order, 2147483647) ASC,
                                  v.id ASC
@@ -235,6 +356,7 @@ public class ProductBrowseRepository {
         if (filterByIds) {
             query.setParameter("categoryIds", categoryIds);
         }
+        storefront.bind(query);
 
         @SuppressWarnings("unchecked")
         List<Object[]> rows = query.getResultList();
@@ -266,6 +388,10 @@ public class ProductBrowseRepository {
      * Trigram ({@code %} / {@code similarity()}) is used when pg_trgm is
      * installed. If the operators are missing, the first failure flips to
      * ILIKE-only ranking so the shop window stays up instead of 500ing.
+     *
+     * BOTH RANKING PATHS ASK THE SHELF QUESTION, because search is the
+     * easiest surface on which to reach another shop's stock: type a brand
+     * this shop has never stocked and, unnarrowed, the marketplace answers.
      */
     public SearchPage searchInstant(String keyword, int page, int size) {
         String likePattern = toLikePattern(keyword);
@@ -313,11 +439,23 @@ public class ProductBrowseRepository {
                     + " OR p.search_keywords ILIKE :likePattern ESCAPE '#'"
                     + " OR p.subcategory ILIKE :likePattern ESCAPE '#')";
 
+    /**
+     * " AND <this shop lists it>", or nothing at all outside a storefront.
+     *
+     * Returning the empty string rather than " AND true" is deliberate: under
+     * SINGLE_SHOP the search SQL is then byte-identical to what it has always
+     * been, which is a claim a test can make about the string itself.
+     */
+    private String andOnTheShelf() {
+        return storefront.applies() ? " AND " + storefront.productIsOnTheShelf("p") : "";
+    }
+
     private SearchPage searchInstantTrigram(String keyword, String likePattern, int page, int size) {
         // Spaces around AND are plain string literals, not text-block lines.
         // Java text blocks strip trailing whitespace, which previously produced
         // "ANDEXISTS" (Postgres 42601) — the same trap documented on browse().
         String where = "FROM products p WHERE p.active = true AND " + SELLABLE_EXISTS
+                + andOnTheShelf()
                 + " AND (p.name % :keyword OR p.brand % :keyword OR " + MATCH_ILIKE + ") ";
         String orderBy = "ORDER BY GREATEST("
                 + "similarity(COALESCE(p.name, ''), :keyword), "
@@ -328,6 +466,7 @@ public class ProductBrowseRepository {
 
     private SearchPage searchInstantIlike(String keyword, String likePattern, int page, int size) {
         String where = "FROM products p WHERE p.active = true AND " + SELLABLE_EXISTS
+                + andOnTheShelf()
                 + " AND " + MATCH_ILIKE + " ";
         String orderBy = "ORDER BY CASE"
                 + " WHEN p.name ILIKE :prefixPattern ESCAPE '#' THEN 0"
@@ -355,6 +494,7 @@ public class ProductBrowseRepository {
             if (bindKeyword) {
                 q.setParameter("keyword", keyword);
             }
+            storefront.bind(q);
         }
         if (!bindKeyword) {
             dataQuery.setParameter("prefixPattern", escapeLike(keyword) + "%");
@@ -383,14 +523,32 @@ public class ProductBrowseRepository {
     }
 
     /** Visible so a unit test can catch the text-block "ANDEXISTS" trap. */
-    static String trigramSqlForTest() {
+    String trigramSqlForTest() {
         return "SELECT p.id FROM products p WHERE p.active = true AND " + SELLABLE_EXISTS
+                + andOnTheShelf()
                 + " AND (p.name % :keyword OR p.brand % :keyword OR " + MATCH_ILIKE + ") ";
     }
 
-    static String ilikeSqlForTest() {
+    String ilikeSqlForTest() {
         return "SELECT p.id FROM products p WHERE p.active = true AND " + SELLABLE_EXISTS
+                + andOnTheShelf()
                 + " AND " + MATCH_ILIKE + " ";
+    }
+
+    /** The browse SQL, so a test can assert on the shelf narrowing rather than only its results. */
+    String browseSqlForTest(String brand, Long categoryId, boolean inStockOnly) {
+        List<String> conditions = new ArrayList<>();
+        conditions.add("p.active = true");
+        conditions.add("COALESCE(v.sellable, false) = true");
+        conditions.add(brand != null ? "LOWER(p.brand) = LOWER(:brand)" : "p.category_id = :categoryId");
+        if (inStockOnly) {
+            conditions.add("COALESCE(v.in_stock, false) = true");
+        }
+        return "FROM products p\n"
+                + priceAggregate()
+                + unitsSoldAggregate()
+                + ratingAggregate()
+                + "WHERE " + String.join(" AND ", conditions);
     }
 
     static boolean looksLikeMissingTrigram(Throwable error) {

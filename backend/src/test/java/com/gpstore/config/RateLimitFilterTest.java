@@ -356,8 +356,26 @@ class RateLimitFilterTest {
         return key;
     }
 
+    /**
+     * A request as a real container hands one over, context path and all.
+     *
+     * THE "/v1" IS THE POINT: this fixture has always deployed the app under a
+     * context path, to prove the buckets are matched on the application path
+     * rather than on whatever the URI happens to start with. What it did not
+     * do was set getContextPath() to match - and no servlet container has ever
+     * produced that combination. It only worked because the filter read
+     * getServletPath() and nothing else.
+     *
+     * Which mattered: MockMvc leaves getServletPath() EMPTY, so the same
+     * filters classified every request in every MockMvc test into the default
+     * bucket, and TenantContextFilter's public-route branch was never taken by
+     * any test at all. RequestPath.of now derives the path the way Spring's own
+     * matchers do - request URI minus context path - so this fixture has to
+     * supply both halves, exactly as Tomcat does.
+     */
     private static MockHttpServletRequest request(String method, String path) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
+        request.setContextPath("/v1");
         request.setServletPath(path);
         request.setRequestURI("/v1" + path);
         request.setRemoteAddr("203.0.113.10");

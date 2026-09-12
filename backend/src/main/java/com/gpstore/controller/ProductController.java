@@ -220,9 +220,27 @@ public class ProductController {
         return productService.browseByBrand(brand, sort, inStockOnly, keyword, page, Math.min(size, 50));
     }
 
+    /**
+     * One product, as this storefront sells it.
+     *
+     * 404 RATHER THAN AN EMPTY 200, and the difference is not cosmetic. This
+     * used to return null - which Spring writes as a 200 with no body - for a
+     * product that does not exist, and now also for one this shop does not
+     * list. A client handed an empty body on a success status has to guess:
+     * the Flutter app parsed it and threw, showing "Something went wrong"
+     * where the honest answer is "we do not sell that here". 404 is that
+     * answer, and it is the same one an id that never existed gets, which is
+     * exactly right - a storefront should not distinguish between "no such
+     * product" and "not ours" for a stranger asking by id.
+     */
     @GetMapping("/{id}")
     public ProductResponse getProduct(@PathVariable Long id) {
-        return productService.getProductById(id);
+        ProductResponse product = productService.getProductById(id);
+        if (product == null) {
+            throw new com.gpstore.exception.ResourceNotFoundException(
+                    "Product not found with id " + id);
+        }
+        return product;
     }
 
     // Admin only (enforced in SecurityConfig) - didn't exist before, a

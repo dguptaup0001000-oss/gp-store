@@ -64,6 +64,40 @@ class PartialRefundsTest {
     @Autowired private CustomerRepository customerRepository;
     @Autowired private com.gpstore.repository.RefundRepository refundRepository;
 
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    /**
+     * TIDIES UP, because the rows this class leaves are not inert.
+     *
+     * <p>Every run used to leave its REFUND_PENDING payments in the shared
+     * test database. The refund reconciliation sweep is deliberately BATCHED,
+     * so a backlog of them eventually grows past one run's reach - and
+     * StuckRefundsGetChasedTest then fails, reproducibly, because the sweep
+     * never got as far as the refund it had just inserted. A test that
+     * poisons the database it shares is a test that fails somebody else's
+     * assertion weeks later, for a reason nobody can see.
+     */
+    @org.junit.jupiter.api.AfterEach
+    void removeWhatThisTestLeftBehind() {
+        // PAYMENTS AND REFUNDS ONLY. Those are the rows that do damage: the
+        // refund reconciliation sweep is batched, so a backlog of abandoned
+        // REFUND_PENDING payments eventually grows past one run's reach and
+        // makes StuckRefundsGetChasedTest fail for a reason that has nothing
+        // to do with the code it tests.
+        //
+        // The orders and customers are left where they are on purpose -
+        // notifications, outbox rows and audit entries point at them, and
+        // chasing every foreign key would turn a tidy-up into a second
+        // cascade to maintain. They are inert; the payments were not.
+        jdbc.update("DELETE FROM refunds WHERE payment_id IN (SELECT p.id FROM payments p "
+                + "JOIN orders o ON o.id = p.order_id WHERE o.order_number LIKE 'PARTIAL-%')");
+        jdbc.update("DELETE FROM payment_provider_events WHERE payment_id IN "
+                + "(SELECT p.id FROM payments p JOIN orders o ON o.id = p.order_id "
+                + "WHERE o.order_number LIKE 'PARTIAL-%')");
+        jdbc.update("DELETE FROM payments WHERE order_id IN "
+                + "(SELECT id FROM orders WHERE order_number LIKE 'PARTIAL-%')");
+    }
+
     @MockitoSpyBean private PaymentGateway gateway;
 
     @Test

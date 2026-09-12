@@ -55,6 +55,20 @@ class CustomerConductIsVisibleTest {
         return customers.save(customer);
     }
 
+    /**
+     * A base for this run's order ids.
+     *
+     * FIXED IDS MADE THIS TEST RUNNABLE EXACTLY ONCE. customer_delivery_ratings
+     * carries a unique constraint on order_id (one rating per delivery, which
+     * is right), and the fixture used to hard-code 900001, 900002 and so on.
+     * Against a fresh database that passes; against the same database a
+     * second time every insert collides. CI never noticed because CI builds a
+     * clean database per run - it took a local re-run to surface, which is
+     * exactly the class of test failure that hides until somebody is
+     * debugging something else.
+     */
+    private final long orderBase = 900_000_000L + (System.nanoTime() % 90_000_000L) * 10;
+
     private void rate(Customer customer, long orderId, int score, LocalDateTime when) {
         CustomerDeliveryRating rating = new CustomerDeliveryRating();
         rating.setCustomerId(customer.getId());
@@ -69,8 +83,8 @@ class CustomerConductIsVisibleTest {
     @DisplayName("the average and the count both reach the customer file")
     void ratingsReachTheScreen() {
         Customer customer = newCustomer();
-        rate(customer, 900001L, 9, LocalDateTime.now().minusDays(3));
-        rate(customer, 900002L, 5, LocalDateTime.now().minusDays(2));
+        rate(customer, orderBase + 1, 9, LocalDateTime.now().minusDays(3));
+        rate(customer, orderBase + 2, 5, LocalDateTime.now().minusDays(2));
 
         AdminCustomerDetailResponse.DeliveryConduct conduct =
                 detail.of(customer.getId()).conduct();
@@ -85,13 +99,13 @@ class CustomerConductIsVisibleTest {
     @DisplayName("the newest rating is first, so a change of behaviour is visible")
     void newestFirst() {
         Customer customer = newCustomer();
-        rate(customer, 900011L, 2, LocalDateTime.now().minusDays(30));
-        rate(customer, 900012L, 10, LocalDateTime.now().minusDays(1));
+        rate(customer, orderBase + 11, 2, LocalDateTime.now().minusDays(30));
+        rate(customer, orderBase + 12, 10, LocalDateTime.now().minusDays(1));
 
         var recent = detail.of(customer.getId()).conduct().recent();
 
         assertEquals(2, recent.size());
-        assertEquals(900012L, recent.get(0).orderId(),
+        assertEquals(orderBase + 12, recent.get(0).orderId(),
                 "a customer who was difficult once and fine since must not read as difficult");
         assertEquals(10, recent.get(0).score());
     }
@@ -120,7 +134,7 @@ class CustomerConductIsVisibleTest {
         // wearing the same name.
         Customer customer = newCustomer();
         for (int i = 0; i < 12; i++) {
-            rate(customer, 900100L + i, 6, LocalDateTime.now().minusDays(12 - i));
+            rate(customer, orderBase + 100 + i, 6, LocalDateTime.now().minusDays(12 - i));
         }
 
         AdminCustomerDetailResponse.DeliveryConduct conduct =
@@ -136,7 +150,7 @@ class CustomerConductIsVisibleTest {
     void ratingsAreScopedToTheirCustomer() {
         Customer rated = newCustomer();
         Customer other = newCustomer();
-        rate(rated, 900200L, 1, LocalDateTime.now());
+        rate(rated, orderBase + 200, 1, LocalDateTime.now());
 
         assertNull(detail.of(other.getId()).conduct().averageScore());
         assertEquals(0, detail.of(other.getId()).conduct().ratedDeliveries());

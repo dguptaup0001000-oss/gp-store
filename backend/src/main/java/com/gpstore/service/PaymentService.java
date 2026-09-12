@@ -2,7 +2,9 @@ package com.gpstore.service;
 
 import com.gpstore.dto.request.InitiatePaymentRequest;
 import com.gpstore.dto.response.PaymentInitiationResponse;
+import com.gpstore.enums.OrderActor;
 import com.gpstore.enums.OrderStatus;
+import com.gpstore.order.OrderStatusChange;
 import com.gpstore.enums.PaymentMethod;
 import com.gpstore.enums.PaymentStatus;
 import com.gpstore.payment.gateway.PaymentGateway;
@@ -267,11 +269,16 @@ public class PaymentService {
         // is refused outright. CANCELLED means cancelOrder got here first,
         // in which case its transition stands and this one is a no-op - the
         // inventory flag has already made the stock side exactly-once.
+        // ASKED OF THE TABLE, NOT OF TWO NAMED STATES. The hand-written
+        // check below used to be "not CANCELLED and not DELIVERED", which
+        // let the sweep cancel a COMPLETED or a REJECTED order - both
+        // terminal, neither cancellable, and one of them an order the
+        // customer has already finished with.
         Order cancelled = null;
-        if (order.getOrderStatus() != OrderStatus.CANCELLED
-                && order.getOrderStatus() != OrderStatus.DELIVERED) {
+        if (OrderStatusChange.canMove(order, OrderStatus.CANCELLED, OrderActor.SYSTEM)
+                && order.getOrderStatus() != OrderStatus.CANCELLED) {
 
-            order.setOrderStatus(OrderStatus.CANCELLED);
+            OrderStatusChange.move(order, OrderStatus.CANCELLED, OrderActor.SYSTEM);
             cancelled = orderRepository.save(order);
 
             auditLogService.log("ORDER_CANCELLED", "Order", orderId,
@@ -284,7 +291,8 @@ public class PaymentService {
             // cancellation or not at all - a crash here cannot leave a
             // cancelled order with a live invoice.
             outboxEventRepository.save(com.gpstore.entity.OutboxEvent.of(
-                    OutboxWorker.AGGREGATE_ORDER, orderId, OutboxWorker.EVENT_ORDER_CANCELLED));
+                    OutboxWorker.AGGREGATE_ORDER, orderId, OutboxWorker.EVENT_ORDER_CANCELLED,
+                    order.getShopId()));
 
             // Initialised deliberately, while the session is still open. The
             // notification below runs after commit, by which point this

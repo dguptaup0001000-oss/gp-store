@@ -1,0 +1,111 @@
+# A SECOND STACK ON THE SAME VPS, FOR TESTING, NEXT TO THE LIVE SHOP.
+#
+# WHY THIS FILE EXISTS. The honest answer to "how do I test before deploying"
+# is a second machine, and this is not that. It is the cheaper answer for
+# somebody who has one VPS: a second Compose project on the same box, with its
+# own database, its own Redis and its own subdomain, sharing the Traefik that
+# is already running.
+#
+# BE CLEAR ABOUT WHAT YOU ARE ACCEPTING. Staging here shares the production
+# host's CPU, memory, disk and kernel. A staging run that fills the disk fills
+# production's disk. A staging load test competes for production's CPU. The
+# isolation you get is the database and the process, and nothing below that.
+#
+# IT DOES FIT, BUT ONLY JUST. Production's own limits already reserve 5,440 MB
+# of a KVM 2's 8 GB. The limits here total 1,664 MB (backend 1024 + postgres
+# 512 + redis 128), which leaves roughly 900 MB of headroom for the OS - tight
+# but real. Do NOT raise these to match
+# production's: a staging stack at production's limits does not fit, and the
+# thing that gets killed when memory runs out will not politely be the staging
+# one.
+#
+#   Usage, from /opt/gp-store/backend on the VPS:
+#
+#     cp .env.example .env.staging      # then edit - see the checklist below
+#     docker compose -p gpstore-staging \
+#       -f docker-compose.yml -f docker-compose.staging.yml \
+#       --env-file .env.staging up -d
+#
+#   The project name is what keeps the volumes apart: Docker prefixes every
+#   volume with it, so gpstore-staging_gpstore_pg_data is a different disk
+#   from production's gpstore_gpstore_pg_data. Get the -p wrong and the two
+#   stacks share a database. Check with: docker volume ls | grep staging
+#
+# BEFORE YOU START IT, in .env.staging:
+#   API_DOMAIN=staging-api.<your domain>   (and an A record pointing here)
+#   DB_NAME, DB_USERNAME, DB_PASSWORD      - its OWN, not production's
+#   JWT_SECRET                             - its own; a shared one would make
+#                                            a staging token work on the live
+#                                            shop
+#   REDIS_PASSWORD                         - its own
+#   CASHFREE_ENVIRONMENT=SANDBOX           - never PRODUCTION here
+#   CASHFREE_APP_ID / SECRET_KEY           - sandbox credentials, or leave
+#                                            blank to keep payment off
+#   (the backup container is switched off here entirely - see below)
+#
+# AND THE ONE THAT MATTERS MOST: never copy production's .env and edit it.
+# Start from .env.example, or you will ship production's database password
+# into a stack you are about to load-test.
+
+services:
+
+  # TRAEFIK IS NOT STARTED TWICE. It binds :80 and :443, and the second one to
+  # try would fail - or worse, win. The production stack's Traefik routes this
+  # stack too, which is why the router names below have to differ.
+  traefik:
+    deploy:
+      replicas: 0
+    profiles: ["never-start-in-staging"]
+
+  dockerproxy:
+    profiles: ["never-start-in-staging"]
+
+  # NO BACKUPS FROM THE TESTBED. They would write to the same disk production's
+  # backups land on, to protect rows nobody minds losing. The whole point of a
+  # staging database is that it is disposable.
+  backup:
+    profiles: ["never-start-in-staging"]
+
+  postgres:
+    # Its own database, its own volume (the project name does that), and
+    # deliberately small: staging holds test rows, not a shop's history.
+    mem_limit: 512m
+    cpus: "0.50"
+
+  redis:
+    mem_limit: 128m
+    cpus: "0.25"
+
+  backend:
+    mem_limit: 1024m
+    cpus: "0.75"
+    environment:
+      # FLYWAY ON, ddl-auto UPDATE for the FIRST boot only. There is no V1 -
+      # Hibernate creates the entity tables and Flyway decorates them (see
+      # db/migration/README.md). After the first successful boot, set
+      # DDL_AUTO=validate here and restart, so staging checks the schema the
+      # same way production does.
+      DDL_AUTO: "${DDL_AUTO:-update}"
+      FLYWAY_ENABLED: "true"
+      # SANDBOX OR NOTHING. A staging stack must never hold credentials that
+      # can move real money. If these are blank the payment path stays off,
+      # which is a correct state for a testbed.
+      CASHFREE_ENVIRONMENT: "${CASHFREE_ENVIRONMENT:-SANDBOX}"
+    labels:
+      # DIFFERENT ROUTER NAMES, not just a different rule. Two routers called
+      # "gpstore" would collide inside the one Traefik and the loser would be
+      # whichever Docker listed second - which is not a coin you want flipped
+      # in front of the live shop.
+      - traefik.enable=true
+      - traefik.http.routers.gpstore.rule=
+      - traefik.http.routers.gpstore-live.rule=
+      - traefik.http.routers.gpstore-staging.rule=Host(`${API_DOMAIN:?set API_DOMAIN in .env.staging}`)
+      - traefik.http.routers.gpstore-staging.entrypoints=websecure
+      - traefik.http.routers.gpstore-staging.tls.certresolver=le
+      # LOWER PRIORITY THAN PRODUCTION'S 10. If a hostname is ever configured
+      # on both by mistake, production wins the tie rather than staging
+      # quietly answering for the live shop.
+      - traefik.http.routers.gpstore-staging.priority=5
+      - traefik.http.routers.gpstore-staging.service=gpstore-staging
+      - traefik.http.services.gpstore-staging.loadbalancer.server.port=8081
+      - traefik.http.services.gpstore-staging.loadbalancer.server.scheme=http

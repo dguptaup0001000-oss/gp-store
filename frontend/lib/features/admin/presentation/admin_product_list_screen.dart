@@ -162,11 +162,16 @@ class _ProductTile extends ConsumerWidget {
   /// "no variants" warning instead of an empty or zero rupee figure.
   String? _priceLabel() {
     if (product.variants.isEmpty) return null;
-    var low = product.variants.first.sellingPrice;
+    // SKIPS VARIANTS WITH NO PRICE. Since Part 2 §10 the server withholds the
+    // price of an item the shop has run out of, so folding a null in as zero
+    // would show every admin a range starting at "₹0".
+    final priced = product.variants.where((v) => v.hasPrice).toList();
+    if (priced.isEmpty) return null;
+    var low = priced.first.sellingPrice!;
     var high = low;
-    for (final variant in product.variants) {
-      if (variant.sellingPrice < low) low = variant.sellingPrice;
-      if (variant.sellingPrice > high) high = variant.sellingPrice;
+    for (final variant in priced) {
+      if (variant.sellingPrice! < low) low = variant.sellingPrice!;
+      if (variant.sellingPrice! > high) high = variant.sellingPrice!;
     }
     return low == high
         ? AdminFormat.rupees(low)

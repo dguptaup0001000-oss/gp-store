@@ -53,6 +53,16 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findByCustomerId(Long customerId);
 
     /**
+     * Every shop's order under one checkout.
+     *
+     * Ordered by shop so a customer's screen does not reshuffle between
+     * refreshes. Shop-filtered like every other query here - which means a
+     * shopkeeper opening a group sees only their own half, and the customer
+     * who placed it reads it through CustomerOwnedRead.
+     */
+    List<Order> findByOrderGroupIdOrderByShopIdAsc(Long orderGroupId);
+
+    /**
      * Locks the order row for the duration of the transaction. cancelOrder
      * and updateOrderStatus both used to be a plain read-check-write: read
      * the current status, validate the transition, write the new status and
@@ -197,21 +207,50 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      * absent here; the service fills them with zero so the chart has no
      * holes.
      */
+    /**
+     * THE SHOP PREDICATE IS WRITTEN BY HAND, because this query is native.
+     *
+     * Hibernate's filter rewrites JPQL and HQL; it does not touch a native
+     * statement, so without the clause below this would total EVERY shop's
+     * takings into one line on one shop's dashboard. The value is not a
+     * parameter a caller chooses: AnalyticsService reads it from the tenant
+     * scope on the thread, which came from the credential.
+     *
+     * A NULL shopId means platform-wide, which is a real answer for a
+     * marketplace operator looking at the whole market - and is what a
+     * single-shop deployment's scheduled reporting already does.
+     */
     @Query(value = "select date_trunc('day', o.order_date) as day, "
             + "coalesce(sum(o.total_amount), 0) as revenue, "
             + "count(*) as orders "
             + "from orders o "
             + "where o.order_date >= :from and o.order_date <= :to "
             + "and o.order_status <> 'CANCELLED' "
+            + "and (cast(:shopId as bigint) is null or o.shop_id = :shopId) "
             + "group by date_trunc('day', o.order_date) "
             + "order by 1",
             nativeQuery = true)
     List<Object[]> revenueByDayBetween(@Param("from") LocalDateTime from,
-                                       @Param("to") LocalDateTime to);
+                                       @Param("to") LocalDateTime to,
+                                       @Param("shopId") Long shopId);
 
     /** Order count grouped by current status - the "what's in the pipeline right now" view. */
     @Query("select o.orderStatus as status, count(o) as cnt from Order o group by o.orderStatus")
     List<Object[]> countByStatus();
+
+    /**
+     * This shop's own trading record over a window: how many orders, in what
+     * state.
+     *
+     * <p>JPQL over a shop-owned entity, so the filter narrows it to the shop
+     * in scope - which is what makes "this shop's reliability" a question that
+     * cannot accidentally be answered with the marketplace's. It is also why
+     * this takes no shop id: a reliability figure computed for a shop the
+     * caller named would be a shop's record read by whoever asked.
+     */
+    @Query("select o.orderStatus as status, count(o) as cnt from Order o "
+            + "where o.orderDate >= :since group by o.orderStatus")
+    List<Object[]> countByStatusSince(@Param("since") java.time.LocalDateTime since);
 
     /**
      * Backs order number generation (see OrderService.placeOrder) with a
@@ -235,5 +274,46 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      */
     @Query("select o from Order o left join fetch o.customer where o.id > :afterId order by o.id asc")
     List<Order> findNewSince(@Param("afterId") Long afterId, Pageable pageable);
+
+    /**
+     * One row per shop: how the marketplace traded in a window.
+     *
+     * THE PLATFORM ROLL-UP, and the only place a figure is grouped BY shop
+     * rather than restricted TO one.
+     *
+     * WHAT KEEPS THE SHOPS APART HERE IS THE GROUPING, not the parameter.
+     * Order IS shop-owned, so this query is rooted on a filtered entity: under
+     * a shop scope Hibernate narrows it to one row before the group-by ever
+     * runs, which is the same answer that shop's own dashboard gives. A
+     * mis-scoped caller therefore reads their own numbers rather than the
+     * market's - it fails closed. Measured: removing the shopId clause below
+     * changed no test, because the filter had already done the work.
+     *
+     * The parameter stays anyway, and the reason is narrow enough to say
+     * plainly: it is the one thing that would still be true if Order ever
+     * stopped being shop-owned, and it costs a single predicate. It is
+     * redundant today. It is not the protection.
+     *
+     * CANCELLED ORDERS ARE COUNTED BUT NOT BANKED, matching sumRevenueBetween
+     * exactly - a marketplace operator needs to see that a shop is taking
+     * orders and cancelling them, which a query that dropped the rows would
+     * hide completely.
+     */
+    @Query("""
+           select o.shopId as shopId,
+                  count(o) as orderCount,
+                  coalesce(sum(case when o.orderStatus <> com.gpstore.enums.OrderStatus.CANCELLED
+                                    then o.totalAmount else 0 end), 0) as grossSales,
+                  sum(case when o.orderStatus = com.gpstore.enums.OrderStatus.CANCELLED
+                           then 1 else 0 end) as cancelledCount,
+                  max(o.orderDate) as lastOrderAt
+           from Order o
+           where o.orderDate >= :from and o.orderDate <= :to
+             and (:shopId is null or o.shopId = :shopId)
+           group by o.shopId
+           """)
+    List<Object[]> tradingByShopBetween(@Param("from") LocalDateTime from,
+                                        @Param("to") LocalDateTime to,
+                                        @Param("shopId") Long shopId);
 
 }

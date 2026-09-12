@@ -21,15 +21,18 @@ public class OrderItemService {
     private final OrderRepository orderRepository;
     private final ProductVariantRepository productVariantRepository;
     private final TaxService taxService;
+    private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
 
     public OrderItemService(OrderItemRepository orderItemRepository,
                             OrderRepository orderRepository,
                             ProductVariantRepository productVariantRepository,
-                            TaxService taxService) {
+                            TaxService taxService,
+                            com.gpstore.catalog.shop.ShopCatalog shopCatalog) {
         this.orderItemRepository = orderItemRepository;
         this.orderRepository = orderRepository;
         this.productVariantRepository = productVariantRepository;
         this.taxService = taxService;
+        this.shopCatalog = shopCatalog;
     }
 
     /**
@@ -84,7 +87,11 @@ public class OrderItemService {
         ProductVariant variant = productVariantRepository.findById(orderItem.getProductVariant().getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
 
-        BigDecimal unitPrice = variant.getSellingPrice();
+        // The price THIS shop charges. An admin adding a line to an order must
+        // charge what the shop's own shelf says, not the catalogue default -
+        // otherwise a manually-added line and a customer-added one for the same
+        // item would come to different money on the same invoice.
+        BigDecimal unitPrice = shopCatalog.priceOf(variant).orElse(null);
         if (unitPrice == null || unitPrice.compareTo(BigDecimal.ZERO) < 0) {
             throw new BadRequestException("That product has no price to charge.");
         }

@@ -88,7 +88,30 @@ class OrderOwnershipTest {
                 deliveryScheduleServiceUnused,
                 // requireIdempotencyKey: these tests cover cancellation and
                 // ownership, never the checkout entry point that reads it.
-                false);
+                false,
+                // Same again for the shop's price list: nothing here prices a
+                // basket.
+                org.mockito.Mockito.mock(com.gpstore.catalog.shop.ShopCatalog.class),
+                // Nor a shop's trading status: nothing here places an order.
+                org.mockito.Mockito.mock(com.gpstore.platform.ShopTradingGate.class),
+                // Nor an order group or a shop lookup: these tests cover
+                // cancellation and ownership, never a checkout.
+                org.mockito.Mockito.mock(com.gpstore.ordergroup.OrderGroupRepository.class),
+                org.mockito.Mockito.mock(com.gpstore.platform.ShopRepository.class),
+                org.mockito.Mockito.mock(com.gpstore.platform.ShopScopeSwitch.class),
+                // Nor the customer-owned widening: that is the replay path,
+                // and nothing here retries a checkout.
+                org.mockito.Mockito.mock(com.gpstore.platform.CustomerOwnedRead.class),
+                // THE REAL POLICY, not a mock, and with no settings behind it.
+                // A mocked quote returns null and would hand this test a
+                // green tick for a path that NPEs in production; the real one
+                // with an empty repository answers what an unconfigured shop
+                // actually answers - nothing is charged.
+                new com.gpstore.order.cancellation.CancellationPolicy(
+                        org.mockito.Mockito.mock(
+                                com.gpstore.repository.StoreOperationsSettingsRepository.class),
+                        "5"),
+                org.mockito.Mockito.mock(com.gpstore.order.cancellation.CancellationDues.class));
     }
 
     private Order orderOwnedBy(Long ownerId) {

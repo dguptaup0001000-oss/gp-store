@@ -38,6 +38,33 @@ import static org.junit.jupiter.api.Assertions.*;
 @AutoConfigureMockMvc
 class PrivateProductTest {
 
+    /**
+     * The scope a real request would already be carrying.
+     *
+     * These tests call the services straight, with no filter in front of
+     * them, and the reporting queries now ask which shop they are about -
+     * TenantContext.reportingShopId() REQUIRES a scope rather than treating a
+     * missing one as "every shop", because a forgotten scope and a deliberate
+     * marketplace report must not look the same. So the test says what
+     * TenantContextFilter says on every real request: this is Shop #1's
+     * dashboard.
+     */
+    @org.junit.jupiter.api.BeforeEach
+    void actAsTheShopTheRequestWouldHaveResolvedTo() {
+        Long shopOne = shopsForScope.findByCode(platformForScope.getFirstShopCode())
+                .orElseThrow().getId();
+        com.gpstore.platform.TenantContext.set(
+                com.gpstore.platform.TenantScope.ofShop(shopOne));
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void dropTheScope() {
+        com.gpstore.platform.TenantContext.clear();
+    }
+
+    @Autowired private com.gpstore.platform.ShopRepository shopsForScope;
+    @Autowired private com.gpstore.platform.PlatformProperties platformForScope;
+
     private static final String REAL_NAME = "PRIVATE_TEST_PRODUCT";
     private static final String ALIAS = "Personal Item";
 

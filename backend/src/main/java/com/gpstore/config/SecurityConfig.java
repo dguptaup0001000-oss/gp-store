@@ -24,6 +24,7 @@ public class SecurityConfig {
 
     private final JwtFilter jwtFilter;
     private final RateLimitFilter rateLimitFilter;
+    private final com.gpstore.platform.CatalogDefinitionAuthorization catalogDefinition;
 
     // Comma-separated allowed origins. No default of "*" - that would be
     // wide open. Set this explicitly per environment (your Flutter web build's
@@ -31,7 +32,9 @@ public class SecurityConfig {
     @Value("${cors.allowed-origins:http://localhost:3000}")
     private String allowedOrigins;
 
-    public SecurityConfig(JwtFilter jwtFilter, RateLimitFilter rateLimitFilter) {
+    public SecurityConfig(JwtFilter jwtFilter, RateLimitFilter rateLimitFilter,
+                          com.gpstore.platform.CatalogDefinitionAuthorization catalogDefinition) {
+        this.catalogDefinition = catalogDefinition;
         this.jwtFilter = jwtFilter;
         this.rateLimitFilter = rateLimitFilter;
     }
@@ -209,6 +212,26 @@ public class SecurityConfig {
                 // must be admin-only, and there's no other rule that would
                 // cover this DELETE path otherwise.
                 .requestMatchers(HttpMethod.DELETE, "/api/reviews/*/moderate").hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
+                // THE MODERATION QUEUE IS NOT PUBLIC, and it would be without
+                // this line: "/api/reviews/**" is permitAll for GET a few
+                // rules below, so a flagged-reviews listing added under that
+                // prefix is world-readable the moment it exists. Stated here,
+                // ahead of it, for the same ordering reason the comment above
+                // gives for GET /api/reviews.
+                .requestMatchers(HttpMethod.GET, "/api/reviews/reported")
+                    .hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
+                .requestMatchers(HttpMethod.POST, "/api/reviews/*/unhide")
+                    .hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
+                // The shop's side of the conversation (§21) and its flag
+                // (§22). Without these they fall through to
+                // anyRequest().authenticated() and any signed-in shopper
+                // could answer a review AS the shop.
+                .requestMatchers(HttpMethod.POST, "/api/reviews/*/respond",
+                        "/api/reviews/*/report")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                // The customer's single reply is theirs, and the service
+                // checks they wrote the review.
+                .requestMatchers(HttpMethod.POST, "/api/reviews/*/reply").authenticated()
                 // Same ordering reason as /api/reviews above - the admin
                 // "everything including inactive" product list must come
                 // before the broad public GET /api/products/** rule below.
@@ -231,9 +254,67 @@ public class SecurityConfig {
 
                 // Admin-only: catalog and inventory management, cross-customer views,
                 // payment/order status mutation, delivery operations
-                .requestMatchers(HttpMethod.POST, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
-                .requestMatchers(HttpMethod.PUT, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
-                .requestMatchers(HttpMethod.DELETE, "/api/products/**", "/api/categories/**", "/api/product-variants/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                // THE SHOP WINDOW. Which storefronts exist and which of them
+                // will deliver to a given point - the one thing a customer's
+                // app needs before it has a shop at all. Public for the same
+                // reason the product catalogue is: refusing it would mean an
+                // app that cannot show anybody anything until they sign in.
+                .requestMatchers(HttpMethod.GET, "/api/marketplace/**").permitAll()
+
+                // THE PLATFORM SURFACE. Merchants, shop lifecycle, and looking
+                // into any shop - the only routes whose scope spans merchants.
+                // Above everything else so nothing below can widen it.
+                .requestMatchers("/api/platform/**").hasAuthority(AdminPermission.PLATFORM_ADMIN.authority())
+
+                // A SHOPKEEPER'S OWN SHOP: their profile, their price list,
+                // their staff. Shop-scoped by TenantContextFilter, so "their
+                // own" is enforced by the tenant filter rather than by a path.
+                // HOW MUCH IS ON THE SHELF IS AN INVENTORY ACT, not a
+                // catalogue one, and this line has to sit ABOVE the listings
+                // rule below or the more general pattern would swallow it and
+                // demand CATALOG_MANAGE for a stock-take. A shop's stock clerk
+                // holds INVENTORY_MANAGE and no pricing permission; pricing and
+                // counting are different jobs in a real kirana, and /api/inventory
+                // is already gated this way. The controller asks for the same
+                // permission again - see requirePermission there.
+                .requestMatchers("/api/shop/listings/*/stock")
+                    .hasAuthority(AdminPermission.INVENTORY_MANAGE.authority())
+                .requestMatchers("/api/shop/listings/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+
+                // THE BACK OFFICE, gated on what it is about rather than on
+                // CATALOG_VIEW below. A delivery manager holds ORDERS_VIEW and
+                // no catalogue permission at all; without these two lines the
+                // path pattern would refuse them the queue of orders they exist
+                // to run, and the refusal would look like a tenancy decision
+                // rather than the accident it is. The controller asks for the
+                // same permission again - see requirePermission there.
+                .requestMatchers("/api/shop/earnings").hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
+                // The shop's own trading record is figures about its orders,
+                // so it is gated like its takings rather than like its
+                // catalogue.
+                .requestMatchers("/api/shop/reliability").hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
+                .requestMatchers("/api/shop/open-work").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                // A SHOP'S OWN DISCIPLINARY RECORD (§2). More sensitive than
+                // the catalogue view "/api/shop/**" falls back to below, so
+                // it takes the same owner-level permission as earnings and
+                // reliability rather than the one a stock clerk holds. The
+                // merchant is never named in the request - it is derived from
+                // the shop the credential resolved to - so this rule is about
+                // WHO IN THE SHOP may read it, not which shop.
+                .requestMatchers("/api/shop/governance", "/api/shop/governance/**")
+                    .hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
+
+                .requestMatchers("/api/shop/**").hasAuthority(AdminPermission.CATALOG_VIEW.authority())
+
+                // WRITING THE SHARED CATALOGUE, which is not the same act as
+                // pricing a shelf - see CatalogDefinitionAuthorization. Under
+                // one shop this is exactly CATALOG_MANAGE and nothing changes;
+                // under a marketplace it narrows to the platform, because one
+                // merchant renaming a product renames it for every merchant
+                // selling it.
+                .requestMatchers(HttpMethod.POST, "/api/products/**", "/api/categories/**", "/api/product-variants/**").access(catalogDefinition)
+                .requestMatchers(HttpMethod.PUT, "/api/products/**", "/api/categories/**", "/api/product-variants/**").access(catalogDefinition)
+                .requestMatchers(HttpMethod.DELETE, "/api/products/**", "/api/categories/**", "/api/product-variants/**").access(catalogDefinition)
                 .requestMatchers("/api/inventory/**").hasAuthority(AdminPermission.INVENTORY_MANAGE.authority())
                 .requestMatchers("/api/uploads/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
                 .requestMatchers("/api/orders").hasAuthority(AdminPermission.ORDERS_VIEW.authority())
@@ -465,6 +546,57 @@ public class SecurityConfig {
                     .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
                 .requestMatchers(HttpMethod.GET, "/api/returns/pending", "/api/returns/pending/count")
                     .hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+
+                // PART 2: THE CUSTOMER'S OWN DISCOVERY SURFACES.
+                //
+                // All of these read the signed-in customer - their preferred
+                // shops, their basket, their comparison - and none of them
+                // takes a customer id from the request. Stated explicitly
+                // rather than left to fall through to anyRequest(), because
+                // /api/preferred-shops is a list of a named person's shopping
+                // habits and a rule that is only correct because of what
+                // follows it is one reordering away from being wrong.
+                .requestMatchers("/api/preferred-shops", "/api/preferred-shops/**").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/discovery/**").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/carts/mine/by-shop").authenticated()
+
+                // SHOP RATINGS (§17-§22). Four audiences on one path prefix,
+                // and the rule is the only thing keeping them apart.
+                //
+                // WITHOUT THESE LINES every one of them falls through to
+                // anyRequest().authenticated(), and any signed-in shopper
+                // could respond to a rating AS the shop, or hide a one-star
+                // rating of a kirana they have never bought from. The two
+                // that moderate content take REVIEWS_MODERATE rather than a
+                // general admin permission, because §20 makes hiding a
+                // rating a platform decision rather than a merchant one.
+                .requestMatchers(HttpMethod.GET, "/api/shop-ratings/reported")
+                    .hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
+                .requestMatchers(HttpMethod.POST, "/api/shop-ratings/*/hide",
+                        "/api/shop-ratings/*/unhide")
+                    .hasAuthority(AdminPermission.REVIEWS_MODERATE.authority())
+                .requestMatchers(HttpMethod.GET, "/api/shop-ratings/manage")
+                    .hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                .requestMatchers(HttpMethod.POST, "/api/shop-ratings/*/respond",
+                        "/api/shop-ratings/*/report")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                // The customer's own three, stated rather than left to fall
+                // through - a rule that is only correct because of what
+                // follows it is one reordering away from being wrong.
+                .requestMatchers(HttpMethod.POST, "/api/shop-ratings").authenticated()
+                .requestMatchers(HttpMethod.POST, "/api/shop-ratings/*/reply").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/shop-ratings/mine").authenticated()
+
+                // CANCELLATION DEBTS (§11). /mine takes the customer from the
+                // token and needs no rule beyond being signed in. The other
+                // two are the SHOP's side and need one urgently: without it
+                // any signed-in shopper could list what every customer of the
+                // shop in scope owes, and - worse - waive their own debt.
+                .requestMatchers(HttpMethod.GET, "/api/cancellation-dues/outstanding")
+                    .hasAuthority(AdminPermission.ORDERS_VIEW.authority())
+                .requestMatchers(HttpMethod.POST, "/api/cancellation-dues/*/waive")
+                    .hasAuthority(AdminPermission.ORDERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.GET, "/api/cancellation-dues/mine").authenticated()
 
                 // Without this, any authenticated customer could deactivate
                 // (or reactivate) ANY other customer's account.

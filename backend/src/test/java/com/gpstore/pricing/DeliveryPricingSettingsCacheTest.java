@@ -61,18 +61,23 @@ class DeliveryPricingSettingsCacheTest {
         clearInvocations(repository);
     }
 
+    // findByShopId, not findById(1): V49 made these settings one row per shop,
+    // so the lookup is by the shop in scope. The property under test is
+    // unchanged - repeated reads must not repeat the round trip - and the
+    // cache key now carries the shop too (CacheConfig.keyGenerator), which is
+    // what stops one shop's delivery pricing being served to another.
     @Test
     @DisplayName("repeated reads cost one database round trip, not one each")
     void settingsAreReadOnceAndReused() {
         pricingService.settings();
-        verify(repository, atLeastOnce()).findById(DeliveryPricingSettings.SINGLETON_ID);
+        verify(repository, atLeastOnce()).findByShopId(org.mockito.ArgumentMatchers.anyLong());
         clearInvocations(repository);
 
         for (int i = 0; i < 25; i++) {
             assertNotNull(pricingService.settings());
         }
 
-        verify(repository, times(0)).findById(DeliveryPricingSettings.SINGLETON_ID);
+        verify(repository, times(0)).findByShopId(org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
@@ -83,14 +88,14 @@ class DeliveryPricingSettingsCacheTest {
         // quote, so a cache that only works for settings() was a miss on
         // the only path that matters.
         pricingService.quoteForCart(java.util.List.of(), null);
-        verify(repository, atLeastOnce()).findById(DeliveryPricingSettings.SINGLETON_ID);
+        verify(repository, atLeastOnce()).findByShopId(org.mockito.ArgumentMatchers.anyLong());
         clearInvocations(repository);
 
         for (int i = 0; i < 10; i++) {
             assertNotNull(pricingService.quoteForCart(java.util.List.of(), null));
         }
 
-        verify(repository, times(0)).findById(DeliveryPricingSettings.SINGLETON_ID);
+        verify(repository, times(0)).findByShopId(org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test

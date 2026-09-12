@@ -74,7 +74,15 @@ public class BrandVocabulary {
     public void reload() {
         try {
             List<String> loaded = new ArrayList<>();
-            for (Object[] row : productRepository.findBrandsWithProductCounts()) {
+            // MARKETPLACE-WIDE ON PURPOSE, even under a marketplace. This
+            // list is spelling knowledge, not a browse surface: it exists so
+            // "aashirwad" can be corrected to "Aashirvaad" before the search
+            // runs, and the search itself is what narrows to the shop's
+            // shelf. It is also rebuilt at startup and on a scheduler, where
+            // there is no shop in scope to narrow to - a per-shop vocabulary
+            // would have to be rebuilt per shop, and would make correction
+            // worse for a small shop by giving it fewer words to recognise.
+            for (Object[] row : productRepository.findBrandsWithProductCounts(false)) {
                 String brand = (String) row[0];
                 if (brand != null && brand.trim().length() >= MIN_BRAND_LENGTH) {
                     loaded.add(brand.trim());

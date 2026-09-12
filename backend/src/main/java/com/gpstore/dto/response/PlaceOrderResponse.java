@@ -25,6 +25,40 @@ public class PlaceOrderResponse {
      */
     private String upiPaymentLink;
 
+    /**
+     * The checkout this order belonged to, and every shop's order in it.
+     *
+     * ADDED BESIDE THE OLD FIELDS, never in place of them. Every APK already
+     * on a customer's phone reads orderId/orderNumber/paymentStatus and knows
+     * nothing about groups, so those keep describing one order - the first
+     * shop's - and a single-shop checkout answers exactly what it always did.
+     */
+    private Long orderGroupId;
+
+    private String orderGroupNumber;
+
+    private java.util.List<ShopOrderSummary> shopOrders = java.util.List.of();
+
+    /** One shop's part of a checkout: what they will pack, and what it costs. */
+    public record ShopOrderSummary(Long orderId, String orderNumber, Long shopId,
+                                   java.math.BigDecimal totalAmount,
+                                   java.math.BigDecimal deliveryFee,
+                                   String paymentStatus, String upiPaymentLink) {}
+
+    public Long getOrderGroupId() { return orderGroupId; }
+
+    public void setOrderGroupId(Long orderGroupId) { this.orderGroupId = orderGroupId; }
+
+    public String getOrderGroupNumber() { return orderGroupNumber; }
+
+    public void setOrderGroupNumber(String orderGroupNumber) { this.orderGroupNumber = orderGroupNumber; }
+
+    public java.util.List<ShopOrderSummary> getShopOrders() { return shopOrders; }
+
+    public void setShopOrders(java.util.List<ShopOrderSummary> shopOrders) {
+        this.shopOrders = shopOrders == null ? java.util.List.of() : java.util.List.copyOf(shopOrders);
+    }
+
     public PlaceOrderResponse() {
     }
 

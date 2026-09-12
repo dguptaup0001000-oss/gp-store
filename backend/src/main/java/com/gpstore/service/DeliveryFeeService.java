@@ -15,16 +15,19 @@ public class DeliveryFeeService {
     private final BigDecimal baseDistanceKm;
     private final BigDecimal perKmCharge;
     private final BigDecimal freeDeliveryProfitFactor;
+    private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
 
     public DeliveryFeeService(
             @Value("${delivery.base-charge}") String baseCharge,
             @Value("${delivery.base-distance-km}") String baseDistanceKm,
             @Value("${delivery.per-km-charge}") String perKmCharge,
-            @Value("${delivery.free-delivery-profit-factor}") String freeDeliveryProfitFactor) {
+            @Value("${delivery.free-delivery-profit-factor}") String freeDeliveryProfitFactor,
+            com.gpstore.catalog.shop.ShopCatalog shopCatalog) {
         this.baseCharge = new BigDecimal(baseCharge);
         this.baseDistanceKm = new BigDecimal(baseDistanceKm);
         this.perKmCharge = new BigDecimal(perKmCharge);
         this.freeDeliveryProfitFactor = new BigDecimal(freeDeliveryProfitFactor);
+        this.shopCatalog = shopCatalog;
     }
 
     /**
@@ -54,9 +57,22 @@ public class DeliveryFeeService {
     public BigDecimal calculateGrossProfit(List<CartItem> cartItems) {
         BigDecimal totalProfit = BigDecimal.ZERO;
 
+        // PROFIT IS THIS SHOP'S PROFIT. Free delivery is funded out of the
+        // margin the shop actually made, so both halves come from the shop's
+        // own listing when it has one, and from the catalogue only as the
+        // single-shop fallback ShopCatalog documents.
+        java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings =
+                shopCatalog.listingsFor(cartItems.stream()
+                        .map(i -> i.getProductVariant() == null ? null : i.getProductVariant().getId())
+                        .toList());
+
         for (CartItem item : cartItems) {
-            BigDecimal sellingPrice = item.getProductVariant().getSellingPrice();
-            BigDecimal costPrice = item.getProductVariant().getCostPrice();
+            com.gpstore.catalog.shop.ShopProductVariant listing =
+                    item.getProductVariant() == null ? null : listings.get(item.getProductVariant().getId());
+            BigDecimal sellingPrice = listing != null
+                    ? listing.getSellingPrice() : item.getProductVariant().getSellingPrice();
+            BigDecimal costPrice = listing != null && listing.getCostPrice() != null
+                    ? listing.getCostPrice() : item.getProductVariant().getCostPrice();
 
             if (sellingPrice == null || costPrice == null) {
                 continue; // unknown cost -> treat as zero profit for this item, not a guess

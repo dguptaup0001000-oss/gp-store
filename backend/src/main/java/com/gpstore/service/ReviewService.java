@@ -7,7 +7,9 @@ import com.gpstore.entity.Review;
 import com.gpstore.dto.response.AdminReviewResponse;
 import com.gpstore.dto.response.ReviewResponse;
 import com.gpstore.exception.BadRequestException;
+import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
+import com.gpstore.rating.HideReason;
 import com.gpstore.repository.OrderItemRepository;
 import com.gpstore.repository.ProductRepository;
 import com.gpstore.repository.ReviewRepository;
@@ -27,13 +29,16 @@ public class ReviewService {
     private final ProductRepository productRepository;
     private final CustomerService customerService;
     private final OrderItemRepository orderItemRepository;
+    private final AuditLogService auditLogService;
 
     public ReviewService(ReviewRepository reviewRepository, ProductRepository productRepository,
-                          CustomerService customerService, OrderItemRepository orderItemRepository) {
+                          CustomerService customerService, OrderItemRepository orderItemRepository,
+                          AuditLogService auditLogService) {
         this.reviewRepository = reviewRepository;
         this.productRepository = productRepository;
         this.customerService = customerService;
         this.orderItemRepository = orderItemRepository;
+        this.auditLogService = auditLogService;
     }
 
     /**
@@ -67,6 +72,11 @@ public class ReviewService {
         review.setComment(request.getComment());
         review.setReviewDate(LocalDateTime.now());
         review.setActive(true);
+        // §18: the reason codes, replaced wholesale on each edit so that
+        // removing one actually removes it.
+        review.setReasons(request.getReasons() == null
+                ? new java.util.LinkedHashSet<>()
+                : new java.util.LinkedHashSet<>(request.getReasons()));
 
         return ReviewResponse.from(reviewRepository.save(review));
     }
@@ -78,7 +88,11 @@ public class ReviewService {
 
     @Transactional(readOnly = true)
         public Page<ReviewResponse> getForProduct(Long productId, Pageable pageable) {
-            return reviewRepository.findByProductIdAndActiveTrueOrderByReviewDateDesc(productId, pageable)
+            // §20: hidden reviews are not deleted, they are not SHOWN. This
+            // is the query that makes the difference real.
+            return reviewRepository
+                    .findByProductIdAndActiveTrueAndHiddenAtIsNullOrderByReviewDateDesc(
+                            productId, pageable)
                     .map(ReviewResponse::from);
         }
 
@@ -99,14 +113,156 @@ public class ReviewService {
         reviewRepository.delete(review);
     }
 
+    // ------------------------------------------------------------------
+    // Moderation, the conversation, and reporting (Part 3 §18, §20-§22).
+    // ------------------------------------------------------------------
+
     /**
-     * Moderation - admin can remove ANY review (e.g. abusive/spam content),
-     * not just their own. This didn't exist before: admin could view every
-     * review but had no way to actually act on a bad one.
+     * Stops a review being SHOWN. It is not deleted (§20).
+     *
+     * <p>WHAT THIS REPLACES, AND WHY IT HAD TO CHANGE. This used to be
+     * {@code reviewRepository.delete(review)} behind an admin permission -
+     * one call, no reason, no record. §20 says genuine negative reviews must
+     * remain, and a hard delete makes that unenforceable and unauditable at
+     * once: the row is gone, so nobody can ask afterwards whether the shop's
+     * one-star reviews keep disappearing.
+     *
+     * <p>Now: a reason from a closed list (see {@link HideReason} for what is
+     * deliberately not in it), the moderator's name on the row, an audit
+     * entry, and the stars usually still counting towards the product's
+     * average - because if hiding also improved the average, hiding would be
+     * worth doing for the arithmetic alone.
      */
-    public void moderateDeleteReview(Long id) {
+    @Transactional
+    public ReviewResponse hideReview(Long id, HideReason reason, String actor) {
+        if (reason == null) {
+            throw new BadRequestException(
+                    "Hiding a review needs a reason, and it has to be one of: "
+                            + java.util.Arrays.toString(HideReason.values()));
+        }
         Review review = reviewRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Review not found"));
-        reviewRepository.delete(review);
+        review.setHiddenAt(LocalDateTime.now());
+        review.setHiddenReason(reason);
+        review.setHiddenBy(actor);
+        Review saved = reviewRepository.save(review);
+        auditLogService.log("REVIEW_HIDDEN", "Review", saved.getId(),
+                reason + " by " + actor
+                        + (reason.stillCounts() ? " (still counts towards the average)"
+                                                : " (removed from the average)"));
+        return ReviewResponse.from(saved);
+    }
+
+    /** Puts one back. An un-hide is a decision too, so it is recorded too. */
+    @Transactional
+    public ReviewResponse unhideReview(Long id, String actor) {
+        Review review = reviewRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Review not found"));
+        review.setHiddenAt(null);
+        review.setHiddenReason(null);
+        review.setHiddenBy(null);
+        Review saved = reviewRepository.save(review);
+        auditLogService.log("REVIEW_RESTORED", "Review", saved.getId(), "by " + actor);
+        return ReviewResponse.from(saved);
+    }
+
+    /**
+     * The shop answers a review of something it sells, once (§21).
+     *
+     * <p>ONCE, and enforced here. A merchant who could post repeatedly could
+     * bury a one-star review under their own replies, which is §20's problem
+     * reached by a different road.
+     *
+     * <p>The responding shop is recorded because a product review is central
+     * (§10) while a reply to one is not - it is one shopkeeper speaking, and
+     * a customer reading it on a different shop's product page deserves to
+     * know which shop said it.
+     */
+    @Transactional
+    public ReviewResponse merchantRespond(Long id, String text, Long shopId, String actor) {
+        String response = trimmedOrNull(text);
+        if (response == null) {
+            throw new BadRequestException("Write something for the customer to read.");
+        }
+        Review review = reviewRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Review not found"));
+        if (review.getMerchantResponse() != null) {
+            throw new ConflictException(
+                    "This review has already been answered. One response each (§21).");
+        }
+        review.setMerchantResponse(response);
+        review.setMerchantResponseAt(LocalDateTime.now());
+        review.setMerchantResponseBy(actor);
+        review.setRespondingShopId(shopId);
+        Review saved = reviewRepository.save(review);
+        auditLogService.log("REVIEW_ANSWERED", "Review", saved.getId(), "by " + actor);
+        return ReviewResponse.from(saved);
+    }
+
+    /** The customer's single reply to that single response (§21). */
+    @Transactional
+    public ReviewResponse customerReply(Long id, Long customerId, String text) {
+        String reply = trimmedOrNull(text);
+        if (reply == null) {
+            throw new BadRequestException("Write something for the shop to read.");
+        }
+        Review review = reviewRepository.findByIdAndCustomerId(id, customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Review not found"));
+        if (review.getMerchantResponse() == null) {
+            throw new ConflictException("The shop has not responded yet.");
+        }
+        if (review.getCustomerReply() != null) {
+            throw new ConflictException("You have already replied. One response each (§21).");
+        }
+        review.setCustomerReply(reply);
+        review.setCustomerReplyAt(LocalDateTime.now());
+        return ReviewResponse.from(reviewRepository.save(review));
+    }
+
+    /**
+     * A shop flags a review for a platform reviewer (§22).
+     *
+     * <p>REPORTING DOES NOT HIDE IT. A merchant able to suppress a review by
+     * objecting to it would have a delete button with an extra step.
+     */
+    @Transactional
+    public ReviewResponse report(Long id, String reason, String actor) {
+        Review review = reviewRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Review not found"));
+        if (review.getReportedAt() == null) {
+            review.setReportedAt(LocalDateTime.now());
+            review.setReportedBy(actor);
+            review.setReportReason(reason == null || reason.isBlank()
+                    ? null
+                    : reason.trim().substring(0, Math.min(reason.trim().length(), 300)));
+            review = reviewRepository.save(review);
+            auditLogService.log("REVIEW_REPORTED", "Review", review.getId(),
+                    "reported by " + actor + (reason == null ? "" : ": " + reason));
+        }
+        return ReviewResponse.from(review);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<AdminReviewResponse> reported(Pageable pageable) {
+        return reviewRepository.findByReportedAtIsNotNullOrderByReportedAtDesc(pageable)
+                .map(AdminReviewResponse::from);
+    }
+
+    /** A product's stars as a page shows them (§19). */
+    @Transactional(readOnly = true)
+    public com.gpstore.rating.RatingTally tallyFor(Long productId) {
+        com.gpstore.rating.RatingTally tally = reviewRepository.tallyForProduct(productId);
+        return tally == null ? com.gpstore.rating.RatingTally.empty() : tally;
+    }
+
+    private static String trimmedOrNull(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        return trimmed.length() <= 1000 ? trimmed : trimmed.substring(0, 1000);
     }
 }

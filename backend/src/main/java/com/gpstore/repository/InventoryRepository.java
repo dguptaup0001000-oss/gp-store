@@ -55,14 +55,44 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     Optional<Inventory> findByProductVariantIdForUpdate(Long productVariantId);
 
     /**
+     * The same lock, for work that is not inside a shop's request.
+     *
+     * The inventory restore runs from the payment-expiry sweep, which spans
+     * shops and therefore has no filter enabled. Naming the shop explicitly -
+     * read off the ORDER being restored, not off anything a caller sent - is
+     * what stops it locking and crediting another merchant's stock row.
+     */
+    @org.springframework.data.jpa.repository.Query(
+            "select i from Inventory i where i.productVariant.id = :productVariantId "
+                    + "and i.shopId = :shopId")
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    Optional<Inventory> findByProductVariantIdAndShopIdForUpdate(
+            @org.springframework.data.repository.query.Param("productVariantId") Long productVariantId,
+            @org.springframework.data.repository.query.Param("shopId") Long shopId);
+
+    /**
      * One-statement decrement. Two concurrent checkouts cannot both subtract
      * from the same unit: PostgreSQL applies the WHERE atomically, so the
      * second update matches zero rows.
      */
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
+    /**
+     * THE SHOP IS AN EXPLICIT PREDICATE, because a bulk update is not filtered.
+     *
+     * Hibernate applies filters to selects, not to "update ... where ..." - so
+     * without the shop clause this statement reaches every shop's row for the
+     * variant and decrements all of them. One customer buying one packet would
+     * take a unit off every merchant who stocks it.
+     *
+     * The value comes from the tenant scope, not from a caller (see
+     * InventoryService.decrementForPurchase). The atomicity that makes this
+     * safe under concurrency is unchanged: the WHERE still either matches one
+     * row or none.
+     */
     @Query("update Inventory i set i.stock = i.stock - :quantity "
-            + "where i.productVariant.id = :productVariantId and i.stock >= :quantity")
-    int decrementIfAvailable(Long productVariantId, int quantity);
+            + "where i.productVariant.id = :productVariantId "
+            + "and i.shopId = :shopId and i.stock >= :quantity")
+    int decrementIfAvailable(Long productVariantId, int quantity, Long shopId);
 
     /**
      * Items at or below their configured reorder point - the actual

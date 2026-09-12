@@ -1,6 +1,10 @@
 package com.gpstore.store;
 
 import com.gpstore.entity.StoreClosure;
+import com.gpstore.store.hours.ShopBusinessHours;
+import com.gpstore.store.hours.ShopBusinessHoursRepository;
+import com.gpstore.store.hours.ShopHoursOverride;
+import com.gpstore.store.hours.ShopHoursOverrideRepository;
 import com.gpstore.entity.StoreOperationsSettings;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
@@ -11,9 +15,14 @@ import com.gpstore.service.AuditLogService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The owner's controls: the order switch and the days the vans do not run.
@@ -41,20 +50,41 @@ public class StoreOperationsService {
      */
     private static final int MAX_CLOSURE_HORIZON_DAYS = 400;
 
+    /**
+     * The longest pause that is still a pause.
+     *
+     * <p>Beyond this a shopkeeper means "closed", and should say so - a
+     * "temporary" pause measured in days is one nobody will remember setting,
+     * and it reads to a customer as a shop that is open and never delivers.
+     */
+    private static final int MAX_PAUSE_HOURS = 24;
+
     private final StoreOperationsSettingsRepository settingsRepository;
     private final StoreClosureRepository closureRepository;
+    private final ShopBusinessHoursRepository weeklyHours;
+    private final ShopHoursOverrideRepository hourOverrides;
+    private final com.gpstore.store.hours.ShopHoursService shopHours;
     private final DeliveryScheduleService scheduleService;
     private final AuditLogService auditLogService;
+    private final com.gpstore.order.cancellation.CancellationPolicy cancellationPolicy;
 
     public StoreOperationsService(
             StoreOperationsSettingsRepository settingsRepository,
             StoreClosureRepository closureRepository,
+            ShopBusinessHoursRepository weeklyHours,
+            ShopHoursOverrideRepository hourOverrides,
+            com.gpstore.store.hours.ShopHoursService shopHours,
             DeliveryScheduleService scheduleService,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            com.gpstore.order.cancellation.CancellationPolicy cancellationPolicy) {
         this.settingsRepository = settingsRepository;
         this.closureRepository = closureRepository;
+        this.weeklyHours = weeklyHours;
+        this.hourOverrides = hourOverrides;
+        this.shopHours = shopHours;
         this.scheduleService = scheduleService;
         this.auditLogService = auditLogService;
+        this.cancellationPolicy = cancellationPolicy;
     }
 
     // ------------------------------------------------------------------
@@ -84,13 +114,18 @@ public class StoreOperationsService {
         if (acceptance == null) {
             throw new BadRequestException("An order acceptance state is required: AUTO, ON or OFF.");
         }
+        // BY SHOP, NOT BY A CONSTANT ID. These settings used to be one row for
+        // the whole deployment; they are now one row per shop, found by the
+        // shop the credential resolved to. Nothing here reads a shop id from
+        // the request.
+        Long shopId = com.gpstore.platform.TenantDefaults
+                .shopIdForCurrentWork(StoreOperationsSettings.class);
         StoreOperationsSettings settings = settingsRepository
-                .findById(StoreOperationsSettings.SINGLETON_ID)
+                .findByShopId(shopId)
                 .orElseGet(StoreOperationsSettings::new);
 
         StoreOrderAcceptance previous = settings.acceptanceOrDefault();
 
-        settings.setId(StoreOperationsSettings.SINGLETON_ID);
         settings.setOrderAcceptance(acceptance);
         if (message != null) {
             String trimmed = message.trim();
@@ -104,11 +139,355 @@ public class StoreOperationsService {
         auditLogService.log(
                 "STORE_ORDER_ACCEPTANCE_CHANGED",
                 "StoreOperationsSettings",
-                StoreOperationsSettings.SINGLETON_ID,
+                saved.getId(),
                 "acceptance: " + previous + " -> " + acceptance
                         + (saved.getClosureMessage() == null ? "" : ", message: " + saved.getClosureMessage()));
 
         return saved;
+    }
+
+    // ------------------------------------------------------------------
+    // Stepping out: a pause that ends by itself.
+    // ------------------------------------------------------------------
+
+    /**
+     * Stops taking NEW orders until a stated time.
+     *
+     * <p>THREE CONTROLS, ONE MECHANISM. "Back in 30 minutes", "back at four"
+     * and "no more orders today" are the same act with three different times,
+     * so they are one method taking the time rather than three flags that
+     * could disagree. The rest-of-day case is the shop's own closing time,
+     * which is why this cannot be computed by the caller: only the schedule
+     * knows when this shop shuts.
+     *
+     * <p>IT DOES NOT TOUCH ORDERS ALREADY ACCEPTED (§12). Pausing is about the
+     * next customer, not about the ones already waiting for their packets: the
+     * orders on the board keep their delivery windows, keep their riders, and
+     * remain the merchant's to complete. Nothing here reads or writes an
+     * order, and AcceptedOrdersSurvivePauseTest is what keeps it that way.
+     *
+     * @param until  when the shop expects to be taking orders again
+     * @param reason shown to customers, so written for them
+     */
+    @Transactional
+    public StoreOperationsSettings pauseUntil(LocalDateTime until, String reason, String actor) {
+        if (until == null) {
+            throw new BadRequestException("A pause needs a time to end at.");
+        }
+        LocalDateTime now = localNow();
+        if (!until.isAfter(now)) {
+            throw new BadRequestException("That time has already passed.");
+        }
+        if (until.isAfter(now.plusHours(MAX_PAUSE_HOURS))) {
+            throw new BadRequestException(
+                    "A pause can run for at most " + MAX_PAUSE_HOURS + " hours. To close for "
+                            + "longer, stop accepting orders or declare the days closed.");
+        }
+
+        StoreOperationsSettings settings = currentSettings();
+        settings.setOrderAcceptance(StoreOrderAcceptance.OFF);
+        settings.setPausedUntil(until);
+        if (reason != null && !reason.isBlank()) {
+            settings.setClosureMessage(truncate(reason.trim(), 300));
+        }
+        settings.setUpdatedAt(LocalDateTime.now());
+        settings.setUpdatedBy(actor);
+        StoreOperationsSettings saved = settingsRepository.save(settings);
+
+        auditLogService.log("STORE_PAUSED", "StoreOperationsSettings", saved.getId(),
+                "paused until " + until);
+        return saved;
+    }
+
+    /** "Back in N minutes", which is the button a shopkeeper actually presses. */
+    @Transactional
+    public StoreOperationsSettings pauseForMinutes(int minutes, String reason, String actor) {
+        if (minutes <= 0) {
+            throw new BadRequestException("A pause has to be at least a minute long.");
+        }
+        return pauseUntil(localNow().plusMinutes(minutes), reason, actor);
+    }
+
+    /**
+     * "No more orders today" - paused until this shop's own closing time.
+     *
+     * <p>Ends at the shop's last run of the day rather than at midnight, so
+     * the shop is taking orders again when it next opens rather than at
+     * 00:01 while everybody is asleep. A shop with nothing left to run today
+     * is paused to the end of the shop-local day instead, which is the same
+     * promise with the only time there is.
+     */
+    @Transactional
+    public StoreOperationsSettings pauseForRestOfDay(String reason, String actor) {
+        LocalDateTime now = localNow();
+        LocalDateTime closing = scheduleService.closingTimeOn(now.toLocalDate());
+        LocalDateTime until = closing != null && closing.isAfter(now)
+                ? closing
+                : now.toLocalDate().atTime(23, 59);
+        if (!until.isAfter(now)) {
+            until = now.plusMinutes(1);
+        }
+        return pauseUntil(until, reason, actor);
+    }
+
+    /** Back open now, whatever the pause said. */
+    @Transactional
+    public StoreOperationsSettings resume(String actor) {
+        StoreOperationsSettings settings = currentSettings();
+        settings.setOrderAcceptance(StoreOrderAcceptance.AUTO);
+        settings.setPausedUntil(null);
+        settings.setClosureMessage(null);
+        settings.setUpdatedAt(LocalDateTime.now());
+        settings.setUpdatedBy(actor);
+        StoreOperationsSettings saved = settingsRepository.save(settings);
+
+        auditLogService.log("STORE_RESUMED", "StoreOperationsSettings", saved.getId(),
+                "taking orders again");
+        return saved;
+    }
+
+    // ------------------------------------------------------------------
+    // The shop's own week.
+    // ------------------------------------------------------------------
+
+    /** This shop's weekly sessions, or an empty list while it trades on the deployment's. */
+    @Transactional(readOnly = true)
+    public List<ShopBusinessHours> weeklyHours() {
+        return weeklyHours.wholeWeek();
+    }
+
+    /**
+     * Replaces the whole week in one go.
+     *
+     * <p>THE WHOLE WEEK, NEVER A DAY. Sessions are rows and a weekday with no
+     * rows is a weekly holiday, so a partial save cannot be told apart from
+     * "we have decided not to open on Tuesdays" - and a screen that saved one
+     * day at a time would close a shop on Tuesday every time it failed
+     * halfway. Taking the week as one value makes that unrepresentable.
+     *
+     * <p>AN EMPTY WEEK IS NOT "CLOSED FOREVER", it is "we have not said" - the
+     * rows go and the shop falls back to the deployment's hours, which is
+     * where every shop starts. A shop that means to shut permanently closes
+     * itself through its status, which is a different question with a
+     * different answer for customers.
+     *
+     * @param week sessions by weekday; a weekday absent from the map is closed
+     */
+    @Transactional
+    public List<ShopBusinessHours> replaceWeek(Map<DayOfWeek, List<TradingSession>> week, String actor) {
+        Map<DayOfWeek, List<TradingSession>> incoming = week == null ? Map.of() : week;
+        for (Map.Entry<DayOfWeek, List<TradingSession>> day : incoming.entrySet()) {
+            validateDay(day.getKey(), day.getValue());
+        }
+
+        // Deleted through the repository rather than by a bulk JPQL delete:
+        // deleteAll on rows this shop's filter already narrowed cannot reach
+        // another shop's, and a bulk delete would be exactly the unfiltered
+        // statement Slice 8 named as the filter's blind spot.
+        weeklyHours.deleteAll(weeklyHours.wholeWeek());
+
+        List<ShopBusinessHours> saved = new ArrayList<>();
+        for (Map.Entry<DayOfWeek, List<TradingSession>> day : incoming.entrySet()) {
+            for (TradingSession session : day.getValue()) {
+                ShopBusinessHours row = new ShopBusinessHours();
+                row.setDay(day.getKey());
+                row.setOpensAt(session.opensAt());
+                row.setClosesAt(session.closesAt());
+                saved.add(weeklyHours.save(row));
+            }
+        }
+
+        shopHours.hoursChanged();
+        auditLogService.log("SHOP_HOURS_CHANGED", "ShopBusinessHours", null,
+                saved.isEmpty()
+                        ? "hours cleared; trading on the deployment's configured hours"
+                        : saved.size() + " session(s) across " + incoming.size() + " day(s)");
+        return saved;
+    }
+
+    /** One date's hours instead of that weekday's. */
+    @Transactional
+    public List<ShopHoursOverride> setHoursOn(LocalDate date, List<TradingSession> sessions,
+                                              String reason, String actor) {
+        if (date == null) {
+            throw new BadRequestException("A date is required.");
+        }
+        LocalDate today = localNow().toLocalDate();
+        if (date.isBefore(today)) {
+            throw new BadRequestException(
+                    "That date has already passed. Hours can only be set for today onwards.");
+        }
+        List<TradingSession> incoming = sessions == null ? List.of() : sessions;
+        validateDay(date.getDayOfWeek(), incoming);
+
+        hourOverrides.deleteAll(hourOverrides.findByOnDate(date));
+
+        List<ShopHoursOverride> saved = new ArrayList<>();
+        for (TradingSession session : incoming) {
+            ShopHoursOverride row = new ShopHoursOverride();
+            row.setOnDate(date);
+            row.setOpensAt(session.opensAt());
+            row.setClosesAt(session.closesAt());
+            if (reason != null && !reason.isBlank()) {
+                row.setReason(truncate(reason.trim(), 300));
+            }
+            row.setCreatedBy(actor);
+            saved.add(hourOverrides.save(row));
+        }
+
+        shopHours.hoursChanged();
+        auditLogService.log("SHOP_HOURS_OVERRIDE_SET", "ShopHoursOverride", null,
+                date + ": " + (saved.isEmpty() ? "back to the usual week" : saved.size() + " session(s)"));
+        return saved;
+    }
+
+    /** Upcoming special days, for the screen that lists them. */
+    @Transactional(readOnly = true)
+    public List<ShopHoursOverride> upcomingHourOverrides() {
+        return hourOverrides.findUpcoming(localNow().toLocalDate());
+    }
+
+    /** One session of one day, as a caller states it. */
+    public record TradingSession(LocalTime opensAt, LocalTime closesAt) {}
+
+    /**
+     * Sessions have to end after they start, and must not overlap each other.
+     *
+     * <p>OVERLAP IS REJECTED RATHER THAN MERGED. 09:00-13:00 and 12:00-17:00
+     * is somebody mistyping one of the four times, and silently merging them
+     * into 09:00-17:00 would hide the typo behind a shop that is open an hour
+     * it did not mean to be.
+     */
+    private static void validateDay(DayOfWeek day, List<TradingSession> sessions) {
+        if (sessions == null || sessions.isEmpty()) {
+            return;
+        }
+        List<TradingSession> ordered = new ArrayList<>(sessions);
+        ordered.sort(Comparator.comparing(TradingSession::opensAt));
+        LocalTime previousClose = null;
+        for (TradingSession session : ordered) {
+            if (session.opensAt() == null || session.closesAt() == null) {
+                throw new BadRequestException("A session needs an opening and a closing time.");
+            }
+            if (!session.closesAt().isAfter(session.opensAt())) {
+                throw new BadRequestException(
+                        day + ": " + session.opensAt() + "-" + session.closesAt()
+                                + " ends before it starts. A shop that trades past midnight is "
+                                + "not something this can express yet.");
+            }
+            if (previousClose != null && session.opensAt().isBefore(previousClose)) {
+                throw new BadRequestException(
+                        day + ": the sessions overlap. Two stretches of the same day cannot "
+                                + "cover the same hour.");
+            }
+            previousClose = session.closesAt();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // What it costs a customer to change their mind (Part 3 §9/§10).
+    // ------------------------------------------------------------------
+
+    /** This shop's cancellation terms, as they stand. */
+    @Transactional(readOnly = true)
+    public com.gpstore.order.cancellation.CancellationTerms cancellationTerms() {
+        return com.gpstore.order.cancellation.CancellationTerms.of(currentSettings());
+    }
+
+    /** The highest percentage this deployment permits - the shop's ceiling. */
+    public java.math.BigDecimal maxCancellationFeePercent() {
+        return cancellationPolicy.maxFeePercent();
+    }
+
+    /**
+     * The merchant sets its own cancellation terms (§10).
+     *
+     * <p>REFUSED ABOVE THE PLATFORM'S CAP, out loud. Silently clamping a 40%
+     * fee to 5% would leave a shopkeeper believing they charge 40% and a
+     * customer paying 5%, and the first either of them would hear about it is
+     * an argument. The quote path clamps as a last defence, but a shop is
+     * told here.
+     *
+     * @param freeSeconds     null leaves the free window alone
+     * @param feePercent      null CLEARS the fee - "we do not charge" has to
+     *                        be sayable, and it is the more common answer
+     * @param chargesDelivery null leaves the switch alone
+     */
+    @Transactional
+    public StoreOperationsSettings setCancellationTerms(
+            Integer freeSeconds, java.math.BigDecimal feePercent,
+            Boolean chargesDelivery, String actor) {
+
+        StoreOperationsSettings settings = currentSettings();
+        com.gpstore.order.cancellation.CancellationTerms before =
+                com.gpstore.order.cancellation.CancellationTerms.of(settings);
+
+        if (freeSeconds != null) {
+            if (freeSeconds < 0 || freeSeconds > 3600) {
+                throw new BadRequestException(
+                        "The free cancellation window must be between 0 and 3600 seconds.");
+            }
+            settings.setFreeCancellationSeconds(freeSeconds);
+        }
+
+        if (feePercent == null) {
+            settings.setCancellationFeePercent(null);
+        } else {
+            if (feePercent.signum() < 0) {
+                throw new BadRequestException("A cancellation charge cannot be negative.");
+            }
+            // REFUSED OUTRIGHT WHILE THE PLATFORM HAS NO CEILING. Accepting
+            // the number and then quietly charging nothing (which is what the
+            // quote would do) would leave a shopkeeper believing they charge
+            // 2% and collecting nothing, and the first they would hear of it
+            // is a cancellation that cost them.
+            if (!cancellationPolicy.capIsDecided()) {
+                throw new BadRequestException(
+                        "GP-STORE has not set a maximum cancellation charge yet, so no shop "
+                                + "can charge one. Your other cancellation settings were not "
+                                + "changed.");
+            }
+            java.math.BigDecimal cap = cancellationPolicy.maxFeePercent();
+            if (feePercent.compareTo(cap) > 0) {
+                throw new BadRequestException(
+                        "A cancellation charge may not be more than "
+                                + cap.stripTrailingZeros().toPlainString() + "%.");
+            }
+            settings.setCancellationFeePercent(feePercent);
+        }
+
+        if (chargesDelivery != null) {
+            settings.setCancellationChargesDelivery(chargesDelivery);
+        }
+
+        settings.setUpdatedAt(LocalDateTime.now());
+        settings.setUpdatedBy(actor);
+        StoreOperationsSettings saved = settingsRepository.save(settings);
+
+        com.gpstore.order.cancellation.CancellationTerms after =
+                com.gpstore.order.cancellation.CancellationTerms.of(saved);
+        auditLogService.log(
+                "STORE_CANCELLATION_TERMS_CHANGED",
+                "StoreOperationsSettings",
+                saved.getId(),
+                "free window: " + before.freeSeconds() + "s -> " + after.freeSeconds() + "s, "
+                        + "fee: " + before.feePercent() + " -> " + after.feePercent() + ", "
+                        + "delivery included: " + before.chargesDelivery()
+                        + " -> " + after.chargesDelivery());
+
+        return saved;
+    }
+
+    /** The settings row for the shop in scope, created on first write. */
+    private StoreOperationsSettings currentSettings() {
+        Long shopId = com.gpstore.platform.TenantDefaults
+                .shopIdForCurrentWork(StoreOperationsSettings.class);
+        return settingsRepository.findByShopId(shopId).orElseGet(StoreOperationsSettings::new);
+    }
+
+    /** Now, in the SHOP's zone - never the server's. */
+    private LocalDateTime localNow() {
+        return scheduleService.localNow();
     }
 
     // ------------------------------------------------------------------

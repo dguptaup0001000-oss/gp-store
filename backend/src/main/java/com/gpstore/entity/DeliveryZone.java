@@ -1,6 +1,10 @@
 package com.gpstore.entity;
 
+import com.gpstore.platform.ShopOwned;
+import com.gpstore.platform.ShopScopeFilter;
+import com.gpstore.platform.TenantEntityListener;
 import jakarta.persistence.*;
+import org.hibernate.annotations.Filter;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -24,7 +28,26 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-public class DeliveryZone {
+@Filter(name = ShopScopeFilter.NAME, condition = ShopScopeFilter.CONDITION)
+@EntityListeners(TenantEntityListener.class)
+public class DeliveryZone implements ShopOwned {
+
+    /**
+     * WHOSE MAP THIS IS (W4).
+     *
+     * A zone is one shop's idea of how its delivery area divides, agreed with
+     * its own riders. Two kiranas on the same street will draw different lines
+     * and both will be right; a shared map would force one shopkeeper's
+     * boundaries on the other, and hand whichever shop resolved an address
+     * first the right to pick a rider for a competitor's order.
+     *
+     * Stamped by TenantEntityListener at insert, read back through the filter.
+     * Never sent by a request.
+     */
+    @Column(name = "shop_id")
+    private Long shopId;
+
+
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

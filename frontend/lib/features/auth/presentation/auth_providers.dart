@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_client.dart';
+import '../../../core/marketplace/shop_context.dart';
 import '../../../core/storage/token_storage.dart';
 import '../data/auth_repository.dart';
 import '../domain/auth_models.dart';
@@ -25,6 +26,12 @@ final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((ref) {
 
   return ApiClient(
     tokenStorage: tokenStorage,
+    // Read, not watched: rebuilding the whole client (and its interceptor
+    // chain, and its in-flight refresh guard) every time somebody switches
+    // shop would drop requests already in the air. The callback is consulted
+    // per request instead, so a switch applies to the next call and to no
+    // call that has already started.
+    activeShopId: () => ref.read(shopContextProvider),
     // When even the refresh token turns out to be invalid, force the auth
     // state back to unauthenticated so the router redirects to login -
     // ref.read (not watch) because this fires from inside a callback, not

@@ -1,5 +1,6 @@
 package com.gpstore.store;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.dto.request.PlaceOrderRequest;
 import com.gpstore.dto.response.PlaceOrderResponse;
 import com.gpstore.entity.*;
@@ -14,7 +15,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -66,27 +69,73 @@ class StoreHoursCheckoutTest {
     @Autowired private CartRepository cartRepository;
     @Autowired private CartItemRepository cartItemRepository;
     @Autowired private OrderRepository orderRepository;
+    @Autowired private com.gpstore.platform.ShopScopeSwitch shopScopeSwitch;
+    @Autowired private com.gpstore.platform.ShopRepository shops;
+    @Autowired private com.gpstore.platform.PlatformProperties platform;
+    @Autowired private com.gpstore.platform.MerchantRepository merchants;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    /** Shops whose hours this test wrote, so teardown removes exactly those. */
+    private final java.util.Set<Long> hoursTouched = new java.util.HashSet<>();
+    private Long secondShopId;
+    private Long secondMerchantId;
 
     @Value("${store.latitude}") private double storeLatitude;
     @Value("${store.longitude}") private double storeLongitude;
 
     /**
-     * Puts the switch back to AUTO, always.
+     * Puts the switch back to AUTO, on the shop this test actually used.
      *
      * <p>Written against the repository rather than through
      * StoreOperationsService on purpose: the service audits, and a stream of
      * "acceptance changed" entries from a test run is noise in a log that
      * exists to answer a real question about a real day.
+     *
+     * <p>THIS USED TO RESET {@code findById(SINGLETON_ID)} AND FORCE
+     * {@code setId(SINGLETON_ID)}, which was the last live use of a constant
+     * that is {@code @Deprecated(forRemoval = true)} and that production
+     * stopped using at V49. Two things were wrong with it. The id is
+     * {@code @GeneratedValue}, so row 1 is not reliably this shop's settings -
+     * the reset could land on another shop's row. And when no row had id 1 it
+     * CREATED one, with a forced primary key and a shop stamped from whatever
+     * scope happened to be active, leaving a stray settings row behind for
+     * {@code findByShopId} to pick up later.
+     *
+     * <p>Settings are per shop (V49) and are found by shop. So is this.
      */
     @AfterEach
     void restoreTheSwitch() {
-        StoreOperationsSettings settings = settingsRepository
-                .findById(StoreOperationsSettings.SINGLETON_ID)
-                .orElseGet(StoreOperationsSettings::new);
-        settings.setId(StoreOperationsSettings.SINGLETON_ID);
-        settings.setOrderAcceptance(StoreOrderAcceptance.AUTO);
-        settings.setClosureMessage(null);
-        settingsRepository.save(settings);
+        long shopId = shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId();
+        settingsRepository.findByShopId(shopId).ifPresent(settings -> {
+            settings.setOrderAcceptance(StoreOrderAcceptance.AUTO);
+            settings.setClosureMessage(null);
+            settingsRepository.save(settings);
+        });
+
+        // ONLY THE HOURS THIS TEST WROTE. Shop #1 is the live shop: hours
+        // invented here that outlast the run are a real kirana advertising a
+        // week nobody agreed to, and the next test reading them is the mildest
+        // of the consequences.
+        // THROUGH THE SERVICE, so the cache goes with the rows. A teardown
+        // that deletes the rows and leaves the cached week behind hands the
+        // next class a schedule the database does not agree with - see
+        // setWeek.
+        for (Long touched : hoursTouched) {
+            shopScopeSwitch.within(touched, () -> operationsService.replaceWeek(
+                    java.util.Map.of(), "hours-test-teardown"));
+        }
+        hoursTouched.clear();
+
+        if (secondShopId != null) {
+            jdbc.update("DELETE FROM store_operations_settings WHERE shop_id = ?", secondShopId);
+            jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", secondShopId);
+            jdbc.update("DELETE FROM shops WHERE id = ?", secondShopId);
+            secondShopId = null;
+        }
+        if (secondMerchantId != null) {
+            jdbc.update("DELETE FROM merchants WHERE id = ?", secondMerchantId);
+            secondMerchantId = null;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -98,27 +147,115 @@ class StoreHoursCheckoutTest {
     void orderCarriesTheServersSchedulingDecision() {
         Fixture fixture = newFixture();
 
-        // Captured before and after, because the boundary could fall between
-        // them: at 20:59:59.999 the expected type genuinely changes mid-test.
-        // Asserting membership of that two-element set is honest; asserting
-        // one exact value would be a test that fails once a day.
-        DeliveryType before = scheduleService.calculateDeliveryType();
         PlaceOrderResponse response = place(fixture);
-        DeliveryType after = scheduleService.calculateDeliveryType();
-
         Order order = orderRepository.findById(response.getOrderId()).orElseThrow();
 
         assertNotNull(order.getDeliveryType(),
                 "the server must record which window it chose, not leave it to be guessed later");
-        assertTrue(order.getDeliveryType() == before || order.getDeliveryType() == after,
-                "recorded " + order.getDeliveryType() + ", but the server's own answer was "
-                        + before + " then " + after);
+
+        // ASKED THE WAY THE ORDER PATH ASKS IT: same function, same shop, same
+        // instant. OrderService does
+        //
+        //     shopScopeSwitch.within(shopId, () -> getStoreStatusAt(placedAt))
+        //
+        // and records that answer. So this recomputes exactly that.
+        //
+        // IT USED TO SAMPLE scheduleService.calculateDeliveryType() BEFORE AND
+        // AFTER and accept either, which is a different question in two ways
+        // and is why CI failed while every local run passed. calculateDelivery-
+        // Type() reads now() rather than the order's pinned placedAt, and it
+        // reads the AMBIENT shop rather than the order's - DeliveryScheduleSer-
+        // vice.schedule() resolves hours through shopHours.forCurrentShop().
+        // Whenever the basket resolved to a shop other than the ambient one,
+        // the test compared one shop's clock against another shop's decision
+        // and reported "recorded NEXT_MORNING, but the server's own answer was
+        // SAME_DAY then SAME_DAY". Neither number was wrong; the comparison
+        // was.
+        //
+        // This is a STRONGER assertion, not a weaker one: it pins one exact
+        // expected value instead of accepting either of two samples, and it
+        // cannot drift with the wall clock because it reuses the order's own
+        // recorded instant.
+        Instant placedAt = order.getOrderDate().toInstant(java.time.ZoneOffset.UTC);
+        DeliveryType decidedTheWayProductionDecides = shopScopeSwitch.within(
+                order.getShopId(), () -> scheduleService.getStoreStatusAt(placedAt).deliveryType());
+
+        assertEquals(decidedTheWayProductionDecides, order.getDeliveryType(),
+                "the order recorded " + order.getDeliveryType() + ", but shop "
+                        + order.getShopId() + " at " + placedAt + " decides "
+                        + decidedTheWayProductionDecides);
 
         LocalDate today = scheduleService.now()
                 .atZone(scheduleService.getProperties().getZone()).toLocalDate();
         assertNotNull(order.getScheduledDeliveryDate(), "an order must know which day it is for");
         assertFalse(order.getScheduledDeliveryDate().isBefore(today),
                 "an order cannot be scheduled for a day that has already passed");
+    }
+
+    /**
+     * THE EXACT DISCREPANCY THAT TURNED CI RED, PINNED.
+     *
+     * <p>Two shops, the same instant, different opening hours. The delivery
+     * promise is per shop (V49 and the locked rule that shop hours and
+     * order-acceptance hours belong to the shop), so at one moment the two
+     * shops can and must give different answers - and asking the WRONG shop
+     * produces precisely the failure this class reported for four runs:
+     * "recorded NEXT_MORNING, but the server's own answer was SAME_DAY".
+     *
+     * <p>Nothing here is about the wall clock. The hours are chosen relative
+     * to the shop's own current time, so the test means the same thing at
+     * 09:27 as at midnight, and the instant is pinned once and reused for both
+     * shops rather than sampled twice.
+     */
+    @Test
+    @DisplayName("two shops, one instant: the delivery promise is the shop's, not the ambient one's")
+    void theDeliveryPromiseBelongsToTheShopBeingAskedAbout() {
+        long shopA = shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId();
+        long shopB = aSecondShop();
+
+        // A CHOSEN INSTANT, NOT now(). getStoreStatusAt takes the moment to
+        // judge, so this test fixes it at 10:00 today in the shop's own zone
+        // and the answer is the same whether CI runs at 04:00 or at midnight.
+        //
+        // Deriving the window from now() instead - "opens two hours ago,
+        // closes in two" - reads well and is a trap: near midnight it wraps
+        // past the end of the day and violates ck_shop_hours_order
+        // (closes_at > opens_at), so the test would fail for an hour a day for
+        // a reason that has nothing to do with what it checks.
+        java.time.ZonedDateTime tenToday = scheduleService.now()
+                .atZone(scheduleService.shopZone())
+                .withHour(10).withMinute(0).withSecond(0).withNano(0);
+        Instant at = tenToday.toInstant();
+
+        // Shop A trades across 10:00. Shop B shut at 08:00.
+        setWeek(shopA, java.time.LocalTime.of(9, 0), java.time.LocalTime.of(18, 0));
+        setWeek(shopB, java.time.LocalTime.of(6, 0), java.time.LocalTime.of(8, 0));
+
+        DeliveryType forA = shopScopeSwitch.within(shopA,
+                () -> scheduleService.getStoreStatusAt(at).deliveryType());
+        DeliveryType forB = shopScopeSwitch.within(shopB,
+                () -> scheduleService.getStoreStatusAt(at).deliveryType());
+
+        assertEquals(DeliveryType.SAME_DAY, forA,
+                "shop A is open across this instant, so it can still deliver today");
+        assertNotEquals(forA, forB,
+                "shop B closed an hour ago and cannot promise what shop A promises - if these "
+                        + "agree, the schedule is not being read per shop and every order in a "
+                        + "two-shop basket would inherit one shop's hours");
+
+        // AND THE ORDER RECORDS ITS OWN SHOP'S ANSWER. This is the half that
+        // was actually broken: not the production decision, but asking for it
+        // in the wrong scope.
+        Fixture fixture = newFixture();
+        PlaceOrderResponse response = place(fixture);
+        Order order = orderRepository.findById(response.getOrderId()).orElseThrow();
+
+        Instant placedAt = order.getOrderDate().toInstant(java.time.ZoneOffset.UTC);
+        assertEquals(
+                shopScopeSwitch.within(order.getShopId(),
+                        () -> scheduleService.getStoreStatusAt(placedAt).deliveryType()),
+                order.getDeliveryType(),
+                "the order must carry the answer for ITS shop at ITS instant");
     }
 
     @Test
@@ -239,6 +376,60 @@ class StoreHoursCheckoutTest {
 
     private record Fixture(Long customerId, Long addressId, Long cartId) {}
 
+    /** A second shop, so "per shop" can mean something. Removed in teardown. */
+    private long aSecondShop() {
+        com.gpstore.platform.Merchant m = new com.gpstore.platform.Merchant();
+        m.setLegalName("Hours fixture " + System.nanoTime());
+        m.setDisplayName("Hours fixture");
+        m.setStatus(com.gpstore.platform.MerchantStatus.ACTIVE);
+        m.setIsDemo(Boolean.TRUE);
+        m.setActive(Boolean.TRUE);
+        secondMerchantId = merchants.save(m).getId();
+
+        com.gpstore.platform.Shop b = new com.gpstore.platform.Shop();
+        b.setMerchantId(secondMerchantId);
+        b.setCode("HRS-" + System.nanoTime());
+        b.setDisplayName("Hours fixture shop");
+        b.setStatus(com.gpstore.platform.ShopStatus.ACTIVE);
+        b.setIsDemo(Boolean.TRUE);
+        b.setActive(Boolean.TRUE);
+        secondShopId = shops.save(b).getId();
+        return secondShopId;
+    }
+
+    /**
+     * Gives one shop the same hours on every day of the week, THROUGH THE
+     * SERVICE.
+     *
+     * <p>NOT WITH AN INSERT, and that distinction cost a CI run.
+     * {@code ShopHoursService.forCurrentShop} is {@code @Cacheable("shopHours")}
+     * and the only thing that evicts it is
+     * {@code StoreOperationsService.replaceWeek}, which carries the matching
+     * {@code @CacheEvict}. Rows written straight into
+     * {@code shop_business_hours} therefore change the database and not the
+     * answer: the schedule keeps serving whatever it cached.
+     *
+     * <p>That is not hypothetical either. EachShopKeepsItsOwnHoursTest gives
+     * shop #1 hours of 06:00-10:00, and removes the ROWS in its teardown
+     * without evicting - so this class inherited a cached 06:00-10:00 week,
+     * and asking at exactly 10:00 found a window whose end is not after the
+     * instant (ends are exclusive) and rolled to NEXT_MORNING. The database
+     * said one thing and the cache another.
+     *
+     * <p>Writing through the service is also simply the production path: a
+     * shopkeeper changing their hours goes through replaceWeek, which is why
+     * the eviction lives there.
+     */
+    private void setWeek(long shopId, java.time.LocalTime opens, java.time.LocalTime closes) {
+        java.util.Map<java.time.DayOfWeek, List<StoreOperationsService.TradingSession>> week =
+                new java.util.EnumMap<>(java.time.DayOfWeek.class);
+        for (java.time.DayOfWeek day : java.time.DayOfWeek.values()) {
+            week.put(day, List.of(new StoreOperationsService.TradingSession(opens, closes)));
+        }
+        shopScopeSwitch.within(shopId, () -> operationsService.replaceWeek(week, "hours-test"));
+        hoursTouched.add(shopId);
+    }
+
     private PlaceOrderResponse place(Fixture fixture) {
         PlaceOrderRequest request = new PlaceOrderRequest();
         request.setAddressId(fixture.addressId);
@@ -251,7 +442,7 @@ class StoreHoursCheckoutTest {
         Customer customer = new Customer();
         customer.setFullName("Store Hours Test Customer");
         customer.setEmail("store-hours-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

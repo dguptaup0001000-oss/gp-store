@@ -32,7 +32,17 @@ enum AdminPermission {
   broadcastSend,
   analyticsView,
   auditView,
-  systemAdmin;
+  systemAdmin,
+
+  /// Acts for the MARKETPLACE rather than for one shop. The only permission
+  /// that grants a cross-shop scope, and no shop role holds it.
+  platformAdmin,
+
+  /// Writes the SHARED catalogue definition - what a product IS, as opposed
+  /// to what this shop charges for it. Under a single-shop deployment the
+  /// backend grants it to whoever holds catalogManage, because with one
+  /// merchant the shopkeeper is the platform.
+  catalogDefine;
 
   /// The backend enum constant this mirrors, e.g. ORDERS_VIEW.
   String get backendName =>
@@ -51,8 +61,23 @@ class AdminRoles {
   static const deliveryManager = 'DELIVERY_MANAGER';
   static const support = 'SUPPORT';
 
-  static final Set<AdminPermission> _all =
-      Set.unmodifiable(AdminPermission.values);
+  /// Runs the marketplace, not a shop. Narrower than [admin] inside any one
+  /// shop: it can read an order to settle a dispute but cannot advance it,
+  /// refund it, or touch that shop's roster.
+  static const platformAdmin = 'PLATFORM_ADMIN';
+
+  /// Every permission a SHOP role can hold.
+  ///
+  /// Written as a subtraction rather than as `AdminPermission.values`, exactly
+  /// as the backend's RolePermissions is: "everything in the enum" would mean
+  /// a shopkeeper silently gaining whatever platform permission is added next.
+  static final Set<AdminPermission> _all = Set.unmodifiable(
+    AdminPermission.values.where(
+      (p) =>
+          p != AdminPermission.platformAdmin &&
+          p != AdminPermission.catalogDefine,
+    ),
+  );
 
   /// Mirrors backend RolePermissions. ADMIN holds everything - see that
   /// file for why that guarantee matters more than a tidy hierarchy.
@@ -107,6 +132,17 @@ class AdminRoles {
       AdminPermission.catalogView,
       AdminPermission.customersView,
       AdminPermission.reviewsModerate,
+    },
+    platformAdmin: {
+      AdminPermission.platformAdmin,
+      AdminPermission.catalogDefine,
+      AdminPermission.catalogView,
+      AdminPermission.catalogManage,
+      AdminPermission.ordersView,
+      AdminPermission.paymentsView,
+      AdminPermission.customersView,
+      AdminPermission.analyticsView,
+      AdminPermission.auditView,
     },
   };
 

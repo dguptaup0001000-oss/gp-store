@@ -88,8 +88,15 @@ class FakeHttpClientAdapter implements HttpClientAdapter {
 
 /// Builds a real ApiClient wired to a fake adapter - use this in repository
 /// tests instead of hitting a real backend.
-ApiClient buildTestApiClient(FakeHttpClientAdapter adapter) {
-  final client = ApiClient(tokenStorage: TokenStorage());
+ApiClient buildTestApiClient(
+  FakeHttpClientAdapter adapter, {
+  /// Which shop the app is acting for, when a test is about that.
+  ///
+  /// Defaults to null, which is what the shipped single-shop app effectively
+  /// sends: no header at all, and the backend answers Shop #1.
+  int? Function()? activeShopId,
+}) {
+  final client = ApiClient(tokenStorage: TokenStorage(), activeShopId: activeShopId);
   client.dio.httpClientAdapter = adapter;
   return client;
 }

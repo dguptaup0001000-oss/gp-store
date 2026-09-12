@@ -107,6 +107,20 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
      * revenue it never added - that would push the total NEGATIVE for a week
      * whose only activity was a cancellation.
      */
+    /*
+     * AND IT NAMES THE SHOP, because the joins above do not scope anything.
+     *
+     * Refund is not shop-owned - a refund belongs to the payment that belongs
+     * to the order that has a shop - and Hibernate's filter restricts the
+     * entity a query is ROOTED on, not one it reaches through a join. So this
+     * summed every shop's refunds. On a marketplace that is not merely a leak:
+     * it is subtracted from one shop's revenue, so a brand-new kirana's first
+     * dashboard reported tens of thousands of rupees of refunds it had never
+     * issued, and a net revenue deep in the negative. Measured, not assumed.
+     *
+     * Null means platform-wide, for a marketplace operator and for the
+     * single-shop reporting that has always seen everything.
+     */
     @Query("""
            select coalesce(sum(r.amount), 0)
            from Refund r
@@ -115,7 +129,41 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
            where r.status = com.gpstore.entity.Refund$Status.SUCCEEDED
              and o.orderDate >= :from and o.orderDate <= :to
              and o.orderStatus <> com.gpstore.enums.OrderStatus.CANCELLED
+             and (:shopId is null or o.shopId = :shopId)
            """)
     BigDecimal settledForOrdersBetween(@Param("from") LocalDateTime from,
-                                       @Param("to") LocalDateTime to);
+                                       @Param("to") LocalDateTime to,
+                                       @Param("shopId") Long shopId);
+
+    /**
+     * Settled refunds grouped by the shop that issued them.
+     *
+     * The platform half of settledForOrdersBetween above.
+     *
+     * UNLIKE THAT ONE, THE SHOP CLAUSE HERE IS NOT WHAT MAKES IT SAFE. Refund
+     * is not shop-owned and nothing filters this, so an unscoped call really
+     * does read every shop's refunds - but the group-by hands each shop its
+     * own row, and ShopEarnings only ever reads the row for a shop that
+     * already appeared in the orders roll-up. A leaked group is a map entry
+     * nobody looks at. Measured: removing the clause changed no test.
+     *
+     * It stays because a query that reads more than the caller needs is one
+     * refactor away from being read, and because null still has to mean
+     * "every shop" out loud for the marketplace overview.
+     */
+    @Query("""
+           select o.shopId as shopId, coalesce(sum(r.amount), 0) as refunded
+           from Refund r
+           join r.payment p
+           join p.order o
+           where r.status = com.gpstore.entity.Refund$Status.SUCCEEDED
+             and o.orderDate >= :from and o.orderDate <= :to
+             and o.orderStatus <> com.gpstore.enums.OrderStatus.CANCELLED
+             and (:shopId is null or o.shopId = :shopId)
+           group by o.shopId
+           """)
+    List<Object[]> settledByShopBetween(@Param("from") LocalDateTime from,
+                                        @Param("to") LocalDateTime to,
+                                        @Param("shopId") Long shopId);
+
 }

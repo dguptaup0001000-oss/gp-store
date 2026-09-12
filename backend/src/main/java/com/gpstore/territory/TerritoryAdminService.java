@@ -173,6 +173,7 @@ public class TerritoryAdminService {
     public DeliverySubzone setPrimaryPartner(Long subzoneId, Long partnerId) {
         DeliverySubzone subzone = requireSubzone(subzoneId);
         DeliveryPartner partner = partnerId == null ? null : requirePartner(partnerId);
+        requireSameShop(subzone, partner);
         subzone.setPrimaryPartner(partner);
         DeliverySubzone saved = subzoneRepository.save(subzone);
         resolver.invalidate();
@@ -207,7 +208,9 @@ public class TerritoryAdminService {
             }
             SubzoneBackupPartner backup = new SubzoneBackupPartner();
             backup.setSubzone(subzone);
-            backup.setPartner(requirePartner(partnerId));
+            DeliveryPartner backupPartner = requirePartner(partnerId);
+            requireSameShop(subzone, backupPartner);
+            backup.setPartner(backupPartner);
             backup.setPriority(priority++);
             saved.add(backupRepository.save(backup));
         }
@@ -228,6 +231,9 @@ public class TerritoryAdminService {
      * roads can say whether a border is a border a scooter can cross.
      */
     @Transactional
+    /** What a territory borders, after a change - ids, read while the collection is live. */
+    public record NeighbourList(Long subzoneId, String code, List<Long> neighbourIds) {}
+
     public DeliverySubzone setNeighbours(Long subzoneId, List<Long> neighbourIds) {
         DeliverySubzone subzone = requireSubzone(subzoneId);
 
@@ -256,6 +262,25 @@ public class TerritoryAdminService {
         DeliverySubzone saved = subzoneRepository.save(subzone);
         resolver.invalidate();
         return saved;
+    }
+
+    /**
+     * The same write, answered with the neighbour ids rather than the entity.
+     *
+     * READ INSIDE THIS TRANSACTION, which is the whole reason it exists.
+     * DeliverySubzone.neighbours is lazy and no longer serialised - see the
+     * comment on that field for the 500 it used to produce - so the one route
+     * whose answer is genuinely about neighbours reads them here, while the
+     * session is still open, and returns plain ids.
+     */
+    @Transactional
+    public NeighbourList setNeighboursAndList(Long subzoneId, List<Long> neighbourIds) {
+        DeliverySubzone saved = setNeighbours(subzoneId, neighbourIds);
+        List<Long> ids = new ArrayList<>();
+        for (DeliverySubzone neighbour : saved.getNeighbours()) {
+            ids.add(neighbour.getId());
+        }
+        return new NeighbourList(saved.getId(), saved.getCode(), ids);
     }
 
     // ------------------------------------------------------------ addresses
@@ -292,7 +317,14 @@ public class TerritoryAdminService {
                 if (Boolean.TRUE.equals(address.getSubzoneLocked())) {
                     continue;
                 }
-                Long before = address.getSubzone() == null ? null : address.getSubzone().getId();
+                // The stamp as THIS shop sees it. A re-resolve walks this
+                // shop's map; an address stamped in another shop's territory
+                // reads as "not stamped here", which is the truth and is also
+                // the only reading that does not load a competitor's row.
+                Long before = subzoneRepository
+                        .findStampedOnAddressIfInScope(address.getId())
+                        .map(com.gpstore.entity.DeliverySubzone::getId)
+                        .orElse(null);
                 Long after = resolver.resolveSubzoneId(address.getLatitude(), address.getLongitude())
                         .orElse(null);
 
@@ -417,5 +449,31 @@ public class TerritoryAdminService {
     private DeliveryPartner requirePartner(Long id) {
         return partnerRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery partner not found: " + id));
+    }
+
+    /**
+     * A territory's rider must work for the shop that drew the territory (W4).
+     *
+     * WHY IT IS STATED HERE and not left to the tenant filter. The filter
+     * already means an administrator can only load their OWN riders and their
+     * OWN subzones, so the two sides are normally the same shop by
+     * construction. But this is the exact pairing decision W4 is about - one
+     * shop, one roster, no shared pool - and pairing two rows that are each
+     * individually readable is not something a row-level filter can see. If
+     * the rule is ever going to be broken it will be broken here, by a change
+     * that looks harmless because both lookups succeeded.
+     *
+     * It also holds when the filter does not: platform-scoped work, a future
+     * console that operates a shop on its behalf, a data repair script.
+     */
+    private void requireSameShop(DeliverySubzone subzone, DeliveryPartner partner) {
+        if (subzone == null || partner == null) {
+            return;
+        }
+        if (subzone.getShopId() != null && partner.getShopId() != null
+                && !subzone.getShopId().equals(partner.getShopId())) {
+            throw new com.gpstore.platform.CrossShopAccessException(
+                    "A territory's rider must work for the shop that drew the territory.");
+        }
     }
 }

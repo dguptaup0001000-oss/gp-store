@@ -106,6 +106,24 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
   /// what delivery_dashboard_screen.dart already does - it opens the installed
   /// app where there is one and the website where there is not, which is the
   /// fallback rather than a separate code path.
+  /// Opens the dialler with the customer's number already in it.
+  ///
+  /// NOT A CALL - a tel: URL fills the dialler and waits for the rider to
+  /// press it, which is the behaviour anyone expects and the only one an app
+  /// can have without the phone permission.
+  Future<void> _callCustomer(String number) async {
+    final uri = Uri(scheme: 'tel', path: number.replaceAll(RegExp(r'[^0-9+]'), ''));
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication)
+        .catchError((_) => false);
+    if (!launched && mounted) {
+      // Said rather than swallowed: a rider who taps and gets nothing needs to
+      // know the number is still on the screen to dial by hand.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No dialler on this phone. The number is $number.')),
+      );
+    }
+  }
+
   Future<void> _navigate() async {
     final lat = _order.latitude;
     final lng = _order.longitude;
@@ -313,12 +331,27 @@ class _WorkerOrderScreenState extends State<WorkerOrderScreen> {
             const SizedBox(height: 4),
             if (_order.customerName != null) Text(_order.customerName!),
             Text(_order.deliveryAddress!),
-            if (_order.customerPhone != null)
+            if (_order.customerPhone != null) ...[
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: SelectableText(_order.customerPhone!,
                     style: theme.textTheme.bodyLarge),
               ),
+              // ONE TAP, because the alternative is a rider at a locked gate
+              // copying a number off a screen with one hand. The old delivery
+              // console had this and the rewrite left the number selectable
+              // but undialable. The text stays: a phone with no dialler, or a
+              // rider who wants to read it out, still needs it.
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () => _callCustomer(_order.customerPhone!),
+                  icon: const Icon(Icons.call),
+                  label: const Text('CALL CUSTOMER'),
+                ),
+              ),
+            ],
           ],
 
           // UNDER THEIR OWN HEADINGS, not glued onto the address line. These

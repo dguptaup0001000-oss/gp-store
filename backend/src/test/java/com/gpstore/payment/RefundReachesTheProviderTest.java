@@ -1,5 +1,6 @@
 package com.gpstore.payment;
 
+import com.gpstore.support.TestMobileNumbers;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.Order;
 import com.gpstore.entity.Payment;
@@ -69,6 +70,27 @@ class RefundReachesTheProviderTest {
     @Autowired private OrderRepository orderRepository;
     @Autowired private PaymentRepository paymentRepository;
     @Autowired private CustomerRepository customerRepository;
+
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    /**
+     * TIDIES UP, because the rows this class leaves are not inert.
+     *
+     * <p>See StuckRefundsGetChasedTest: the refund reconciliation sweep is
+     * batched, so a backlog of abandoned REFUND_PENDING payments eventually
+     * grows past one run's reach and makes that test fail for a reason that
+     * has nothing to do with the code it tests.
+     */
+    @org.junit.jupiter.api.AfterEach
+    void removeWhatThisTestLeftBehind() {
+        jdbc.update("DELETE FROM refunds WHERE payment_id IN (SELECT p.id FROM payments p "
+                + "JOIN orders o ON o.id = p.order_id WHERE o.order_number LIKE 'REFUND-%')");
+        jdbc.update("DELETE FROM payment_provider_events WHERE payment_id IN "
+                + "(SELECT p.id FROM payments p JOIN orders o ON o.id = p.order_id "
+                + "WHERE o.order_number LIKE 'REFUND-%')");
+        jdbc.update("DELETE FROM payments WHERE order_id IN "
+                + "(SELECT id FROM orders WHERE order_number LIKE 'REFUND-%')");
+    }
 
     /** A spy, so every other test in the suite keeps the real gateway. */
     @MockitoSpyBean private PaymentGateway gateway;
@@ -333,7 +355,7 @@ class RefundReachesTheProviderTest {
         Customer customer = new Customer();
         customer.setFullName("Refund Test Customer");
         customer.setEmail("refund-" + System.nanoTime() + "@example.com");
-        customer.setMobileNumber("9" + String.valueOf(System.nanoTime()).substring(0, 9));
+        customer.setMobileNumber(TestMobileNumbers.unique());
         customer.setPassword("irrelevant-for-this-test");
         customer.setEnabled(true);
         customer.setActive(true);

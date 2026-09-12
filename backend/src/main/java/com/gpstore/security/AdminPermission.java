@@ -89,7 +89,41 @@ public enum AdminPermission {
      * operational roles - a route nobody has classified yet should be
      * reachable by the shop owner, not by whoever happens to be on shift.
      */
-    SYSTEM_ADMIN;
+    SYSTEM_ADMIN,
+
+    /**
+     * Acts for the MARKETPLACE rather than for one shop.
+     *
+     * <p>THIS IS THE PERMISSION THAT GRANTS A CROSS-SHOP SCOPE, and it is the
+     * only one. TenantResolver used to read SYSTEM_ADMIN for that, which was
+     * wrong in a way that would have been very expensive to discover: every
+     * existing shop owner holds SYSTEM_ADMIN, so the first multi-shop
+     * deployment would have resolved every shopkeeper to the whole
+     * marketplace.
+     *
+     * <p>Held by {@link com.gpstore.entity.Role#PLATFORM_ADMIN} and by nothing
+     * else - asserted by test, because a map edit is all it would take.
+     */
+    PLATFORM_ADMIN,
+
+    /**
+     * Write the SHARED catalogue: what a product IS.
+     *
+     * <p>Names, pack sizes, barcodes, photos, categories, GST class - the row
+     * every shop that sells the item points at. One merchant editing it
+     * changes what every other merchant is selling, which is why it is a
+     * platform act rather than a shop one.
+     *
+     * <p>NOT THE SAME AS CATALOG_MANAGE, which is what a shopkeeper does every
+     * day: their price, their stock, whether they list the item at all. That
+     * is their own row and always theirs to change.
+     *
+     * <p>UNDER SINGLE_SHOP THE DISTINCTION IS EMPTY, and CatalogDefinition
+     * grants it to whoever holds CATALOG_MANAGE - with one merchant, the
+     * shopkeeper IS the platform, and taking catalogue editing away from them
+     * would break the shop that is actually trading.
+     */
+    CATALOG_DEFINE;
 
     /** The authority string SecurityConfig matches on. */
     public String authority() {
