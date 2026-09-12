@@ -32,19 +32,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * validated a token carrying that role.
  */
 @SpringBootTest(properties = {
-        // THE AUTH LIMITER IS SHARED AND THIS CLASS IS NOT ITS SUBJECT.
-        // rate-limit.auth-per-minute is 20 for the WHOLE suite - one counter,
-        // one MockMvc client address - and nearly every test here registers an
-        // account first. On a runner fast enough to compress the suite's auth
-        // traffic into one minute, the register call starts returning 429 and
-        // an authorization test fails for a reason that has nothing to do with
-        // authorization: CI reported "expected:<200> but was:<429>" on the
-        // register at line 154.
-        //
-        // The assertions are untouched. RateLimitFilter has its own tests, and
-        // RegisterEnumerationTest, JwtRoleRecheckTest and
-        // DeactivatedCustomerJwtTest already do exactly this.
-        "rate-limit.auth-per-minute=10000",
         // NO LIVE OUTBOX WORKER. A running drain turns committed work into
         // auto-assigned deliveries against whichever rider is available, and
         // Spring caches this context and never closes it - so the worker

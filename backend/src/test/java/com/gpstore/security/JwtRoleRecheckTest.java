@@ -31,7 +31,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         // Why it only started now: RateLimitFilter classified on
         // getServletPath(), which MockMvc leaves empty, so every request in
         // the suite fell into the default bucket. See RequestPath.
-        "rate-limit.auth-per-minute=10000",
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",

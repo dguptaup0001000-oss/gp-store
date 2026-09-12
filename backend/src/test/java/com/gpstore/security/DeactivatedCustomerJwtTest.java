@@ -29,20 +29,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * request, and that reactivation restores the same unexpired access token.
  */
 @SpringBootTest(properties = {
-        // THE LIMITER IS SHARED, AND THIS TEST IS NOT ITS SUBJECT. Every
-        // method here registers and logs in, and rate-limit.auth-per-minute
-        // defaults to 20 across the WHOLE suite - one Redis counter, one
-        // MockMvc client address. On a fast runner the suite's auth calls
-        // compress into a single minute and this class starts getting 429s,
-        // which is what turned CI red: disabledAccountCannotLogin asserted
-        // 401 and was handed 429 by a limiter that had nothing to do with the
-        // account being disabled.
-        //
-        // Raising it does not weaken the assertion - 401 and the "Invalid
-        // email or password" body are still exactly what is demanded. It
-        // removes an unrelated neighbour from the measurement. RateLimitFilter
-        // has its own tests; this class is about deactivated credentials.
-        "rate-limit.auth-per-minute=10000",
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",

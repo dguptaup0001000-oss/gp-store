@@ -59,7 +59,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
         "idempotency.cleanup-initial-delay-ms=3600000",
         "otp.cleanup-initial-delay-ms=3600000",
         "delivery.late-flag-initial-delay-ms=3600000",
-        "rate-limit.auth-per-minute=10000"
 })
 @AutoConfigureMockMvc
 @DisplayName("What a marketplace must allow before anybody has a shop")
