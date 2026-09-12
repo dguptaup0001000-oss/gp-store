@@ -230,7 +230,7 @@ Existing roles are preserved and given a scope, rather than replaced:
 | `SHOP_ADMIN` | `ADMIN`, `MANAGER` | shop-scoped |
 | — | `INVENTORY_MANAGER`, `ORDER_MANAGER`, `DELIVERY_MANAGER`, `SUPPORT` | shop-scoped staff roles, kept as-is |
 | `SHOP_WORKER` | `DELIVERY_BOY` | shop-scoped |
-| `PLATFORM_ADMIN` | *(new)* | platform-scoped; `SYSTEM_ADMIN` splits into platform vs shop system permissions |
+| `PLATFORM_ADMIN` | *(new)* | platform-scoped permission, held by `SUPER_ADMIN`; `SYSTEM_ADMIN` splits into platform vs shop system permissions |
 
 Authorization becomes **permission × scope**. `CATALOG_MANAGE` stops meaning "may edit
 products" and starts meaning "may edit products *of shops in scope*". The 18
@@ -608,15 +608,25 @@ restored.
 | Axis | Who | What it grants |
 |---|---|---|
 | **Shop** | `ADMIN`, `SUPER_ADMIN`, `MANAGER`, `INVENTORY_MANAGER`, `ORDER_MANAGER`, `DELIVERY_MANAGER`, `SUPPORT` | Everything inside the shops they are on the staff list of. Never more than one shop at a time |
-| **Platform** | `PLATFORM_ADMIN` | Merchants, shop lifecycle, the shared catalogue, cross-shop reporting. **Narrower than ADMIN inside any one shop** — it can read an order to settle a dispute, not advance it, refund it, or touch the roster |
-| **Deployment** | `SYSTEM_ADMIN` permission (ADMIN/SUPER_ADMIN only) | Actuator, API docs, bulk seeding. A third job again, and not the platform's |
+| **Platform** | `SUPER_ADMIN` | The whole app. Merchants, shop lifecycle, the shared catalogue, cross-shop reporting, platform observability — **and everything a shop admin can do**, in any shop. The owner of GP-STORE takes every decision about it |
+| **Deployment** | `SYSTEM_ADMIN` permission (ADMIN/SUPER_ADMIN only) | Actuator, API docs, bulk seeding |
+
+> **`PLATFORM_ADMIN` is not a fifth role.** It was originally a third authority level — wider
+> than `ADMIN` across shops, deliberately narrower inside any one of them. That split has been
+> retired by a business decision: **`SUPER_ADMIN` is the single highest authority.** The enum
+> constant survives only as a compatibility alias, granted the *same permission set as
+> `SUPER_ADMIN` by reference* so the two cannot diverge, because `customers.role` is a string
+> under a CHECK constraint that V50 taught to accept it and removing the constant would make
+> `Role.valueOf` throw on any surviving row. `TheGpStoreRoleModelTest` asserts the equality in
+> both directions. New platform accounts get `SUPER_ADMIN`.
 
 **The single most dangerous line in the design, and the bug it fixes.** Slice 1a resolved
 a platform-wide scope from `SYSTEM_ADMIN` — which *every existing shop owner holds*,
 because `ADMIN` was mapped to the whole permission set with `EnumSet.allOf`. The first
 multi-shop deployment would have handed every shopkeeper a scope spanning every merchant.
-The fix is two-part: a distinct `PLATFORM_ADMIN` permission that only the platform role
-holds, and `EVERY_SHOP_PERMISSION` written as a **subtraction** rather than `allOf`, so
+The fix is two-part: a distinct `PLATFORM_ADMIN` *permission* that only the platform owner
+holds (the permission is the mechanism and is very much still in use — it is the `Role` of the
+same name that was retired), and `EVERY_SHOP_PERMISSION` written as a **subtraction** rather than `allOf`, so
 adding a permission never silently grants it to shop roles. Both are pinned by test.
 
 ## Staff shop identity

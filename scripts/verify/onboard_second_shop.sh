@@ -28,7 +28,7 @@
 # to a shop-owning role is a hole, not a convenience, and the server is right
 # to have no route for it.
 #
-#   PLATFORM_EMAIL    a PLATFORM_ADMIN account. Opens merchants and shops.
+#   PLATFORM_EMAIL    a SUPER_ADMIN account. Opens merchants and shops.
 #   PLATFORM_PASSWORD its password.
 #   OWNER_B_EMAIL     an EXISTING admin-role account to own the new shop.
 #   OWNER_B_PASSWORD  its password.

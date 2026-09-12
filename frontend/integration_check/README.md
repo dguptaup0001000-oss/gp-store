@@ -56,7 +56,7 @@ reg "{\"name\":\"Check platform\",\"email\":\"check-plat-$S@example.test\",\"pho
 reg "{\"name\":\"Check merchant\",\"email\":\"check-merch-$S@example.test\",\"phone\":\"82$RANDOM$RANDOM\",\"password\":\"LiveCheck!2345\"}"
 
 psql "$DB" \
-  -c "UPDATE customers SET role='PLATFORM_ADMIN' WHERE email='check-plat-$S@example.test';" \
+  -c "UPDATE customers SET role='SUPER_ADMIN' WHERE email='check-plat-$S@example.test';" \
   -c "UPDATE customers SET role='ADMIN'          WHERE email='check-merch-$S@example.test';" \
   -c "INSERT INTO shop_staff (shop_id, customer_id, is_default, active)
       SELECT 1, id, true, true FROM customers WHERE email='check-merch-$S@example.test';"

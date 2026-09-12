@@ -209,8 +209,14 @@ class StaffRolePermissionsTest {
         // /actuator, the API docs, bulk catalogue seeding, and anything new
         // under /api/admin/** that nobody has classified yet. An unclassified
         // route should be reachable by the owner, not by whoever is on shift.
+        // PLATFORM_ADMIN is included because it is now an ALIAS for
+        // SUPER_ADMIN rather than a narrower operator role - the owner's
+        // decision, recorded in RolePermissions and asserted by
+        // TheGpStoreRoleModelTest.
         for (Role role : Role.values()) {
-            boolean expected = role == Role.ADMIN || role == Role.SUPER_ADMIN;
+            boolean expected = role == Role.ADMIN
+                    || role == Role.SUPER_ADMIN
+                    || role == Role.PLATFORM_ADMIN;
             assertThat(RolePermissions.forRole(role).contains(AdminPermission.SYSTEM_ADMIN))
                     .as("SYSTEM_ADMIN for %s", role)
                     .isEqualTo(expected);
@@ -278,19 +284,19 @@ class StaffRolePermissionsTest {
                     .containsAll(RolePermissions.forRole(role));
         }
 
-        // ...and the part of that claim that IS about shops, asserted rather
-        // than waved at: inside a shop, the platform operator can do strictly
-        // less than the shopkeeper.
-        Set<AdminPermission> platform = RolePermissions.forRole(Role.PLATFORM_ADMIN);
-        assertThat(platform)
-                .as("a platform operator must not be able to work a shop's orders or money")
-                .doesNotContain(AdminPermission.ORDERS_MANAGE,
-                        AdminPermission.PAYMENTS_MANAGE,
-                        AdminPermission.PAYMENTS_REFUND,
-                        AdminPermission.DELIVERY_MANAGE,
-                        AdminPermission.COUPONS_MANAGE,
-                        AdminPermission.CUSTOMERS_MANAGE,
-                        AdminPermission.SYSTEM_ADMIN);
+        // WHAT USED TO BE HERE. This asserted that inside a shop the platform
+        // operator could do strictly LESS than the shopkeeper - no advancing
+        // orders, no refunds, no roster. That WAS the separate-authority
+        // model, and the owner has since decided there is no separate platform
+        // authority: SUPER_ADMIN is the single highest role and PLATFORM_ADMIN
+        // is an alias for it.
+        //
+        // The claim is not weakened, it tightened: equality in both directions
+        // is a stronger statement than "does not contain these seven", and it
+        // is the statement the decision actually makes.
+        assertThat(RolePermissions.forRole(Role.PLATFORM_ADMIN))
+                .as("PLATFORM_ADMIN must be an alias for the platform owner, not a level")
+                .isEqualTo(RolePermissions.forRole(Role.SUPER_ADMIN));
     }
 
     @Test

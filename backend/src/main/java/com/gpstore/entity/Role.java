@@ -32,7 +32,13 @@ public enum Role {
     // an account that exists today. See RolePermissions for what each may do.
     // ------------------------------------------------------------------
 
-    /** The shop owner. Today identical to ADMIN; a name that is theirs alone. */
+    /**
+     * THE PLATFORM OWNER - runs GP-STORE itself, and takes every decision
+     * about it. The single highest authority in the app: every permission the
+     * enum defines, including the ones whose scope spans shops. It is NOT a
+     * wider ADMIN with a nicer name; ADMIN is the shop owner, and the two are
+     * different jobs at different levels. See RolePermissions.
+     */
     SUPER_ADMIN,
 
     /** Runs the shop day to day. Everything operational, not the system surface. */
@@ -51,20 +57,30 @@ public enum Role {
     SUPPORT,
 
     /**
-     * Runs the MARKETPLACE, not a shop.
+     * A LEGACY ALIAS FOR {@link #SUPER_ADMIN}. NOT A SEPARATE BUSINESS ROLE.
      *
-     * <p>DELIBERATELY NOT A WIDER ADMIN. The obvious shortcut - let ADMIN mean
-     * "can do anything, including across shops" - is what turns every
-     * shopkeeper into a platform operator the day a second merchant signs up,
-     * because every existing staff account is an ADMIN. This role is the other
-     * axis: it governs merchants, shop lifecycle and the shared catalogue, and
-     * it is the only role whose scope spans shops.
+     * <p>GP-STORE HAS FOUR BUSINESS ROLES: CUSTOMER shops, DELIVERY_BOY
+     * delivers, ADMIN owns a shop, SUPER_ADMIN owns the platform. This
+     * constant is none of them.
      *
-     * <p>It is also NARROWER than ADMIN inside any one shop. A platform
-     * administrator can read an order to settle a dispute; they cannot advance
-     * it, refund it, or edit that shop's rider roster. Running the market is
-     * not the same job as running a shop, and §103 is explicit that the shops
-     * stay independent.
+     * <p>It used to be a third authority level - wider than ADMIN across
+     * shops, deliberately narrower inside any one of them - on the theory that
+     * running the market and running a shop were different jobs that should
+     * not be held by one account. The owner of GP-STORE has settled it the
+     * other way: SUPER_ADMIN is the single highest authority and decides
+     * everything, so there is nothing left for a second platform role to be.
+     *
+     * <p>WHY IT IS STILL HERE. customers.role is a string under a CHECK
+     * constraint that V50__staff_shop_identity.sql taught to accept
+     * 'PLATFORM_ADMIN'. Deleting the constant would make Role.valueOf throw on
+     * any row still holding it - an outage for that account, in a database
+     * this code cannot inspect from here. No migration ever seeded such an
+     * account, so this is a precaution rather than a known case, and it costs
+     * nothing: RolePermissions grants it the SAME SET as SUPER_ADMIN by
+     * reference, so the two cannot drift, and TheGpStoreRoleModelTest asserts
+     * that equality rather than trusting this sentence.
+     *
+     * <p>DO NOT USE IT FOR NEW ACCOUNTS. Give the platform owner SUPER_ADMIN.
      */
     PLATFORM_ADMIN
 

@@ -124,6 +124,40 @@ class TheGpStoreRoleModelTest {
     }
 
     @Nested
+    @DisplayName("PLATFORM_ADMIN is not a second authority")
+    class NoSecondAuthority {
+
+        @Test
+        @DisplayName("grants nothing beyond SUPER_ADMIN, ever")
+        void isExactlyTheAppAdmin() {
+            // The owner's decision: SUPER_ADMIN is the single highest role and
+            // PLATFORM_ADMIN is not a separate business role. It survives only
+            // because customers.role is a string under a CHECK constraint that
+            // V50 taught to accept it - deleting the constant would make
+            // Role.valueOf throw on any row still holding it.
+            //
+            // EQUALITY IN BOTH DIRECTIONS. "Grants no more" alone would allow
+            // it to quietly become a weaker role, which is the same divergence
+            // in the other direction and just as much a second authority.
+            assertThat(of(Role.PLATFORM_ADMIN))
+                    .as("PLATFORM_ADMIN has drifted from SUPER_ADMIN and is a second authority "
+                            + "again - it must be an alias, not a level")
+                    .isEqualTo(of(Role.SUPER_ADMIN));
+        }
+
+        @Test
+        @DisplayName("the shop admin is still nothing like either of them")
+        void theShopAdminIsUnaffected() {
+            // Collapsing the two platform names must not quietly widen the
+            // shopkeeper, which is the mistake this whole model exists to stop.
+            assertThat(of(Role.ADMIN)).doesNotContain(
+                    AdminPermission.PLATFORM_ADMIN,
+                    AdminPermission.PLATFORM_OBSERVABILITY,
+                    AdminPermission.CATALOG_DEFINE);
+        }
+    }
+
+    @Nested
     @DisplayName("worker (DELIVERY_BOY) delivers, and administers nothing")
     class Worker {
 

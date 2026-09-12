@@ -1,11 +1,31 @@
 # FINAL HARDENING REPORT
 
+> ## SUPERSEDED — 12 September 2026
+>
+> **Read [PRODUCTION_READINESS_REPORT.md](PRODUCTION_READINESS_REPORT.md)
+> instead.** This document is kept because the *method* it records is still
+> the right one — results separated by how they were verified, and the gaps
+> named rather than rounded up — and because the detail in sections A3, A9,
+> D and G has not been re-derived anywhere else.
+>
+> Its headline is out of date in both directions. **The code IS deployed
+> now**, and the smoke suite has been run against the real VPS from a GitHub
+> runner (38/38, with the deployed SHA asserted), which this document
+> correctly reported as not done at the time. Against that, the role model
+> it describes has since changed: `PLATFORM_ADMIN` was a third authority
+> level when this was written and is now a compatibility alias for
+> `SUPER_ADMIN`, so anything below that treats the two as different jobs
+> describes a model the owner has retired. Test counts here (1761 backend)
+> are also superseded.
+>
+> Nothing below has been edited. Take its numbers as of its own date.
+
 *GP-STORE, after the marketplace-integration phase. Every figure here came
 from a command run in this session against the committed code. Where something
 was not run, or could not be, this report says so and says why — it does not
 report it as passed.*
 
-**Status: NOT PRODUCTION-READY, and not deployed.**
+**Status at the time of writing: NOT PRODUCTION-READY, and not deployed.**
 
 This code is on a branch. Production is still running the previous build. No
 APK exists. Nothing is deployed — though a staging stack for the VPS you
