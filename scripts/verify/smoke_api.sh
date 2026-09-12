@@ -31,20 +31,50 @@ BASE="${BASE%/}"
 LAT="${LAT:-27.16231}"
 LNG="${LNG:-83.940468}"
 
+# WRITES NOTHING AT ALL when set to 1. The authenticated half of this script
+# needs a token, and the only way to get one is to register - which is one
+# real row in customers. That is a defensible footprint against production
+# (see the Authentication section) but it is not NO footprint, and a probe
+# that must not touch the database at all is a reasonable thing to want.
+# Read-only keeps the public surface and the 401 checks and drops the rest.
+READ_ONLY="${SMOKE_READ_ONLY:-0}"
+
+# When set, /api/version must report exactly this commit. Lets a smoke run
+# assert it is testing the build somebody thinks is deployed, rather than
+# whatever happens to be running.
+EXPECT_SHA="${EXPECT_SHA:-}"
+
 pass=0; fail=0
 RED=$'\033[31m'; GREEN=$'\033[32m'; OFF=$'\033[0m'
+
+BODY="$(mktemp -t smoke_body.XXXXXX)"
+trap 'rm -f "$BODY"' EXIT
+
+# ONE REQUEST, AND THE TRUTH ABOUT IT.
+#
+# Two things here were quietly lying. `|| echo 000` appended to curl's own
+# "000" and reported `got 000000`, a status that does not exist. And when a
+# request never completed curl wrote no body, so the failure printed whatever
+# the PREVIOUS check had left in the file - evidence from another request
+# entirely. A smoke test whose whole product is trustworthy evidence cannot
+# do either, so: truncate the body first, and take curl's exit separately.
+request() {
+  : > "$BODY"
+  curl -sS -o "$BODY" -w '%{http_code}' --max-time 25 "$@" 2>/dev/null || true
+}
 
 # check <name> <expected-status> <curl args...>
 check() {
   local name="$1" want="$2"; shift 2
   local got
-  got=$(curl -sS -o /tmp/smoke_body -w '%{http_code}' --max-time 25 "$@" 2>/dev/null || echo 000)
+  got=$(request "$@")
+  got="${got:-000}"
   if [ "$got" = "$want" ]; then
     printf '  %sPASS%s  %-58s %s\n' "$GREEN" "$OFF" "$name" "$got"
     pass=$((pass+1))
   else
     printf '  %sFAIL%s  %-58s got %s, wanted %s\n' "$RED" "$OFF" "$name" "$got" "$want"
-    head -c 200 /tmp/smoke_body; echo
+    head -c 200 "$BODY"; echo
     fail=$((fail+1))
   fi
 }
@@ -55,13 +85,14 @@ check() {
 checkAny() {
   local name="$1" a="$2" b="$3"; shift 3
   local got
-  got=$(curl -sS -o /tmp/smoke_body -w '%{http_code}' --max-time 25 "$@" 2>/dev/null || echo 000)
+  got=$(request "$@")
+  got="${got:-000}"
   if [ "$got" = "$a" ] || [ "$got" = "$b" ]; then
     printf '  %sPASS%s  %-58s %s\n' "$GREEN" "$OFF" "$name" "$got"
     pass=$((pass+1))
   else
     printf '  %sFAIL%s  %-58s got %s, wanted %s or %s\n' "$RED" "$OFF" "$name" "$got" "$a" "$b"
-    head -c 200 /tmp/smoke_body; echo
+    head -c 200 "$BODY"; echo
     fail=$((fail+1))
   fi
 }
@@ -73,6 +104,22 @@ echo "Smoke target: $BASE"
 say "Liveness"
 check "GET /api/health"                     200 "$BASE/api/health"
 check "GET /api/health/ready"               200 "$BASE/api/health/ready"
+
+say "Deployed build"
+check "GET /api/version"                    200 "$BASE/api/version"
+DEPLOYED_SHA=$(curl -sS --max-time 25 "$BASE/api/version" 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("gitCommit",""))' 2>/dev/null || echo "")
+echo "  deployed gitCommit: ${DEPLOYED_SHA:-<none>}"
+if [ -n "$EXPECT_SHA" ]; then
+  if [ "$DEPLOYED_SHA" = "$EXPECT_SHA" ]; then
+    printf '  %sPASS%s  %-58s %s\n' "$GREEN" "$OFF" "/api/version matches expected commit" "${DEPLOYED_SHA:0:12}"
+    pass=$((pass+1))
+  else
+    printf '  %sFAIL%s  %-58s got %s, wanted %s\n' "$RED" "$OFF" \
+      "/api/version matches expected commit" "${DEPLOYED_SHA:-<none>}" "$EXPECT_SHA"
+    fail=$((fail+1))
+  fi
+fi
 
 say "Marketplace, unauthenticated"
 # These are deliberately public: a customer who has just installed the app has
@@ -107,7 +154,27 @@ fi
 # suspended is between the platform and that merchant.
 check "GET /api/marketplace/shops/99999999" 404 "$BASE/api/marketplace/shops/99999999"
 
+say "No token at all"
+check "GET /api/carts/mine unauthenticated"          401 "$BASE/api/carts/mine"
+check "GET /api/orders/my-orders unauthenticated"    401 "$BASE/api/orders/my-orders"
+
+if [ "$READ_ONLY" = "1" ]; then
+  say "Read-only mode"
+  echo "  SMOKE_READ_ONLY=1, so nothing below runs and nothing was written."
+  echo "  Skipped: registration, the signed-in surfaces, the customer-is-not-a-"
+  echo "  merchant authorization matrix, the IDOR probes, the X-Shop-Id probes"
+  echo "  and the payment-assertion probe. Those need a token."
+  printf '\n== %d passed, %d failed ==\n' "$pass" "$fail"
+  [ "$fail" -eq 0 ] || exit 1
+  exit 0
+fi
+
 say "Authentication"
+# WHAT THIS WRITES, EXACTLY: one row in customers - name "SMOKE TEST", a
+# 9999xxxxxxx phone, an @example.invalid email, role CUSTOMER, verified=false.
+# No order, no payment, no cart content, no shop, no worker. The app offers no
+# other way to obtain a customer token, so this is the minimum a signed-in
+# check can cost. Set SMOKE_READ_ONLY=1 to pay nothing and test less.
 STAMP=$(date +%s)
 PHONE="9999$(printf '%06d' $((STAMP % 1000000)))"
 EMAIL="smoke-$STAMP@example.invalid"
@@ -174,10 +241,6 @@ if [ -n "$SHOP_B" ]; then
   check "GET /api/shop/governance with X-Shop-Id: B" 403 "${AUTH[@]}" -H "X-Shop-Id: $SHOP_B" "$BASE/api/shop/governance"
 fi
 check "GET /api/shop/earnings with X-Shop-Id: 99999" 403 "${AUTH[@]}" -H "X-Shop-Id: 99999" "$BASE/api/shop/earnings"
-
-say "No token at all"
-check "GET /api/carts/mine unauthenticated"          401 "$BASE/api/carts/mine"
-check "GET /api/orders/my-orders unauthenticated"    401 "$BASE/api/orders/my-orders"
 
 say "Payment is not something a client may assert"
 # /verify takes NO request body: it asks the provider and applies the answer.
