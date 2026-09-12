@@ -476,6 +476,36 @@ jobs:
           script: ${{ env.REMOTE_DEPLOY }}
 
 
+  # DOES THE RELEASE ACTUALLY WORK, not just answer.
+  #
+  # deploy checks /actuator/health and that /api/version reports the commit it
+  # pushed. Both were green for the whole time every instant search on
+  # production was returning HTTP 500 - health and identity are not behaviour.
+  # This walks the marketplace over real HTTP and attacks the tenant boundary,
+  # which is what actually catches that.
+  #
+  # CALLED, not triggered. A workflow_run trigger on this same workflow never
+  # fires: Deploy Production is dispatched by github-actions[bot] with
+  # GITHUB_TOKEN, and GitHub refuses to start new workflow runs from
+  # GITHUB_TOKEN events. Calling it puts the result on this run instead, where
+  # whoever is watching the release will see it.
+  #
+  # A failure does NOT roll anything back - by here the deploy has happened -
+  # it turns the deploy red so a person looks. One row in customers per
+  # release is the whole write footprint; see the called workflow.
+  smoke:
+    name: Smoke the release
+    needs: [deploy, deploy-fallback]
+    if: >-
+      always()
+      && github.event_name != 'pull_request'
+      && (needs.deploy.result == 'success' || needs['deploy-fallback'].result == 'success')
+    uses: ./.github/workflows/production-smoke.yml
+    with:
+      # The emergency dispatch can deploy a SHA other than this ref's head, so
+      # assert whatever the deploy was actually told to ship.
+      expect_sha: ${{ inputs.sha || github.sha }}
+
   start-offbox:
     name: Start off-box backup
     needs: [deploy, deploy-fallback]

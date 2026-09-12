@@ -31,6 +31,32 @@
 name: Production smoke test
 
 on:
+  # CALLED BY Deploy Production AS ITS LAST JOB.
+  #
+  # This was a workflow_run trigger first, and workflow_run cannot work here:
+  # Deploy Production is dispatched by github-actions[bot] with GITHUB_TOKEN,
+  # and GitHub deliberately refuses to start new workflow runs from
+  # GITHUB_TOKEN-triggered events - that is the anti-recursion rule, not a
+  # misconfiguration. The deploy completed green and no smoke run appeared.
+  #
+  # workflow_call runs inside the caller's own run instead, so it always
+  # fires, and the result sits on the deploy where somebody looking at the
+  # release will actually see it.
+  workflow_call:
+    inputs:
+      api_base_url:
+        required: false
+        type: string
+        default: 'https://api.gpstore.co.in/v1'
+      expect_sha:
+        required: false
+        type: string
+        default: ''
+      read_only:
+        required: false
+        type: boolean
+        default: false
+
   # AFTER EVERY PRODUCTION DEPLOY, AUTOMATICALLY.
   #
   # This workflow found a customer-facing HTTP 500 - every instant search on
@@ -45,10 +71,6 @@ on:
   #
   # A failure here does not roll anything back; the deploy has already
   # happened. It fails loudly so a person knows to look.
-  workflow_run:
-    workflows: ["Deploy Production"]
-    types: [completed]
-
   workflow_dispatch:
     inputs:
       api_base_url:
@@ -77,11 +99,6 @@ permissions:
 jobs:
   smoke:
     name: Smoke the deployed API
-    # Never smoke a deploy that failed - the failure is the story, and a
-    # second red workflow only buries it. Manual runs always proceed.
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -89,7 +106,7 @@ jobs:
       # automatic run takes the live defaults and asserts the commit that was
       # just deployed - which is exactly the head_sha of the deploy run.
       API_BASE_URL: ${{ inputs.api_base_url || vars.PUBLIC_API_BASE_URL || 'https://api.gpstore.co.in/v1' }}
-      EXPECT_SHA: ${{ inputs.expect_sha || github.event.workflow_run.head_sha || '' }}
+      EXPECT_SHA: ${{ inputs.expect_sha || '' }}
       SMOKE_READ_ONLY: ${{ (inputs.read_only && '1') || '0' }}
     steps:
       - uses: actions/checkout@v4
