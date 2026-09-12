@@ -253,8 +253,20 @@ jobs:
                       if node is None:
                           continue
                       msg = (node.get("message") or node.get("type") or "").strip()
+                      # THE FIRST FRAME IN OUR OWN CODE. A message like
+                      # "Incorrect result size: expected 1, actual 0" names the
+                      # symptom and not the line, and five tests sharing a
+                      # fixture all report it identically - which is a whole
+                      # round of guessing unless the frame comes with it.
+                      frame = ""
+                      for line in (node.text or "").splitlines():
+                          line = line.strip()
+                          if line.startswith("at com.gpstore.") and "(" in line:
+                              frame = line[3:]
+                              break
                       bad.append(f"{kind.upper()}  {case.get('classname')}.{case.get('name')}\n"
-                                 f"        {msg.splitlines()[0] if msg.splitlines() else ''}")
+                                 f"        {msg.splitlines()[0] if msg.splitlines() else ''}"
+                                 + (f"\n        at {frame}" if frame else ""))
 
           marker = "<!-- ci-failing-tests -->"
           if bad:
