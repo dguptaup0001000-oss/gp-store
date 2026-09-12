@@ -26,6 +26,15 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Same convention as the money evaluator: a retry whose logic was
+      # never exercised is a retry nobody should trust with a verdict about
+      # production. Runs in about a second - the delay is zeroed in the
+      # self-test, not slept through.
+      - name: Prove the retry logic first
+        run: |
+          set -Eeuo pipefail
+          SSH_RETRY_SELFTEST=1 bash deploy/production/ssh_retry.sh
+
       - name: Require VPS SSH secrets
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
@@ -51,7 +60,8 @@ jobs:
           chmod +x .github/scripts/identify_deploy_pubkey.sh
           .github/scripts/identify_deploy_pubkey.sh
 
-      - name: Fetch status.txt and evaluate
+      - name: Fetch status.txt
+        id: fetch
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
           PROD_USER: ${{ secrets.PROD_USER }}
@@ -66,14 +76,60 @@ jobs:
           printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$KEY"
           chmod 600 "$KEY"
           APP_DIR="${PROD_APP_DIR:-/opt/gp-store}"
-          ssh -i "$KEY" \
-            -p "${PROD_PORT:-22}" \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=accept-new \
-            "${PROD_USER}@${PROD_HOST}" \
-            "cd '$APP_DIR/backend' && docker compose -f docker-compose.yml exec -T backup cat /backups/status.txt" \
-            > /tmp/status.txt
+
+          # NO chmod, AND `|| true`, both deliberate. deploy-production.yml
+          # records six consecutive releases killed by `chmod +x` failing on
+          # this very file. A diagnostic must never be able to break the
+          # thing it was added to diagnose - so if this cannot run, the
+          # alert still checks the money.
+          ./.github/scripts/log_runner_egress.sh || true
+
+          # Retried, and the output file is owned by the wrapper: a truncated
+          # status.txt joined to a retry's copy would read as two backups and
+          # be evaluated as neither. See deploy/production/ssh_retry.sh.
+          # RUN VIA bash, NOT chmod+exec. See the note in
+          # deploy-production.yml: a chmod on a repository file has killed
+          # this kind of step before, and the retry must not be able to
+          # break the thing it exists to make reliable.
+          bash deploy/production/ssh_retry.sh \
+            --output /tmp/status.txt \
+            -- ssh -i "$KEY" \
+              -p "${PROD_PORT:-22}" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o ConnectTimeout=20 \
+              -o StrictHostKeyChecking=accept-new \
+              "${PROD_USER}@${PROD_HOST}" \
+              "cd '$APP_DIR/backend' && docker compose -f docker-compose.yml exec -T backup cat /backups/status.txt"
           echo "Fetched status.txt (values below are metadata, not credentials):"
           grep -E '^(taken_at|bytes|filename|status)=' /tmp/status.txt || true
+
+      - name: Is the backup recent enough?
+        id: evaluate
+        run: |
+          set -Eeuo pipefail
           MAX_AGE_HOURS=26 bash deploy/production/evaluate-backup-status.sh /tmp/status.txt
+
+      - name: What to do when the backup is stale or missing
+        if: always() && steps.evaluate.outcome == 'failure'
+        run: |
+          echo "::error::GP-STORE's backup is not recent enough to restore from."
+          echo "The status file was read, so SSH and the backup container are fine -"
+          echo "what failed is the backup itself. Check, in this order:"
+          echo "  1. docker compose logs backup on the VPS."
+          echo "  2. Disk space: deploy/production/disk-guard.sh, docker system df."
+          echo "  3. deploy/production/DISASTER_RECOVERY.md for a manual run."
+          exit 1
+
+      # NOT A CLAIM ABOUT THE BACKUP. Nothing was read, so nothing is known.
+      - name: Could not check the backup
+        if: always() && steps.fetch.outcome == 'failure'
+        run: |
+          echo "::error::Could not reach production to CHECK the backup. NOTHING WAS"
+          echo "READ - this says nothing about whether a backup exists or is recent."
+          echo ""
+          echo "ssh could not connect, on every attempt. The runner's egress address"
+          echo "is printed above; a single blocked GitHub runner IP looks like this."
+          echo "If the deploy or the money alert succeeded around the same time, SSH"
+          echo "works and this was one bad runner. It is checked again next hour."
+          exit 1

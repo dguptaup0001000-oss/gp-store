@@ -91,6 +91,10 @@ jobs:
           bash -n deploy/production/offbox-decrypt-restore.sh
           bash -n deploy/production/offbox-gpg-roundtrip.sh
           bash -n deploy/production/evaluate-backup-status.sh
+          # The retry every scheduled alert now depends on. Proved on every
+          # deploy so a change to it cannot reach production untested.
+          bash -n deploy/production/ssh_retry.sh
+          SSH_RETRY_SELFTEST=1 bash deploy/production/ssh_retry.sh
           bash -n deploy/production/evaluate-offbox-result.sh
           bash -n deploy/production/backup-restore-drill.sh
           bash -n deploy/production/probe-public-health.sh
