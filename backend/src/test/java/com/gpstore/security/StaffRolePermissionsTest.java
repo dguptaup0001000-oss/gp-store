@@ -85,12 +85,63 @@ class StaffRolePermissionsTest {
         // staff account that exists today is an ADMIN; if ADMIN carried
         // PLATFORM_ADMIN, TenantResolver would hand every one of them a scope
         // spanning every merchant on the platform.
+        //
+        // SUPER_ADMIN IS THE PLATFORM OWNER AND MUST CARRY IT. That is a
+        // deliberate change from the single-shop era, when SUPER_ADMIN and
+        // ADMIN were byte-identical. Withholding PLATFORM_ADMIN from the
+        // owner did not protect anything - it meant TenantResolver resolved
+        // the person who owns the marketplace to one shop like any
+        // shopkeeper, and threw outright on an owner account with no shop
+        // membership. The dangerous direction is ADMIN, and that is still
+        // asserted below.
         for (Role role : Role.values()) {
-            boolean expected = role == Role.PLATFORM_ADMIN;
+            boolean expected = role == Role.PLATFORM_ADMIN || role == Role.SUPER_ADMIN;
             assertThat(RolePermissions.forRole(role).contains(AdminPermission.PLATFORM_ADMIN))
                     .as("PLATFORM_ADMIN for %s", role)
                     .isEqualTo(expected);
         }
+
+        assertThat(RolePermissions.forRole(Role.ADMIN))
+                .as("a shop owner must never span the marketplace")
+                .doesNotContain(AdminPermission.PLATFORM_ADMIN);
+    }
+
+    @Test
+    @DisplayName("a shop owner cannot read the marketplace's own numbers")
+    void adminDoesNotGetPlatformObservability() {
+        // /actuator/prometheus and /actuator/metrics report every shop's
+        // traffic at once. A merchant holding this can estimate platform-wide
+        // order volume from inside their own shop.
+        assertThat(RolePermissions.forRole(Role.ADMIN))
+                .as("PLATFORM_OBSERVABILITY leaked to the shop owner")
+                .doesNotContain(AdminPermission.PLATFORM_OBSERVABILITY);
+
+        for (Role role : Role.values()) {
+            boolean expected = role == Role.SUPER_ADMIN || role == Role.PLATFORM_ADMIN;
+            assertThat(RolePermissions.forRole(role).contains(AdminPermission.PLATFORM_OBSERVABILITY))
+                    .as("PLATFORM_OBSERVABILITY for %s", role)
+                    .isEqualTo(expected);
+        }
+    }
+
+    @Test
+    @DisplayName("the platform owner is strictly more than a shop owner")
+    void superAdminStrictlyExceedsAdmin() {
+        // The claim the old model could not make, because the two sets were
+        // identical. SUPER_ADMIN runs GP-STORE; ADMIN runs one shop in it.
+        Set<AdminPermission> owner = RolePermissions.forRole(Role.SUPER_ADMIN);
+        Set<AdminPermission> shopkeeper = RolePermissions.forRole(Role.ADMIN);
+
+        assertThat(owner).containsAll(shopkeeper);
+        assertThat(owner)
+                .as("SUPER_ADMIN and ADMIN are the same set again - the platform owner has "
+                        + "collapsed back into a shop owner")
+                .hasSizeGreaterThan(shopkeeper.size());
+        assertThat(owner).contains(
+                AdminPermission.PLATFORM_ADMIN,
+                AdminPermission.PLATFORM_OBSERVABILITY,
+                AdminPermission.CATALOG_DEFINE,
+                AdminPermission.SYSTEM_ADMIN);
     }
 
     @Test
@@ -99,12 +150,18 @@ class StaffRolePermissionsTest {
         // CATALOG_MANAGE is a shopkeeper's own price and stock. CATALOG_DEFINE
         // is what a product IS, shared by every shop selling it - so one
         // merchant holding it would be editing every other merchant's shelf.
+        // SUPER_ADMIN is not a shop role - it owns the platform the shared
+        // catalogue belongs to - so it holds this too.
         for (Role role : Role.values()) {
-            boolean expected = role == Role.PLATFORM_ADMIN;
+            boolean expected = role == Role.PLATFORM_ADMIN || role == Role.SUPER_ADMIN;
             assertThat(RolePermissions.forRole(role).contains(AdminPermission.CATALOG_DEFINE))
                     .as("CATALOG_DEFINE for %s", role)
                     .isEqualTo(expected);
         }
+
+        assertThat(RolePermissions.forRole(Role.ADMIN))
+                .as("a merchant holding CATALOG_DEFINE edits every other merchant's shelf")
+                .doesNotContain(AdminPermission.CATALOG_DEFINE);
     }
 
     @Test
@@ -207,9 +264,13 @@ class StaffRolePermissionsTest {
         // of a shopkeeper's permissions would be asserting that running the
         // market is a smaller version of running a shop, which is exactly the
         // conflation this role exists to end.
+        // SUPER_ADMIN IS EXCLUDED FOR THE SAME REASON, and that is the
+        // change: it is the platform owner, not the largest shop role, so it
+        // is required to exceed ADMIN rather than forbidden from it. See
+        // superAdminStrictlyExceedsAdmin, which asserts that directly.
         Set<AdminPermission> admin = RolePermissions.forRole(Role.ADMIN);
         for (Role role : Role.values()) {
-            if (role == Role.PLATFORM_ADMIN) {
+            if (role == Role.PLATFORM_ADMIN || role == Role.SUPER_ADMIN) {
                 continue;
             }
             assertThat(admin)

@@ -197,7 +197,27 @@ public class SecurityConfig {
                 .requestMatchers("/api/health", "/api/health/**").permitAll()
                 .requestMatchers("/api/version").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
-                .requestMatchers("/actuator/**").hasAuthority(AdminPermission.SYSTEM_ADMIN.authority())
+                // PLATFORM_OBSERVABILITY, NOT SYSTEM_ADMIN, AND THE DIFFERENCE
+                // IS A MERCHANT READING THE MARKETPLACE'S NUMBERS.
+                //
+                // Every shop owner holds SYSTEM_ADMIN - ADMIN is granted the
+                // shop permission set and SYSTEM_ADMIN is in it - so gating
+                // here on SYSTEM_ADMIN served /actuator/prometheus and
+                // /actuator/metrics to any merchant: http_server_requests
+                // across every tenant, pool depth, outbox backlog, refunds
+                // awaiting the provider. Enough to estimate the whole
+                // platform's order volume from inside one shop.
+                //
+                // Narrowed HERE and by adding one permission, rather than by
+                // taking SYSTEM_ADMIN off ADMIN: /api/admin/** is on
+                // SYSTEM_ADMIN too and the merchant app calls
+                // /api/admin/store/**, /api/admin/workers and the catalogue
+                // routes on every screen. Those are shop operations and stay
+                // exactly as they were.
+                //
+                // /actuator/health stays permitAll above - that is what the
+                // deploy and the Uptime alert actually use.
+                .requestMatchers("/actuator/**").hasAuthority(AdminPermission.PLATFORM_OBSERVABILITY.authority())
                 // Springdoc auto-generates these from your existing @RestController
                 // annotations - no extra code needed. Admin-only for now since
                 // you're pre-launch; open these up once you want partners/devs

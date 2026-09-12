@@ -56,10 +56,42 @@ public final class RolePermissions {
                     // Writes the SHARED catalogue. Under one shop
                     // CatalogDefinition hands this to whoever holds
                     // CATALOG_MANAGE, so the shopkeeper is unaffected today.
-                    AdminPermission.CATALOG_DEFINE)));
+                    AdminPermission.CATALOG_DEFINE,
+                    // The marketplace's own numbers. A shop owner reading
+                    // http_server_requests across every tenant can estimate
+                    // the whole platform's order volume, and every shop owner
+                    // holds ADMIN. Excluded here is the ONLY thing keeping
+                    // that out of a merchant's hands - EnumSet.complementOf
+                    // would otherwise hand them each new permission by
+                    // default, which is exactly the trap this set is written
+                    // as a subtraction to avoid.
+                    AdminPermission.PLATFORM_OBSERVABILITY)));
+
+    /**
+     * THE PLATFORM OWNER. Runs GP-STORE itself, not a shop in it.
+     *
+     * <p>SUPER_ADMIN used to be byte-identical to ADMIN, which was wrong in
+     * both directions at once. It gave the shop owner the platform's
+     * observability, and - less obviously and more damagingly - it withheld
+     * PLATFORM_ADMIN from the platform owner, so {@link
+     * com.gpstore.platform.TenantResolver} resolved SUPER_ADMIN to a single
+     * shop like any shopkeeper. The person who owns the marketplace could not
+     * see across it, and on an account with no shop membership at all the
+     * resolver simply threw.
+     *
+     * <p>allOf is correct HERE and nowhere else: the platform owner is the one
+     * role that should gain every permission anybody adds to the enum next.
+     */
+    private static final Set<AdminPermission> EVERY_PERMISSION =
+            Collections.unmodifiableSet(EnumSet.allOf(AdminPermission.class));
 
     private static final Map<Role, Set<AdminPermission>> BY_ROLE = Map.of(
-            Role.SUPER_ADMIN, EVERY_SHOP_PERMISSION,
+            Role.SUPER_ADMIN, EVERY_PERMISSION,
+
+            // The shop owner. Everything inside their own shop, and nothing
+            // that spans the marketplace. Unchanged from what ADMIN has always
+            // held except that PLATFORM_OBSERVABILITY - which is new - is not
+            // granted, so no existing capability is taken away.
             Role.ADMIN, EVERY_SHOP_PERMISSION,
 
             // Runs the marketplace: merchants, shop lifecycle, the shared
@@ -75,6 +107,8 @@ public final class RolePermissions {
             // belong to whoever runs the deployment, which is a third job again.
             Role.PLATFORM_ADMIN, unmodifiable(
                     AdminPermission.PLATFORM_ADMIN,
+                    // Runs the marketplace, so its numbers are their business.
+                    AdminPermission.PLATFORM_OBSERVABILITY,
                     AdminPermission.CATALOG_DEFINE,
                     AdminPermission.CATALOG_VIEW,
                     AdminPermission.CATALOG_MANAGE,
