@@ -1,0 +1,534 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/api/error_messages.dart';
+import '../../../core/util/haptic_widgets.dart';
+import '../domain/platform_models.dart';
+import 'platform_providers.dart';
+
+/// Opening a merchant and a shop, from the console rather than from a terminal.
+///
+/// WHY THESE EXIST. Every route behind them has been on the server, tested,
+/// since the marketplace slice landed - but the console only ever LISTED
+/// merchants and shops and moved them between statuses. Creating either meant
+/// twelve curl calls against /api/platform, which made the one thing only the
+/// platform owner can do the one thing the platform owner could not do from
+/// the app.
+///
+/// THE SEQUENCE IS THE SERVER'S, AND THESE FORMS DO NOT SHORTCUT IT. A
+/// merchant lands in APPLICATION and has to be walked to APPROVED before a
+/// shop can open under it; a shop lands in DRAFT and has to be moved to
+/// ACTIVE before it sells. Both rules are enforced server-side and re-checked
+/// on every call. What these forms add is that the sequence is now VISIBLE:
+/// each one says what it just created, what state it is in, and what the next
+/// step is - so the owner is not left guessing why a brand-new merchant
+/// cannot have a shop yet.
+
+/// Registers a business.
+class PlatformMerchantFormDialog extends ConsumerStatefulWidget {
+  const PlatformMerchantFormDialog({super.key});
+
+  @override
+  ConsumerState<PlatformMerchantFormDialog> createState() =>
+      _PlatformMerchantFormDialogState();
+}
+
+class _PlatformMerchantFormDialogState
+    extends ConsumerState<PlatformMerchantFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _legalName = TextEditingController();
+  final _displayName = TextEditingController();
+  final _phone = TextEditingController();
+  final _email = TextEditingController();
+  final _ownerId = TextEditingController();
+  bool _demo = false;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _legalName.dispose();
+    _displayName.dispose();
+    _phone.dispose();
+    _email.dispose();
+    _ownerId.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+    try {
+      final merchant = await ref.read(platformRepositoryProvider).registerMerchant(
+            legalName: _legalName.text.trim(),
+            displayName: _displayName.text.trim(),
+            contactPhone: _phone.text.trim(),
+            contactEmail: _email.text.trim(),
+            ownerCustomerId: int.tryParse(_ownerId.text.trim()),
+            demo: _demo,
+          );
+      ref.invalidate(platformMerchantsProvider);
+      if (!mounted) return;
+      Navigator.of(context).pop(merchant);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(extractErrorMessage(error))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Register a merchant'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // A BUSINESS, NOT A SHOP, and the wording says so because the
+              // distinction is the whole reason there are two forms: one
+              // business can run several storefronts, and the papers are
+              // checked once.
+              const Text(
+                'The business applies first. It lands as an APPLICATION and '
+                'cannot trade or hold a shop until you approve it.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _legalName,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Legal name *',
+                  hintText: 'The name on the papers',
+                ),
+                validator: (value) => (value == null || value.trim().isEmpty)
+                    ? 'A merchant needs a legal name'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _displayName,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Trading name',
+                  hintText: 'What customers see. Defaults to the legal name',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _phone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Contact phone'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _email,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'Contact email'),
+              ),
+              const SizedBox(height: 12),
+              // THE FIELD MOST WORTH FILLING IN, and the one whose absence is
+              // invisible until somebody tries to sign in. The server grants
+              // this account a staff row on every shop opened under this
+              // merchant and makes it their default shop.
+              TextFormField(
+                controller: _ownerId,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Owner account id',
+                  helperText: 'The existing admin account that will run this '
+                      "merchant's shops. Leave it out and shops opened under "
+                      'this merchant have nobody who can sign in.',
+                  helperMaxLines: 4,
+                ),
+                validator: (value) {
+                  final raw = value?.trim() ?? '';
+                  if (raw.isEmpty) return null;
+                  return int.tryParse(raw) == null
+                      ? 'An account id is a number'
+                      : null;
+                },
+              ),
+              const SizedBox(height: 4),
+              CheckboxListTile(
+                value: _demo,
+                onChanged: (value) => setState(() => _demo = value ?? false),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text('Demo merchant', style: TextStyle(fontSize: 14)),
+                subtitle: const Text(
+                  'For testing. Marks the merchant and every shop under it, '
+                  'so real trade can be told apart from a rehearsal.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : hapticize(_save),
+          child: _saving
+              ? const SizedBox(
+                  height: 16, width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Register'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Opens a storefront under an approved merchant.
+class PlatformShopFormDialog extends ConsumerStatefulWidget {
+  const PlatformShopFormDialog({super.key, this.merchants = const []});
+
+  /// The merchants to choose between. Passed in rather than watched so the
+  /// list cannot change under the reviewer mid-form.
+  final List<MerchantView> merchants;
+
+  @override
+  ConsumerState<PlatformShopFormDialog> createState() =>
+      _PlatformShopFormDialogState();
+}
+
+class _PlatformShopFormDialogState extends ConsumerState<PlatformShopFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _code = TextEditingController();
+  final _displayName = TextEditingController();
+  final _latitude = TextEditingController();
+  final _longitude = TextEditingController();
+  final _radiusKm = TextEditingController(text: '5');
+  final _timeZone = TextEditingController(text: 'Asia/Kolkata');
+  int? _merchantId;
+  bool _saving = false;
+
+  /// The server opens a shop only under these two. Listed here so the form can
+  /// SAY SO rather than only relaying the refusal - but the server re-checks,
+  /// because a merchant can be suspended between this form opening and being
+  /// submitted.
+  static bool _canHoldAShop(MerchantView m) =>
+      m.status == 'APPROVED' || m.status == 'ACTIVE';
+
+  @override
+  void initState() {
+    super.initState();
+    final eligible = widget.merchants.where(_canHoldAShop).toList();
+    if (eligible.length == 1) _merchantId = eligible.first.id;
+  }
+
+  @override
+  void dispose() {
+    _code.dispose();
+    _displayName.dispose();
+    _latitude.dispose();
+    _longitude.dispose();
+    _radiusKm.dispose();
+    _timeZone.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final merchantId = _merchantId;
+    if (merchantId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choose which merchant this shop belongs to.')),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final shop = await ref.read(platformRepositoryProvider).openShop(
+            merchantId: merchantId,
+            code: _code.text.trim(),
+            displayName: _displayName.text.trim(),
+            latitude: double.tryParse(_latitude.text.trim()),
+            longitude: double.tryParse(_longitude.text.trim()),
+            maxDeliveryRadiusKm: double.tryParse(_radiusKm.text.trim()),
+            timeZone: _timeZone.text.trim(),
+          );
+      ref.invalidate(platformShopsProvider);
+      if (!mounted) return;
+      Navigator.of(context).pop(shop);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(extractErrorMessage(error))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final eligible = widget.merchants.where(_canHoldAShop).toList();
+
+    return AlertDialog(
+      title: const Text('Open a shop'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (eligible.isEmpty)
+                // NOT AN ERROR, A NEXT STEP. The commonest way to arrive here
+                // is having just registered a merchant, which lands in
+                // APPLICATION - so the form explains the sequence instead of
+                // letting the owner submit and read a conflict.
+                const Text(
+                  'No merchant is ready to hold a shop yet. A shop can only '
+                  'open under a merchant that is APPROVED or ACTIVE - approve '
+                  'one on the Merchants tab first.',
+                  style: TextStyle(fontSize: 13),
+                )
+              else ...[
+                const Text(
+                  'The storefront opens as a DRAFT. Build it, then move it to '
+                  'ACTIVE on this tab when it is ready to sell.',
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<int>(
+                  initialValue: _merchantId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Merchant *'),
+                  items: [
+                    for (final merchant in eligible)
+                      DropdownMenuItem(
+                        value: merchant.id,
+                        child: Text(
+                          '${merchant.displayName ?? merchant.legalName ?? 'Merchant ${merchant.id}'}'
+                          '  ·  ${merchant.status}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: (value) => setState(() => _merchantId = value),
+                  validator: (value) =>
+                      value == null ? 'Choose a merchant' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _code,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'Shop code *',
+                    helperText: 'Short, unique, and permanent - it identifies '
+                        'the shop everywhere. Refused if another shop has it.',
+                    helperMaxLines: 3,
+                  ),
+                  validator: (value) => (value == null || value.trim().isEmpty)
+                      ? 'A shop needs a code'
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _displayName,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Shop name',
+                    hintText: "What customers see. Defaults to the merchant's name",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // WHERE IT IS AND HOW FAR IT DELIVERS, together, because a
+                // shop with coordinates and no radius reaches nobody and a
+                // radius with no coordinates reaches everybody.
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _latitude,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true, signed: true),
+                        decoration: const InputDecoration(labelText: 'Latitude'),
+                        validator: (value) => _optionalNumber(value, 'latitude'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _longitude,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true, signed: true),
+                        decoration: const InputDecoration(labelText: 'Longitude'),
+                        validator: (value) => _optionalNumber(value, 'longitude'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _radiusKm,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Delivery radius (km)',
+                    helperText: 'How far this shop will deliver. Customers '
+                        'outside it never see the storefront.',
+                    helperMaxLines: 3,
+                  ),
+                  validator: (value) => _optionalNumber(value, 'radius'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _timeZone,
+                  decoration: const InputDecoration(
+                    labelText: 'Time zone',
+                    helperText: "The shop's own hours are read in this zone.",
+                    helperMaxLines: 2,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: Text(eligible.isEmpty ? 'Close' : 'Cancel'),
+        ),
+        if (eligible.isNotEmpty)
+          FilledButton(
+            onPressed: _saving ? null : hapticize(_save),
+            child: _saving
+                ? const SizedBox(
+                    height: 16, width: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Open as draft'),
+          ),
+      ],
+    );
+  }
+
+  static String? _optionalNumber(String? value, String what) {
+    final raw = value?.trim() ?? '';
+    if (raw.isEmpty) return null;
+    return double.tryParse(raw) == null ? 'A $what is a number' : null;
+  }
+}
+
+/// Puts an existing account on a shop's staff list.
+///
+/// THE RECOVERY PATH for a merchant registered without an owner account, and
+/// the way a second person gets access to a shop. Putting somebody on the
+/// staff list is the ONLY way an account gets a tenant scope, so this is the
+/// hinge the whole isolation model turns on - which is why it is the
+/// platform's call and not a shop's.
+class PlatformStaffDialog extends ConsumerStatefulWidget {
+  const PlatformStaffDialog({super.key, required this.shop});
+
+  final PlatformShopView shop;
+
+  @override
+  ConsumerState<PlatformStaffDialog> createState() => _PlatformStaffDialogState();
+}
+
+class _PlatformStaffDialogState extends ConsumerState<PlatformStaffDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _customerId = TextEditingController();
+  bool _asDefault = true;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _customerId.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+    try {
+      await ref.read(platformRepositoryProvider).addStaff(
+            shopId: widget.shop.id,
+            customerId: int.parse(_customerId.text.trim()),
+            asDefault: _asDefault,
+          );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(extractErrorMessage(error))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Staff for ${widget.shop.displayName ?? widget.shop.code ?? 'this shop'}'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Being on a shop’s staff list is what gives an account that '
+              "shop's data and nothing else. The account must already exist "
+              'with an admin role.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _customerId,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Account id *'),
+              validator: (value) {
+                final raw = value?.trim() ?? '';
+                if (raw.isEmpty) return 'Which account?';
+                return int.tryParse(raw) == null
+                    ? 'An account id is a number'
+                    : null;
+              },
+            ),
+            const SizedBox(height: 4),
+            CheckboxListTile(
+              value: _asDefault,
+              onChanged: (value) => setState(() => _asDefault = value ?? false),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('Make this their home shop',
+                  style: TextStyle(fontSize: 14)),
+              subtitle: const Text(
+                'Where they land when they sign in. Without it, an account '
+                'that already has a home shop keeps it.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : hapticize(_save),
+          child: _saving
+              ? const SizedBox(
+                  height: 16, width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Add to staff'),
+        ),
+      ],
+    );
+  }
+}

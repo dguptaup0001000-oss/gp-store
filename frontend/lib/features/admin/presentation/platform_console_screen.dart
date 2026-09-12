@@ -5,6 +5,7 @@ import '../../../admin/design/admin_components.dart';
 import '../../../core/api/error_messages.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../domain/platform_models.dart';
+import 'platform_onboarding_forms.dart';
 import 'platform_providers.dart';
 
 /// Running the marketplace: who is on it, and whether they may trade.
@@ -20,28 +21,116 @@ import 'platform_providers.dart';
 /// business's papers and decided" is a real event, and one recorded with no
 /// reason is one nobody can account for later - including the merchant, who
 /// is shown it.
-class PlatformConsoleScreen extends ConsumerWidget {
+class PlatformConsoleScreen extends ConsumerStatefulWidget {
   const PlatformConsoleScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Marketplace'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Merchants'),
-              Tab(text: 'Shops'),
-              Tab(text: 'Overview'),
-            ],
-          ),
-        ),
-        body: const TabBarView(
-          children: [_MerchantsTab(), _ShopsTab(), _OverviewTab()],
+  ConsumerState<PlatformConsoleScreen> createState() =>
+      _PlatformConsoleScreenState();
+}
+
+class _PlatformConsoleScreenState extends ConsumerState<PlatformConsoleScreen>
+    with SingleTickerProviderStateMixin {
+  // ITS OWN CONTROLLER RATHER THAN DefaultTabController, because the action
+  // button has to know which tab is showing: "Register a merchant" and "Open
+  // a shop" are different jobs and one button that did both would be a menu.
+  late final TabController _tabs;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(length: 3, vsync: this)
+      ..addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Marketplace'),
+        bottom: TabBar(
+          controller: _tabs,
+          tabs: const [
+            Tab(text: 'Merchants'),
+            Tab(text: 'Shops'),
+            Tab(text: 'Overview'),
+          ],
         ),
       ),
+      body: TabBarView(
+        controller: _tabs,
+        children: const [_MerchantsTab(), _ShopsTab(), _OverviewTab()],
+      ),
+      // NOTHING TO CREATE ON THE OVERVIEW TAB, so no button there rather than
+      // a disabled one: a button that is present and dead is a worse answer
+      // than no button.
+      floatingActionButton: switch (_tabs.index) {
+        0 => FloatingActionButton.extended(
+            onPressed: hapticize(_registerMerchant),
+            icon: const Icon(Icons.store_mall_directory_outlined),
+            label: const Text('Merchant'),
+          ),
+        1 => FloatingActionButton.extended(
+            onPressed: hapticize(_openShop),
+            icon: const Icon(Icons.add_business_outlined),
+            label: const Text('Shop'),
+          ),
+        _ => null,
+      },
+    );
+  }
+
+  Future<void> _registerMerchant() async {
+    final created = await showDialog<MerchantView>(
+      context: context,
+      builder: (_) => const PlatformMerchantFormDialog(),
+    );
+    if (created == null || !mounted) return;
+    // SAYS WHAT HAPPENS NEXT, because what happened is not what the owner
+    // wanted: they wanted a shop, and they have a business in APPLICATION
+    // that cannot hold one yet.
+    _say(
+      context,
+      '${created.displayName ?? created.legalName ?? 'Merchant'} registered as '
+      '${created.status ?? 'APPLICATION'}. Approve it before opening a shop.',
+    );
+  }
+
+  Future<void> _openShop() async {
+    // AWAITED, NOT READ OFF THE CACHE, and this is not a nicety.
+    // TabBarView builds a tab lazily, so somebody who opens the console and
+    // goes straight to Shops has never triggered the merchants provider.
+    // `.valueOrNull` is then null, which the dialog would faithfully report
+    // as "no merchant is ready to hold a shop" - the most discouraging
+    // possible way to be wrong, and it would look like the feature was
+    // broken rather than the list unloaded.
+    //
+    // Read ONCE here rather than watched, so the list cannot change under
+    // somebody mid-form.
+    final List<MerchantView> merchants;
+    try {
+      merchants = await ref.read(platformMerchantsProvider.future);
+    } catch (error) {
+      if (mounted) _say(context, extractErrorMessage(error));
+      return;
+    }
+    if (!mounted) return;
+    final created = await showDialog<PlatformShopView>(
+      context: context,
+      builder: (_) => PlatformShopFormDialog(merchants: merchants),
+    );
+    if (created == null || !mounted) return;
+    _say(
+      context,
+      '${created.displayName ?? created.code ?? 'Shop'} opened as '
+      '${created.status ?? 'DRAFT'}. Stock it, set its hours, then open it on '
+      'the marketplace.',
     );
   }
 }
@@ -220,11 +309,30 @@ class _ShopCard extends ConsumerWidget {
                     onPressed: hapticize(() => _move(context, ref, status)),
                     child: Text(_label(status)),
                   ),
+              // BESIDE THE STATUS MOVES, because it belongs to the same job
+              // and is the step most easily missed. A shop whose merchant was
+              // registered without an owner account has no staff at all, and
+              // nothing about the shop looks wrong until somebody tries to
+              // sign in to it.
+              TextButton.icon(
+                onPressed: hapticize(() => _addStaff(context, ref)),
+                icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
+                label: const Text('Staff'),
+              ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _addStaff(BuildContext context, WidgetRef ref) async {
+    final added = await showDialog<bool>(
+      context: context,
+      builder: (_) => PlatformStaffDialog(shop: shop),
+    );
+    if (added != true || !context.mounted) return;
+    _say(context, 'Added to this shop\u2019s staff.');
   }
 
   static String _label(String status) => switch (status) {

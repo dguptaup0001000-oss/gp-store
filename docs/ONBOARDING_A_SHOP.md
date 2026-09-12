@@ -10,6 +10,18 @@ This is the sequence a real merchant goes through. Every step is an API call a
 platform administrator or the merchant themselves actually makes. There is no
 seeding script in the happy path and no SQL.
 
+> **Steps 1–5 are a screen now.** In the admin app, **Marketplace →
+> Merchants & Shops** (the last group in the sidebar, visible only to
+> `SUPER_ADMIN`) registers a merchant, walks it through review, opens a shop
+> under it, and puts an account on that shop's staff list. The API calls below
+> are what those buttons send, and remain the reference — but opening a real
+> shop no longer needs a terminal.
+>
+> The routes had existed and been tested since the marketplace slice; the
+> console only ever *listed* merchants and shops and moved them between
+> statuses. That made the one thing only the platform owner can do the one
+> thing the platform owner could not do from the app.
+
 ---
 
 ## The sequence
