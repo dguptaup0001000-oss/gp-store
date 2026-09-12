@@ -17,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -115,8 +116,13 @@ class StoreHoursCheckoutTest {
         // invented here that outlast the run are a real kirana advertising a
         // week nobody agreed to, and the next test reading them is the mildest
         // of the consequences.
+        // THROUGH THE SERVICE, so the cache goes with the rows. A teardown
+        // that deletes the rows and leaves the cached week behind hands the
+        // next class a schedule the database does not agree with - see
+        // setWeek.
         for (Long touched : hoursTouched) {
-            jdbc.update("DELETE FROM shop_business_hours WHERE shop_id = ?", touched);
+            shopScopeSwitch.within(touched, () -> operationsService.replaceWeek(
+                    java.util.Map.of(), "hours-test-teardown"));
         }
         hoursTouched.clear();
 
@@ -391,19 +397,36 @@ class StoreHoursCheckoutTest {
         return secondShopId;
     }
 
-    /** Gives one shop the same hours on every day of the week. */
+    /**
+     * Gives one shop the same hours on every day of the week, THROUGH THE
+     * SERVICE.
+     *
+     * <p>NOT WITH AN INSERT, and that distinction cost a CI run.
+     * {@code ShopHoursService.forCurrentShop} is {@code @Cacheable("shopHours")}
+     * and the only thing that evicts it is
+     * {@code StoreOperationsService.replaceWeek}, which carries the matching
+     * {@code @CacheEvict}. Rows written straight into
+     * {@code shop_business_hours} therefore change the database and not the
+     * answer: the schedule keeps serving whatever it cached.
+     *
+     * <p>That is not hypothetical either. EachShopKeepsItsOwnHoursTest gives
+     * shop #1 hours of 06:00-10:00, and removes the ROWS in its teardown
+     * without evicting - so this class inherited a cached 06:00-10:00 week,
+     * and asking at exactly 10:00 found a window whose end is not after the
+     * instant (ends are exclusive) and rolled to NEXT_MORNING. The database
+     * said one thing and the cache another.
+     *
+     * <p>Writing through the service is also simply the production path: a
+     * shopkeeper changing their hours goes through replaceWeek, which is why
+     * the eviction lives there.
+     */
     private void setWeek(long shopId, java.time.LocalTime opens, java.time.LocalTime closes) {
-        jdbc.update("DELETE FROM shop_business_hours WHERE shop_id = ?", shopId);
-        for (int day = 1; day <= 7; day++) {
-            // java.sql.Time, not the LocalTime and not its toString(). The
-            // columns are "time without time zone" and the driver will not
-            // take a String for one through a PreparedStatement - the first
-            // version of this helper failed with BadSqlGrammarException, while
-            // the neighbouring test that inlines '08:00' as a literal works.
-            jdbc.update("INSERT INTO shop_business_hours (shop_id, day_of_week, opens_at, closes_at)"
-                    + " VALUES (?, ?, ?, ?)",
-                    shopId, day, java.sql.Time.valueOf(opens), java.sql.Time.valueOf(closes));
+        java.util.Map<java.time.DayOfWeek, List<StoreOperationsService.TradingSession>> week =
+                new java.util.EnumMap<>(java.time.DayOfWeek.class);
+        for (java.time.DayOfWeek day : java.time.DayOfWeek.values()) {
+            week.put(day, List.of(new StoreOperationsService.TradingSession(opens, closes)));
         }
+        shopScopeSwitch.within(shopId, () -> operationsService.replaceWeek(week, "hours-test"));
         hoursTouched.add(shopId);
     }
 
