@@ -191,9 +191,27 @@ class DeliveryStateUnderConcurrencyTest {
         return partners.save(rider).getId();
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private java.util.concurrent.ExecutorService orderSideEffectsExecutor;
+
     @AfterEach
     void tidyUp() {
         TenantContext.clear();
+        // WAIT FOR THE ORDER'S OWN AFTER-COMMIT WORK BEFORE DELETING IT.
+        //
+        // Collecting the cash commits, and AfterCommitExecutor then writes the
+        // customer's notification on another thread. The deletes below already
+        // take notifications before orders - but on a runner quick enough to
+        // start tearing down while that thread is still going, the row lands
+        // in the gap and the order delete fails on
+        // fk6og1jgdhfyqm6mk8v6a1qxias. CI reported exactly that, from this
+        // line, and it cannot happen on a machine slow enough for the thread
+        // to have finished first.
+        //
+        // Draining is the fix rather than deleting notifications twice or
+        // catching the violation: the point is that the side effect has
+        // finished, not that its trace has been removed twice.
+        awaitSideEffectsIdle();
         jdbc.update("DELETE FROM audit_logs WHERE entity_id IN "
                 + "(SELECT id FROM deliveries WHERE order_id = ?)"
                 + " AND entity_type = 'Delivery'", orderId);
@@ -357,4 +375,38 @@ class DeliveryStateUnderConcurrencyTest {
     private <T> T inShop(java.util.function.Supplier<T> work) {
         return TenantContext.runWithin(TenantScope.ofShop(shopOne), work::get);
     }
+
+    /**
+     * Blocks until the after-commit pool has nothing left to do.
+     *
+     * <p>Same shape as WorkerDeliveryStatusTest and WorkerPackScanTest, which
+     * need it for the same reason. Checks twice with a pause between, because
+     * a task can be handed from the queue to a thread between the two reads
+     * and a single check would call that idle.
+     */
+    private void awaitSideEffectsIdle() {
+        if (!(orderSideEffectsExecutor instanceof java.util.concurrent.ThreadPoolExecutor pool)) {
+            return;
+        }
+        for (int attempt = 0; attempt < 200; attempt++) {
+            if (pool.getActiveCount() == 0 && pool.getQueue().isEmpty()) {
+                try {
+                    Thread.sleep(20);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                if (pool.getActiveCount() == 0 && pool.getQueue().isEmpty()) {
+                    return;
+                }
+            }
+            try {
+                Thread.sleep(25);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
 }
