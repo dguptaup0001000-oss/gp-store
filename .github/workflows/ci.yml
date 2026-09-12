@@ -141,19 +141,29 @@ jobs:
           REDIS_PORT: 6379
         run: ./mvnw -B clean verify
 
-      # WHAT ACTUALLY FAILED, at the end of the log where it can be found.
+      # WHAT ACTUALLY FAILED, where it can actually be found.
       #
       # Postgres and Redis service-container logs are dumped at job teardown,
       # and they are thousands of lines. They bury Maven's own summary so
       # completely that reading the tail of a failed run shows only database
       # chatter - which is how a red build ends up diagnosed by guesswork.
       # Surefire has already written the answer to XML; this prints it last.
+      #
+      # AND WRITES IT TO THE JOB SUMMARY, which is the half that was missing.
+      # Printing last is not enough when the reader cannot reach the raw log:
+      # the GitHub API's job-log endpoint hands back that same teardown dump,
+      # and the log archive and the surefire artifact are both plain downloads
+      # that a restricted network may refuse. This build was red for two
+      # commits with no way to see which test failed, from a machine that
+      # could reach the API and nothing else. $GITHUB_STEP_SUMMARY is served
+      # by the API, so the answer now travels with the check itself.
       - name: Name the failing tests
         if: failure()
         working-directory: backend
         run: |
           python3 - <<'PY'
           import glob
+          import os
           import xml.etree.ElementTree as ET
 
           bad = []
@@ -174,14 +184,27 @@ jobs:
                       )
           print("=" * 70)
           if bad:
-              print(f"{len(bad)} failing test(s):")
-              for line in bad:
-                  print(line)
+              headline = f"{len(bad)} failing test(s):"
           else:
-              print("No failing testcase in surefire XML - the failure is not a")
-              print("test body. Look at the Maven step itself (compile, enforcer,")
-              print("a plugin, or the JVM crashing).")
+              headline = (
+                  "No failing testcase in surefire XML - the failure is not a\n"
+                  "test body. Look at the Maven step itself (compile, enforcer,\n"
+                  "a plugin, or the JVM crashing)."
+              )
+          print(headline)
+          for line in bad:
+              print(line)
           print("=" * 70)
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as out:
+                  out.write("## Failing tests\n\n")
+                  out.write("```\n")
+                  out.write(headline + "\n")
+                  for line in bad:
+                      out.write(line + "\n")
+                  out.write("```\n")
           PY
 
       - name: Upload test results
