@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/error_messages.dart';
@@ -41,6 +42,13 @@ class _PlatformMerchantFormDialogState
   final _phone = TextEditingController();
   final _email = TextEditingController();
   final _ownerId = TextEditingController();
+  final _ownerName = TextEditingController();
+  final _ownerEmail = TextEditingController();
+  final _ownerPhone = TextEditingController();
+  // DEFAULTS ON, because the case where the merchant already has an
+  // admin-role account is the rare one: before this existed, creating that
+  // account needed SQL on the box, so almost nobody has one.
+  bool _openLogin = true;
   bool _demo = false;
   bool _saving = false;
 
@@ -51,23 +59,52 @@ class _PlatformMerchantFormDialogState
     _phone.dispose();
     _email.dispose();
     _ownerId.dispose();
+    _ownerName.dispose();
+    _ownerEmail.dispose();
+    _ownerPhone.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
+    final repository = ref.read(platformRepositoryProvider);
     try {
-      final merchant = await ref.read(platformRepositoryProvider).registerMerchant(
+      // THE LOGIN FIRST, because the merchant row wants its id. Opening the
+      // account and then failing to register the business leaves one
+      // recoverable orphan - an unused staff login - whereas registering
+      // the business and then failing to open its login leaves a merchant
+      // nobody can administer, which is the state this whole feature exists
+      // to stop happening.
+      int? ownerId = int.tryParse(_ownerId.text.trim());
+      OpenedStaffAccount? opened;
+      if (_openLogin) {
+        opened = await repository.openStaffAccount(
+          fullName: _ownerName.text.trim(),
+          email: _ownerEmail.text.trim(),
+          mobileNumber: _ownerPhone.text.trim(),
+          role: 'ADMIN',
+        );
+        ownerId = opened.customerId;
+      }
+
+      final merchant = await repository.registerMerchant(
             legalName: _legalName.text.trim(),
             displayName: _displayName.text.trim(),
             contactPhone: _phone.text.trim(),
             contactEmail: _email.text.trim(),
-            ownerCustomerId: int.tryParse(_ownerId.text.trim()),
+            ownerCustomerId: ownerId,
             demo: _demo,
           );
       ref.invalidate(platformMerchantsProvider);
       if (!mounted) return;
+
+      // SHOWN BEFORE THE DIALOG CLOSES, and blocking, because this is the
+      // only time this password exists. Dismiss it and it is gone.
+      if (opened != null) {
+        await showOneTimePassword(context, opened);
+        if (!mounted) return;
+      }
       Navigator.of(context).pop(merchant);
     } catch (error) {
       if (!mounted) return;
@@ -132,28 +169,79 @@ class _PlatformMerchantFormDialogState
                 decoration: const InputDecoration(labelText: 'Contact email'),
               ),
               const SizedBox(height: 12),
-              // THE FIELD MOST WORTH FILLING IN, and the one whose absence is
-              // invisible until somebody tries to sign in. The server grants
-              // this account a staff row on every shop opened under this
-              // merchant and makes it their default shop.
-              TextFormField(
-                controller: _ownerId,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Owner account id',
-                  helperText: 'The existing admin account that will run this '
-                      "merchant's shops. Leave it out and shops opened under "
-                      'this merchant have nobody who can sign in.',
-                  helperMaxLines: 4,
+              // WHO WILL SIGN IN, which is the half that used to require SQL
+              // and the half whose absence is invisible until somebody tries.
+              const Divider(height: 28),
+              CheckboxListTile(
+                value: _openLogin,
+                onChanged: (value) => setState(() => _openLogin = value ?? false),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text("Create the owner's login",
+                    style: TextStyle(fontSize: 14)),
+                subtitle: const Text(
+                  'You get a one-time password to hand over. They must change '
+                  'it before they can use the app, and after that you no '
+                  'longer have it.',
+                  style: TextStyle(fontSize: 12),
                 ),
-                validator: (value) {
-                  final raw = value?.trim() ?? '';
-                  if (raw.isEmpty) return null;
-                  return int.tryParse(raw) == null
-                      ? 'An account id is a number'
-                      : null;
-                },
               ),
+              if (_openLogin) ...[
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _ownerName,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(labelText: "Owner's name *"),
+                  validator: (value) => (value == null || value.trim().isEmpty)
+                      ? 'A name is required'
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _ownerEmail,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    labelText: "Owner's email *",
+                    helperText: 'This is their login. Refused if an account '
+                        'already uses it.',
+                    helperMaxLines: 2,
+                  ),
+                  validator: (value) {
+                    final raw = value?.trim() ?? '';
+                    if (raw.isEmpty) return 'An email is the login, so it is required';
+                    // Deliberately loose: the server owns the real rule, and
+                    // a clever regex here only rejects addresses that work.
+                    return raw.contains('@') ? null : 'That is not an email address';
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _ownerPhone,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: "Owner's phone"),
+                ),
+              ] else
+                // THE ESCAPE HATCH for a merchant who already has an
+                // admin-role account. Rare, and getting rarer: before this
+                // feature the only way to have one was SQL on the box.
+                TextFormField(
+                  controller: _ownerId,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Existing owner account id',
+                    helperText: 'The admin account that will run this '
+                        "merchant's shops. Leave it out and shops opened "
+                        'under this merchant have nobody who can sign in.',
+                    helperMaxLines: 4,
+                  ),
+                  validator: (value) {
+                    final raw = value?.trim() ?? '';
+                    if (raw.isEmpty) return null;
+                    return int.tryParse(raw) == null
+                        ? 'An account id is a number'
+                        : null;
+                  },
+                ),
               const SizedBox(height: 4),
               CheckboxListTile(
                 value: _demo,
@@ -527,6 +615,106 @@ class _PlatformStaffDialogState extends ConsumerState<PlatformStaffDialog> {
                   height: 16, width: 16,
                   child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Add to staff'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Shows a one-time password, once.
+///
+/// BLOCKING AND NOT DISMISSIBLE BY TAPPING OUTSIDE. This is the only moment
+/// this password exists: the server keeps a bcrypt hash and has no route
+/// that returns the plaintext again. A stray tap on the scrim would lose a
+/// credential the owner has not written down yet, and the only recovery is
+/// a reset - which invalidates the account's sessions and asks the merchant
+/// to change it again.
+///
+/// NOTHING HERE PERSISTS IT. No storage, no file, no clipboard history the
+/// app manages. Copy goes to the system clipboard because that is the only
+/// way a person moves a 14-character random string into a message - and that
+/// is the owner's clipboard, not a store this app keeps.
+Future<void> showOneTimePassword(
+    BuildContext context, OpenedStaffAccount account) {
+  final password = account.oneTimePassword ?? '';
+  return showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Hand these over now'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This password is shown once and cannot be looked up again. If '
+              'you lose it, use Reset password on the merchant to issue a '
+              'new one.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            _Handover(label: 'Login', value: account.email ?? '—'),
+            const SizedBox(height: 8),
+            _Handover(label: 'One-time password', value: password, mono: true),
+            const SizedBox(height: 16),
+            const Text(
+              'They must set their own password before the app will let them '
+              'do anything else. After that this one stops working and you no '
+              'longer have access to their account.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (password.isNotEmpty)
+          TextButton.icon(
+            onPressed: hapticize(() async {
+              await Clipboard.setData(ClipboardData(text: password));
+              if (!dialogContext.mounted) return;
+              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                const SnackBar(content: Text('Password copied.')),
+              );
+            }),
+            icon: const Icon(Icons.copy_outlined, size: 18),
+            label: const Text('Copy password'),
+          ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          // NOT "OK". The button has to say that dismissing loses it, because
+          // that is what dismissing does.
+          child: const Text("I've saved it"),
+        ),
+      ],
+    ),
+  );
+}
+
+class _Handover extends StatelessWidget {
+  const _Handover({required this.label, required this.value, this.mono = false});
+
+  final String label;
+  final String value;
+  final bool mono;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 12)),
+        const SizedBox(height: 2),
+        // SELECTABLE, so it can be long-pressed and copied on a phone where
+        // the Copy button is off the bottom of a small dialog.
+        SelectableText(
+          value,
+          style: TextStyle(
+            fontSize: mono ? 18 : 15,
+            fontWeight: FontWeight.w600,
+            fontFamily: mono ? 'monospace' : null,
+            letterSpacing: mono ? 1.0 : null,
+          ),
         ),
       ],
     );

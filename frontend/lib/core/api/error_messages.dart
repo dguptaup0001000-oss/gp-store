@@ -195,3 +195,34 @@ bool meansShopViewIsStale(Object error) {
   final status = apiStatusOf(error);
   return status == 404 || status == 409 || status == 403;
 }
+
+/// The one code JwtFilter sends when an account is still on a password
+/// somebody else chose.
+const String passwordChangeRequiredCode = 'PASSWORD_CHANGE_REQUIRED';
+
+/// The backend's machine-readable reason for a refusal, or null.
+///
+/// Unwraps the same way [apiStatusOf] does, and for the same reason: the
+/// interceptor throws a DioException CARRYING an ApiException rather than
+/// throwing the ApiException itself, so an `is ApiException` check on its own
+/// is dead code.
+String? apiErrorCodeOf(Object error) {
+  if (error is ApiException) return error.code;
+  if (error is DioException) {
+    final inner = error.error;
+    if (inner is ApiException) return inner.code;
+  }
+  return null;
+}
+
+/// True when the server refused this request solely because the account owes
+/// a password change - the one-time password it was created with is still in
+/// place.
+///
+/// BOTH HALVES MATTER. The code alone would let any future 4xx that happens
+/// to reuse the string send someone to the password screen; the 403 alone is
+/// every ordinary permission refusal in the app.
+bool meansPasswordChangeRequired(Object error) {
+  return apiStatusOf(error) == 403 &&
+      apiErrorCodeOf(error) == passwordChangeRequiredCode;
+}

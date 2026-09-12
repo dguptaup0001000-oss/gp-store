@@ -117,6 +117,18 @@ void main() {
   });
 
   group('registering a merchant', () {
+    /// Turns the owner's login off, to reach the escape hatch behind it.
+    ///
+    /// ensureVisible first: the dialog scrolls, and by the time the login
+    /// fields are on screen the checkbox itself can be below the fold.
+    Future<void> untickTheLogin(WidgetTester tester) async {
+      final box = find.byType(CheckboxListTile).first;
+      await tester.ensureVisible(box);
+      await tester.pumpAndSettle();
+      await tester.tap(box);
+      await tester.pumpAndSettle();
+    }
+
     testWidgets('says the business cannot trade or hold a shop yet',
         (tester) async {
       await tester.pumpWidget(host(const PlatformMerchantFormDialog()));
@@ -139,10 +151,74 @@ void main() {
       expect(find.text('A merchant needs a legal name'), findsOneWidget);
     });
 
-    testWidgets('warns that a shop with no owner account has nobody to sign in',
+    testWidgets("the owner's login is offered by default, not opt-in",
         (tester) async {
       await tester.pumpWidget(host(const PlatformMerchantFormDialog()));
       await tester.pumpAndSettle();
+
+      // THE DEFAULT IS THE FEATURE. Every merchant needs somebody who can
+      // sign in, and until this existed the only way to create that account
+      // was SQL on the box. Making it opt-in would leave the common case
+      // exactly where it was.
+      expect(find.text("Owner's name *"), findsOneWidget);
+      expect(find.text("Owner's email *"), findsOneWidget);
+      // And the escape hatch is out of the way while it is on.
+      expect(find.text('Existing owner account id'), findsNothing);
+    });
+
+    testWidgets('it says the password is handed over once and then lost',
+        (tester) async {
+      await tester.pumpWidget(host(const PlatformMerchantFormDialog()));
+      await tester.pumpAndSettle();
+
+      // The owner has to know BEFORE submitting that this is their only
+      // chance to copy it, and that their own copy stops working afterwards -
+      // that second half is what makes the merchant's actions their own.
+      expect(find.textContaining('one-time password'), findsOneWidget);
+      expect(find.textContaining('no longer have it'), findsOneWidget);
+    });
+
+    testWidgets('a login will not be opened without an email to log in with',
+        (tester) async {
+      await tester.pumpWidget(host(const PlatformMerchantFormDialog()));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextFormField, 'Legal name *'), 'Sharma Kirana');
+      await tester.enterText(
+          find.widgetWithText(TextFormField, "Owner's name *"), 'Ravi Sharma');
+      await tester.tap(find.text('Register'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('An email is the login, so it is required'),
+          findsOneWidget);
+    });
+
+    testWidgets('something that is not an address is caught before it is sent',
+        (tester) async {
+      await tester.pumpWidget(host(const PlatformMerchantFormDialog()));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextFormField, 'Legal name *'), 'Sharma Kirana');
+      await tester.enterText(
+          find.widgetWithText(TextFormField, "Owner's name *"), 'Ravi Sharma');
+      await tester.enterText(
+          find.widgetWithText(TextFormField, "Owner's email *"), '9876543210');
+      await tester.tap(find.text('Register'));
+      await tester.pumpAndSettle();
+
+      // A phone number in the email field is the mistake somebody actually
+      // makes, and it would come back as an opaque server refusal.
+      expect(find.text('That is not an email address'), findsOneWidget);
+    });
+
+    testWidgets('unticking it warns that the shop has nobody who can sign in',
+        (tester) async {
+      await tester.pumpWidget(host(const PlatformMerchantFormDialog()));
+      await tester.pumpAndSettle();
+
+      await untickTheLogin(tester);
 
       // THE FIELD WHOSE ABSENCE IS INVISIBLE. Everything looks right until
       // somebody tries to open the shop's back office.
@@ -157,14 +233,83 @@ void main() {
       await tester.pumpWidget(host(const PlatformMerchantFormDialog()));
       await tester.pumpAndSettle();
 
+      // The escape hatch, for a merchant who already has an admin account.
+      await untickTheLogin(tester);
+
       await tester.enterText(
           find.widgetWithText(TextFormField, 'Legal name *'), 'Sharma Kirana');
       await tester.enterText(
-          find.widgetWithText(TextFormField, 'Owner account id'), 'sharma@x.com');
+          find.widgetWithText(TextFormField, 'Existing owner account id'),
+          'sharma@x.com');
       await tester.tap(find.text('Register'));
       await tester.pumpAndSettle();
 
       expect(find.text('An account id is a number'), findsOneWidget);
+    });
+  });
+
+  group('handing the password over', () {
+    /// The dialog the console shows once, and never again.
+    Future<void> showIt(WidgetTester tester, OpenedStaffAccount account) async {
+      await tester.pumpWidget(host(Builder(
+        builder: (context) => TextButton(
+          onPressed: () => showOneTimePassword(context, account),
+          child: const Text('open'),
+        ),
+      )));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    const opened = OpenedStaffAccount(
+      customerId: 55,
+      email: 'ravi@sharmakirana.test',
+      role: 'ADMIN',
+      oneTimePassword: 'k7Rmq3xTbYw9Zc',
+    );
+
+    testWidgets('both halves of the credential are on screen', (tester) async {
+      await showIt(tester, opened);
+
+      // An owner reading this out over the phone needs the login as well as
+      // the password; the email they typed two screens ago is not in front
+      // of them any more.
+      expect(find.text('ravi@sharmakirana.test'), findsOneWidget);
+      expect(find.text('k7Rmq3xTbYw9Zc'), findsOneWidget);
+    });
+
+    testWidgets('it says, in the button, that dismissing loses it',
+        (tester) async {
+      await showIt(tester, opened);
+
+      // NOT "OK". Dismissing this destroys the only copy - there is no route
+      // that returns it - so the button has to say what it does.
+      expect(find.text("I've saved it"), findsOneWidget);
+      expect(find.textContaining('cannot be looked up again'), findsOneWidget);
+    });
+
+    testWidgets('a stray tap outside cannot dismiss it', (tester) async {
+      await showIt(tester, opened);
+
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      expect(find.text('k7Rmq3xTbYw9Zc'), findsOneWidget,
+          reason: 'barrierDismissible must stay false: a mis-tap here loses '
+              'the password permanently and the merchant cannot be onboarded '
+              'without a reset');
+    });
+
+    testWidgets('a reset with no password in the reply offers nothing to copy',
+        (tester) async {
+      // Defensive, not hypothetical-only: the model makes oneTimePassword
+      // nullable because an older server, or a partial reply, can omit it.
+      // A Copy button that copied the empty string would look like it worked.
+      await showIt(tester,
+          const OpenedStaffAccount(customerId: 55, email: 'ravi@x.test'));
+
+      expect(find.text('Copy password'), findsNothing);
+      expect(find.text("I've saved it"), findsOneWidget);
     });
   });
 }

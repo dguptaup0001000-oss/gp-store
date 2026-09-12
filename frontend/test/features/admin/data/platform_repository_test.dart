@@ -156,6 +156,85 @@ void main() {
               'opening their second storefront is added and lands nowhere new');
     });
 
+    test('opening a staff login returns the only copy of the password',
+        () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? sent;
+      adapter.on('POST', '/api/platform/staff', (options) {
+        sent = Map<String, dynamic>.from(options.data as Map);
+        return const FakeResponse({
+          'customerId': 55,
+          'email': 'ravi@sharmakirana.test',
+          'role': 'ADMIN',
+          'oneTimePassword': 'k7Rmq3xTbYw9Zc',
+        });
+      });
+
+      final opened = await PlatformRepository(apiClient: buildTestApiClient(adapter))
+          .openStaffAccount(
+        fullName: 'Ravi Sharma',
+        email: 'ravi@sharmakirana.test',
+        mobileNumber: '9876543210',
+        role: 'ADMIN',
+      );
+
+      expect(sent!['email'], 'ravi@sharmakirana.test');
+      expect(sent!['role'], 'ADMIN');
+      expect(sent!['mobileNumber'], '9876543210');
+      // THE HOLE THIS FILLS. Until this route existed no API could make an
+      // account an ADMIN - the only role ever assigned in code was
+      // DELIVERY_BOY - so onboarding a merchant meant SQL on the box.
+      expect(opened.customerId, 55,
+          reason: "registerMerchant needs this id for ownerCustomerId, which "
+              'is the whole reason the login is opened first');
+      expect(opened.oneTimePassword, 'k7Rmq3xTbYw9Zc');
+    });
+
+    test('a blank phone is left out rather than sent empty', () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? sent;
+      adapter.on('POST', '/api/platform/staff', (options) {
+        sent = Map<String, dynamic>.from(options.data as Map);
+        return const FakeResponse({'customerId': 56, 'oneTimePassword': 'x'});
+      });
+
+      await PlatformRepository(apiClient: buildTestApiClient(adapter))
+          .openStaffAccount(
+              fullName: 'Ravi Sharma',
+              email: 'ravi@x.test',
+              mobileNumber: '',
+              role: 'ADMIN');
+
+      // An empty string is not the same as "not given": the form always has
+      // a phone controller, and sending "" would store a blank number that
+      // OTP delivery would later try to use.
+      expect(sent!.containsKey('mobileNumber'), isFalse);
+    });
+
+    test('a reset issues a NEW password and never reads the old one', () async {
+      final adapter = FakeHttpClientAdapter();
+      var called = 0;
+      adapter.on('POST', '/api/platform/staff/55/reset-password', (_) {
+        called++;
+        return const FakeResponse({
+          'customerId': 55,
+          'email': 'ravi@sharmakirana.test',
+          'role': 'ADMIN',
+          'oneTimePassword': 'w4Ptz8kMhQr2Ds',
+        });
+      });
+
+      final reset = await PlatformRepository(apiClient: buildTestApiClient(adapter))
+          .resetStaffPassword(customerId: 55);
+
+      expect(called, 1);
+      // NOT A WAY TO READ THE CURRENT ONE. There is no such route,
+      // deliberately: a merchant who cannot get in needs a new password, not
+      // the platform owner reading their existing one.
+      expect(reset.oneTimePassword, 'w4Ptz8kMhQr2Ds');
+      expect(reset.customerId, 55);
+    });
+
     test('the market overview is one line per shop, never a pooled total', () async {
       final adapter = FakeHttpClientAdapter();
       adapter.on('GET', '/api/platform/overview', (_) => const FakeResponse({

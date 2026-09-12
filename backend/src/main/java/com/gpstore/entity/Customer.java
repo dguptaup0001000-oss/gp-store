@@ -49,6 +49,26 @@ public class Customer {
 private Role role;
 
 private Boolean enabled;
+
+    /**
+     * True while this account is still using a password somebody else chose.
+     *
+     * SET WHEN THE PLATFORM CREATES A STAFF LOGIN. A merchant's account is
+     * opened by the platform owner, so its first password was typed by
+     * somebody who is not its owner - and until that is replaced, every
+     * action the account takes is deniable ("the platform set my password").
+     *
+     * JwtFilter refuses every route except the password change while this is
+     * true, so the window is one request long and the merchant cannot work
+     * around it by going straight to a screen. AuthService.changePassword
+     * clears it.
+     *
+     * NULL MEANS FALSE. Every account that existed before this column chose
+     * its own password at registration, so a legacy row must not be locked
+     * out of the app by a missing value.
+     */
+    @Column(name = "must_change_password")
+    private Boolean mustChangePassword;
     
     // Same reasoning as cart below: addresses have their own dedicated
     // endpoint (GET /api/addresses/mine, see AddressController), and without

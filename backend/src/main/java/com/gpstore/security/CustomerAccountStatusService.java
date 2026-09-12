@@ -36,13 +36,23 @@ public class CustomerAccountStatusService {
     static final long TTL_MS = 2_000L;
     static final long DEFAULT_MAX_ENTRIES = 50_000L;
 
-    public record Snapshot(boolean usable, String role) {
+    /**
+     * @param mustChangePassword the account is still on a password somebody
+     *     else chose, so JwtFilter must refuse everything but the change.
+     *     Read live, like usable and role, so clearing it takes effect on
+     *     the very next request rather than when the token expires.
+     */
+    public record Snapshot(boolean usable, String role, boolean mustChangePassword) {
         public static Snapshot unusable() {
-            return new Snapshot(false, null);
+            // FALSE, NOT TRUE, for a missing or dead account. An unusable
+            // snapshot is already refused outright; claiming it also owes a
+            // password change would send a deleted account to a screen it
+            // cannot authenticate for.
+            return new Snapshot(false, null, false);
         }
     }
 
-    private record Cached(boolean usable, String role) {}
+    private record Cached(boolean usable, String role, boolean mustChangePassword) {}
 
     private final CustomerRepository customerRepository;
     private final Cache<Long, Cached> cache;
@@ -80,13 +90,14 @@ public class CustomerAccountStatusService {
         }
         Cached cached = cache.getIfPresent(customerId);
         if (cached != null) {
-            return new Snapshot(cached.usable, cached.role);
+            return new Snapshot(cached.usable, cached.role, cached.mustChangePassword);
         }
         Customer customer = customerRepository.findById(customerId).orElse(null);
         boolean usable = isCustomerUsable(customer);
         String role = roleName(customer);
-        cache.put(customerId, new Cached(usable, role));
-        return new Snapshot(usable, role);
+        boolean mustChange = mustChangePassword(customer);
+        cache.put(customerId, new Cached(usable, role, mustChange));
+        return new Snapshot(usable, role, mustChange);
     }
 
     public void invalidate(Long customerId) {
@@ -127,6 +138,15 @@ public class CustomerAccountStatusService {
         // enabled=null is treated as enabled (legacy rows). enabled=false
         // is a deleted/disabled account and must not authenticate.
         return !Boolean.FALSE.equals(customer.getEnabled());
+    }
+
+    /**
+     * NULL IS FALSE. Every account that existed before the column chose its
+     * own password at registration, and a legacy row must not be locked out
+     * of the app by a missing value.
+     */
+    public static boolean mustChangePassword(Customer customer) {
+        return customer != null && Boolean.TRUE.equals(customer.getMustChangePassword());
     }
 
     private static String roleName(Customer customer) {

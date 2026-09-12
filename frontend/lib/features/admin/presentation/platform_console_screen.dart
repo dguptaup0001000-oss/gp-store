@@ -198,6 +198,8 @@ class _MerchantCard extends ConsumerWidget {
             _Fact(label: 'Phone', value: merchant.contactPhone!),
           if (merchant.contactEmail != null)
             _Fact(label: 'Email', value: merchant.contactEmail!),
+          if (merchant.ownerCustomerId != null)
+            _Fact(label: 'Owner account', value: '${merchant.ownerCustomerId}'),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -209,11 +211,63 @@ class _MerchantCard extends ConsumerWidget {
                     onPressed: hapticize(() => _move(context, ref, status)),
                     child: Text(_label(status)),
                   ),
+              // THE ONLY RECOVERY for a merchant who cannot get in. There is
+              // deliberately no route that reads their current password, so
+              // "I lost it" and "it leaked" have the same answer: issue a
+              // new one and end every session the old one holds.
+              if (merchant.ownerCustomerId != null)
+                TextButton.icon(
+                  onPressed: hapticize(() => _resetOwnerPassword(context, ref)),
+                  icon: const Icon(Icons.key_outlined, size: 18),
+                  label: const Text('Reset password'),
+                ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _resetOwnerPassword(BuildContext context, WidgetRef ref) async {
+    final owner = merchant.ownerCustomerId;
+    if (owner == null) return;
+    // ASKED FIRST, because this is destructive in a way the other buttons
+    // here are not: it ends the merchant's sessions and the password they
+    // chose stops working. Doing that by a mis-tap while they are mid-order
+    // is worth one confirmation.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reset their password?'),
+        content: const Text(
+          'They will be signed out everywhere and the password they chose '
+          'will stop working. You get a new one-time password to hand over, '
+          'shown once.',
+          style: TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final opened = await ref
+          .read(platformRepositoryProvider)
+          .resetStaffPassword(customerId: owner);
+      if (!context.mounted) return;
+      await showOneTimePassword(context, opened);
+    } catch (error) {
+      if (context.mounted) _say(context, extractErrorMessage(error));
+    }
   }
 
   static String _label(String status) => switch (status) {

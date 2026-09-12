@@ -58,6 +58,7 @@ public class AuthService {
     private final SecureRandom secureRandom = new SecureRandom();
     private final int passwordResetTokenMinutes;
     private final OtpChannel otpChannel;
+    private final com.gpstore.security.CustomerAccountStatusService accountStatusService;
 
     public AuthService(CustomerRepository customerRepository,
                         JwtService jwtService,
@@ -68,7 +69,8 @@ public class AuthService {
                         ObjectProvider<Clock> clocks,
                         PlatformTransactionManager transactionManager,
                         @Value("${otp.password-reset-token-minutes:10}") int passwordResetTokenMinutes,
-                        @Value("${otp.channel:EMAIL}") String otpChannel) {
+                        @Value("${otp.channel:EMAIL}") String otpChannel,
+                        com.gpstore.security.CustomerAccountStatusService accountStatusService) {
         this.customerRepository = customerRepository;
         this.jwtService = jwtService;
         this.passwordEncoder = passwordEncoder;
@@ -79,6 +81,7 @@ public class AuthService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.passwordResetTokenMinutes = Math.max(1, passwordResetTokenMinutes);
         this.otpChannel = OtpChannel.from(otpChannel);
+        this.accountStatusService = accountStatusService;
     }
 
     @Transactional
@@ -210,7 +213,9 @@ public class AuthService {
             throw new BadRequestException(INVALID_RESET_TOKEN);
         }
         customer.setPassword(passwordEncoder.encode(newPassword));
+        nowItIsTheirOwnPassword(customer);
         customerRepository.save(customer);
+        accountStatusService.invalidate(customer.getId());
 
         token.setConsumedAt(LocalDateTime.now(clock));
         passwordResetTokenRepository.save(token);
@@ -219,6 +224,27 @@ public class AuthService {
         consumeResetChallenges(customer);
         refreshTokenService.revokeAllForCustomer(customer.getId());
         log.info("PASSWORD_RESET_SUCCESS dest={}", maskCustomer(customer));
+    }
+
+    /**
+     * Lets go of the forced-change gate, because the password on this account
+     * is now one its holder chose.
+     *
+     * EVERY PATH THAT SETS A PASSWORD THE HOLDER PICKED MUST CALL THIS, and
+     * that is why it is one method rather than three assignments. There are
+     * three such paths - the signed-in change, the OTP reset and the
+     * reset-token reset - and each of them proves the same thing by a
+     * different challenge: knowledge of the current password, an SMS to the
+     * account's own phone, or a token mailed to it. The platform owner who
+     * issued the one-time password can answer none of them.
+     *
+     * Miss one and the failure is not a security hole but a lockout: an
+     * operator who reset a forgotten one-time password would land back on the
+     * change screen with no current password left to confirm, and no way out
+     * of it. That is what a merchant with a shop to run would hit first.
+     */
+    private void nowItIsTheirOwnPassword(Customer customer) {
+        customer.setMustChangePassword(Boolean.FALSE);
     }
 
     /**
@@ -246,8 +272,20 @@ public class AuthService {
         }
 
         PasswordPolicy.requireAcceptable(newPassword);
+        // THE SAME PASSWORD AGAIN IS NOT A CHANGE. Without this, a merchant
+        // handed a one-time password could "change" it to itself and keep
+        // working on the credential the platform owner still knows, which is
+        // precisely what the forced change exists to end.
+        if (currentPassword != null && currentPassword.equals(newPassword)) {
+            throw new BadRequestException("Choose a password different from your current one");
+        }
         customer.setPassword(passwordEncoder.encode(newPassword));
+        nowItIsTheirOwnPassword(customer);
         customerRepository.save(customer);
+        // The live snapshot JwtFilter reads caches for two seconds. Without
+        // this the merchant would be refused their own app for a moment
+        // after doing exactly what they were told to do.
+        accountStatusService.invalidate(customerId);
 
         refreshTokenService.revokeAllForCustomer(customerId);
     }
@@ -272,8 +310,10 @@ public class AuthService {
             }
             PasswordPolicy.requireAcceptable(newPassword);
             customer.get().setPassword(passwordEncoder.encode(newPassword));
+            nowItIsTheirOwnPassword(customer.get());
             customerRepository.save(customer.get());
             refreshTokenService.revokeAllForCustomer(customer.get().getId());
+            accountStatusService.invalidate(customer.get().getId());
             log.info("PASSWORD_RESET_SUCCESS dest={}", maskCustomer(customer.get()));
         });
     }
@@ -286,7 +326,9 @@ public class AuthService {
 
         String accessToken = jwtService.generateToken(customer.getId(), customer.getEmail(), customer.getRole());
 
-        return new AuthResponse(accessToken, result.newRawToken(), customer.getId(), customer.getEmail(), customer.getRole().name());
+        return new AuthResponse(accessToken, result.newRawToken(), customer.getId(), customer.getEmail(),
+                customer.getRole().name(),
+                com.gpstore.security.CustomerAccountStatusService.mustChangePassword(customer));
     }
 
     /** Logs out of just this session/device. */
@@ -362,7 +404,9 @@ public class AuthService {
     private AuthResponse issueTokens(Customer customer) {
         String accessToken = jwtService.generateToken(customer.getId(), customer.getEmail(), customer.getRole());
         String refreshToken = refreshTokenService.issue(customer);
-        return new AuthResponse(accessToken, refreshToken, customer.getId(), customer.getEmail(), customer.getRole().name());
+        return new AuthResponse(accessToken, refreshToken, customer.getId(), customer.getEmail(),
+                customer.getRole().name(),
+                com.gpstore.security.CustomerAccountStatusService.mustChangePassword(customer));
     }
 
     private static String sha256(String value) {

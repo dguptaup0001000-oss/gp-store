@@ -103,3 +103,25 @@ class MarketOverview with _$MarketOverview {
 
   factory MarketOverview.fromJson(Map<String, dynamic> json) => _$MarketOverviewFromJson(json);
 }
+
+/// A staff login the platform just opened, and the only copy of its password.
+///
+/// NOT PERSISTED, ANYWHERE. This object exists for as long as the dialog
+/// showing it does. The server keeps a bcrypt hash and returns the plaintext
+/// exactly once, so writing it to storage here - "so the owner can look it
+/// up later" - would rebuild the shared-credential problem the one-time
+/// password exists to prevent, on the phone instead of the server.
+@freezed
+class OpenedStaffAccount with _$OpenedStaffAccount {
+  const factory OpenedStaffAccount({
+    required int customerId,
+    String? email,
+    String? role,
+
+    /// Shown once. There is no route that returns it again.
+    String? oneTimePassword,
+  }) = _OpenedStaffAccount;
+
+  factory OpenedStaffAccount.fromJson(Map<String, dynamic> json) =>
+      _$OpenedStaffAccountFromJson(json);
+}

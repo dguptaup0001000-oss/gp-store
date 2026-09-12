@@ -11,11 +11,22 @@ import 'retry_policy.dart';
 /// message, not a generic "something went wrong".
 class ApiException implements Exception {
   ApiException(
-      {required this.statusCode, required this.message, this.fieldErrors});
+      {required this.statusCode,
+      required this.message,
+      this.fieldErrors,
+      this.code});
 
   final int? statusCode;
   final String message;
   final Map<String, String>? fieldErrors;
+
+  /// The backend's machine-readable reason, when it sent one (currently
+  /// PASSWORD_CHANGE_REQUIRED from JwtFilter).
+  ///
+  /// MATCH ON THIS, NEVER ON [message]. The message is written for a person
+  /// and is free to be reworded; a screen that branches on its wording breaks
+  /// silently the first time somebody improves the English.
+  final String? code;
 
   @override
   String toString() => message;
@@ -317,6 +328,7 @@ class ApiClient {
 
     String message = 'Something went wrong. Please try again.';
     Map<String, String>? fieldErrors;
+    String? code;
 
     // Map, not Map<String, dynamic>. A decoded JSON object is normally the
     // latter, but not always - and when the cast missed, a perfectly good
@@ -325,6 +337,9 @@ class ApiClient {
       final body = data.map((key, value) => MapEntry(key.toString(), value));
       if (body['message'] is String) {
         message = body['message'] as String;
+      }
+      if (body['code'] is String) {
+        code = body['code'] as String;
       }
       if (body['fieldErrors'] is Map) {
         fieldErrors = (body['fieldErrors'] as Map).map(
@@ -364,6 +379,7 @@ class ApiClient {
         statusCode: error.response?.statusCode,
         message: message,
         fieldErrors: fieldErrors,
+        code: code,
       ),
     );
   }
