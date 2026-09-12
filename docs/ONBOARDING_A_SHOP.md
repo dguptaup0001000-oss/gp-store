@@ -10,17 +10,23 @@ This is the sequence a real merchant goes through. Every step is an API call a
 platform administrator or the merchant themselves actually makes. There is no
 seeding script in the happy path and no SQL.
 
-> **Steps 1–5 are a screen now.** In the admin app, **Marketplace →
+> **Steps 0–5 are a screen now.** In the admin app, **Marketplace →
 > Merchants & Shops** (the last group in the sidebar, visible only to
-> `SUPER_ADMIN`) registers a merchant, walks it through review, opens a shop
-> under it, and puts an account on that shop's staff list. The API calls below
-> are what those buttons send, and remain the reference — but opening a real
-> shop no longer needs a terminal.
+> `SUPER_ADMIN`) opens the merchant's login, registers the merchant, walks it
+> through review, opens a shop under it, and puts an account on that shop's
+> staff list. The API calls below are what those buttons send, and remain the
+> reference — but opening a real shop no longer needs a terminal.
 >
-> The routes had existed and been tested since the marketplace slice; the
+> Steps 1–5 had existed and been tested since the marketplace slice; the
 > console only ever *listed* merchants and shops and moved them between
 > statuses. That made the one thing only the platform owner can do the one
 > thing the platform owner could not do from the app.
+>
+> **Step 0 did not exist at all until now.** No API could make an account an
+> `ADMIN` — the only role ever assigned anywhere in the code was
+> `DELIVERY_BOY`, set with a rider's roster row — so a merchant's login had to
+> be written with SQL on the box. `POST /api/platform/staff` closes that, and
+> is the reason this document no longer has a manual step in its happy path.
 
 ---
 
@@ -28,11 +34,12 @@ seeding script in the happy path and no SQL.
 
 | # | Who | Call | What it means |
 |---|---|---|---|
-| 1 | Platform | `POST /api/platform/merchants` | The **business** applies. Not a shop yet. |
+| 0 | Platform | `POST /api/platform/staff` | The merchant's **login** is opened, as an `ADMIN`. Returns a one-time password, once. |
+| 1 | Platform | `POST /api/platform/merchants` | The **business** applies, with step 0's account as `ownerCustomerId`. Not a shop yet. |
 | 2 | Platform | `PUT /api/platform/merchants/{id}/status` → `PENDING_REVIEW` | Somebody is looking at the papers. |
 | 3 | Platform | `PUT /api/platform/merchants/{id}/status` → `APPROVED` | The papers are in order. |
 | 4 | Platform | `POST /api/platform/shops` | The **storefront** opens, as a `DRAFT`. Refused if the merchant is not approved. |
-| 5 | Platform | `POST /api/platform/shops/{id}/staff` | Somebody can now sign in to it. `asDefault: true` makes it that account's home shop. |
+| 5 | Platform | `POST /api/platform/shops/{id}/staff` | Somebody can now sign in to it. `asDefault: true` makes it that account's home shop. Step 1's owner is added automatically; this is for anyone else. |
 | 6 | Merchant | `GET /api/shop/readiness` | What is still missing, in the shopkeeper's words. |
 | 7 | Merchant | `POST /api/admin/territory/zones` + `/subzones` | Where they deliver. |
 | 8 | Merchant | `POST /api/delivery-partners` | Who delivers it. Their riders, nobody else's. |
@@ -48,6 +55,55 @@ and `GET /api/shop/readiness` is the only screen that says so.
 
 **Until step 12 the storefront returns 404,** not 403. Whether a particular
 shop exists but is suspended is between the platform and that merchant.
+
+---
+
+## The merchant's login, and why the platform owner cannot keep it
+
+`POST /api/platform/staff` creates the account and returns a **one-time
+password**. That password:
+
+- is shown **once**, in the response and the dialog that displays it, and is
+  stored nowhere — what the database holds is a bcrypt hash, exactly like every
+  other password. There is no route that returns it again;
+- is generated server-side from an alphabet with `l`, `1`, `I`, `O` and `0`
+  removed, 14 characters long, because it gets read out over a phone;
+- buys **exactly one route**. The account arrives with
+  `customers.must_change_password = true`, and while that is set `JwtFilter`
+  refuses every request but `PUT /api/auth/change-password` with a 403 carrying
+  `"code":"PASSWORD_CHANGE_REQUIRED"` — `/api/customers/me` included.
+
+**The refusal is in the filter, not the app, and that is the point.** A client
+that merely *showed* a change-password screen could be navigated around — a
+deep link, an older build, a hand-built request — and the account would then be
+working normally on a credential the platform owner also knows. Every action it
+took would be deniable. Enforcing it server-side is what makes a merchant's
+actions their own.
+
+Because the gate refuses `/api/customers/me` too, a client cannot *ask*
+whether it owes a change, so the login and refresh responses carry
+`mustChangePassword`. The Flutter app deliberately acts on the **403 code**
+instead: it is the one signal that cannot go stale, and it is the only one that
+catches a password the platform **reset** while somebody was already signed in.
+The screen it shows is the same one, shown in place of the app rather than over
+it, with the system back gesture refused and a sign-out as the only other way
+out.
+
+Three paths clear the flag, and each proves the holder chose the password by a
+different challenge the platform owner cannot answer: the signed-in change
+(knows the current password), the OTP reset, and the reset-token reset. A
+merchant who loses the handover slip before using it therefore has a way in
+that is not "ask the platform owner to read it back" — there is no such route.
+
+`POST /api/platform/staff/{customerId}/reset-password` issues a **new**
+one-time password, revokes every refresh token the account holds, and puts the
+gate back. It does not, and cannot, read the existing one.
+
+Roles this route will open: `ADMIN`, `MANAGER`, `INVENTORY_MANAGER`,
+`ORDER_MANAGER`, `DELIVERY_MANAGER`, `SUPPORT`. It refuses `SUPER_ADMIN` (a
+second platform owner is a deliberate change at the database), `CUSTOMER` (they
+register themselves) and `DELIVERY_BOY` (a rider's account is created with
+their roster row).
 
 ---
 

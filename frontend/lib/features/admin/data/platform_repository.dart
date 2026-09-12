@@ -75,6 +75,56 @@ class PlatformRepository {
     return MerchantView.fromJson(Map<String, dynamic>.from(response.data as Map));
   }
 
+  /// Opens a staff login and returns the ONLY copy of its password.
+  ///
+  /// THE HOLE THIS FILLS. Until now no API could make an account an ADMIN:
+  /// the only role ever assigned in code was DELIVERY_BOY, so onboarding a
+  /// merchant meant SQL on the box. `registerMerchant` wants an
+  /// `ownerCustomerId` that had to already exist, and nothing could create
+  /// it.
+  ///
+  /// THE PASSWORD COMES BACK ONCE AND IS NOT STORED ANYWHERE. What the
+  /// server keeps is a bcrypt hash, like every other password; the plaintext
+  /// exists in this response and in no column, log or second table. Show it,
+  /// let it be copied, and lose it - [resetStaffPassword] makes a new one if
+  /// it is lost before being handed over.
+  ///
+  /// The account arrives owing a password change, so until the merchant sets
+  /// their own the server refuses them every route but the change itself.
+  /// After that the platform owner's copy is dead, which is what keeps the
+  /// merchant's actions their own in a dispute.
+  Future<OpenedStaffAccount> openStaffAccount({
+    required String fullName,
+    required String email,
+    String? mobileNumber,
+    required String role,
+  }) async {
+    final response = await apiClient.dio.post(
+      '/api/platform/staff',
+      data: {
+        'fullName': fullName,
+        'email': email,
+        if (mobileNumber != null && mobileNumber.isNotEmpty) 'mobileNumber': mobileNumber,
+        'role': role,
+      },
+    );
+    return OpenedStaffAccount.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// Issues a new one-time password and kills every session the account has.
+  ///
+  /// NOT A WAY TO READ THE OLD ONE. There is no such route, deliberately:
+  /// a merchant who cannot get in needs a new password, not the platform
+  /// owner reading their current one.
+  Future<OpenedStaffAccount> resetStaffPassword({required int customerId}) async {
+    final response = await apiClient.dio.post(
+      '/api/platform/staff/$customerId/reset-password',
+    );
+    return OpenedStaffAccount.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
   /// Opens a storefront under an already-approved merchant.
   ///
   /// ARRIVES AS `DRAFT`, deliberately: a shop is built before it sells, and

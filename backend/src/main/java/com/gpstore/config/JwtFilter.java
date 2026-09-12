@@ -117,6 +117,26 @@ public class JwtFilter extends OncePerRequestFilter {
                         rejectInactive(response);
                         return;
                     }
+                    // A PASSWORD SOMEBODY ELSE CHOSE BUYS EXACTLY ONE ROUTE.
+                    //
+                    // The platform owner opens a merchant's login, so its
+                    // first password was typed by a person who is not its
+                    // owner. Until it is replaced, every action the account
+                    // takes is deniable - "the platform set my password" -
+                    // which would quietly undo the tenant isolation the rest
+                    // of this codebase is built around.
+                    //
+                    // ENFORCED HERE RATHER THAN IN THE APP, because a client
+                    // that merely SHOWS a change-password screen can be
+                    // navigated around, and the account would be working
+                    // normally on a shared credential. Here it cannot: the
+                    // only thing a token for such an account reaches is the
+                    // change itself.
+                    if (snapshot.mustChangePassword() && !isPasswordChangePath(path)) {
+                        SecurityContextHolder.clearContext();
+                        rejectUntilPasswordChanged(response);
+                        return;
+                    }
                 }
 
                 AuthenticatedUser principal =
@@ -156,6 +176,17 @@ public class JwtFilter extends OncePerRequestFilter {
                 || "/api/auth/logout-all".equals(path);
     }
 
+    /**
+     * The one route an account owing a password change may still reach.
+     *
+     * DELIBERATELY NOT /api/auth/** AS A PREFIX. Widening this to the whole
+     * auth namespace would hand such an account every other auth route as
+     * well, and the point is that it has exactly one thing to do.
+     */
+    static boolean isPasswordChangePath(String path) {
+        return "/api/auth/change-password".equals(path);
+    }
+
     private com.gpstore.worker.WorkerAccess.Decision workerAccess(Long workerId) {
         try {
             return workerAccessService.resolve(workerId);
@@ -190,6 +221,24 @@ public class JwtFilter extends OncePerRequestFilter {
             log.warn("Account status check failed for customerId={}: {}", customerId, ex.getMessage());
             return CustomerAccountStatusService.Snapshot.unusable();
         }
+    }
+
+    /**
+     * 403 and a machine-readable code, not 401.
+     *
+     * The token is VALID and the account is live - what is missing is a step
+     * the account owes, so 401 would send a correctly signed-in merchant
+     * back to the login screen in a loop. The code lets the app route
+     * straight to the change-password screen instead of pattern-matching a
+     * sentence that might be reworded.
+     */
+    private static void rejectUntilPasswordChanged(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setContentType("application/json");
+        response.getWriter().write(
+                "{\"status\":403,\"error\":\"Forbidden\",\"code\":\"PASSWORD_CHANGE_REQUIRED\","
+                        + "\"message\":\"Set your own password before using the app. "
+                        + "This account is still on the one-time password it was created with.\"}");
     }
 
     private static void rejectInactive(HttpServletResponse response) throws IOException {

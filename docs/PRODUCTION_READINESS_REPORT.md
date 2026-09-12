@@ -422,21 +422,33 @@ else in this report was done.
    needs a real merchant who agrees to be onboarded — not something to
    fabricate.
 
-   **The mechanics are no longer your problem.** In the admin app,
-   **Marketplace → Merchants & Shops** now registers the business, walks it
-   through review, opens the storefront, and puts the owner's account on its
-   staff list. `docs/ONBOARDING_A_SHOP.md` is the reference for what those
-   buttons send, and `scripts/verify/onboard_second_shop.sh` still does the
-   whole thing over HTTP and then attacks the wall between the new shop and
-   Shop #1. What remains yours is the merchant.
+   **The mechanics are no longer your problem, including the login.** In the
+   admin app, **Marketplace → Merchants & Shops** now opens the merchant's
+   `ADMIN` account, registers the business, walks it through review, opens the
+   storefront, and puts that account on its staff list. Registering a merchant
+   hands you a **one-time password** to pass on; the merchant must replace it
+   before the app will let them do anything, and after that your copy is dead.
+   That last part is what makes their actions their own in a dispute.
+
+   Until this existed, no API could make an account an `ADMIN` — the only role
+   ever assigned in code was `DELIVERY_BOY` — so this step meant SQL on the
+   box. It was the one thing only you can do that you could not do from the
+   app.
+
+   `docs/ONBOARDING_A_SHOP.md` is the reference for what those buttons send,
+   and `scripts/verify/onboard_second_shop.sh` still does the whole thing over
+   HTTP and then attacks the wall between the new shop and Shop #1. What
+   remains yours is the merchant.
 
 2. **A phone, and the APK.** `build-apk` produces one on every CI run.
    Install it and walk the customer journey, the merchant back office and the
    worker app. This is the only item on this list that nothing automated can
    substitute for.
 
-3. **Check for `PLATFORM_ADMIN` accounts** — one read-only query, so you know
-   whether the alias is carrying anybody:
+3. **Check for `PLATFORM_ADMIN` accounts.** Run the **Who runs the shop**
+   workflow in GitHub Actions: it answers this and item 4 together against the
+   live database, read-only, with emails masked. The query it runs, if you
+   would rather read it yourself:
 
    ```sql
    SELECT id, email, role FROM customers WHERE role = 'PLATFORM_ADMIN';

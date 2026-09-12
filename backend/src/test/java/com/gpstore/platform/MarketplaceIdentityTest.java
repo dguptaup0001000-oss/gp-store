@@ -190,6 +190,12 @@ class MarketplaceIdentityTest {
         jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id in (?, ?)", shopB, shopB2);
         jdbc.update("DELETE FROM shops WHERE id in (?, ?)", shopB, shopB2);
         jdbc.update("DELETE FROM merchants WHERE id = ?", merchantB);
+        // merchantsCannotOpenStaffLogins proves the platform owner CAN open
+        // one, which means it really creates an account. Removed by email
+        // because the test never learns its id.
+        jdbc.update("DELETE FROM audit_logs WHERE entity_type = 'Customer' AND entity_id IN "
+                + "(SELECT id FROM customers WHERE email = ?)", "minted-" + tag + "@example.test");
+        jdbc.update("DELETE FROM customers WHERE email = ?", "minted-" + tag + "@example.test");
         jdbc.update("DELETE FROM customers WHERE id in (?, ?, ?)", ownerA, ownerB, platformAdminId);
         installDefaultsFor(PlatformMode.SINGLE_SHOP);
     }
@@ -445,6 +451,43 @@ class MarketplaceIdentityTest {
         } finally {
             jdbc.update("DELETE FROM delivery_partners WHERE name in (?, ?)", riderAtA, riderAtB);
         }
+    }
+
+    // ------------------- opening a merchant's login is the platform's alone
+
+    @Test
+    @DisplayName("a shop owner cannot open a staff login, which would mint their own peers")
+    void merchantsCannotOpenStaffLogins() {
+        // THE ESCALATION THIS ROUTE COULD HAVE BEEN. Creating an account
+        // with a role and being handed its password is, in one request, a
+        // login as that role. If a shop ADMIN could reach it they could mint
+        // ADMIN after ADMIN - and a MANAGER could mint an ADMIN above
+        // themselves. /api/platform/** is gated on PLATFORM_ADMIN, which no
+        // shop role holds; this asserts it on the real mapping rather than
+        // trusting the matcher.
+        String body = """
+                {"fullName":"Minted","email":"minted-%s@example.test","role":"ADMIN"}
+                """.formatted(tag);
+
+        for (Role shopRole : new Role[] {Role.ADMIN, Role.MANAGER, Role.SUPPORT}) {
+            assertEquals(403, statusOf(post("/api/platform/staff")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body), ownerB, shopRole),
+                    shopRole + " reached the route that opens a staff login, so it could mint "
+                            + "an account and be told its password in the same request");
+        }
+
+        assertEquals(403, statusOf(post("/api/platform/staff/" + ownerA + "/reset-password"),
+                        ownerB, Role.ADMIN),
+                "one merchant could reset another merchant's password and read the new one");
+
+        // And the platform owner can, which is the other half: a refusal
+        // that applies to everybody is a broken route, not a guarded one.
+        assertNotEquals(403, statusOf(post("/api/platform/staff")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body), platformAdminId, Role.SUPER_ADMIN),
+                "the platform owner must be able to open a merchant's login - that is the "
+                        + "capability this route exists for");
     }
 
     // ---------------------------- 10, 11, 12. catalogue write split

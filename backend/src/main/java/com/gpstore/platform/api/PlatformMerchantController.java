@@ -27,15 +27,18 @@ public class PlatformMerchantController {
     private final ShopLifecycleService shopLifecycle;
     private final ShopMembership membership;
     private final com.gpstore.money.ShopEarnings earnings;
+    private final com.gpstore.platform.PlatformStaffService staffService;
 
     public PlatformMerchantController(MerchantLifecycleService merchantLifecycle,
                                       ShopLifecycleService shopLifecycle,
                                       ShopMembership membership,
-                                      com.gpstore.money.ShopEarnings earnings) {
+                                      com.gpstore.money.ShopEarnings earnings,
+                                      com.gpstore.platform.PlatformStaffService staffService) {
         this.merchantLifecycle = merchantLifecycle;
         this.shopLifecycle = shopLifecycle;
         this.membership = membership;
         this.earnings = earnings;
+        this.staffService = staffService;
     }
 
     // ------------------------------------------------------------- the market
@@ -229,6 +232,46 @@ public class PlatformMerchantController {
     @DeleteMapping("/shops/{shopId}/staff/{customerId}")
     public void removeStaff(@PathVariable Long shopId, @PathVariable Long customerId) {
         membership.revoke(shopId, customerId);
+    }
+
+    // -------------------------------------------------------------- staff
+
+    public record OpenStaffRequest(String fullName, String email, String mobileNumber,
+                                   String role) {}
+
+    /**
+     * The one-time password is in the RESPONSE BODY and nowhere else.
+     *
+     * Not in a log line, not in a column, not in a second table. If the
+     * owner loses it before handing it over, reset makes a new one - there
+     * is no route that returns this one again, which is the property that
+     * makes a platform-opened login safe to give somebody.
+     */
+    @PostMapping("/staff")
+    public PlatformStaffService.OpenedAccount openStaffAccount(
+            @RequestBody OpenStaffRequest request) {
+        return staffService.openAccount(request.fullName(), request.email(),
+                request.mobileNumber(), parseStaffRole(request.role()));
+    }
+
+    /**
+     * Issues a new one-time password and kills every existing session.
+     *
+     * POST rather than PUT: it is not idempotent - each call mints a
+     * different credential and invalidates the last one.
+     */
+    @PostMapping("/staff/{customerId}/reset-password")
+    public PlatformStaffService.OpenedAccount resetStaffPassword(@PathVariable Long customerId) {
+        return staffService.resetPassword(customerId);
+    }
+
+    private static com.gpstore.entity.Role parseStaffRole(String raw) {
+        try {
+            return com.gpstore.entity.Role.valueOf(
+                    String.valueOf(raw).trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException | NullPointerException unknown) {
+            throw new com.gpstore.exception.BadRequestException("Unknown role: " + raw);
+        }
     }
 
     private static MerchantStatus parseMerchantStatus(String raw) {
