@@ -17,6 +17,13 @@ jobs:
       run:
         working-directory: backend
 
+    # pull-requests: write is for ONE step - "Report the failing tests on the
+    # PR", below. contents: read is spelled out because naming any permission
+    # drops the job to that set alone, and the checkout needs it.
+    permissions:
+      contents: read
+      pull-requests: write
+
     # A REAL Postgres, provided by GitHub Actions - this is exactly what
     # Termux couldn't give us, and it's why BackendApplicationTests.contextLoads
     # can finally pass here even though it couldn't run locally on-device.
@@ -205,6 +212,90 @@ jobs:
                   for line in bad:
                       out.write(line + "\n")
                   out.write("```\n")
+          PY
+
+      # A THIRD CHANNEL, AND THE ONLY ONE THAT SURVIVES A RESTRICTED NETWORK.
+      #
+      # The step above prints the failing tests and writes them to the job
+      # summary. Neither reaches a reader who has the GitHub API and nothing
+      # else: the API's job-log endpoint returns the service-container teardown
+      # dump rather than Maven's output, the check-run output comes back empty,
+      # and the log archive and the surefire artifact are plain file downloads
+      # that a locked-down egress proxy refuses. This branch sat red for three
+      # commits for exactly that reason - the answer existed in three places
+      # and was reachable from none of them.
+      #
+      # A PR comment is readable wherever the API is. Only on failure, only on
+      # pull_request, and it edits one comment rather than adding another on
+      # every run, so a long red streak does not bury the conversation.
+      - name: Report the failing tests on the PR
+        if: failure() && github.event_name == 'pull_request'
+        working-directory: backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import glob, json, os, urllib.request
+          import xml.etree.ElementTree as ET
+
+          bad = []
+          for path in glob.glob("target/surefire-reports/*.xml"):
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  continue
+              for case in root.iter("testcase"):
+                  for kind in ("failure", "error"):
+                      node = case.find(kind)
+                      if node is None:
+                          continue
+                      msg = (node.get("message") or node.get("type") or "").strip()
+                      bad.append(f"{kind.upper()}  {case.get('classname')}.{case.get('name')}\n"
+                                 f"        {msg.splitlines()[0] if msg.splitlines() else ''}")
+
+          marker = "<!-- ci-failing-tests -->"
+          if bad:
+              body = (f"{marker}\n### CI: {len(bad)} failing test(s)\n\n```\n"
+                      + "\n".join(sorted(bad)[:60]) + "\n```\n")
+              if len(bad) > 60:
+                  body += f"\n...and {len(bad) - 60} more.\n"
+          else:
+              body = (f"{marker}\n### CI failed before any test body\n\n"
+                      "No failing testcase in the surefire XML, so this is not a test "
+                      "assertion: look at compile, the enforcer, a plugin, or the JVM.\n")
+          body += f"\n[Full run]({os.environ['RUN_URL']})\n"
+
+          repo, pr, token = os.environ["REPO"], os.environ["PR"], os.environ["GH_TOKEN"]
+          api = f"https://api.github.com/repos/{repo}"
+          headers = {"Authorization": f"Bearer {token}",
+                     "Accept": "application/vnd.github+json",
+                     "User-Agent": "gpstore-ci"}
+
+          def call(url, data=None, method="GET"):
+              req = urllib.request.Request(
+                  url, method=method,
+                  data=json.dumps(data).encode() if data else None,
+                  headers={**headers, "Content-Type": "application/json"})
+              with urllib.request.urlopen(req) as r:
+                  return json.loads(r.read() or "null")
+
+          try:
+              existing = next(
+                  (c for c in call(f"{api}/issues/{pr}/comments?per_page=100")
+                   if marker in (c.get("body") or "")), None)
+              if existing:
+                  call(f"{api}/issues/comments/{existing['id']}", {"body": body}, "PATCH")
+                  print("updated the existing failing-tests comment")
+              else:
+                  call(f"{api}/issues/{pr}/comments", {"body": body}, "POST")
+                  print("posted a failing-tests comment")
+          except Exception as e:
+              # Never turn a reporting problem into a second failure - the job
+              # is already red for the reason that matters.
+              print(f"could not post the failing-tests comment: {e}")
           PY
 
       - name: Upload test results
