@@ -31,6 +31,24 @@
 name: Production smoke test
 
 on:
+  # AFTER EVERY PRODUCTION DEPLOY, AUTOMATICALLY.
+  #
+  # This workflow found a customer-facing HTTP 500 - every instant search on
+  # production - within 46 seconds of its first run. It found it because
+  # somebody happened to run it. The deploy itself could not have: it checks
+  # /actuator/health and the reported commit, both of which were perfectly
+  # healthy while the search box was broken for every customer.
+  #
+  # So the deploy now verifies what it shipped rather than only that it
+  # shipped. NOT on every commit - the user's constraint and the right one -
+  # but on every release, which is when production actually changes.
+  #
+  # A failure here does not roll anything back; the deploy has already
+  # happened. It fails loudly so a person knows to look.
+  workflow_run:
+    workflows: ["Deploy Production"]
+    types: [completed]
+
   workflow_dispatch:
     inputs:
       api_base_url:
@@ -59,16 +77,26 @@ permissions:
 jobs:
   smoke:
     name: Smoke the deployed API
+    # Never smoke a deploy that failed - the failure is the story, and a
+    # second red workflow only buries it. Manual runs always proceed.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # workflow_dispatch supplies inputs; workflow_run supplies none, so the
+      # automatic run takes the live defaults and asserts the commit that was
+      # just deployed - which is exactly the head_sha of the deploy run.
+      API_BASE_URL: ${{ inputs.api_base_url || vars.PUBLIC_API_BASE_URL || 'https://api.gpstore.co.in/v1' }}
+      EXPECT_SHA: ${{ inputs.expect_sha || github.event.workflow_run.head_sha || '' }}
+      SMOKE_READ_ONLY: ${{ (inputs.read_only && '1') || '0' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Refuse a URL that is not the versioned API
-        env:
-          API_BASE_URL: ${{ inputs.api_base_url }}
         run: |
           set -Eeuo pipefail
           # A base without /v1 makes every route 404 and the whole run reads
@@ -80,10 +108,6 @@ jobs:
 
       - name: Run the smoke test
         id: smoke
-        env:
-          API_BASE_URL: ${{ inputs.api_base_url }}
-          EXPECT_SHA: ${{ inputs.expect_sha }}
-          SMOKE_READ_ONLY: ${{ inputs.read_only && '1' || '0' }}
         run: |
           set -Eeuo pipefail
           chmod +x scripts/verify/smoke_api.sh
@@ -105,9 +129,10 @@ jobs:
           {
             echo "## Production smoke test"
             echo
-            echo "- API: \`${{ inputs.api_base_url }}\`"
-            echo "- Read-only: \`${{ inputs.read_only }}\`"
-            echo "- Expected commit: \`${{ inputs.expect_sha || 'not checked' }}\`"
+            echo "- Trigger: \`${{ github.event_name }}\`"
+            echo "- API: \`$API_BASE_URL\`"
+            echo "- Read-only: \`$SMOKE_READ_ONLY\`"
+            echo "- Expected commit: \`${EXPECT_SHA:-not checked}\`"
             echo
             echo '```'
             # Strip the ANSI colour the script writes for a terminal.
