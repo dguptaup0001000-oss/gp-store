@@ -55,6 +55,9 @@ class InventoryUnderConcurrencyTest {
     @Autowired private MerchantRepository merchants;
     @Autowired private PlatformProperties platform;
     @Autowired private InventoryService inventoryService;
+    @Autowired private com.gpstore.repository.CategoryRepository categories;
+    @Autowired private com.gpstore.repository.ProductRepository products;
+    @Autowired private com.gpstore.repository.ProductVariantRepository variants;
 
     private final String tag = "cinv" + System.nanoTime();
 
@@ -62,6 +65,7 @@ class InventoryUnderConcurrencyTest {
     private long shopB;
     private Long merchantB;
     private Long variantId;
+    private com.gpstore.support.CatalogueItem item;
 
     @BeforeEach
     void oneVariantStockedByTwoShops() {
@@ -87,10 +91,18 @@ class InventoryUnderConcurrencyTest {
         // ONE central variant - the shared catalogue - with a stock row per
         // shop. This is the exact shape §10 describes and the one a naive
         // implementation gets wrong by keying stock on the variant alone.
-        variantId = jdbc.queryForObject(
-                "SELECT id FROM product_variants ORDER BY id LIMIT 1", Long.class);
-        jdbc.update("DELETE FROM inventory WHERE product_variant_id = ? AND shop_id in (?, ?)",
-                variantId, shopA, shopB);
+        //
+        // THIS USED TO BE "SELECT id FROM product_variants ORDER BY id LIMIT 1"
+        // and that is why these five tests failed on CI and nowhere else.
+        // CatalogSeedService only runs from POST /api/admin/catalog/seed, so on
+        // a database that has just been wiped and migrated the table is EMPTY
+        // until some other test seeds it - and queryForObject then throws
+        // "Incorrect result size: expected 1, actual 0" from this very line.
+        // A developer's database, months deep in accumulated variants, never
+        // shows it. The test now creates the item it sells.
+        item = com.gpstore.support.CatalogueItem.create(
+                tag, jdbc, categories, products, variants);
+        variantId = item.variantId();
     }
 
     @AfterEach
@@ -98,6 +110,7 @@ class InventoryUnderConcurrencyTest {
         TenantContext.clear();
         jdbc.update("DELETE FROM inventory WHERE product_variant_id = ? AND shop_id in (?, ?)",
                 variantId, shopA, shopB);
+        item.remove();
         jdbc.update("DELETE FROM store_operations_settings WHERE shop_id = ?", shopB);
         jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", shopB);
         jdbc.update("DELETE FROM shops WHERE id = ?", shopB);

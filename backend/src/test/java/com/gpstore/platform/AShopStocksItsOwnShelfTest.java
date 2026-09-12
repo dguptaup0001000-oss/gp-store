@@ -76,6 +76,9 @@ class AShopStocksItsOwnShelfTest {
     @Autowired private PlatformProperties platform;
     @Autowired private MerchantLifecycleService merchantLifecycle;
     @Autowired private ShopLifecycleService shopLifecycle;
+    @Autowired private com.gpstore.repository.CategoryRepository categories;
+    @Autowired private com.gpstore.repository.ProductRepository products;
+    @Autowired private com.gpstore.repository.ProductVariantRepository variants;
 
     private final String tag = "stk" + System.nanoTime();
 
@@ -86,6 +89,7 @@ class AShopStocksItsOwnShelfTest {
     private Long ownerA;
     private Long ownerB;
     private Long variantId;
+    private com.gpstore.support.CatalogueItem item;
 
     /**
      * TWO SHOPS THIS TEST MADE, AND SHOP #1 IS NOT ONE OF THEM.
@@ -123,9 +127,15 @@ class AShopStocksItsOwnShelfTest {
         ownerA = newStaffFor(shopA, "a");
         ownerB = newStaffFor(shopB, "b");
 
-        variantId = jdbc.queryForObject(
-                "SELECT id FROM product_variants ORDER BY id ASC LIMIT 1", Long.class);
-        assertNotNull(variantId, "the shared catalogue has no variant to list");
+        // ITS OWN CATALOGUE ROW, for the same reason as the shops above. This
+        // used to take "the first variant in the table", which is empty on a
+        // freshly migrated database until some other test seeds it - the bug
+        // that failed InventoryUnderConcurrencyTest on CI. This test escaped
+        // only because it runs later in the alphabet.
+        item = com.gpstore.support.CatalogueItem.create(
+                tag, jdbc, categories, products, variants);
+        variantId = item.variantId();
+        assertNotNull(variantId, "the fixture did not create a variant to list");
     }
 
     @AfterEach
@@ -141,6 +151,7 @@ class AShopStocksItsOwnShelfTest {
             jdbc.update("DELETE FROM store_operations_settings WHERE shop_id = ?", shop);
             jdbc.update("DELETE FROM shops WHERE id = ?", shop);
         }
+        item.remove();
         jdbc.update("DELETE FROM merchants WHERE id in (?, ?)", merchantA, merchantB);
         jdbc.update("DELETE FROM customers WHERE id in (?, ?)", ownerA, ownerB);
         TenantDefaults.install(PlatformMode.SINGLE_SHOP,
@@ -296,9 +307,20 @@ class AShopStocksItsOwnShelfTest {
             // of them next door".
             MvcResult peek = send(get(stockPath()), ownerB, null);
             assertEquals(404, peek.getResponse().getStatus());
-            assertFalse(peek.getResponse().getContentAsString().contains("50"),
-                    "the refusal leaked the other shop's count: "
-                            + peek.getResponse().getContentAsString());
+
+            // NAME THE FIELD, DO NOT GREP FOR THE NUMBER. This used to assert
+            // the body did not contain the string "50", which is a different
+            // and much weaker claim: the error body carries an ISO timestamp,
+            // and the first one ending in ...950827464Z failed the test while
+            // leaking precisely nothing. The property that matters is that a
+            // refusal carries no stock data at all.
+            String body = peek.getResponse().getContentAsString();
+            for (String leaked : new String[]{"\"stock\"", "\"availableStock\"",
+                    "\"reservedStock\"", "\"productVariantId\""}) {
+                assertFalse(body.contains(leaked),
+                        "the refusal carries " + leaked + ", which belongs to the other shop: "
+                                + body);
+            }
         }
     }
 
