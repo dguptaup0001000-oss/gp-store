@@ -41,6 +41,92 @@ class PlatformRepository {
     return MerchantView.fromJson(Map<String, dynamic>.from(response.data as Map));
   }
 
+  /// Registers a business. It is NOT a shop yet and cannot trade.
+  ///
+  /// LANDS IN `APPLICATION`, not `APPROVED`, and the server decides that - no
+  /// field here can shortcut it. A merchant created already trading is a
+  /// merchant nobody checked, so the console has to walk the same
+  /// review sequence anybody else would.
+  ///
+  /// [ownerCustomerId] IS THE FIELD THAT MATTERS MOST and the easiest to
+  /// leave out. `ShopLifecycleService.open` grants it a staff row on every
+  /// shop opened under this merchant, and makes that shop their default -
+  /// so a merchant registered without one produces shops no one can sign in
+  /// to. Recoverable later with [addStaff], but far cheaper to get right here.
+  Future<MerchantView> registerMerchant({
+    required String legalName,
+    String? displayName,
+    String? contactPhone,
+    String? contactEmail,
+    int? ownerCustomerId,
+    bool demo = false,
+  }) async {
+    final response = await apiClient.dio.post(
+      '/api/platform/merchants',
+      data: {
+        'legalName': legalName,
+        if (displayName != null && displayName.isNotEmpty) 'displayName': displayName,
+        if (contactPhone != null && contactPhone.isNotEmpty) 'contactPhone': contactPhone,
+        if (contactEmail != null && contactEmail.isNotEmpty) 'contactEmail': contactEmail,
+        if (ownerCustomerId != null) 'ownerCustomerId': ownerCustomerId,
+        'demo': demo,
+      },
+    );
+    return MerchantView.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// Opens a storefront under an already-approved merchant.
+  ///
+  /// ARRIVES AS `DRAFT`, deliberately: a shop is built before it sells, and
+  /// the platform moves it to `ACTIVE` when it is ready. The server refuses
+  /// this outright unless the merchant is `APPROVED` or `ACTIVE`, and refuses
+  /// a [code] another shop already uses - both are conflicts worth showing
+  /// verbatim rather than pre-empting, because the merchant's status can
+  /// change between this form opening and being submitted.
+  ///
+  /// The shop's operating settings and delivery pricing rows are created
+  /// server-side with it, so nothing here has to remember them.
+  Future<PlatformShopView> openShop({
+    required int merchantId,
+    required String code,
+    String? displayName,
+    double? latitude,
+    double? longitude,
+    double? maxDeliveryRadiusKm,
+    String? timeZone,
+  }) async {
+    final response = await apiClient.dio.post(
+      '/api/platform/shops',
+      data: {
+        'merchantId': merchantId,
+        'code': code,
+        if (displayName != null && displayName.isNotEmpty) 'displayName': displayName,
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
+        if (maxDeliveryRadiusKm != null) 'maxDeliveryRadiusKm': maxDeliveryRadiusKm,
+        if (timeZone != null && timeZone.isNotEmpty) 'timeZone': timeZone,
+      },
+    );
+    return PlatformShopView.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// Puts an account on a shop's staff list, which is the only way an account
+  /// gets a tenant scope at all.
+  ///
+  /// [asDefault] IS AN INSTRUCTION, NOT A HINT. Without it an account that
+  /// already has a home shop keeps it, so a merchant opening their second
+  /// storefront would be added and land nowhere new.
+  Future<void> addStaff({
+    required int shopId,
+    required int customerId,
+    bool asDefault = true,
+  }) async {
+    await apiClient.dio.post(
+      '/api/platform/shops/$shopId/staff',
+      data: {'customerId': customerId, 'asDefault': asDefault},
+    );
+  }
+
   Future<List<PlatformShopView>> shops({int? merchantId}) async {
     final response = await apiClient.dio.get(
       '/api/platform/shops',

@@ -45,6 +45,117 @@ void main() {
               'can account for later');
     });
 
+    test('registering a merchant sends the owner account, and never a status',
+        () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? sent;
+      adapter.on('POST', '/api/platform/merchants', (options) {
+        sent = Map<String, dynamic>.from(options.data as Map);
+        return const FakeResponse(
+            {'id': 9, 'legalName': 'Sharma Kirana', 'status': 'APPLICATION'});
+      });
+
+      final merchant =
+          await PlatformRepository(apiClient: buildTestApiClient(adapter))
+              .registerMerchant(
+        legalName: 'Sharma Kirana',
+        displayName: 'Sharma Store',
+        contactPhone: '9876500000',
+        ownerCustomerId: 42,
+      );
+
+      expect(sent!['legalName'], 'Sharma Kirana');
+      expect(sent!['ownerCustomerId'], 42,
+          reason: 'the owner account is what the server grants a staff row to '
+              'on every shop opened under this merchant - without it the shop '
+              'has nobody who can sign in');
+      expect(sent!.containsKey('status'), isFalse,
+          reason: 'A MERCHANT CANNOT BE CREATED ALREADY APPROVED. The status '
+              'is the platform review sequence and belongs to the server; a '
+              'field here would be a way to skip it');
+      expect(sent!['demo'], false);
+      expect(sent!.containsKey('contactEmail'), isFalse,
+          reason: 'an empty field is sent as absent, not as an empty string - '
+              'the server turns blank into null and a literal "" would defeat '
+              'that');
+      expect(merchant.status, 'APPLICATION');
+      expect(merchant.isTrading, isFalse);
+    });
+
+    test('opening a shop names its merchant and cannot name its status', () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? sent;
+      adapter.on('POST', '/api/platform/shops', (options) {
+        sent = Map<String, dynamic>.from(options.data as Map);
+        return const FakeResponse({
+          'id': 7,
+          'merchantId': 9,
+          'code': 'SHARMA-1',
+          'displayName': 'Sharma Store',
+          'status': 'DRAFT',
+        });
+      });
+
+      final shop = await PlatformRepository(apiClient: buildTestApiClient(adapter))
+          .openShop(
+        merchantId: 9,
+        code: 'SHARMA-1',
+        displayName: 'Sharma Store',
+        latitude: 27.16231,
+        longitude: 83.940468,
+        maxDeliveryRadiusKm: 5,
+        timeZone: 'Asia/Kolkata',
+      );
+
+      expect(sent!['merchantId'], 9);
+      expect(sent!['code'], 'SHARMA-1');
+      expect(sent!['latitude'], 27.16231);
+      expect(sent!['maxDeliveryRadiusKm'], 5);
+      expect(sent!['timeZone'], 'Asia/Kolkata');
+      expect(sent!.containsKey('status'), isFalse,
+          reason: 'A SHOP CANNOT BE OPENED ALREADY SELLING. It arrives as a '
+              'DRAFT and the platform moves it, so there is no status to send');
+      expect(shop.status, 'DRAFT');
+    });
+
+    test('a shop opened with no coordinates sends none rather than zeroes',
+        () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? sent;
+      adapter.on('POST', '/api/platform/shops', (options) {
+        sent = Map<String, dynamic>.from(options.data as Map);
+        return const FakeResponse({'id': 8, 'code': 'NOWHERE', 'status': 'DRAFT'});
+      });
+
+      await PlatformRepository(apiClient: buildTestApiClient(adapter))
+          .openShop(merchantId: 9, code: 'NOWHERE');
+
+      // ZERO IS A PLACE. Sending 0,0 for "not set" puts the shop in the Gulf
+      // of Guinea and makes it reachable by a discovery search that should
+      // have skipped it entirely.
+      expect(sent!.containsKey('latitude'), isFalse);
+      expect(sent!.containsKey('longitude'), isFalse);
+      expect(sent!.containsKey('maxDeliveryRadiusKm'), isFalse);
+    });
+
+    test('adding staff asks for the home shop explicitly', () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? sent;
+      adapter.on('POST', '/api/platform/shops/7/staff', (options) {
+        sent = Map<String, dynamic>.from(options.data as Map);
+        return const FakeResponse({});
+      });
+
+      await PlatformRepository(apiClient: buildTestApiClient(adapter))
+          .addStaff(shopId: 7, customerId: 42);
+
+      expect(sent!['customerId'], 42);
+      expect(sent!['asDefault'], isTrue,
+          reason: 'asDefault is an instruction, not a hint: without it an '
+              'account that already has a home shop keeps it, so a merchant '
+              'opening their second storefront is added and lands nowhere new');
+    });
+
     test('the market overview is one line per shop, never a pooled total', () async {
       final adapter = FakeHttpClientAdapter();
       adapter.on('GET', '/api/platform/overview', (_) => const FakeResponse({

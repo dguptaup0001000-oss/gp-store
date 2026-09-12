@@ -420,8 +420,15 @@ else in this report was done.
 1. **A second real merchant and shop**, if you want live A-vs-B isolation
    proved with production credentials rather than by the test suite. This
    needs a real merchant who agrees to be onboarded — not something to
-   fabricate. `docs/ONBOARDING_A_SHOP.md` and
-   `scripts/verify/onboard_second_shop.sh` do the work once they exist.
+   fabricate.
+
+   **The mechanics are no longer your problem.** In the admin app,
+   **Marketplace → Merchants & Shops** now registers the business, walks it
+   through review, opens the storefront, and puts the owner's account on its
+   staff list. `docs/ONBOARDING_A_SHOP.md` is the reference for what those
+   buttons send, and `scripts/verify/onboard_second_shop.sh` still does the
+   whole thing over HTTP and then attacks the wall between the new shop and
+   Shop #1. What remains yours is the merchant.
 
 2. **A phone, and the APK.** `build-apk` produces one on every CI run.
    Install it and walk the customer journey, the merchant back office and the
