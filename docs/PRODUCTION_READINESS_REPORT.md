@@ -137,6 +137,21 @@ VPS command. Verified directly:
 `extensions`** — the production layout — which is how the bug was reproduced
 in the first place.
 
+**Search is indexed there, not merely working.** Moving the extension between
+schemas rewrites the opclass reference in every dependent index, so the four
+GIN indexes on `products` became
+`USING gin (name extensions.gin_trgm_ops)` and are still chosen by the
+planner:
+
+```
+explain select id from products where name % 'basmati'
+  ->  Bitmap Index Scan on idx_products_name_trgm
+```
+
+That distinction matters: a fix that made the operator resolve but left the
+query on a sequential scan would have turned a 500 into a slow page, which is
+harder to notice and worse under load.
+
 ### The deploy verifies what it shipped
 
 `.github/workflows/production-smoke.yml` runs the 38-check smoke suite from a
