@@ -129,8 +129,24 @@ public class ShopLifecycleService {
             return null;
         });
 
+        // INSIDE THE NEW SHOP'S SCOPE, and that is not tidiness - it is the
+        // whole bug this line was written to fix.
+        //
+        // grant() sets the membership's shop explicitly, but TenantEntityListener
+        // stamps every shop-owned row on the way to the database and the scope
+        // on the thread wins. The admin app sends X-Shop-Id on every request
+        // once a shop is selected - and in the admin app one always is - so
+        // this ran with the scope narrowed to the shop the PHONE was pointed
+        // at, and the new shop's staff row was written with that shop's id
+        // instead. It collided with the row already there on uk_shop_staff and
+        // came back as the generic "that conflicts with something that already
+        // exists", which named nothing and pointed nowhere.
+        //
+        // Saying which shop this row is for is the caller's job, so it is said
+        // here rather than left to whatever the request happened to carry.
         if (merchant.getOwnerCustomerId() != null) {
-            membership.grant(saved.getId(), merchant.getOwnerCustomerId(), true);
+            TenantContext.runWithin(TenantScope.ofShop(saved.getId()),
+                    () -> membership.grant(saved.getId(), merchant.getOwnerCustomerId(), true));
         }
         return saved;
     }

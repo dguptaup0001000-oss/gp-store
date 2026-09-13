@@ -58,6 +58,7 @@ class OneScreenOnboardingTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private PlatformOnboardingService onboarding;
+    @Autowired private ShopLifecycleService shopLifecycle;
     @Autowired private MerchantRepository merchants;
     @Autowired private ShopRepository shops;
     @Autowired private JdbcTemplate jdbc;
@@ -115,6 +116,94 @@ class OneScreenOnboardingTest {
         madeShops.clear();
         madeMerchants.clear();
         madeCustomers.clear();
+    }
+
+    @Test
+    @DisplayName("the admin app sends X-Shop-Id, and opening a shop must survive it")
+    void openingAShopWhileTheAppIsPointedAtAnotherOne() throws Exception {
+        String tag = tag();
+        // WHAT THE PHONE ACTUALLY SENDS. ApiClient attaches X-Shop-Id to
+        // every non-auth request once a shop is selected, and in the admin
+        // app one always is - the account's home shop. So the platform
+        // console's "open a shop" arrives with the header naming a DIFFERENT,
+        // already-existing shop, which narrows a platform admin's scope to
+        // that shop for the whole request.
+        //
+        // Nothing in the tests reached this: they all call the service
+        // directly, in platform scope, with no header at all.
+        var first = onboardOne("Header Sender " + tag, tag + "@example.test");
+
+        mockMvc.perform(post("/api/platform/shops")
+                        .with(authentication(platformOwner()))
+                        .header("X-Shop-Id", String.valueOf(first.shopId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "merchantId", first.merchantId(),
+                                "code", "hdr-" + tag,
+                                "displayName", "Branch Two",
+                                "latitude", 26.7606,
+                                "longitude", 83.3732,
+                                "maxDeliveryRadiusKm", 15,
+                                "timeZone", "Asia/Kolkata"))))
+                .andExpect(status().isOk());
+
+        Long opened = jdbc.queryForObject(
+                "SELECT id FROM shops WHERE code = ?", Long.class, "hdr-" + tag);
+        assertNotNull(opened, "the shop must exist after a 200");
+        madeShops.add(opened);
+
+        // THE SETTINGS MUST BELONG TO THE NEW SHOP, not to the one the header
+        // named. A row stamped with the header's shop collides with that
+        // shop's existing row on uk_store_operations_settings_shop, and the
+        // refusal reaches the phone as the generic "that already exists".
+        Integer ops = jdbc.queryForObject(
+                "SELECT count(*) FROM store_operations_settings WHERE shop_id = ?",
+                Integer.class, opened);
+        assertEquals(1, ops, "the new shop needs its own operating settings");
+        Integer pricing = jdbc.queryForObject(
+                "SELECT count(*) FROM delivery_pricing_settings WHERE shop_id = ?",
+                Integer.class, opened);
+        assertEquals(1, pricing, "the new shop needs its own delivery pricing");
+    }
+
+    @Test
+    @DisplayName("a merchant whose owner already has a home shop can open a second one")
+    void aSecondShopUnderAnOwnerWhoIsAlreadySomewhere() {
+        String tag = tag();
+        // THE PRODUCTION SHAPE, and the reason this test exists. The first
+        // shop makes its owner's HOME shop - open() grants them a default
+        // shop_staff row so a new storefront is not one nobody can sign in
+        // to. Opening the SECOND shop then runs grant() again for an account
+        // that already holds a default, and uk_shop_staff_one_default is a
+        // unique index over (customer_id) WHERE is_default AND active.
+        //
+        // Every fixture that opens ONE shop misses this entirely: its owner
+        // had no home shop when grant ran. On the live marketplace, the only
+        // merchant that exists has an owner who has had one since the day the
+        // shop opened, so the first thing the platform owner ever tried was
+        // exactly this.
+        var first = onboardOne("Already Trading " + tag, tag + "@example.test");
+
+        Shop second = shopLifecycle.open(first.merchantId(), "second-" + tag,
+                "Second Branch", 26.7606, 83.3732, new BigDecimal("15.0"), "Asia/Kolkata");
+        madeShops.add(second.getId());
+
+        assertEquals(first.merchantId(), second.getMerchantId());
+
+        // THE OWNER KEEPS THE HOME THEY WERE WORKING IN. A second branch is
+        // not a relocation, and nobody asked to be moved.
+        Long home = jdbc.queryForObject(
+                "SELECT shop_id FROM shop_staff WHERE customer_id = ? AND active IS TRUE "
+                        + "AND is_default IS TRUE", Long.class, first.ownerCustomerId());
+        assertEquals(first.shopId(), home,
+                "opening a second shop must not move the owner out of their first");
+
+        // And they are on the new shop's staff, or the branch has nobody.
+        Integer onSecond = jdbc.queryForObject(
+                "SELECT count(*) FROM shop_staff WHERE shop_id = ? AND customer_id = ? "
+                        + "AND active IS TRUE", Integer.class, second.getId(), first.ownerCustomerId());
+        assertEquals(1, onSecond,
+                "the owner must be able to work in the branch that was just opened for them");
     }
 
     @Test
