@@ -306,7 +306,7 @@ not have signed in.
 cd backend && mvn clean verify
 
 # flutter
-# last run: 811 tests passing, analyze at its 41-info baseline, no warnings
+# last run: 805 tests passing, analyze at its 41-info baseline, no warnings
 cd frontend && flutter analyze && flutter test
 ```
 
