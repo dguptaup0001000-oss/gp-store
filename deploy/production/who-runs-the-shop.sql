@@ -135,3 +135,24 @@ SELECT
       WHERE st.shop_id = s.id AND st.active IS TRUE) AS staff_rows
   FROM shops s
  ORDER BY s.id;
+
+\echo '--- every unique index on the tables opening a shop writes to ---'
+-- WHY THIS IS WORTH ASKING. A database that has been migrated for a year is
+-- not the same shape as one built from the migrations this morning, and an
+-- index left behind by an older release is invisible from the application:
+-- nothing in the code knows it is there, so nothing pre-checks it, and the
+-- refusal arrives as the generic "that already exists".
+--
+-- Compare this list against a freshly built schema. Anything here that is
+-- not there is the answer.
+SELECT
+    t.relname                              AS table_name,
+    i.relname                              AS index_name,
+    pg_get_indexdef(ix.indexrelid)         AS definition
+  FROM pg_index ix
+  JOIN pg_class i ON i.oid = ix.indexrelid
+  JOIN pg_class t ON t.oid = ix.indrelid
+ WHERE ix.indisunique
+   AND t.relname IN ('shops', 'shop_staff', 'merchants',
+                     'store_operations_settings', 'delivery_pricing_settings')
+ ORDER BY t.relname, i.relname;
