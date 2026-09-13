@@ -103,13 +103,20 @@ public class PlatformMerchantController {
 
     // ------------------------------------------------------------ merchants
 
-    public record MerchantView(Long id, String legalName, String displayName, String contactPhone,
+    public record MerchantView(Long id,
+                               /** M-000001. For reading aloud, never for deciding (§3). */
+                               String merchantRef,
+                               String legalName, String displayName, String contactPhone,
                                String contactEmail, MerchantStatus status, String statusReason,
-                               Long ownerCustomerId, Boolean isDemo, Boolean active) {
+                               Long ownerCustomerId, Boolean isDemo, Boolean active,
+                               java.time.LocalDateTime createdAt,
+                               java.time.LocalDateTime updatedAt) {
         static MerchantView of(Merchant m) {
-            return new MerchantView(m.getId(), m.getLegalName(), m.getDisplayName(),
+            return new MerchantView(m.getId(), com.gpstore.platform.PublicIds.merchant(m.getId()),
+                    m.getLegalName(), m.getDisplayName(),
                     m.getContactPhone(), m.getContactEmail(), m.getStatus(), m.getStatusReason(),
-                    m.getOwnerCustomerId(), m.getIsDemo(), m.getActive());
+                    m.getOwnerCustomerId(), m.getIsDemo(), m.getActive(),
+                    m.getCreatedAt(), m.getUpdatedAt());
         }
     }
 
@@ -117,6 +124,30 @@ public class PlatformMerchantController {
                                           String contactEmail, Long ownerCustomerId, Boolean demo) {}
 
     public record StatusChangeRequest(String status, String reason) {}
+
+    /**
+     * One merchant and every shop under it (§53, §54).
+     *
+     * ONE CALL, BECAUSE THE QUESTION IS ONE QUESTION. "Deepak Enterprises,
+     * three shops, one of them paused" is what the platform owner is actually
+     * looking at, and assembling it from two endpoints on the client means a
+     * screen that can show a merchant beside somebody else's shops for as long
+     * as the second request is in flight.
+     *
+     * THE SHOPS ARE READ BY MERCHANT ID FROM THE DATABASE, not filtered from a
+     * list the caller sent. There is nothing here a client could point at
+     * another merchant's storefronts.
+     */
+    @GetMapping("/merchants/{merchantId}/detail")
+    public MerchantDetail merchantDetail(@PathVariable Long merchantId) {
+        Merchant merchant = merchantLifecycle.byId(merchantId);
+        List<ShopView> theirShops = shopLifecycle.forMerchant(merchantId).stream()
+                .map(ShopView::of)
+                .toList();
+        return new MerchantDetail(MerchantView.of(merchant), theirShops, theirShops.size());
+    }
+
+    public record MerchantDetail(MerchantView merchant, List<ShopView> shops, int shopCount) {}
 
     @GetMapping("/merchants")
     public List<MerchantView> merchants() {
@@ -144,10 +175,18 @@ public class PlatformMerchantController {
 
     // ---------------------------------------------------------------- shops
 
-    public record ShopView(Long id, Long merchantId, String code, String displayName,
+    public record ShopView(Long id,
+                           /** S-000001. Beside shops.code, not instead of it (§43). */
+                           String shopRef,
+                           Long merchantId,
+                           /** M-000001, so a shop names its merchant without a second call. */
+                           String merchantRef,
+                           String code, String displayName,
                            ShopStatus status, String statusReason, Boolean isDemo, Boolean active) {
         static ShopView of(Shop s) {
-            return new ShopView(s.getId(), s.getMerchantId(), s.getCode(), s.getDisplayName(),
+            return new ShopView(s.getId(), com.gpstore.platform.PublicIds.shop(s.getId()),
+                    s.getMerchantId(), com.gpstore.platform.PublicIds.merchant(s.getMerchantId()),
+                    s.getCode(), s.getDisplayName(),
                     s.getStatus(), s.getStatusReason(), s.getIsDemo(), s.getActive());
         }
     }

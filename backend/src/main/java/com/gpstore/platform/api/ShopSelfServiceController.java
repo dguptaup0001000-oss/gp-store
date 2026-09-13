@@ -150,6 +150,66 @@ public class ShopSelfServiceController {
     }
 
     /**
+     * The BUSINESS behind the shops, which is not the same thing as a shop.
+     *
+     * WHY THIS IS SEPARATE (§12, §63). A merchant's identity - who owns it,
+     * what the platform has verified, whether the account is in good standing
+     * - belongs to the merchant and not to any one of its storefronts.
+     * Folding it into the shop profile would mean a business with three
+     * kiranas answering the question "who are you" three times and possibly
+     * differently, and would put merchant-level standing on a screen that
+     * shop staff open all day.
+     *
+     * ONLY THE OWNER. §12 says merchant-level information must not leak to
+     * shop staff, and the check is ownership of the merchant rather than a
+     * permission, deliberately: an ORDER_MANAGER at one of the shops holds
+     * plenty of shop permissions and has no business reading the merchant's
+     * standing with the platform. The owner is the account the merchant row
+     * names, which nothing a client sends can change.
+     *
+     * NO SECRETS. There is no password here and no activation code - those
+     * are shown once when they are created and stored only as hashes, so
+     * there is nothing for this route to return even if it wanted to.
+     */
+    @GetMapping("/merchant")
+    public MerchantProfile merchantProfile() {
+        Shop shop = currentShop();
+        Long merchantId = shop.getMerchantId();
+        com.gpstore.platform.Merchant merchant = merchantId == null ? null
+                : merchants.findById(merchantId).orElse(null);
+        if (merchant == null) {
+            throw new com.gpstore.exception.ResourceNotFoundException(
+                    "This shop is not attached to a merchant.");
+        }
+        Long me = currentUser.customerId();
+        if (me == null || !me.equals(merchant.getOwnerCustomerId())) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Only the merchant's owner may see the business account.");
+        }
+        List<com.gpstore.platform.Shop> theirs = shops.findByMerchantId(merchant.getId());
+        return new MerchantProfile(
+                merchant.getId(),
+                com.gpstore.platform.PublicIds.merchant(merchant.getId()),
+                merchant.getLegalName(), merchant.getDisplayName(),
+                merchant.getContactName(), merchant.getContactEmail(), merchant.getContactPhone(),
+                merchant.getStatus(), merchant.getStatusReason(),
+                merchant.getCreatedAt(), theirs.size());
+    }
+
+    /**
+     * A merchant, as its own owner sees it.
+     *
+     * Shop count rather than the shops themselves: which shops exist is
+     * already answered, with the switcher's own view of status and operability,
+     * by /api/shop/my-shops. Two lists of the same thing drift.
+     */
+    public record MerchantProfile(Long id, String merchantRef,
+                                  String legalName, String displayName,
+                                  String contactName, String contactEmail, String contactPhone,
+                                  com.gpstore.platform.MerchantStatus status, String statusReason,
+                                  java.time.LocalDateTime createdAt, int shopCount) {}
+
+    /**
      * Every shop this account may work in, and which one it is working in now.
      *
      * <p>WHAT THE SWITCHER NEEDS, and the missing half of §4. One merchant
