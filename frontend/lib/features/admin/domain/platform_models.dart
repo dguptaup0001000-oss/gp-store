@@ -26,6 +26,9 @@ class MerchantView with _$MerchantView {
     int? ownerCustomerId,
     bool? isDemo,
     bool? active,
+
+    /// M-000001. Derived server-side for reading aloud, never for deciding.
+    String? merchantRef,
   }) = _MerchantView;
 
   // Required by freezed for the getter below: a class that adds anything of
@@ -49,10 +52,38 @@ class PlatformShopView with _$PlatformShopView {
     String? statusReason,
     bool? isDemo,
     bool? active,
+
+    /// S-000001, beside the merchant's own shop code rather than instead of it.
+    String? shopRef,
+    String? merchantRef,
   }) = _PlatformShopView;
 
   factory PlatformShopView.fromJson(Map<String, dynamic> json) =>
       _$PlatformShopViewFromJson(json);
+}
+
+/// One merchant and every shop under it, as `MerchantDetail` sends it.
+///
+/// ONE CALL, BECAUSE THE QUESTION IS ONE QUESTION. "Deepak Enterprises, three
+/// shops, one of them paused" is what the platform owner is looking at.
+/// Assembling it from the two list endpoints on this side means a screen that
+/// can show one merchant beside another merchant's shops for as long as the
+/// second request is in flight - and the shops here were read by merchant id
+/// on the server, not filtered from a list this app sent.
+@freezed
+class PlatformMerchantDetail with _$PlatformMerchantDetail {
+  const factory PlatformMerchantDetail({
+    required MerchantView merchant,
+    @Default([]) List<PlatformShopView> shops,
+
+    /// Sent separately from `shops.length` and trusted over it: the server
+    /// counted, and a count taken from a list this app truncated for display
+    /// would quietly under-report a merchant's storefronts.
+    @Default(0) int shopCount,
+  }) = _PlatformMerchantDetail;
+
+  factory PlatformMerchantDetail.fromJson(Map<String, dynamic> json) =>
+      _$PlatformMerchantDetailFromJson(json);
 }
 
 /// One shop's trading, in the marketplace roll-up.
@@ -120,6 +151,13 @@ class OpenedStaffAccount with _$OpenedStaffAccount {
 
     /// Shown once. There is no route that returns it again.
     String? oneTimePassword,
+
+    /// The fifteen characters for the first login, also shown once.
+    ///
+    /// NULL ON A PASSWORD RESET, because a reset replaces the password and
+    /// leaves the code alone - and null on a reissue's password half, for the
+    /// mirror-image reason. Each call hands back only what it actually minted.
+    String? activationCode,
   }) = _OpenedStaffAccount;
 
   factory OpenedStaffAccount.fromJson(Map<String, dynamic> json) =>
@@ -146,6 +184,12 @@ class OnboardedMerchant with _$OnboardedMerchant {
 
     /// Shown once. There is no route that returns it again.
     String? oneTimePassword,
+
+    /// The other half of the first sign-in, and shown once for the same
+    /// reason. WITHOUT THIS THE PASSWORD IS NOT ENOUGH - a merchant handed
+    /// only the password cannot get in at all - so the two travel together
+    /// from the server to the dialog to the person typing them.
+    String? activationCode,
   }) = _OnboardedMerchant;
 
   factory OnboardedMerchant.fromJson(Map<String, dynamic> json) =>

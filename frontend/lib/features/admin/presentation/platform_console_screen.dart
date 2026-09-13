@@ -4,9 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../admin/design/admin_components.dart';
 import '../../../core/api/error_messages.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../domain/merchant_transitions.dart';
 import '../domain/platform_models.dart';
+import 'platform_merchant_detail_screen.dart';
 import 'platform_onboarding_forms.dart';
 import 'platform_providers.dart';
+import 'platform_shop_card.dart';
 
 /// Running the marketplace: who is on it, and whether they may trade.
 ///
@@ -123,7 +126,7 @@ class _PlatformConsoleScreenState extends ConsumerState<PlatformConsoleScreen>
       builder: (_) => const PlatformOnboardMerchantDialog(),
     );
     if (opened == null || !mounted) return;
-    _say(
+    platformSay(
       context,
       '${opened.businessName ?? 'Merchant'} is approved and shop '
       '"${opened.shopCode ?? opened.shopId}" is open. Once they have put '
@@ -140,7 +143,7 @@ class _PlatformConsoleScreenState extends ConsumerState<PlatformConsoleScreen>
     // SAYS WHAT HAPPENS NEXT, because what happened is not what the owner
     // wanted: they wanted a shop, and they have a business in APPLICATION
     // that cannot hold one yet.
-    _say(
+    platformSay(
       context,
       '${created.displayName ?? created.legalName ?? 'Merchant'} registered as '
       '${created.status ?? 'APPLICATION'}. Approve it before opening a shop.',
@@ -162,7 +165,7 @@ class _PlatformConsoleScreenState extends ConsumerState<PlatformConsoleScreen>
     try {
       merchants = await ref.read(platformMerchantsProvider.future);
     } catch (error) {
-      if (mounted) _say(context, extractErrorMessage(error));
+      if (mounted) platformSay(context, extractErrorMessage(error));
       return;
     }
     if (!mounted) return;
@@ -171,7 +174,7 @@ class _PlatformConsoleScreenState extends ConsumerState<PlatformConsoleScreen>
       builder: (_) => PlatformShopFormDialog(merchants: merchants),
     );
     if (created == null || !mounted) return;
-    _say(
+    platformSay(
       context,
       '${created.displayName ?? created.code ?? 'Shop'} opened as '
       '${created.status ?? 'DRAFT'}. Stock it, set its hours, then open it on '
@@ -186,6 +189,24 @@ class _MerchantsTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final merchantsAsync = ref.watch(platformMerchantsProvider);
+    // HOW MANY SHOPS EACH BUSINESS HAS, counted from the list the Shops tab
+    // already loads rather than by asking per merchant. One extra request for
+    // the whole screen, cached, against one request per card - and the answer
+    // the platform owner is looking for ("who has more than one?") needs every
+    // merchant's count at once anyway.
+    //
+    // A SEPARATE `.when` DELIBERATELY NOT USED. The merchant list is what this
+    // tab is for; if the shop list is still loading or refused, every card
+    // still draws and simply says nothing about shops, rather than the whole
+    // tab failing over a subtitle.
+    final shopsByMerchant = <int, int>{};
+    for (final shop in ref.watch(platformShopsProvider).valueOrNull ??
+        const <PlatformShopView>[]) {
+      final owner = shop.merchantId;
+      if (owner != null) {
+        shopsByMerchant[owner] = (shopsByMerchant[owner] ?? 0) + 1;
+      }
+    }
 
     return merchantsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -195,15 +216,20 @@ class _MerchantsTab extends ConsumerWidget {
         onRetry: () => ref.invalidate(platformMerchantsProvider),
       ),
       data: (merchants) => RefreshIndicator(
-        onRefresh: () async => ref.invalidate(platformMerchantsProvider),
+        onRefresh: () async {
+          ref.invalidate(platformMerchantsProvider);
+          ref.invalidate(platformShopsProvider);
+        },
         child: merchants.isEmpty
             ? const _Empty(message: 'No merchants yet.')
             : ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: merchants.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) =>
-                    _MerchantCard(merchant: merchants[index]),
+                itemBuilder: (context, index) => _MerchantCard(
+                  merchant: merchants[index],
+                  shopCount: shopsByMerchant[merchants[index].id],
+                ),
               ),
       ),
     );
@@ -211,22 +237,16 @@ class _MerchantsTab extends ConsumerWidget {
 }
 
 class _MerchantCard extends ConsumerWidget {
-  const _MerchantCard({required this.merchant});
+  const _MerchantCard({required this.merchant, this.shopCount});
 
   final MerchantView merchant;
 
-  /// The moves the platform can make on a business, in the order a reviewer
-  /// meets them. Mirrors MerchantStatus; the backend re-checks the value and
-  /// refuses anything it does not know.
-  static const _statuses = [
-    'PENDING_REVIEW',
-    'VERIFICATION_REQUIRED',
-    'APPROVED',
-    'ACTIVE',
-    'SUSPENDED',
-    'REJECTED',
-    'REMOVED',
-  ];
+  /// Null while the shop list has not arrived (or was refused), which is why
+  /// the line is omitted rather than shown as zero: "no shops" and "not known
+  /// yet" are different answers and only one of them is a problem.
+  final int? shopCount;
+
+  List<String> get _offered => MerchantTransitions.from(merchant.status);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -236,36 +256,53 @@ class _MerchantCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _Fact(label: 'Status', value: merchant.status ?? 'Unknown'),
+          if (merchant.merchantRef != null)
+            PlatformFact(label: 'Merchant ID', value: merchant.merchantRef!),
+          PlatformFact(label: 'Status', value: merchant.status ?? 'Unknown'),
           if (merchant.statusReason != null)
-            _Fact(label: 'Reason', value: merchant.statusReason!),
+            PlatformFact(label: 'Reason', value: merchant.statusReason!),
           if (merchant.contactPhone != null)
-            _Fact(label: 'Phone', value: merchant.contactPhone!),
+            PlatformFact(label: 'Phone', value: merchant.contactPhone!),
           if (merchant.contactEmail != null)
-            _Fact(label: 'Email', value: merchant.contactEmail!),
+            PlatformFact(label: 'Email', value: merchant.contactEmail!),
           if (merchant.ownerCustomerId != null)
-            _Fact(label: 'Owner account', value: '${merchant.ownerCustomerId}'),
+            PlatformFact(label: 'Owner account', value: '${merchant.ownerCustomerId}'),
+          // ON THE CARD, not only on the detail screen. Whether a business runs
+          // one shop or four changes what suspending it does, and the list is
+          // where that decision usually gets made.
+          if (shopCount != null)
+            PlatformFact(
+                label: 'Shops', value: shopCount == 1 ? '1' : '$shopCount'),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final status in _statuses)
-                if (status != merchant.status)
-                  OutlinedButton(
-                    onPressed: hapticize(() => _move(context, ref, status)),
-                    child: Text(_label(status)),
-                  ),
-              // THE ONLY RECOVERY for a merchant who cannot get in. There is
-              // deliberately no route that reads their current password, so
-              // "I lost it" and "it leaked" have the same answer: issue a
-              // new one and end every session the old one holds.
-              if (merchant.ownerCustomerId != null)
-                TextButton.icon(
-                  onPressed: hapticize(() => _resetOwnerPassword(context, ref)),
-                  icon: const Icon(Icons.key_outlined, size: 18),
-                  label: const Text('Reset password'),
+              // THE WAY IN TO THE SHOPS THEMSELVES. A merchant with several
+              // storefronts cannot show them all on a list card without the
+              // card becoming the screen, so the card says how many and this
+              // opens them.
+              OutlinedButton.icon(
+                onPressed: hapticize(() => _open(context)),
+                icon: const Icon(Icons.storefront_outlined, size: 18),
+                label: const Text('Shops'),
+              ),
+              for (final status in _offered)
+                OutlinedButton(
+                  onPressed: hapticize(() => _move(context, ref, status)),
+                  child: Text(MerchantTransitions.label(status)),
                 ),
+              if (_offered.isEmpty)
+                const Text(
+                  'This business is closed. Its records stay.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              // GETTING THE OWNER BACK IN, when they never received a secret
+              // or lost one. Neither button reads the old one back - both are
+              // stored as hashes - so the only answer is a new one.
+              if (merchant.ownerCustomerId != null)
+                MerchantOwnerRecovery(
+                    ownerCustomerId: merchant.ownerCustomerId!),
             ],
           ),
         ],
@@ -273,61 +310,15 @@ class _MerchantCard extends ConsumerWidget {
     );
   }
 
-  Future<void> _resetOwnerPassword(BuildContext context, WidgetRef ref) async {
-    final owner = merchant.ownerCustomerId;
-    if (owner == null) return;
-    // ASKED FIRST, because this is destructive in a way the other buttons
-    // here are not: it ends the merchant's sessions and the password they
-    // chose stops working. Doing that by a mis-tap while they are mid-order
-    // is worth one confirmation.
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Reset their password?'),
-        content: const Text(
-          'They will be signed out everywhere and the password they chose '
-          'will stop working. You get a new one-time password to hand over, '
-          'shown once.',
-          style: TextStyle(fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Reset'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !context.mounted) return;
-
-    try {
-      final opened = await ref
-          .read(platformRepositoryProvider)
-          .resetStaffPassword(customerId: owner);
-      if (!context.mounted) return;
-      await showOneTimePassword(context, opened);
-    } catch (error) {
-      if (context.mounted) _say(context, extractErrorMessage(error));
-    }
+  void _open(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => PlatformMerchantDetailScreen(merchantId: merchant.id),
+    ));
   }
 
-  static String _label(String status) => switch (status) {
-        'APPROVED' => 'Approve',
-        'ACTIVE' => 'Let them trade',
-        'SUSPENDED' => 'Suspend',
-        'REJECTED' => 'Reject',
-        'REMOVED' => 'Remove',
-        'PENDING_REVIEW' => 'Send for review',
-        'VERIFICATION_REQUIRED' => 'Ask for documents',
-        _ => status,
-      };
-
   Future<void> _move(BuildContext context, WidgetRef ref, String status) async {
-    final reason = await _askForReason(context, _label(status));
+    final reason =
+        await askPlatformReason(context, MerchantTransitions.label(status));
     if (reason == null || !context.mounted) return;
     try {
       await ref.read(platformRepositoryProvider).setMerchantStatus(
@@ -339,9 +330,10 @@ class _MerchantCard extends ConsumerWidget {
       // A merchant's status decides whether its shops may trade, so the shop
       // list is stale the moment this returns.
       ref.invalidate(platformShopsProvider);
-      if (context.mounted) _say(context, 'Merchant moved to $status.');
+      ref.invalidate(platformMerchantDetailProvider(merchant.id));
+      if (context.mounted) platformSay(context, 'Merchant moved to $status.');
     } catch (error) {
-      if (context.mounted) _say(context, extractErrorMessage(error));
+      if (context.mounted) platformSay(context, extractErrorMessage(error));
     }
   }
 }
@@ -368,95 +360,10 @@ class _ShopsTab extends ConsumerWidget {
                 padding: const EdgeInsets.all(16),
                 itemCount: shops.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) => _ShopCard(shop: shops[index]),
+                itemBuilder: (context, index) => PlatformShopCard(shop: shops[index]),
               ),
       ),
     );
-  }
-}
-
-class _ShopCard extends ConsumerWidget {
-  const _ShopCard({required this.shop});
-
-  final PlatformShopView shop;
-
-  /// Mirrors ShopStatus. CLOSED is terminal on the server, and is offered
-  /// last for that reason.
-  static const _statuses = ['DRAFT', 'ACTIVE', 'PAUSED', 'SUSPENDED', 'CLOSED'];
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return AdminSectionCard(
-      title: shop.displayName ?? 'Shop ${shop.id}',
-      subtitle: shop.code,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _Fact(label: 'Status', value: shop.status ?? 'Unknown'),
-          if (shop.statusReason != null)
-            _Fact(label: 'Reason', value: shop.statusReason!),
-          if (shop.merchantId != null)
-            _Fact(label: 'Merchant', value: '${shop.merchantId}'),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final status in _statuses)
-                if (status != shop.status)
-                  OutlinedButton(
-                    onPressed: hapticize(() => _move(context, ref, status)),
-                    child: Text(_label(status)),
-                  ),
-              // BESIDE THE STATUS MOVES, because it belongs to the same job
-              // and is the step most easily missed. A shop whose merchant was
-              // registered without an owner account has no staff at all, and
-              // nothing about the shop looks wrong until somebody tries to
-              // sign in to it.
-              TextButton.icon(
-                onPressed: hapticize(() => _addStaff(context, ref)),
-                icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
-                label: const Text('Staff'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _addStaff(BuildContext context, WidgetRef ref) async {
-    final added = await showDialog<bool>(
-      context: context,
-      builder: (_) => PlatformStaffDialog(shop: shop),
-    );
-    if (added != true || !context.mounted) return;
-    _say(context, 'Added to this shop\u2019s staff.');
-  }
-
-  static String _label(String status) => switch (status) {
-        'ACTIVE' => 'Open on the marketplace',
-        'PAUSED' => 'Pause',
-        'SUSPENDED' => 'Suspend',
-        'CLOSED' => 'Close for good',
-        'DRAFT' => 'Back to draft',
-        _ => status,
-      };
-
-  Future<void> _move(BuildContext context, WidgetRef ref, String status) async {
-    final reason = await _askForReason(context, _label(status));
-    if (reason == null || !context.mounted) return;
-    try {
-      await ref.read(platformRepositoryProvider).setShopStatus(
-            shopId: shop.id,
-            status: status,
-            reason: reason.isEmpty ? null : reason,
-          );
-      ref.invalidate(platformShopsProvider);
-      if (context.mounted) _say(context, 'Shop moved to $status.');
-    } catch (error) {
-      if (context.mounted) _say(context, extractErrorMessage(error));
-    }
   }
 }
 
@@ -483,18 +390,18 @@ class _OverviewTab extends ConsumerWidget {
               title: 'The market, last 30 days',
               child: Column(
                 children: [
-                  _Fact(
+                  PlatformFact(
                       label: 'Orders',
                       value: '${overview.totals?.orderCount ?? 0}'),
-                  _Fact(
+                  PlatformFact(
                     label: 'Gross sales',
                     value: '₹${(overview.totals?.grossSales ?? 0).toStringAsFixed(0)}',
                   ),
-                  _Fact(
+                  PlatformFact(
                     label: 'Refunds',
                     value: '₹${(overview.totals?.refunds ?? 0).toStringAsFixed(0)}',
                   ),
-                  _Fact(label: 'Shops trading', value: '${overview.shops.length}'),
+                  PlatformFact(label: 'Shops trading', value: '${overview.shops.length}'),
                 ],
               ),
             ),
@@ -510,12 +417,12 @@ class _OverviewTab extends ConsumerWidget {
                   title: 'Shop ${line.shopId}',
                   child: Column(
                     children: [
-                      _Fact(label: 'Orders', value: '${line.orderCount}'),
-                      _Fact(
+                      PlatformFact(label: 'Orders', value: '${line.orderCount}'),
+                      PlatformFact(
                         label: 'Gross sales',
                         value: '₹${line.grossSales.toStringAsFixed(0)}',
                       ),
-                      _Fact(
+                      PlatformFact(
                         label: 'Refunds',
                         value: '₹${line.refunds.toStringAsFixed(0)}',
                       ),
@@ -528,44 +435,6 @@ class _OverviewTab extends ConsumerWidget {
       ),
     );
   }
-}
-
-/// Asks why, before anything is changed.
-///
-/// Returns null when the reviewer backs out, an empty string when they went
-/// ahead without typing one - which the repository turns into no reason at
-/// all rather than an empty one.
-Future<String?> _askForReason(BuildContext context, String action) {
-  final controller = TextEditingController();
-  return showDialog<String>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: Text(action),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        decoration: const InputDecoration(
-          labelText: 'Reason',
-          hintText: 'Shown to the merchant, and kept',
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
-          child: const Text('Confirm'),
-        ),
-      ],
-    ),
-  );
-}
-
-void _say(BuildContext context, String message) {
-  ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(content: Text(message)));
 }
 
 class _Failed extends StatelessWidget {
@@ -604,33 +473,6 @@ class _Empty extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(32),
       children: [Center(child: Text(message))],
-    );
-  }
-}
-
-class _Fact extends StatelessWidget {
-  const _Fact({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 13)),
-          Flexible(
-            child: Text(value,
-                textAlign: TextAlign.right,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
     );
   }
 }

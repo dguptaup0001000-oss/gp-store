@@ -370,6 +370,7 @@ class _PlatformOnboardMerchantDialogState
             email: opened.ownerEmail,
             role: 'ADMIN',
             oneTimePassword: opened.oneTimePassword,
+            activationCode: opened.activationCode,
           ));
       if (!mounted) return;
       Navigator.of(context).pop(opened);
@@ -871,6 +872,7 @@ class _PlatformStaffDialogState extends ConsumerState<PlatformStaffDialog> {
 Future<void> showOneTimePassword(
     BuildContext context, OpenedStaffAccount account) {
   final password = account.oneTimePassword ?? '';
+  final code = account.activationCode ?? '';
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
@@ -881,16 +883,35 @@ Future<void> showOneTimePassword(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'This password is shown once and cannot be looked up again. If '
-              'you lose it, use Reset password on the merchant to issue a '
-              'new one.',
-              style: TextStyle(fontSize: 13),
+            Text(
+              code.isEmpty
+                  ? 'This password is shown once and cannot be looked up '
+                      'again. If you lose it, use Reset password on the '
+                      'merchant to issue a new one.'
+                  : 'These are shown once and cannot be looked up again. If '
+                      'either is lost, issue a new one from the merchant - '
+                      'there is no way to read the old one back.',
+              style: const TextStyle(fontSize: 13),
             ),
             const SizedBox(height: 16),
             _Handover(label: 'Login', value: account.email ?? '—'),
-            const SizedBox(height: 8),
-            _Handover(label: 'One-time password', value: password, mono: true),
+            if (password.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _Handover(label: 'One-time password', value: password, mono: true),
+            ],
+            // THE SECOND HALF OF THE FIRST LOGIN. Both halves travel together
+            // or the merchant cannot get in at all - which is exactly why they
+            // are on one screen with one "I've saved it".
+            if (code.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _Handover(label: 'Activation code', value: code, mono: true),
+              const SizedBox(height: 8),
+              const Text(
+                'The activation code is needed only for their FIRST sign-in. '
+                'After that they use their email and password.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
             const SizedBox(height: 16),
             const Text(
               'They must set their own password before the app will let them '
@@ -902,17 +923,27 @@ Future<void> showOneTimePassword(
         ),
       ),
       actions: [
-        if (password.isNotEmpty)
+        if (password.isNotEmpty || code.isNotEmpty)
           TextButton.icon(
             onPressed: hapticize(() async {
-              await Clipboard.setData(ClipboardData(text: password));
+              // BOTH HALVES IN ONE COPY, because they are useless apart: a
+              // merchant sent only the password cannot sign in, and a second
+              // copy-paste is a second chance to send the wrong thing.
+              final buffer = StringBuffer();
+              if (account.email != null) buffer.writeln(account.email);
+              if (password.isNotEmpty) buffer.writeln(password);
+              if (code.isNotEmpty) buffer.writeln(code);
+              await Clipboard.setData(
+                  ClipboardData(text: buffer.toString().trim()));
               if (!dialogContext.mounted) return;
               ScaffoldMessenger.of(dialogContext).showSnackBar(
-                const SnackBar(content: Text('Password copied.')),
+                SnackBar(content: Text(code.isEmpty
+                    ? 'Password copied.'
+                    : 'Login details copied.')),
               );
             }),
             icon: const Icon(Icons.copy_outlined, size: 18),
-            label: const Text('Copy password'),
+            label: Text(code.isEmpty ? 'Copy password' : 'Copy all'),
           ),
         FilledButton(
           onPressed: () => Navigator.of(dialogContext).pop(),

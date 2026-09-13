@@ -24,6 +24,20 @@ class PlatformRepository {
     return MerchantView.fromJson(Map<String, dynamic>.from(response.data as Map));
   }
 
+  /// One merchant and every shop under it, in one call.
+  ///
+  /// THE SHOPS COME BACK KEYED BY THE MERCHANT ON THE SERVER, read by merchant
+  /// id from the database rather than filtered from anything this app sent.
+  /// There is no parameter here a client could point at another merchant's
+  /// storefronts - the only id in the request is the merchant already being
+  /// looked at, and PERM_PLATFORM_ADMIN is what allows looking at any of them.
+  Future<PlatformMerchantDetail> merchantDetail(int merchantId) async {
+    final response =
+        await apiClient.dio.get('/api/platform/merchants/$merchantId/detail');
+    return PlatformMerchantDetail.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
   /// Moves a merchant through its lifecycle.
   ///
   /// THE REASON IS NOT OPTIONAL IN PRACTICE. "Somebody looked at this
@@ -257,5 +271,21 @@ class PlatformRepository {
         .whereType<Map>()
         .map((e) => parse(Map<String, dynamic>.from(e)))
         .toList(growable: false);
+  }
+
+  /// A new activation code, killing the old one (§30).
+  ///
+  /// THERE IS NO "READ THE CODE" CALL, deliberately: it is stored as a
+  /// fingerprint, so "I lost it" and "it leaked" have the same answer.
+  Future<OpenedStaffAccount> reissueActivationCode({
+    required int customerId,
+    String? reason,
+  }) async {
+    final response = await apiClient.dio.post(
+      '/api/platform/staff/$customerId/reissue-activation-code',
+      data: {if (reason != null && reason.isNotEmpty) 'reason': reason},
+    );
+    return OpenedStaffAccount.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
   }
 }
