@@ -54,6 +54,31 @@ class _PlatformConsoleScreenState extends ConsumerState<PlatformConsoleScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('Marketplace'),
+        // ONLY ON THE MERCHANTS TAB, because the one thing in it registers a
+        // business, and an overflow menu that is present on every tab and
+        // holds nothing relevant to two of them is a menu people learn to
+        // ignore.
+        actions: _tabs.index == 0
+            ? [
+                PopupMenuButton<String>(
+                  tooltip: 'More merchant actions',
+                  onSelected: (value) {
+                    if (value == 'register') _registerMerchant();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem<String>(
+                      value: 'register',
+                      child: ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.assignment_outlined),
+                        title: Text('Register a business only'),
+                        subtitle: Text('No login, no shop - paperwork first'),
+                      ),
+                    ),
+                  ],
+                ),
+              ]
+            : null,
         bottom: TabBar(
           controller: _tabs,
           tabs: const [
@@ -71,8 +96,14 @@ class _PlatformConsoleScreenState extends ConsumerState<PlatformConsoleScreen>
       // a disabled one: a button that is present and dead is a worse answer
       // than no button.
       floatingActionButton: switch (_tabs.index) {
+        // ONBOARD, NOT REGISTER. Registering leaves a business in
+        // APPLICATION that cannot hold a shop yet, which is not what anybody
+        // opening this button wants - they want a merchant who can sell.
+        // Registering on its own is still possible - it is in the overflow
+        // menu above, for the case where the papers arrive before the person
+        // who will run the shop does.
         0 => FloatingActionButton.extended(
-            onPressed: hapticize(_registerMerchant),
+            onPressed: hapticize(_onboardMerchant),
             icon: const Icon(Icons.store_mall_directory_outlined),
             label: const Text('Merchant'),
           ),
@@ -83,6 +114,20 @@ class _PlatformConsoleScreenState extends ConsumerState<PlatformConsoleScreen>
           ),
         _ => null,
       },
+    );
+  }
+
+  Future<void> _onboardMerchant() async {
+    final opened = await showDialog<OnboardedMerchant>(
+      context: context,
+      builder: (_) => const PlatformOnboardMerchantDialog(),
+    );
+    if (opened == null || !mounted) return;
+    _say(
+      context,
+      '${opened.businessName ?? 'Merchant'} is approved and shop '
+      '"${opened.shopCode ?? opened.shopId}" is open. Once they have put '
+      'stock up, press Let them trade.',
     );
   }
 

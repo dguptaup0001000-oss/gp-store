@@ -423,13 +423,23 @@ else in this report was done.
    needs a real merchant who agrees to be onboarded — not something to
    fabricate.
 
-   **The mechanics are no longer your problem, including the login.** In the
-   admin app, **Marketplace → Merchants & Shops** now opens the merchant's
-   `ADMIN` account, registers the business, walks it through review, opens the
-   storefront, and puts that account on its staff list. Registering a merchant
-   hands you a **one-time password** to pass on; the merchant must replace it
-   before the app will let them do anything, and after that your copy is dead.
-   That last part is what makes their actions their own in a dispute.
+   **The mechanics are one form now, including the login.** The **Merchant**
+   button on **Merchants & Shops** asks for six things — business name,
+   owner's name, owner's email, owner's phone, the shop's pin pasted from
+   Google Maps, and how far it delivers — and `POST /api/platform/onboard`
+   opens the owner's `ADMIN` account, registers the business, walks it through
+   review to `APPROVED` with the reason recorded, and opens their shop, in one
+   transaction. Either all of that happened or none of it did; there is no
+   half-onboarded merchant to clean up.
+
+   It hands you a **one-time password** to pass on; the merchant must replace
+   it before the app will let them do anything, and after that your copy is
+   dead. That last part is what makes their actions their own in a dispute.
+
+   **It stops short of trading, deliberately.** The shop opens with empty
+   shelves, so it is not findable yet — the merchant signs in, puts stock up,
+   and then you press **Let them trade**. `GET /api/shop/readiness` is what
+   tells them what is still missing.
 
    Until this existed, no API could make an account an `ADMIN` — the only role
    ever assigned in code was `DELIVERY_BOY` — so this step meant SQL on the

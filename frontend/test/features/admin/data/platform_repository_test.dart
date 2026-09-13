@@ -82,6 +82,92 @@ void main() {
       expect(merchant.isTrading, isFalse);
     });
 
+    test('onboarding sends one request for what used to take five', () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? sent;
+      var calls = 0;
+      adapter.on('POST', '/api/platform/onboard', (options) {
+        calls++;
+        sent = Map<String, dynamic>.from(options.data as Map);
+        return const FakeResponse({
+          'merchantId': 9,
+          'businessName': 'Sharma Kirana',
+          'shopId': 7,
+          'shopCode': 'SHARMA-KIRANA',
+          'ownerCustomerId': 55,
+          'ownerEmail': 'ravi@sharmakirana.test',
+          'oneTimePassword': 'k7Rmq3xTbYw9Zc',
+        });
+      });
+
+      final opened =
+          await PlatformRepository(apiClient: buildTestApiClient(adapter))
+              .onboardMerchant(
+        businessName: 'Sharma Kirana',
+        ownerName: 'Ravi Sharma',
+        ownerEmail: 'ravi@sharmakirana.test',
+        ownerPhone: '9876543210',
+        latitude: 26.7606,
+        longitude: 83.3732,
+        maxDeliveryRadiusKm: 5,
+      );
+
+      // ONE CALL, AND THAT IS THE POINT. Opening a login, registering a
+      // business, sending it to review, approving it and opening a shop were
+      // five requests from here, and a failure at any of them left a
+      // half-onboarded merchant nobody could finish or undo from this screen.
+      // Server-side they are one transaction.
+      expect(calls, 1);
+      expect(sent!['businessName'], 'Sharma Kirana');
+      expect(sent!['ownerEmail'], 'ravi@sharmakirana.test');
+      expect(sent!['latitude'], 26.7606);
+      expect(sent!['maxDeliveryRadiusKm'], 5);
+      expect(sent!.containsKey('status'), isFalse,
+          reason: 'THE LIFECYCLE IS STILL THE SERVER\'S. The merchant reaches '
+              'APPROVED by being walked through PENDING_REVIEW with a reason '
+              'recorded, not by this form naming an end state');
+      expect(opened.shopId, 7);
+      expect(opened.ownerCustomerId, 55);
+      expect(opened.oneTimePassword, 'k7Rmq3xTbYw9Zc');
+      expect(opened.shopCode, 'SHARMA-KIRANA',
+          reason: 'the code was derived server-side from the business name, '
+              'so the console has to show what it became rather than what was '
+              'asked for');
+    });
+
+    test('onboarding leaves out what was not filled in, rather than sending blanks',
+        () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? sent;
+      adapter.on('POST', '/api/platform/onboard', (options) {
+        sent = Map<String, dynamic>.from(options.data as Map);
+        return const FakeResponse({
+          'merchantId': 9,
+          'shopId': 7,
+          'ownerCustomerId': 55,
+        });
+      });
+
+      await PlatformRepository(apiClient: buildTestApiClient(adapter))
+          .onboardMerchant(
+        businessName: 'Sharma Kirana',
+        ownerName: 'Ravi Sharma',
+        ownerEmail: 'ravi@sharmakirana.test',
+        ownerPhone: '',
+        latitude: 26.7606,
+        longitude: 83.3732,
+        maxDeliveryRadiusKm: 5,
+      );
+
+      // An empty phone sent as "" would be stored as a blank number that
+      // collides with the next merchant onboarded the same way - the column
+      // is UNIQUE, so the second one is refused for a number nobody typed.
+      expect(sent!.containsKey('ownerPhone'), isFalse);
+      expect(sent!.containsKey('shopCode'), isFalse,
+          reason: 'no code given means the server derives one from the '
+              'business name; an empty string would be a code');
+    });
+
     test('opening a shop names its merchant and cannot name its status', () async {
       final adapter = FakeHttpClientAdapter();
       Map<String, dynamic>? sent;

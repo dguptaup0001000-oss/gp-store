@@ -125,6 +125,52 @@ class PlatformRepository {
         Map<String, dynamic>.from(response.data as Map));
   }
 
+  /// Onboards a merchant in ONE call: login, business, review, shop.
+  ///
+  /// WHY NOT FIVE CALLS FROM HERE. Opening a merchant by hand is a staff
+  /// login, a business, two status transitions and a shop. Done from the
+  /// phone that is five round trips with four places to stop halfway, and
+  /// every stop leaves something real behind - a login nobody can use, a
+  /// business stuck in APPLICATION, a merchant with no shop. The server does
+  /// it in one transaction, so the answer is a merchant who can be handed
+  /// their password, or nothing.
+  ///
+  /// [latitude], [longitude] and [maxDeliveryRadiusKm] are REQUIRED here
+  /// though openShop allows them to be null: the marketplace matches
+  /// customers to shops by distance, so a shop without them looks finished
+  /// and is offered to nobody.
+  ///
+  /// It stops short of letting them trade. The shop has empty shelves, and a
+  /// findable shop with nothing to sell is worse than one not yet findable.
+  Future<OnboardedMerchant> onboardMerchant({
+    required String businessName,
+    required String ownerName,
+    required String ownerEmail,
+    String? ownerPhone,
+    String? shopCode,
+    required double latitude,
+    required double longitude,
+    required double maxDeliveryRadiusKm,
+    String? timeZone,
+  }) async {
+    final response = await apiClient.dio.post(
+      '/api/platform/onboard',
+      data: {
+        'businessName': businessName,
+        'ownerName': ownerName,
+        'ownerEmail': ownerEmail,
+        if (ownerPhone != null && ownerPhone.isNotEmpty) 'ownerPhone': ownerPhone,
+        if (shopCode != null && shopCode.isNotEmpty) 'shopCode': shopCode,
+        'latitude': latitude,
+        'longitude': longitude,
+        'maxDeliveryRadiusKm': maxDeliveryRadiusKm,
+        if (timeZone != null && timeZone.isNotEmpty) 'timeZone': timeZone,
+      },
+    );
+    return OnboardedMerchant.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
   /// Opens a storefront under an already-approved merchant.
   ///
   /// ARRIVES AS `DRAFT`, deliberately: a shop is built before it sells, and

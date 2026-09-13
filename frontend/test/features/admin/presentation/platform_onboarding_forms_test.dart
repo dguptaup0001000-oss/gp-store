@@ -248,6 +248,170 @@ void main() {
     });
   });
 
+  group('onboarding a merchant in one screen', () {
+    // THE ONE FIELD THAT IS NOT A NAME. Everything else on the form is typed
+    // straight out of a conversation; this one is pasted, and a pin that is
+    // wrong in a way nobody notices puts a real shop somewhere it will never
+    // be found by the distance search that decides who is offered it.
+    group('the pin', () {
+      ({double lat, double lng})? parse(String raw) =>
+          PlatformOnboardMerchantDialog.parseLocation(raw);
+
+      test('takes exactly what Google Maps copies', () {
+        final where = parse('26.7606, 83.3732');
+        expect(where!.lat, 26.7606);
+        expect(where.lng, 83.3732);
+      });
+
+      test('a space instead of a comma still works', () {
+        // Both are what actually lands on a clipboard, and refusing one of
+        // them would look like the field was broken.
+        expect(parse('26.7606 83.3732')!.lng, 83.3732);
+        expect(parse('  26.7606,83.3732  ')!.lat, 26.7606);
+      });
+
+      test('negatives survive, because half the world is one', () {
+        final where = parse('-33.8688, 151.2093');
+        expect(where!.lat, -33.8688);
+        expect(where.lng, 151.2093);
+      });
+
+      test('one number is not a place', () {
+        expect(parse('26.7606'), isNull);
+        expect(parse(''), isNull);
+        expect(parse('26.7606, 83.3732, 40'), isNull);
+      });
+
+      test('words are not coordinates', () {
+        expect(parse('near the bus stand'), isNull);
+        expect(parse('26.7606, north'), isNull);
+      });
+
+      test('a pair that is not a place on Earth is refused', () {
+        expect(parse('91, 20'), isNull, reason: 'no latitude past 90');
+        expect(parse('-90.1, 20'), isNull);
+        expect(parse('20, 181'), isNull, reason: 'no longitude past 180');
+        expect(parse('20, -180.5'), isNull);
+      });
+
+      test('the poles and the meridian are inside the range, not outside', () {
+        // An exclusive bound would refuse 90/180 outright. They are real
+        // coordinates, and a parser that rejected its own limits would be a
+        // bug nobody hits until somebody does.
+        expect(parse('90, 180'), isNotNull);
+        expect(parse('-90, -180'), isNotNull);
+        expect(parse('0, 0'), isNotNull);
+      });
+
+      test('the halves swapped are NOT caught here, and cannot be', () {
+        // 83.3732, 26.7606 is the mistake somebody actually makes, and it
+        // parses: it is a real pin, off the north coast of Greenland. Nothing
+        // in a range check can tell it from a deliberate one, so this is
+        // recorded rather than asserted away - the form's job is to make the
+        // swap unlikely by taking ONE pasted string instead of two fields
+        // somebody fills in by hand, not to detect it afterwards.
+        final swapped = parse('83.3732, 26.7606');
+        expect(swapped, isNotNull);
+        expect(swapped!.lat, 83.3732);
+      });
+    });
+
+    testWidgets('it says what the owner is actually getting', (tester) async {
+      await tester.pumpWidget(host(const PlatformOnboardMerchantDialog()));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('one-time password'), findsOneWidget);
+      // AND WHAT THEY ARE NOT GETTING. The shop opens with empty shelves, so
+      // an owner who expects a trading storefront and checks for it would
+      // find nothing and assume this failed.
+      expect(find.textContaining('not trading yet'), findsOneWidget,
+          reason: 'the shop cannot sell until the merchant puts stock up, and '
+              'the form has to say so before it is submitted');
+      expect(find.textContaining('Let them trade'), findsOneWidget);
+    });
+
+    testWidgets('nothing is sent without a business name', (tester) async {
+      await tester.pumpWidget(host(const PlatformOnboardMerchantDialog()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Onboard'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('The business needs a name'), findsOneWidget);
+    });
+
+    testWidgets('a phone number typed into the email field is caught here',
+        (tester) async {
+      await tester.pumpWidget(host(const PlatformOnboardMerchantDialog()));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextFormField, 'Business name *'), 'Sharma Kirana');
+      await tester.enterText(
+          find.widgetWithText(TextFormField, "Owner's name *"), 'Ravi Sharma');
+      await tester.enterText(
+          find.widgetWithText(TextFormField, "Owner's email *"), '9876543210');
+      await tester.tap(find.text('Onboard'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('That is not an email address'), findsOneWidget);
+    });
+
+    testWidgets('an unparseable pin stops the form rather than the server',
+        (tester) async {
+      await tester.pumpWidget(host(const PlatformOnboardMerchantDialog()));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextFormField, 'Business name *'), 'Sharma Kirana');
+      await tester.enterText(
+          find.widgetWithText(TextFormField, "Owner's name *"), 'Ravi Sharma');
+      await tester.enterText(find.widgetWithText(TextFormField, "Owner's email *"),
+          'ravi@sharmakirana.test');
+      await tester.enterText(
+          find.widgetWithText(TextFormField, 'Shop location *'), 'near the mandi');
+      await tester.tap(find.text('Onboard'));
+      await tester.pumpAndSettle();
+
+      // _save() reads parseLocation(...)! - a form that submitted with an
+      // unparseable pin would throw on the bang rather than say anything.
+      expect(find.text('Paste a latitude and longitude, like 26.7606, 83.3732'),
+          findsOneWidget);
+    });
+
+    testWidgets('a delivery radius of zero is refused', (tester) async {
+      await tester.pumpWidget(host(const PlatformOnboardMerchantDialog()));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextFormField, 'Business name *'), 'Sharma Kirana');
+      await tester.enterText(
+          find.widgetWithText(TextFormField, "Owner's name *"), 'Ravi Sharma');
+      await tester.enterText(find.widgetWithText(TextFormField, "Owner's email *"),
+          'ravi@sharmakirana.test');
+      await tester.enterText(
+          find.widgetWithText(TextFormField, 'Shop location *'), '26.7606, 83.3732');
+      await tester.enterText(
+          find.widgetWithText(TextFormField, 'Delivers up to (km) *'), '0');
+      await tester.tap(find.text('Onboard'));
+      await tester.pumpAndSettle();
+
+      // A radius of zero is a shop nobody is ever near enough to order from,
+      // which is indistinguishable from the shop being broken.
+      expect(find.text('Must be more than zero'), findsOneWidget);
+    });
+
+    testWidgets('the radius starts at a number rather than empty',
+        (tester) async {
+      await tester.pumpWidget(host(const PlatformOnboardMerchantDialog()));
+      await tester.pumpAndSettle();
+
+      // Six fields is the whole point of this screen; one of them having a
+      // sensible default makes it five.
+      expect(find.text('5'), findsOneWidget);
+    });
+  });
+
   group('handing the password over', () {
     /// The dialog the console shows once, and never again.
     Future<void> showIt(WidgetTester tester, OpenedStaffAccount account) async {

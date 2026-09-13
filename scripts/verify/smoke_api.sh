@@ -239,6 +239,14 @@ check "POST /api/platform/staff (mints an ADMIN login)" 403 \
   "$BASE/api/platform/staff"
 check "POST /api/platform/staff/1/reset-password" 403 \
   -X POST "${AUTH[@]}" "$BASE/api/platform/staff/1/reset-password"
+# THE ONE-SCREEN ROUTE IS THE SAME DANGER IN ONE CALL. /api/platform/onboard
+# opens an ADMIN login, approves a business and opens a shop in a single
+# request, so a missing rule here is every hole the two above would be, plus
+# a merchant. Exact 403, for the same reason: 404 would mean not deployed.
+check "POST /api/platform/onboard (mints an ADMIN login and an approved shop)" 403 \
+  -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"businessName":"Smoke Probe Stores","ownerName":"Smoke Probe","ownerEmail":"smoke-probe-onboard@example.invalid","latitude":26.7606,"longitude":83.3732,"maxDeliveryRadiusKm":5}' \
+  "$BASE/api/platform/onboard"
 
 say "IDOR: naming somebody else's row does not fetch it"
 # Not 200. 403 or 404 are both correct - refusing to say whether the row
