@@ -13,6 +13,8 @@ ROWS = (
     ("Customer", "gpstore-customer-armv7.apk", "ARMv7 / armeabi-v7a"),
     ("Admin", "gpstore-admin-release.apk", "ARM64 / arm64-v8a"),
     ("Admin", "gpstore-admin-armv7.apk", "ARMv7 / armeabi-v7a"),
+    ("Super Admin", "gpstore-superadmin-release.apk", "ARM64 / arm64-v8a"),
+    ("Super Admin", "gpstore-superadmin-armv7.apk", "ARMv7 / armeabi-v7a"),
     ("Worker", "gpstore-worker-arm64.apk", "ARM64 / arm64-v8a"),
     ("Worker", "gpstore-worker-armv7.apk", "ARMv7 / armeabi-v7a"),
 )
@@ -34,7 +36,10 @@ def main() -> int:
             finally:
                 sys.argv = ["report_apk_artifacts.py", "--self-test"]
             sha_files = list(d.glob("*.apk.sha256"))
-            if rc != 0 or len(sha_files) != 6:
+            # len(ROWS), not a literal: adding an app to the table must not
+            # need this number edited too, and a stale literal here would
+            # report a row that never rendered as a pass.
+            if rc != 0 or len(sha_files) != len(ROWS):
                 print("self-test failed", rc, len(sha_files), file=sys.stderr)
                 return 1
             print("report_apk_artifacts.py self-test ok")

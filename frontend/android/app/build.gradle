@@ -11,6 +11,28 @@ plugins {
 def workerSlim = (System.getenv("GPSTORE_WORKER_SLIM") ?: "0") == "1"
 def workerApplicationId = (project.findProperty("gpstore.applicationId") ?: "").toString()
 def workerApk = workerSlim || workerApplicationId == "com.gpstore.worker"
+
+// THE SUPER ADMIN APK HAS NO FIREBASE CLIENT, AND MUST NOT NEED ONE.
+//
+// The google-services plugin resolves a client entry for the variant's
+// applicationId and fails the build outright when there is none ("No matching
+// client found for package name"). in.gpstore.superadmin is not in the
+// Firebase project, and adding it would be a console change only the owner
+// can make - so a build of this flavor would be red until they made it.
+//
+// It does not need one. Push in this project carries NEW_ORDER and
+// ORDER_STATUS for a shop; the platform owner does not run a shop from this
+// app. PushAvailability.firebaseReady stays false, and
+// PushNotificationService.start() is already a no-op in that state.
+//
+// Read from the requested task names rather than a flag somebody has to
+// remember: `flutter build apk --flavor superadmin` runs
+// assembleSuperadminRelease, and a bundle runs bundleSuperadminRelease.
+// If this ever stops matching, the failure is the loud google-services
+// error above, not a silently Firebase-less build of another flavor.
+def requestedTasks = gradle.startParameter.taskNames.join(" ").toLowerCase()
+def superAdminApk = requestedTasks.contains("superadmin")
+def noFirebaseClient = workerApk || superAdminApk
 // Cloned in.gpstore.customer / admin clients are not in the Firebase
 // project. The Crashlytics Gradle plugin then uploads mappings and
 // gets HTTP 400, failing assembleRelease. Apply it only after both
@@ -18,7 +40,7 @@ def workerApk = workerSlim || workerApplicationId == "com.gpstore.worker"
 // operator sets CRASHLYTICS_MAPPING_UPLOAD=1. Runtime Crashlytics
 // (the Dart plugin) does not need this Gradle plugin.
 def crashlyticsMappingUpload = (System.getenv("CRASHLYTICS_MAPPING_UPLOAD") ?: "0") == "1"
-if (!workerApk) {
+if (!noFirebaseClient) {
     // Needs android/app/google-services.json to exist (see
     // FIREBASE_SETUP.md) - without it, this line makes the build fail
     // loudly with a clear "File google-services.json is missing" error
@@ -98,6 +120,21 @@ android {
             dimension "app"
             applicationId "com.gpstore.worker"
             resValue "string", "app_name", "GP-STORE Worker"
+        }
+        // The platform owner's own app. A SEPARATE applicationId, so it
+        // installs alongside GP-STORE Admin rather than replacing it - a
+        // merchant and the platform owner can be signed in on the same phone
+        // during onboarding, which is exactly when both are needed.
+        //
+        // NOT A SECURITY BOUNDARY, and nothing here pretends otherwise:
+        // /api/platform/** is gated on PERM_PLATFORM_ADMIN server-side, so a
+        // merchant who sideloads this APK gets 403 on every screen in it.
+        // What the split buys is a home screen that IS the platform console
+        // and an icon that says which hat you are wearing.
+        superadmin {
+            dimension "app"
+            applicationId "in.gpstore.superadmin"
+            resValue "string", "app_name", "GP-STORE Super Admin"
         }
     }
 
@@ -192,7 +229,7 @@ def disableCrashlyticsUpload = { task ->
         task.enabled = crashlyticsMappingUpload
     }
 }
-if (!workerApk && !crashlyticsMappingUpload) {
+if (!noFirebaseClient && !crashlyticsMappingUpload) {
     tasks.configureEach { t -> disableCrashlyticsUpload(t) }
 }
 
@@ -207,7 +244,7 @@ gradle.taskGraph.whenReady { graph ->
             + "key.properties.example, or set ALLOW_DEBUG_RELEASE_SIGNING=1 for a "
             + "sideload-only debug-signed APK. Play uploads must never use debug signing.")
     }
-    if (!workerApk && !crashlyticsMappingUpload) {
+    if (!noFirebaseClient && !crashlyticsMappingUpload) {
         graph.allTasks.each { t -> disableCrashlyticsUpload(t) }
     }
 }

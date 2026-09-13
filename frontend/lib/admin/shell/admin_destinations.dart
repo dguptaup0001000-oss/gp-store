@@ -95,6 +95,21 @@ class AdminNav {
     builder: _dashboard,
   );
 
+  /// Named, like [dashboard], because the super admin APK opens on it.
+  ///
+  /// Still listed in the Marketplace group below and still gated on
+  /// platformAdmin - naming it does not grant it. It is a `static const` here
+  /// so SuperAdminRootScreen can hand it to AdminShell as that app's home
+  /// without a second copy of its label, icon and builder to keep in step.
+  static const AdminDestination platformConsole = AdminDestination(
+    id: 'platform',
+    requires: AdminPermission.platformAdmin,
+    label: 'Merchants & Shops',
+    icon: Icons.hub_outlined,
+    description: 'Approve, suspend, and see the whole market',
+    builder: _platform,
+  );
+
   static Widget _dashboard(BuildContext context) => const AdminDashboardScreen();
 
   static Widget _preparation(BuildContext context) =>
@@ -351,16 +366,7 @@ class AdminNav {
     // regardless.
     AdminNavGroup(
       title: 'Marketplace',
-      destinations: [
-        AdminDestination(
-          id: 'platform',
-          requires: AdminPermission.platformAdmin,
-          label: 'Merchants & Shops',
-          icon: Icons.hub_outlined,
-          description: 'Approve, suspend, and see the whole market',
-          builder: _platform,
-        ),
-      ],
+      destinations: [platformConsole],
     ),
   ];
 

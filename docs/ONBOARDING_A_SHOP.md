@@ -10,12 +10,19 @@ This is the sequence a real merchant goes through. Every step is an API call a
 platform administrator or the merchant themselves actually makes. There is no
 seeding script in the happy path and no SQL.
 
-> **Steps 0–5 are a screen now.** In the admin app, **Marketplace →
-> Merchants & Shops** (the last group in the sidebar, visible only to
-> `SUPER_ADMIN`) opens the merchant's login, registers the merchant, walks it
-> through review, opens a shop under it, and puts an account on that shop's
-> staff list. The API calls below are what those buttons send, and remain the
-> reference — but opening a real shop no longer needs a terminal.
+> **Steps 0–5 are a screen now — and it is the first screen of its own app.**
+> **GP-STORE Super Admin** (`gpstore-superadmin-release.apk`,
+> `in.gpstore.superadmin`) opens on **Merchants & Shops**: it opens the
+> merchant's login, registers the merchant, walks it through review, opens a
+> shop under it, and puts an account on that shop's staff list. The API calls
+> below are what those buttons send, and remain the reference — but opening a
+> real shop no longer needs a terminal.
+>
+> The same screen is still reachable in **GP-STORE Admin** under
+> **Marketplace → Merchants & Shops**, as the last group in the sidebar and
+> only for an account holding `PERM_PLATFORM_ADMIN`. Being last in a sidebar
+> inside an app whose home screen is one shop's trading day is exactly why the
+> separate APK exists.
 >
 > Steps 1–5 had existed and been tested since the marketplace slice; the
 > console only ever *listed* merchants and shops and moved them between
@@ -55,6 +62,35 @@ and `GET /api/shop/readiness` is the only screen that says so.
 
 **Until step 12 the storefront returns 404,** not 403. Whether a particular
 shop exists but is suspended is between the platform and that merchant.
+
+---
+
+## Which app each person installs
+
+| App | applicationId | Who | Opens on |
+|---|---|---|---|
+| GP-STORE | `in.gpstore.customer` | Shoppers | The shop |
+| **GP-STORE Super Admin** | `in.gpstore.superadmin` | **The platform owner, only** | **Merchants & Shops** |
+| GP-STORE Admin | `in.gpstore.admin` | A merchant and their staff | That shop's dashboard |
+| GP-STORE Worker | `com.gpstore.worker` | Riders | Today's packing list |
+
+Four applicationIds, so all four install side by side — which matters during
+onboarding, when the owner and the merchant are often sitting at the same
+counter with one phone each.
+
+**None of this is a security boundary, and none of it is meant to be.** Every
+route is gated server-side on the signed-in account's live role:
+`/api/platform/**` needs `PERM_PLATFORM_ADMIN`, a permission `RolePermissions`
+builds every shop role by *subtracting*. A merchant who sideloads the Super
+Admin APK is refused by the backend on every screen in it. What the split buys
+is a home screen that is the right one and an icon that says which hat you are
+wearing.
+
+The Super Admin app has **no push notifications and no Play bundle**, both on
+purpose. Every notification this project sends is about one shop's order, and
+this is not the app anybody runs a shop from; and a Play listing for the
+platform owner's own console is not something to produce by accident. It is
+sideloaded from the CI artifact.
 
 ---
 
