@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'shop_switcher_bar.dart';
 
 import '../../core/util/haptic_widgets.dart';
 import '../dashboard/admin_dashboard_screen.dart';
@@ -107,6 +108,15 @@ class _AdminShellState extends State<AdminShell> {
         ),
         title: Text(_home.label, style: AdminText.sectionTitle),
         actions: _headerActions(context),
+        // WHICH SHOP AM I IN. Renders nothing at all for a merchant with one
+        // shop, so the single-shop app is untouched (§59); appears the moment
+        // there are two, because from then on a merchant who thinks they are
+        // in GP Store and is actually in Deepak Hardware will change the wrong
+        // prices and not find out until a customer complains (§64).
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(0),
+          child: ShopSwitcherBar(),
+        ),
       ),
       drawer: Drawer(
         backgroundColor: AdminColors.sidebar,

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/marketplace/shop_context.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../data/shop_self_service_repository.dart';
 import '../domain/shop_admin_models.dart';
@@ -29,4 +30,25 @@ final myShopEarningsProvider =
 
 final myShopOpenWorkProvider = FutureProvider<Map<String, int>>((ref) {
   return ref.watch(shopSelfServiceRepositoryProvider).openWork();
+});
+
+/// Every shop this account may work in, and which it is acting for.
+///
+/// WATCHES shopContextProvider so that switching shop re-asks. Two things
+/// change when a merchant switches: which shop the server answers for, and
+/// which entry the switcher shows a tick beside. Both come from this call, so
+/// both are the server's answer rather than the app's memory of one.
+final myShopsProvider = FutureProvider<MyShops>((ref) {
+  ref.watch(shopContextProvider);
+  return ref.watch(shopSelfServiceRepositoryProvider).myShops();
+});
+
+/// The business behind the current shop. Owner only.
+///
+/// autoDispose because most accounts are refused this - a manager, an order
+/// manager - and a cached refusal is not worth holding onto.
+final myMerchantProfileProvider =
+    FutureProvider.autoDispose<MerchantProfile>((ref) {
+  ref.watch(shopContextProvider);
+  return ref.watch(shopSelfServiceRepositoryProvider).merchantProfile();
 });
