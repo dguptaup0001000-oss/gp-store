@@ -119,6 +119,54 @@ class OneScreenOnboardingTest {
     }
 
     @Test
+    @DisplayName("the admin app sends X-Shop-Id, and opening a shop must survive it")
+    void openingAShopWhileTheAppIsPointedAtAnotherOne() throws Exception {
+        String tag = tag();
+        // WHAT THE PHONE ACTUALLY SENDS. ApiClient attaches X-Shop-Id to
+        // every non-auth request once a shop is selected, and in the admin
+        // app one always is - the account's home shop. So the platform
+        // console's "open a shop" arrives with the header naming a DIFFERENT,
+        // already-existing shop, which narrows a platform admin's scope to
+        // that shop for the whole request.
+        //
+        // Nothing in the tests reached this: they all call the service
+        // directly, in platform scope, with no header at all.
+        var first = onboardOne("Header Sender " + tag, tag + "@example.test");
+
+        mockMvc.perform(post("/api/platform/shops")
+                        .with(authentication(platformOwner()))
+                        .header("X-Shop-Id", String.valueOf(first.shopId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "merchantId", first.merchantId(),
+                                "code", "hdr-" + tag,
+                                "displayName", "Branch Two",
+                                "latitude", 26.7606,
+                                "longitude", 83.3732,
+                                "maxDeliveryRadiusKm", 15,
+                                "timeZone", "Asia/Kolkata"))))
+                .andExpect(status().isOk());
+
+        Long opened = jdbc.queryForObject(
+                "SELECT id FROM shops WHERE code = ?", Long.class, "hdr-" + tag);
+        assertNotNull(opened, "the shop must exist after a 200");
+        madeShops.add(opened);
+
+        // THE SETTINGS MUST BELONG TO THE NEW SHOP, not to the one the header
+        // named. A row stamped with the header's shop collides with that
+        // shop's existing row on uk_store_operations_settings_shop, and the
+        // refusal reaches the phone as the generic "that already exists".
+        Integer ops = jdbc.queryForObject(
+                "SELECT count(*) FROM store_operations_settings WHERE shop_id = ?",
+                Integer.class, opened);
+        assertEquals(1, ops, "the new shop needs its own operating settings");
+        Integer pricing = jdbc.queryForObject(
+                "SELECT count(*) FROM delivery_pricing_settings WHERE shop_id = ?",
+                Integer.class, opened);
+        assertEquals(1, pricing, "the new shop needs its own delivery pricing");
+    }
+
+    @Test
     @DisplayName("a merchant whose owner already has a home shop can open a second one")
     void aSecondShopUnderAnOwnerWhoIsAlreadySomewhere() {
         String tag = tag();

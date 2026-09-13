@@ -115,7 +115,32 @@ public final class TenantDefaults {
     public static Long shopIdForNewRow(Long declared, Class<?> entityType) {
         TenantScope scope = TenantContext.current();
         if (scope != null && scope.isSingleShop()) {
-            return scope.requireShopId();
+            Long inScope = scope.requireShopId();
+            // A CONTRADICTION IS A BUG, NOT A PREFERENCE, and resolving it
+            // quietly is how one stayed hidden.
+            //
+            // The scope still wins - code that names a shop must never be able
+            // to write into one the credential does not reach, which is the
+            // property this method exists for. But when the row SAYS which
+            // shop it is for and the thread says a different one, silently
+            // rewriting the row put it somewhere nobody asked for: opening a
+            // shop wrote the new storefront's staff row into whichever shop
+            // the phone's X-Shop-Id happened to name, where it collided with
+            // the row already there and surfaced as a generic conflict that
+            // named nothing.
+            //
+            // Refusing costs a loud failure in the one case that was already
+            // broken, and buys a named one instead of a puzzle.
+            if (declared != null && !declared.equals(inScope)) {
+                throw new IllegalStateException(
+                        "Refusing to insert a " + entityType.getSimpleName() + " for shop "
+                                + declared + " while the work on this thread is scoped to shop "
+                                + inScope + ". One of the two is wrong, and guessing which would "
+                                + "write the row into a shop nobody named. Code that means a "
+                                + "particular shop must say so with "
+                                + "TenantContext.runWithin(TenantScope.ofShop(...), ...).");
+            }
+            return inScope;
         }
         if (declared != null) {
             return declared;
