@@ -21,8 +21,10 @@ import java.util.List;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import org.springframework.http.MediaType;
 
 /**
  * The business is not the shop, and the staff of a shop are not the business.
@@ -173,6 +175,44 @@ class MerchantLevelDataIsNotShopDataTest {
         // shop the credential already permits.
         mockMvc.perform(get("/api/shop/merchant")
                         .header("X-Shop-Id", String.valueOf(theirs.shopId()))
+                        .with(authentication(account(mine.ownerCustomerId(), Role.ADMIN))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("the owner is refused the operator's view of their own business")
+    void theConsoleIsNotForTheMerchant() throws Exception {
+        var made = onboardOne();
+
+        // THEIR OWN MERCHANT ID, their own business, and still 403. Everything
+        // under /api/platform is the marketplace operator's console, and the
+        // merchant reads their business through /api/shop/merchant - which the
+        // test above proves they can. The distinction is not decoration: the
+        // console route takes ANY merchant id, so a shop role that could reach
+        // it could walk every business on the platform by counting upwards.
+        mockMvc.perform(get("/api/platform/merchants/" + made.merchantId() + "/detail")
+                        .header("X-Shop-Id", String.valueOf(made.shopId()))
+                        .with(authentication(account(made.ownerCustomerId(), Role.ADMIN))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("one merchant's owner cannot mint an activation code for another's")
+    void nobodyIssuesSomebodyElseAWayIn() throws Exception {
+        var mine = onboardOne();
+        var theirs = onboardOne();
+
+        // THE WORST THING THE CONSOLE CAN DO, offered to the wrong person. A
+        // reissue overwrites the stored fingerprint, so whoever calls it holds
+        // the only live code for that account - and the account it is aimed at
+        // here belongs to a different business entirely. ADMIN is every
+        // permission a SHOP can grant and it is not enough, because
+        // RolePermissions builds each shop role by subtracting PLATFORM_ADMIN.
+        mockMvc.perform(post("/api/platform/staff/" + theirs.ownerCustomerId()
+                                + "/reissue-activation-code")
+                        .header("X-Shop-Id", String.valueOf(mine.shopId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"they asked me to\"}")
                         .with(authentication(account(mine.ownerCustomerId(), Role.ADMIN))))
                 .andExpect(status().isForbidden());
     }

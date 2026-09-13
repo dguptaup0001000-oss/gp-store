@@ -221,6 +221,12 @@ check "GET /api/platform/governance/actions"         403 "${AUTH[@]}" "$BASE/api
 check "GET /api/platform/overview (platform admin)"   403 "${AUTH[@]}" "$BASE/api/platform/overview"
 check "GET /api/platform/merchants (platform admin)"  403 "${AUTH[@]}" "$BASE/api/platform/merchants"
 check "GET /api/platform/shops (every shop)"          403 "${AUTH[@]}" "$BASE/api/platform/shops"
+# ONE MERCHANT AND EVERY SHOP UNDER IT, addressed by an id the caller picks.
+# The route takes any merchant id, so an unguarded one is not a leak of a
+# single business - it is a way to walk every business on the platform by
+# counting upwards. Exact 403: a 404 would mean it is not deployed at all.
+check "GET /api/platform/merchants/1/detail (a business and its shops)" 403 \
+  "${AUTH[@]}" "$BASE/api/platform/merchants/1/detail"
 check "GET /api/admin/workers (platform admin)"       403 "${AUTH[@]}" "$BASE/api/admin/workers"
 check "GET /api/cancellation-dues/outstanding"       403 "${AUTH[@]}" "$BASE/api/cancellation-dues/outstanding"
 check "GET /api/shop-ratings/manage"                 403 "${AUTH[@]}" "$BASE/api/shop-ratings/manage"

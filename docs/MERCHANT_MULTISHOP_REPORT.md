@@ -160,7 +160,16 @@ rather than truncates, so the millionth shop is not a collision with the first.
 MANAGER of that very shop**, because a permission set is something a shop can
 hand out and ownership is not.
 
-`MerchantLevelDataIsNotShopDataTest` (4 tests).
+`MerchantLevelDataIsNotShopDataTest` (6 tests), which also tries the two
+console routes the Super Admin screens added — merchant detail, and reissue
+activation code — as a shop ADMIN. The second is the one that matters: a
+reissue overwrites the stored fingerprint, so whoever calls it holds the only
+live code for that account, and the test aims it at a *different* merchant's
+owner.
+
+Mutation: widen `/api/platform/**` from `hasAuthority(PLATFORM_ADMIN)` to
+`authenticated()` → both answer **200**, and a merchant could have minted
+themselves a way into a competitor's account.
 
 ### 9. MY SHOPS and the one-tap switcher
 
@@ -293,9 +302,11 @@ not have signed in.
 
 ```bash
 # backend: wipe schema, full Flyway replay, whole suite
+# last run: 1908 tests, 0 failures, 0 errors, 1 skipped
 cd backend && mvn clean verify
 
 # flutter
+# last run: 805 tests passing, analyze at its 41-info baseline, no warnings
 cd frontend && flutter analyze && flutter test
 ```
 
