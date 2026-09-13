@@ -130,7 +130,52 @@ public class AuthService {
             throw new AuthException(INVALID_CREDENTIALS);
         }
 
+        claimWithActivationCodeIfOneIsOutstanding(customer, request.getActivationCode());
+
         return issueTokens(customer);
+    }
+
+    /**
+     * The second factor, on the one login where it matters.
+     *
+     * WHEN THIS APPLIES: the account holds an activation code that has never
+     * been spent. That is true exactly once in an account's life - between the
+     * platform opening it and the merchant claiming it - and it is the window
+     * where the credential is most exposed, because a temporary password has
+     * just travelled to the merchant by whatever means the owner had to hand.
+     *
+     * AFTER THE CLAIM IT IS NEVER ASKED FOR AGAIN (§28). claimedAt is stamped
+     * inside the same transaction as the login that spent it, so a second
+     * attempt with the same code finds it already claimed and falls through to
+     * ordinary email-and-password.
+     *
+     * THE PASSWORD IS CHECKED FIRST, DELIBERATELY. Verifying the code before
+     * the password would let somebody with only a leaked code learn that the
+     * code is valid - a probe that tells an attacker which half of the
+     * credential they are missing. Reaching here means the password was
+     * already right.
+     *
+     * WRONG CODE READS AS WRONG CREDENTIALS. The caller is not told which of
+     * the two was wrong, for the same reason login does not say whether an
+     * email exists.
+     */
+    private void claimWithActivationCodeIfOneIsOutstanding(Customer customer, String typed) {
+        String fingerprint = customer.getActivationCodeHash();
+        boolean outstanding = fingerprint != null && customer.getActivationCodeClaimedAt() == null;
+        if (!outstanding) {
+            return;
+        }
+        if (!com.gpstore.auth.ActivationCodes.matches(typed, fingerprint)) {
+            throw new AuthException(
+                    "This account has not been activated yet. Sign in with the email, the "
+                            + "temporary password and the 15-character activation code you were "
+                            + "given.");
+        }
+        customer.setActivationCodeClaimedAt(java.time.LocalDateTime.now());
+        customerRepository.save(customer);
+        // The snapshot JwtFilter reads caches for two seconds; without this a
+        // claim would not be visible to the very next request.
+        accountStatusService.invalidate(customer.getId());
     }
 
     /** Sends an OTP to this phone number - works whether it's a new or existing customer. */

@@ -1,5 +1,6 @@
 package com.gpstore.platform;
 
+import com.gpstore.auth.ActivationCodes;
 import com.gpstore.auth.PasswordPolicy;
 import com.gpstore.entity.Customer;
 import com.gpstore.entity.Role;
@@ -108,9 +109,22 @@ public class PlatformStaffService {
         this.refreshTokens = refreshTokens;
     }
 
-    /** An account and the one-time password to hand over with it. */
+    /**
+     * An account and the two secrets to hand over with it.
+     *
+     * BOTH ARE SHOWN ONCE AND STORED NOWHERE IN READABLE FORM. The password
+     * exists here and as a bcrypt hash; the activation code exists here and as
+     * a SHA-256 fingerprint. No route returns either afterwards - a lost one
+     * is reissued, not recovered (§30).
+     */
     public record OpenedAccount(Long customerId, String email, String role,
-                                String oneTimePassword) {}
+                                String oneTimePassword, String activationCode) {
+
+        /** Kept so existing callers that never knew about codes still compile. */
+        public OpenedAccount(Long customerId, String email, String role, String oneTimePassword) {
+            this(customerId, email, role, oneTimePassword, null);
+        }
+    }
 
     /**
      * Opens a staff login and returns the only copy of its password.
@@ -174,6 +188,16 @@ public class PlatformStaffService {
         staff.setPassword(passwordEncoder.encode(oneTime));
         staff.setMustChangePassword(Boolean.TRUE);
 
+        // THE SECOND FACTOR FOR THE FIRST LOGIN. A temporary password can be
+        // read over a shoulder or forwarded in a message; the code is what
+        // makes the one login that claims a never-used account require two
+        // things rather than one. It is spent on that login and not asked for
+        // again (§28).
+        String activationCode = freshActivationCode();
+        staff.setActivationCodeHash(ActivationCodes.fingerprint(activationCode));
+        staff.setActivationCodeIssuedAt(java.time.LocalDateTime.now());
+        staff.setActivationCodeClaimedAt(null);
+
         Customer saved = customers.save(staff);
 
         // ROLE AND ID ONLY. The audit trail must record that the platform
@@ -182,7 +206,72 @@ public class PlatformStaffService {
         auditLog.log("STAFF_ACCOUNT_OPENED", "Customer", saved.getId(),
                 "role=" + role.name() + ", mustChangePassword=true");
 
-        return new OpenedAccount(saved.getId(), saved.getEmail(), role.name(), oneTime);
+        return new OpenedAccount(saved.getId(), saved.getEmail(), role.name(), oneTime,
+                activationCode);
+    }
+
+    /**
+     * A code no other account holds.
+     *
+     * THE COLLISION IS NOT THE POINT - with about 87 bits behind it, two
+     * accounts drawing the same code is not something that happens. The point
+     * is that §23 asks for uniqueness to be VERIFIED server-side, and a
+     * uniqueness claim nothing checks is a claim, not a property. The unique
+     * index behind activation_code_hash is the real enforcement; this loop is
+     * what turns its refusal into another draw instead of a 500 in a
+     * shopkeeper's face.
+     */
+    private String freshActivationCode() {
+        for (int attempt = 0; attempt < 10; attempt++) {
+            String candidate = ActivationCodes.generate();
+            if (!customers.existsByActivationCodeHash(ActivationCodes.fingerprint(candidate))) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException(
+                "Could not generate an unused activation code after ten attempts.");
+    }
+
+    /**
+     * Issues a NEW activation code and kills the old one (§30).
+     *
+     * IMMEDIATELY, AND THERE IS ONLY EVER ONE. Overwriting the fingerprint is
+     * what makes the previous code stop working in the same instant - two
+     * live codes would mean a leaked one stays usable after the merchant was
+     * told it had been replaced.
+     *
+     * RE-ARMED, NOT JUST REPLACED. claimedAt is cleared, so the new code has
+     * to be typed on the next login exactly as the first one did; a reissue
+     * that left the account already-claimed would hand over a code that
+     * nothing ever asks for.
+     */
+    @Transactional
+    public OpenedAccount reissueActivationCode(Long customerId, String reason) {
+        Customer staff = customers.findById(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
+        Role role = staff.getRole();
+        if (role == null || !OPENABLE.contains(role)) {
+            throw new BadRequestException(
+                    "Only a staff account opened by the platform has an activation code.");
+        }
+
+        String activationCode = freshActivationCode();
+        staff.setActivationCodeHash(ActivationCodes.fingerprint(activationCode));
+        staff.setActivationCodeIssuedAt(java.time.LocalDateTime.now());
+        staff.setActivationCodeClaimedAt(null);
+        customers.save(staff);
+
+        accountStatus.invalidate(customerId);
+
+        // WHO, WHEN, WHY - AND NOT WHAT. The reason is recorded because a
+        // credential being replaced is exactly the kind of act that has to be
+        // accountable later; the secret is not, because an audit log that
+        // carries secrets is a second place to steal them from.
+        auditLog.log("STAFF_ACTIVATION_CODE_REISSUED", "Customer", customerId,
+                "role=" + role.name() + ", reason="
+                        + (reason == null || reason.isBlank() ? "(none given)" : reason.trim()));
+
+        return new OpenedAccount(customerId, staff.getEmail(), role.name(), null, activationCode);
     }
 
     /**

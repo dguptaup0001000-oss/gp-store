@@ -243,6 +243,13 @@ check "POST /api/platform/staff/1/reset-password" 403 \
 # opens an ADMIN login, approves a business and opens a shop in a single
 # request, so a missing rule here is every hole the two above would be, plus
 # a merchant. Exact 403, for the same reason: 404 would mean not deployed.
+# A CUSTOMER MUST NOT BE ABLE TO REPLACE A MERCHANT'S SECOND FACTOR. Reissuing
+# an activation code kills the old one and mints a new one, so an unguarded
+# route here is a way to lock a merchant out of their own claim and take it.
+check "POST /api/platform/staff/1/reissue-activation-code" 403 \
+  -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"reason":"smoke probe"}' \
+  "$BASE/api/platform/staff/1/reissue-activation-code"
 check "POST /api/platform/onboard (mints an ADMIN login and an approved shop)" 403 \
   -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d '{"businessName":"Smoke Probe Stores","ownerName":"Smoke Probe","ownerEmail":"smoke-probe-onboard@example.invalid","latitude":26.7606,"longitude":83.3732,"maxDeliveryRadiusKm":5}' \

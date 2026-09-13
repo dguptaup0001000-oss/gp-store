@@ -324,6 +324,29 @@ public class PlatformMerchantController {
         return staffService.resetPassword(customerId);
     }
 
+    /**
+     * A new activation code, and the old one stops working immediately (§30).
+     *
+     * WHY THE PLATFORM CAN REPLACE IT BUT NOBODY CAN READ IT. The code is
+     * stored as a fingerprint, so there is no route that could return the
+     * existing one even if somebody wanted to write it. A merchant who lost
+     * theirs before claiming the account is given a new one; the old one dies
+     * in the same instant, because two live codes would mean a leaked one
+     * stays usable after the merchant was told it had been replaced.
+     *
+     * THE REASON IS RECORDED AND THE SECRET IS NOT. A credential being
+     * replaced is exactly the kind of act that has to be accountable later.
+     * An audit log carrying the secret would just be a second place to steal
+     * it from.
+     */
+    @PostMapping("/staff/{customerId}/reissue-activation-code")
+    public PlatformStaffService.OpenedAccount reissueActivationCode(
+            @PathVariable Long customerId,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        String reason = body == null ? null : body.get("reason");
+        return staffService.reissueActivationCode(customerId, reason);
+    }
+
     private static com.gpstore.entity.Role parseStaffRole(String raw) {
         try {
             return com.gpstore.entity.Role.valueOf(
