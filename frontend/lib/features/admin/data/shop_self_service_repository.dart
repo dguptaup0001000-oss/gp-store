@@ -40,4 +40,21 @@ class ShopSelfServiceRepository {
     return data.map((key, value) =>
         MapEntry(key.toString(), value is num ? value.toInt() : 0));
   }
+
+  /// Every shop this account may work in.
+  ///
+  /// ASKED EVERY TIME, NOT REMEMBERED (§33). The authoritative list is the
+  /// server's, and a shop that was taken away must stop appearing the moment
+  /// it is taken away rather than the next time somebody reinstalls.
+  Future<MyShops> myShops() async {
+    final response = await apiClient.dio.get('/api/shop/my-shops');
+    return MyShops.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// The business behind the current shop. Owner only - the server refuses
+  /// anybody else, including a manager of this very shop.
+  Future<MerchantProfile> merchantProfile() async {
+    final response = await apiClient.dio.get('/api/shop/merchant');
+    return MerchantProfile.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
 }

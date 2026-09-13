@@ -31,6 +31,22 @@ public enum MerchantStatus {
     ACTIVE,
 
     /**
+     * Trading has stopped, and nobody is in trouble.
+     *
+     * NOT A SOFTER SUSPENSION, and the difference is the whole reason this
+     * value exists rather than reusing SUSPENDED. A pause is a business
+     * state - a shutter down for Diwali, a kitchen being rebuilt, a merchant
+     * who asked for a month off - and SUSPENDED is an enforcement action the
+     * platform took against them. Recording one as the other puts an
+     * accusation in a merchant's permanent record for closing over a
+     * festival, and that record is what an appeal is argued from.
+     *
+     * A paused merchant keeps their back office: they can still work on the
+     * catalogue they intend to come back with. What stops is trading.
+     */
+    PAUSED,
+
+    /**
      * Temporarily stopped. Reversible on purpose - a suspension that can only
      * be undone by deleting and re-onboarding would cost the merchant their
      * whole history for a fixable problem.
@@ -72,8 +88,16 @@ public enum MerchantStatus {
                     VERIFICATION_REQUIRED, APPROVED, REJECTED, REMOVED);
             case VERIFICATION_REQUIRED -> java.util.EnumSet.of(
                     PENDING_REVIEW, APPROVED, REJECTED, REMOVED);
-            case APPROVED -> java.util.EnumSet.of(ACTIVE, SUSPENDED, REMOVED);
-            case ACTIVE -> java.util.EnumSet.of(SUSPENDED, REMOVED);
+            case APPROVED -> java.util.EnumSet.of(ACTIVE, PAUSED, SUSPENDED, REMOVED);
+            case ACTIVE -> java.util.EnumSet.of(PAUSED, SUSPENDED, REMOVED);
+            // BACK TO ACTIVE, AND STILL SUSPENDABLE. A pause is not a shelter:
+            // a merchant who pauses after an enforcement action was opened
+            // must still be reachable by it.
+            case PAUSED -> java.util.EnumSet.of(ACTIVE, SUSPENDED, REMOVED);
+            // NOT TO PAUSED. Lifting enforcement is a decision to let a
+            // business trade again; routing it through PAUSED would let a
+            // suspension be quietly downgraded to "they are just closed today"
+            // and lose why it happened.
             case SUSPENDED -> java.util.EnumSet.of(ACTIVE, REMOVED);
             // Terminal. A rejected applicant who re-applies gets a new record,
             // so the first decision and its reason stay readable.

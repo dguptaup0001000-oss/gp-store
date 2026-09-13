@@ -106,3 +106,64 @@ class ShopEarnings with _$ShopEarnings {
 
   factory ShopEarnings.fromJson(Map<String, dynamic> json) => _$ShopEarningsFromJson(json);
 }
+
+/// One shop a merchant may work in, as the switcher sees it.
+///
+/// `operable` IS NOT COSMETIC. A shop that is closed, or whose merchant has
+/// been removed, has nothing left to administer - offering it in the switcher
+/// would be offering a screen that errors on arrival. The server decides that,
+/// not the app.
+@freezed
+class ShopChoice with _$ShopChoice {
+  const factory ShopChoice({
+    required int shopId,
+    String? code,
+    String? displayName,
+    String? status,
+    String? logoUrl,
+    @Default(true) bool operable,
+    @Default(false) bool acting,
+  }) = _ShopChoice;
+
+  factory ShopChoice.fromJson(Map<String, dynamic> json) => _$ShopChoiceFromJson(json);
+}
+
+/// Every shop this account may work in, and which one it is working in now.
+///
+/// THE LIST IS THE SERVER'S ANSWER, NEVER A CACHE (§33). A client-held list of
+/// shops is a list that can be stale in the one direction that matters: a shop
+/// that was taken away still showing as available. Asking every time costs one
+/// request and removes a whole class of "why can I still see it".
+@freezed
+class MyShops with _$MyShops {
+  const factory MyShops({
+    @Default(<ShopChoice>[]) List<ShopChoice> shops,
+    int? acting,
+  }) = _MyShops;
+
+  factory MyShops.fromJson(Map<String, dynamic> json) => _$MyShopsFromJson(json);
+}
+
+/// The business behind the shops (§12, §63).
+///
+/// Separate from [ShopProfile] on purpose: a merchant with three kiranas has
+/// one identity and three storefronts, and folding them together would ask the
+/// same business who it is three times.
+@freezed
+class MerchantProfile with _$MerchantProfile {
+  const factory MerchantProfile({
+    required int id,
+    String? merchantRef,
+    String? legalName,
+    String? displayName,
+    String? contactName,
+    String? contactEmail,
+    String? contactPhone,
+    String? status,
+    String? statusReason,
+    @Default(0) int shopCount,
+  }) = _MerchantProfile;
+
+  factory MerchantProfile.fromJson(Map<String, dynamic> json) =>
+      _$MerchantProfileFromJson(json);
+}

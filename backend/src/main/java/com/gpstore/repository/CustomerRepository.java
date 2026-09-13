@@ -49,4 +49,22 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     // is placed, not just the customer who placed it.
     List<Customer> findByRole(Role role);
 
+
+    /**
+     * Whether any account already holds this activation-code fingerprint.
+     *
+     * §23 asks for uniqueness to be verified server-side. The unique index on
+     * the column is the real enforcement; this is what lets the generator draw
+     * again instead of handing a constraint violation to a shopkeeper.
+     */
+    boolean existsByActivationCodeHash(String activationCodeHash);
+
+    /**
+     * The account holding this fingerprint, if any.
+     *
+     * BY FINGERPRINT, NEVER BY CODE. The code is not stored, so there is
+     * nothing here that could return it.
+     */
+    java.util.Optional<com.gpstore.entity.Customer> findByActivationCodeHash(
+            String activationCodeHash);
 }

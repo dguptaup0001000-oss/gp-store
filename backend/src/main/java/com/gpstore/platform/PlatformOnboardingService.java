@@ -75,7 +75,17 @@ public class PlatformOnboardingService {
                                     String shopCode,
                                     Long ownerCustomerId,
                                     String ownerEmail,
-                                    String oneTimePassword) {}
+                                    String oneTimePassword,
+
+                                    /**
+                                     * Shown once, beside the password.
+                                     *
+                                     * Both halves of the first login travel
+                                     * together and are stored nowhere in
+                                     * readable form; a lost one is reissued,
+                                     * not recovered (§30).
+                                     */
+                                    String activationCode) {}
 
     @Transactional
     public OnboardedMerchant onboard(String businessName,
@@ -133,7 +143,8 @@ public class PlatformOnboardingService {
         return new OnboardedMerchant(
                 merchant.getId(), merchant.getDisplayName(),
                 shop.getId(), shop.getCode(),
-                account.customerId(), account.email(), account.oneTimePassword());
+                account.customerId(), account.email(), account.oneTimePassword(),
+                account.activationCode());
     }
 
     /**

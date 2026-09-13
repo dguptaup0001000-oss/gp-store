@@ -69,6 +69,31 @@ private Boolean enabled;
      */
     @Column(name = "must_change_password")
     private Boolean mustChangePassword;
+
+    /**
+     * SHA-256 of the activation code, never the code.
+     *
+     * NULL MEANS "NO CODE", which is the correct description of every account
+     * that existed before activation codes did - including Shop #1's owner -
+     * and is why nothing had to be backfilled. An account with no code signs
+     * in with email and password, exactly as it always has.
+     */
+    @Column(name = "activation_code_hash", length = 64)
+    private String activationCodeHash;
+
+    @Column(name = "activation_code_issued_at")
+    private java.time.LocalDateTime activationCodeIssuedAt;
+
+    /**
+     * When the code was spent.
+     *
+     * THIS IS WHAT MAKES IT ONE-TIME. A claimed code stops authenticating, and
+     * the row is kept rather than cleared so the record can still say the
+     * account was claimed and when - §30 asks for the reissue to be audited,
+     * and an audit trail that cannot see the first claim is half a trail.
+     */
+    @Column(name = "activation_code_claimed_at")
+    private java.time.LocalDateTime activationCodeClaimedAt;
     
     // Same reasoning as cart below: addresses have their own dedicated
     // endpoint (GET /api/addresses/mine, see AddressController), and without
