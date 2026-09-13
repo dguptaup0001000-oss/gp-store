@@ -258,4 +258,20 @@ class PlatformRepository {
         .map((e) => parse(Map<String, dynamic>.from(e)))
         .toList(growable: false);
   }
+
+  /// A new activation code, killing the old one (§30).
+  ///
+  /// THERE IS NO "READ THE CODE" CALL, deliberately: it is stored as a
+  /// fingerprint, so "I lost it" and "it leaked" have the same answer.
+  Future<OpenedStaffAccount> reissueActivationCode({
+    required int customerId,
+    String? reason,
+  }) async {
+    final response = await apiClient.dio.post(
+      '/api/platform/staff/$customerId/reissue-activation-code',
+      data: {if (reason != null && reason.isNotEmpty) 'reason': reason},
+    );
+    return OpenedStaffAccount.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
 }

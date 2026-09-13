@@ -215,18 +215,37 @@ class _MerchantCard extends ConsumerWidget {
 
   final MerchantView merchant;
 
-  /// The moves the platform can make on a business, in the order a reviewer
-  /// meets them. Mirrors MerchantStatus; the backend re-checks the value and
-  /// refuses anything it does not know.
-  static const _statuses = [
-    'PENDING_REVIEW',
-    'VERIFICATION_REQUIRED',
-    'APPROVED',
-    'ACTIVE',
-    'SUSPENDED',
-    'REJECTED',
-    'REMOVED',
-  ];
+  /// The moves that are LEGAL FROM WHERE THIS MERCHANT IS, and only those.
+  ///
+  /// WHY THIS IS NOT A FLAT LIST ANY MORE. It used to offer every status on
+  /// every card, so the platform owner could tap APPROVED on a business still
+  /// in APPLICATION and be told "A merchant cannot go from APPLICATION to
+  /// APPROVED" - a refusal that is correct, arrives after the tap, and
+  /// explains nothing about what to do instead. The answer was PENDING_REVIEW
+  /// first, and nothing on the screen said so.
+  ///
+  /// A MIRROR, NOT THE RULE. MerchantStatus.allowedNext is the rule and the
+  /// server re-checks every transition; this copy exists so the buttons that
+  /// cannot work are not drawn. When the two disagree the server wins and the
+  /// merchant sees a refusal - which is the safe direction for a copy to be
+  /// wrong in, and MerchantTransitionsOfferedTest keeps them in step.
+  static const Map<String, List<String>> _nextFrom = {
+    'APPLICATION': ['PENDING_REVIEW', 'REJECTED', 'REMOVED'],
+    'PENDING_REVIEW': ['VERIFICATION_REQUIRED', 'APPROVED', 'REJECTED', 'REMOVED'],
+    'VERIFICATION_REQUIRED': ['PENDING_REVIEW', 'APPROVED', 'REJECTED', 'REMOVED'],
+    'APPROVED': ['ACTIVE', 'PAUSED', 'SUSPENDED', 'REMOVED'],
+    'ACTIVE': ['PAUSED', 'SUSPENDED', 'REMOVED'],
+    'PAUSED': ['ACTIVE', 'SUSPENDED', 'REMOVED'],
+    // Lifting enforcement lets a business trade again; it does not get
+    // downgraded to "they are just closed today".
+    'SUSPENDED': ['ACTIVE', 'REMOVED'],
+    // Terminal. A re-application is a new merchant record, so the first
+    // decision and its reason stay readable.
+    'REJECTED': <String>[],
+    'REMOVED': <String>[],
+  };
+
+  List<String> get _offered => _nextFrom[merchant.status] ?? const <String>[];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -236,6 +255,8 @@ class _MerchantCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (merchant.merchantRef != null)
+            _Fact(label: 'Merchant ID', value: merchant.merchantRef!),
           _Fact(label: 'Status', value: merchant.status ?? 'Unknown'),
           if (merchant.statusReason != null)
             _Fact(label: 'Reason', value: merchant.statusReason!),
@@ -250,12 +271,16 @@ class _MerchantCard extends ConsumerWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final status in _statuses)
-                if (status != merchant.status)
-                  OutlinedButton(
-                    onPressed: hapticize(() => _move(context, ref, status)),
-                    child: Text(_label(status)),
-                  ),
+              for (final status in _offered)
+                OutlinedButton(
+                  onPressed: hapticize(() => _move(context, ref, status)),
+                  child: Text(_label(status)),
+                ),
+              if (_offered.isEmpty)
+                const Text(
+                  'This business is closed. Its records stay.',
+                  style: TextStyle(fontSize: 12),
+                ),
               // THE ONLY RECOVERY for a merchant who cannot get in. There is
               // deliberately no route that reads their current password, so
               // "I lost it" and "it leaked" have the same answer: issue a
@@ -266,11 +291,40 @@ class _MerchantCard extends ConsumerWidget {
                   icon: const Icon(Icons.key_outlined, size: 18),
                   label: const Text('Reset password'),
                 ),
+              // THE OTHER HALF OF THE FIRST LOGIN. A merchant who lost the
+              // activation code before claiming their account cannot be given
+              // the old one - it is stored as a fingerprint and nothing can
+              // read it back - so the only answer is a new one, which kills
+              // the old in the same instant.
+              if (merchant.ownerCustomerId != null)
+                TextButton.icon(
+                  onPressed: hapticize(() => _reissueCode(context, ref)),
+                  icon: const Icon(Icons.pin_outlined, size: 18),
+                  label: const Text('New activation code'),
+                ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _reissueCode(BuildContext context, WidgetRef ref) async {
+    final owner = merchant.ownerCustomerId;
+    if (owner == null) return;
+    final reason = await _askForReason(context, 'New activation code');
+    if (reason == null || !context.mounted) return;
+    try {
+      final issued = await ref
+          .read(platformRepositoryProvider)
+          .reissueActivationCode(customerId: owner, reason: reason);
+      if (!context.mounted) return;
+      await showOneTimePassword(context, issued);
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(extractErrorMessage(error))));
+    }
   }
 
   Future<void> _resetOwnerPassword(BuildContext context, WidgetRef ref) async {
@@ -319,6 +373,9 @@ class _MerchantCard extends ConsumerWidget {
         'APPROVED' => 'Approve',
         'ACTIVE' => 'Let them trade',
         'SUSPENDED' => 'Suspend',
+        // PAUSE AND SUSPEND MUST NOT READ ALIKE (§57). One is a shutter down
+        // for a festival; the other is an accusation on a permanent record.
+        'PAUSED' => 'Pause trading',
         'REJECTED' => 'Reject',
         'REMOVED' => 'Remove',
         'PENDING_REVIEW' => 'Send for review',

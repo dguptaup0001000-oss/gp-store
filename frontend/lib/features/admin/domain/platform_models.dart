@@ -26,6 +26,9 @@ class MerchantView with _$MerchantView {
     int? ownerCustomerId,
     bool? isDemo,
     bool? active,
+
+    /// M-000001. Derived server-side for reading aloud, never for deciding.
+    String? merchantRef,
   }) = _MerchantView;
 
   // Required by freezed for the getter below: a class that adds anything of
@@ -49,6 +52,10 @@ class PlatformShopView with _$PlatformShopView {
     String? statusReason,
     bool? isDemo,
     bool? active,
+
+    /// S-000001, beside the merchant's own shop code rather than instead of it.
+    String? shopRef,
+    String? merchantRef,
   }) = _PlatformShopView;
 
   factory PlatformShopView.fromJson(Map<String, dynamic> json) =>
@@ -120,6 +127,13 @@ class OpenedStaffAccount with _$OpenedStaffAccount {
 
     /// Shown once. There is no route that returns it again.
     String? oneTimePassword,
+
+    /// The fifteen characters for the first login, also shown once.
+    ///
+    /// NULL ON A PASSWORD RESET, because a reset replaces the password and
+    /// leaves the code alone - and null on a reissue's password half, for the
+    /// mirror-image reason. Each call hands back only what it actually minted.
+    String? activationCode,
   }) = _OpenedStaffAccount;
 
   factory OpenedStaffAccount.fromJson(Map<String, dynamic> json) =>

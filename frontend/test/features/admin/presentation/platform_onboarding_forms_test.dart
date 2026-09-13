@@ -464,6 +464,53 @@ void main() {
               'without a reset');
     });
 
+    testWidgets('both halves of the first login are shown together',
+        (tester) async {
+      await showIt(tester, const OpenedStaffAccount(
+        customerId: 55,
+        email: 'ravi@sharmakirana.test',
+        role: 'ADMIN',
+        oneTimePassword: 'k7Rmq3xTbYw9Zc',
+        activationCode: '7KQ4N8ZP2H5RX9M',
+      ));
+
+      // USELESS APART. A merchant sent only the password cannot sign in at
+      // all, so putting the two on separate screens - or behind two copies -
+      // is a way to hand over half a credential and not notice.
+      expect(find.text('k7Rmq3xTbYw9Zc'), findsOneWidget);
+      expect(find.text('7KQ4N8ZP2H5RX9M'), findsOneWidget);
+      expect(find.text('Copy all'), findsOneWidget);
+    });
+
+    testWidgets('it says the code is for the first sign-in only',
+        (tester) async {
+      await showIt(tester, const OpenedStaffAccount(
+        customerId: 55,
+        email: 'ravi@sharmakirana.test',
+        oneTimePassword: 'k7Rmq3xTbYw9Zc',
+        activationCode: '7KQ4N8ZP2H5RX9M',
+      ));
+
+      // §28. Without this sentence a merchant files the code away as a
+      // permanent third password and keeps it written down beside the phone,
+      // which is the opposite of what a second factor is for.
+      expect(find.textContaining('FIRST sign-in'), findsOneWidget);
+    });
+
+    testWidgets('a reissue shows the code alone, with no empty password field',
+        (tester) async {
+      // A reissue mints a code and no password. A blank "One-time password"
+      // row would read as a password that is somehow empty.
+      await showIt(tester, const OpenedStaffAccount(
+        customerId: 55,
+        email: 'ravi@sharmakirana.test',
+        activationCode: '7KQ4N8ZP2H5RX9M',
+      ));
+
+      expect(find.text('7KQ4N8ZP2H5RX9M'), findsOneWidget);
+      expect(find.text('One-time password'), findsNothing);
+    });
+
     testWidgets('a reset with no password in the reply offers nothing to copy',
         (tester) async {
       // Defensive, not hypothetical-only: the model makes oneTimePassword
