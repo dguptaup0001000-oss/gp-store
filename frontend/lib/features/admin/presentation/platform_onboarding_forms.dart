@@ -370,6 +370,7 @@ class _PlatformOnboardMerchantDialogState
             email: opened.ownerEmail,
             role: 'ADMIN',
             oneTimePassword: opened.oneTimePassword,
+            activationCode: opened.activationCode,
           ));
       if (!mounted) return;
       Navigator.of(context).pop(opened);

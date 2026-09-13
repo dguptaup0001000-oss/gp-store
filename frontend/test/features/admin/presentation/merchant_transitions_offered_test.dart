@@ -11,19 +11,20 @@ import 'package:flutter_test/flutter_test.dart';
 /// nothing about what to do instead. The real answer was "Send for review
 /// first", and nothing on the screen said so.
 ///
-/// The card now draws only the legal moves. That means the Dart map is a COPY
-/// of MerchantStatus.allowedNext, and a copy drifts: somebody adds a state to
-/// the enum, the console keeps offering yesterday's moves, and the platform
-/// owner is back to tapping buttons that cannot work.
+/// Both screens that draw these buttons - the console's merchant card and the
+/// merchant detail screen - now offer only the legal moves, from one shared
+/// map. That map is a COPY of MerchantStatus.allowedNext, and a copy drifts:
+/// somebody adds a state to the enum, the console keeps offering yesterday's
+/// moves, and the platform owner is back to tapping buttons that cannot work.
 ///
 /// So this reads BOTH files and compares them. It is deliberately a string
 /// comparison against the Java source rather than a fixture, because a fixture
 /// would be a third copy to keep in step.
 void main() {
   test('the console offers exactly the transitions MerchantStatus allows', () {
-    final dart = File(
-            'lib/features/admin/presentation/platform_console_screen.dart')
-        .readAsStringSync();
+    final dart =
+        File('lib/features/admin/domain/merchant_transitions.dart')
+            .readAsStringSync();
     final java = File(
             '../backend/src/main/java/com/gpstore/platform/MerchantStatus.java')
         .readAsStringSync();
@@ -32,7 +33,7 @@ void main() {
     final javaMap = _javaTransitions(java);
 
     expect(javaMap, isNotEmpty, reason: 'could not parse allowedNext() at all');
-    expect(dartMap, isNotEmpty, reason: 'could not parse _nextFrom at all');
+    expect(dartMap, isNotEmpty, reason: 'could not parse nextFrom at all');
 
     expect(
       dartMap,
@@ -40,7 +41,8 @@ void main() {
       reason: 'The Super Admin console and MerchantStatus.allowedNext disagree '
           'about which moves are legal. The server is the rule; the console is '
           'a copy kept so buttons that cannot work are not drawn. Update '
-          '_nextFrom in platform_console_screen.dart to match.\n'
+          'MerchantTransitions.nextFrom in '
+          'lib/features/admin/domain/merchant_transitions.dart to match.\n'
           'console: $dartMap\n'
           'server:  $javaMap',
     );
@@ -49,7 +51,7 @@ void main() {
 
 /// Reads `'ACTIVE': ['PAUSED', 'SUSPENDED', 'REMOVED'],` out of the Dart map.
 Map<String, Set<String>> _dartTransitions(String source) {
-  final start = source.indexOf('_nextFrom = {');
+  final start = source.indexOf('nextFrom = {');
   if (start < 0) return {};
   final end = source.indexOf('};', start);
   final body = source.substring(start, end);

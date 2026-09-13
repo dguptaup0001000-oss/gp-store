@@ -24,6 +24,20 @@ class PlatformRepository {
     return MerchantView.fromJson(Map<String, dynamic>.from(response.data as Map));
   }
 
+  /// One merchant and every shop under it, in one call.
+  ///
+  /// THE SHOPS COME BACK KEYED BY THE MERCHANT ON THE SERVER, read by merchant
+  /// id from the database rather than filtered from anything this app sent.
+  /// There is no parameter here a client could point at another merchant's
+  /// storefronts - the only id in the request is the merchant already being
+  /// looked at, and PERM_PLATFORM_ADMIN is what allows looking at any of them.
+  Future<PlatformMerchantDetail> merchantDetail(int merchantId) async {
+    final response =
+        await apiClient.dio.get('/api/platform/merchants/$merchantId/detail');
+    return PlatformMerchantDetail.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
   /// Moves a merchant through its lifecycle.
   ///
   /// THE REASON IS NOT OPTIONAL IN PRACTICE. "Somebody looked at this

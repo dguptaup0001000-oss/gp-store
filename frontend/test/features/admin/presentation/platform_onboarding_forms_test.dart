@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gpstore/features/admin/data/platform_repository.dart';
 import 'package:gpstore/features/admin/domain/platform_models.dart';
 import 'package:gpstore/features/admin/presentation/platform_onboarding_forms.dart';
+import 'package:gpstore/features/admin/presentation/platform_providers.dart';
 
 /// Opening a shop, from the console.
 ///
@@ -14,6 +16,7 @@ import 'package:gpstore/features/admin/presentation/platform_onboarding_forms.da
 /// deliberately, and these tests are what stop the copy drifting into
 /// something more permissive than the server.
 void main() {
+  _onboardHandsOverBothHalves();
   Widget host(Widget child) => ProviderScope(
         child: MaterialApp(home: Scaffold(body: child)),
       );
@@ -522,5 +525,95 @@ void main() {
       expect(find.text('Copy password'), findsNothing);
       expect(find.text("I've saved it"), findsOneWidget);
     });
+  });
+}
+
+/// Onboarding a merchant has to hand over BOTH halves of the first sign-in.
+///
+/// WHAT WENT WRONG, AND WHY THIS TEST EXISTS. `POST /api/platform/onboard`
+/// mints a one-time password AND a 15-character activation code, and the
+/// server's first-login check demands both. The Flutter model for that
+/// response carried only the password, so the console showed the platform
+/// owner one of the two secrets and silently dropped the other. Every merchant
+/// onboarded through that dialog would have been handed credentials that
+/// cannot sign in - and the only recovery (issue a new code) is on a screen
+/// they were about to be told they could not reach.
+///
+/// The gap was in the plumbing between the response and the dialog, so the
+/// test drives exactly that: a fake repository returning both, and an
+/// assertion that both reach the screen.
+class _RepoThatReturnsBothHalves implements PlatformRepository {
+  @override
+  Future<OnboardedMerchant> onboardMerchant({
+    required String businessName,
+    required String ownerName,
+    required String ownerEmail,
+    String? ownerPhone,
+    String? shopCode,
+    required double latitude,
+    required double longitude,
+    required double maxDeliveryRadiusKm,
+    String? timeZone,
+  }) async {
+    return const OnboardedMerchant(
+      merchantId: 6,
+      businessName: 'Gupta Hardware',
+      shopId: 11,
+      shopCode: 'GUPTA-HARDWARE',
+      ownerCustomerId: 993,
+      ownerEmail: 'owner@example.test',
+      oneTimePassword: 'Temp-Pass-8834',
+      activationCode: 'Kx7mRt2QpLn4Vb9',
+    );
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('${invocation.memberName} is not part of this test');
+}
+
+void _onboardHandsOverBothHalves() {
+  testWidgets('onboarding shows the activation code beside the password',
+      (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        platformRepositoryProvider
+            .overrideWithValue(_RepoThatReturnsBothHalves()),
+      ],
+      child: const MaterialApp(
+        home: Scaffold(body: PlatformOnboardMerchantDialog()),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Business name *'), 'Gupta Hardware');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, "Owner's name *"), 'Deepak Gupta');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, "Owner's email *"),
+        'owner@example.test');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Shop location *'), '26.7606, 83.3732');
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Onboard'));
+    // pump, NOT pumpAndSettle. The Onboard button is left spinning underneath
+    // the credentials dialog on purpose - the form is not coming back - and a
+    // CircularProgressIndicator never settles.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Temp-Pass-8834'), findsOneWidget);
+    expect(
+      find.text('Kx7mRt2QpLn4Vb9'),
+      findsOneWidget,
+      reason: 'the server minted an activation code and the first sign-in '
+          'demands it; a dialog that shows only the password hands over '
+          'credentials that cannot get in',
+    );
+    expect(find.textContaining('FIRST sign-in'), findsOneWidget);
+    // One copy, both halves - they are useless apart, and a second
+    // copy-paste is a second chance to send the wrong thing.
+    expect(find.text('Copy all'), findsOneWidget);
   });
 }
