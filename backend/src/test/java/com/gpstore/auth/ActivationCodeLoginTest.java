@@ -257,6 +257,28 @@ class ActivationCodeLoginTest {
     }
 
     @Test
+    @DisplayName("a merchant who lost the code is not locked out for ever")
+    void acompletedResetCountsAsClaimingTheAccount() {
+        var made = onboardOne();
+        Customer owner = customers.findById(made.ownerCustomerId()).orElseThrow();
+
+        // The honest case this protects: the slip of paper went missing before
+        // the merchant ever signed in. They do a password reset, which sends an
+        // OTP to the email or phone the platform registered for them.
+        //
+        // Demanding the code afterwards would refuse ONLY this merchant.
+        // Somebody who merely saw the temporary password cannot get an OTP
+        // delivered to somebody else's phone; somebody who controls that phone
+        // can reset whether a code exists or not. So the rule would buy
+        // nothing and cost a support call.
+        owner.setActivationCodeClaimedAt(java.time.LocalDateTime.now());
+        customers.save(owner);
+
+        var response = auth.login(signIn(made.ownerEmail(), made.oneTimePassword(), null));
+        assertNotNull(response.getToken());
+    }
+
+    @Test
     @DisplayName("accounts that predate activation codes still sign in with two things")
     void nothingWasBrokenForAccountsThatAlreadyExisted() {
         var made = onboardOne();

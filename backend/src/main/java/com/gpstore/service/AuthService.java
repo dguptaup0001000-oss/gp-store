@@ -259,6 +259,23 @@ public class AuthService {
         }
         customer.setPassword(passwordEncoder.encode(newPassword));
         nowItIsTheirOwnPassword(customer);
+        // A COMPLETED RESET IS A CLAIM, and leaving the code outstanding here
+        // would be a lockout rather than a protection.
+        //
+        // The activation code guards ONE window: a temporary password
+        // travelling to a merchant by whatever means the platform owner had to
+        // hand. Somebody who only saw that password cannot get through an OTP
+        // delivered to the merchant's own registered email or phone, so the
+        // code has already done its whole job by the time this line runs.
+        //
+        // And it protects nothing against the one attacker it would still
+        // exclude: somebody who CONTROLS that email or phone can complete a
+        // reset whether or not a code exists, so demanding one here refuses
+        // only the legitimate merchant - the one who lost the slip of paper
+        // and did the honest thing. Their account is otherwise unreachable
+        // until the platform reissues, which is a support call created by a
+        // rule that was buying nothing.
+        claimed(customer);
         customerRepository.save(customer);
         accountStatusService.invalidate(customer.getId());
 
@@ -288,6 +305,19 @@ public class AuthService {
      * change screen with no current password left to confirm, and no way out
      * of it. That is what a merchant with a shop to run would hit first.
      */
+    /**
+     * Marks an outstanding activation code as spent.
+     *
+     * Idempotent, and a no-op for the accounts that have no code at all -
+     * which is every account that existed before codes did.
+     */
+    private void claimed(Customer customer) {
+        if (customer.getActivationCodeHash() != null
+                && customer.getActivationCodeClaimedAt() == null) {
+            customer.setActivationCodeClaimedAt(java.time.LocalDateTime.now());
+        }
+    }
+
     private void nowItIsTheirOwnPassword(Customer customer) {
         customer.setMustChangePassword(Boolean.FALSE);
     }

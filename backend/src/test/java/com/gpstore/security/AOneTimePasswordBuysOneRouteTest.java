@@ -205,10 +205,17 @@ class AOneTimePasswordBuysOneRouteTest {
         String body = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"email":"%s","password":"%s"}
+                                {"email":"%s","password":"%s","activationCode":"%s"}
                                 """.formatted(
                                 merchant.account().email(),
-                                merchant.account().oneTimePassword())))
+                                merchant.account().oneTimePassword(),
+                                // THE FIRST LOGIN NOW TAKES BOTH HALVES. The
+                                // account has never been claimed, so the
+                                // activation code is required exactly once -
+                                // which does not change what this test is
+                                // about: that login REPORTS the owed password
+                                // change, because no later request can ask.
+                                merchant.account().activationCode())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.mustChangePassword").value(true))
                 .andReturn().getResponse().getContentAsString();
