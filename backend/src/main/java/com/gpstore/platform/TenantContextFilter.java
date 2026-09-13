@@ -42,8 +42,11 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
     private final TenantResolver resolver;
 
-    public TenantContextFilter(TenantResolver resolver) {
+    private final ShopOperationGate operationGate;
+
+    public TenantContextFilter(TenantResolver resolver, ShopOperationGate operationGate) {
         this.resolver = resolver;
+        this.operationGate = operationGate;
     }
 
     @Override
@@ -82,10 +85,67 @@ public class TenantContextFilter extends OncePerRequestFilter {
         }
 
         try {
+            if (!mayProceed(request)) {
+                response.sendError(HttpServletResponse.SC_FORBIDDEN,
+                        "This shop is suspended or closed, so it cannot be changed. You can "
+                                + "still see your records, and appeal the decision.");
+                return;
+            }
             chain.doFilter(request, response);
         } finally {
             TenantContext.clear();
         }
+    }
+
+    /**
+     * A shop under enforcement is read-only to its own people.
+     *
+     * ENFORCED HERE BECAUSE HERE IS THE ONLY CHOKEPOINT. The merchant's back
+     * office is spread over /api/shop, /api/admin and more, and a rule applied
+     * controller by controller is a rule that is missing from whichever
+     * controller is written next. Every scoped request already passes through
+     * this filter to get a tenant at all.
+     *
+     * READS PASS. See ShopOperationGate for why refusing them would take a
+     * merchant's own records away from them.
+     */
+    private boolean mayProceed(HttpServletRequest request) {
+        if (isRead(request)) {
+            return true;
+        }
+        TenantScope scope = TenantContext.current();
+        if (scope == null || scope.isPlatform()) {
+            return true;
+        }
+        // The platform manages suspended shops - that is what suspension is
+        // for - and a rider finishes deliveries that were already paid for.
+        if (operationGate.isPlatformActor() || isRiderFinishingWork(request)) {
+            return true;
+        }
+        if (operationGate.mayOperate(scope.shopId())) {
+            return true;
+        }
+        // THE APPEAL IS THE ONE WRITE A SUSPENDED MERCHANT KEEPS. Suspending a
+        // business and removing its only way to ask why is a dead end, not
+        // enforcement.
+        return com.gpstore.config.RequestPath.of(request).startsWith("/api/shop/governance");
+    }
+
+    private static boolean isRead(HttpServletRequest request) {
+        String method = request.getMethod();
+        return "GET".equals(method) || "HEAD".equals(method) || "OPTIONS".equals(method);
+    }
+
+    /**
+     * Orders already placed still have to arrive.
+     *
+     * A rider's scope comes from their roster row, so without this a
+     * suspension against a merchant would strand paid orders mid-delivery and
+     * leave customers with neither goods nor a refund. The suspension is
+     * against the merchant, not the shopper waiting at the door.
+     */
+    private static boolean isRiderFinishingWork(HttpServletRequest request) {
+        return com.gpstore.config.RequestPath.of(request).startsWith("/api/worker");
     }
 
     /**

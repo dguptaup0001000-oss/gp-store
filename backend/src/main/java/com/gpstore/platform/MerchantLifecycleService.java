@@ -125,8 +125,18 @@ public class MerchantLifecycleService {
         if (!next.canTrade()) {
             for (Shop shop : shops.findByMerchantId(saved.getId())) {
                 if (shop.getStatus() == ShopStatus.ACTIVE || shop.getStatus() == ShopStatus.PAUSED) {
-                    shop.setStatus(next == MerchantStatus.REMOVED
-                            ? ShopStatus.CLOSED : ShopStatus.SUSPENDED);
+                    // THE SHOP FOLLOWS THE MERCHANT'S REASON, not merely its
+                    // inability to trade. A paused business closing for a
+                    // festival and a suspended one being stopped by the
+                    // platform both stop selling, and recording them the same
+                    // way would put an enforcement action on the record of a
+                    // merchant who did nothing wrong - which is the record an
+                    // appeal is later argued from.
+                    shop.setStatus(switch (next) {
+                        case REMOVED -> ShopStatus.CLOSED;
+                        case PAUSED -> ShopStatus.PAUSED;
+                        default -> ShopStatus.SUSPENDED;
+                    });
                     shop.setStatusReason("Merchant " + next + ": " + reason.trim());
                     shops.save(shop);
                     auditLog.log("SHOP_STATUS_CHANGED", "Shop", shop.getId(),

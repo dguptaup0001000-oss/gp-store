@@ -60,7 +60,34 @@ public class TenantResolver {
      */
     public TenantScope resolve() {
         if (!platform.getMode().requiresExplicitShopContext()) {
-            return TenantScope.ofShop(firstShopId());
+            // SHOP #1 IS THE FALLBACK, NOT THE ANSWER, and that distinction is
+            // the whole of this branch.
+            //
+            // This line used to read `return TenantScope.ofShop(firstShopId())`
+            // unconditionally, which is correct exactly as long as there is one
+            // shop - Shop #1 is then the only answer there is. It stops being
+            // correct the moment a second shop exists, because it is reached
+            // BEFORE any membership is consulted: the owner of the second shop
+            // sends no X-Shop-Id on their first request after signing in, and
+            // resolved to somebody else's business. They would have read, and
+            // written, another merchant's orders, catalogue and takings, with
+            // nothing in any log to show a boundary had been crossed.
+            //
+            // `platform.mode` is set nowhere in this repository, so production
+            // takes the default and runs in this branch. The defect was
+            // therefore live and waiting for the second shop rather than
+            // theoretical, and SecondMerchantLandsInTheirOwnShopTest fails
+            // against the old line.
+            //
+            // THE FIX IS NOT TO CHANGE THE MODE. A mode flip is a production
+            // decision with its own consequences for how customers browse
+            // (SingleShopBrowseIsUnchangedTest pins those). What is wrong here
+            // is narrower and true in every mode: an account that belongs to a
+            // particular shop belongs to THAT shop. Only a credential with no
+            // shop of its own - a shopper, an account on nobody's roster - has
+            // any business falling back to the first one.
+            Long own = shopThisCredentialBelongsTo();
+            return TenantScope.ofShop(own != null ? own : firstShopId());
         }
 
         // A platform administrator legitimately spans shops.
@@ -242,6 +269,34 @@ public class TenantResolver {
      * carry a different id for the same shop. The code is the stable name;
      * the id is an implementation detail of one database.
      */
+    /**
+     * The shop this credential is attached to, or null when it is attached to
+     * none.
+     *
+     * READ FROM THE SAME PLACES THE MULTI-SHOP BRANCH READS, deliberately: a
+     * rider's roster row and a staff account's membership. A second source of
+     * truth for "which shop is this person's" is how the two branches drift
+     * apart, and this branch is the one that runs in production.
+     *
+     * NULL IS AN ANSWER. A shopper has no shop of their own, and neither does
+     * a staff account nobody has put on a roster yet. Both legitimately fall
+     * back to the first shop under a single-shop deployment - that is what
+     * makes this branch backwards compatible for everybody who works today.
+     */
+    private Long shopThisCredentialBelongsTo() {
+        Long workerId = currentWorkerIdOrNull();
+        if (workerId != null) {
+            return riders.findById(workerId)
+                    .map(com.gpstore.entity.DeliveryPartner::getShopId)
+                    .orElse(null);
+        }
+        Long customerId = currentUserIdOrNull();
+        if (customerId == null) {
+            return null;
+        }
+        return membership.defaultShopIdFor(customerId).orElse(null);
+    }
+
     private Long firstShopId() {
         return shops.findByCode(platform.getFirstShopCode())
                 .map(Shop::getId)
