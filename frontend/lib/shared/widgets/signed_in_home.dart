@@ -16,6 +16,10 @@ import '../../features/profile/presentation/profile_providers.dart';
 class SignedInHome extends ConsumerWidget {
   const SignedInHome({super.key, required this.builder});
 
+  /// The commit this APK was built from, as the Profile screen shows it.
+  /// 'dev' for a local run without --dart-define=BUILD_SHA.
+  static const _buildSha = String.fromEnvironment('BUILD_SHA', defaultValue: 'dev');
+
   final Widget Function(Profile profile) builder;
 
   @override
@@ -54,6 +58,22 @@ class SignedInHome extends ConsumerWidget {
           );
         }
 
+        // RETRY ALONE IS A TRAP, and this screen is where somebody gets
+        // caught in it. Every error that is not a network blip answers the
+        // same way however many times it is asked - a refusal, a suspended
+        // shop, an account that owes something the running build does not
+        // know how to ask for. Retry then loops forever with no way off the
+        // screen: the app is signed in, so there is no login page to go back
+        // to, and nothing here signs out.
+        //
+        // That is not hypothetical. A merchant on a build older than the
+        // forced-password-change screen landed here holding a one-time
+        // password, and the only control on screen could not help them.
+        //
+        // The build sha is here for the same reason it is on the Profile
+        // screen - "is this actually the latest APK" is repeatedly the real
+        // answer - except that Profile is behind exactly the call that just
+        // failed, so this is the one place it can still be read.
         return Scaffold(
           body: Center(
             child: Padding(
@@ -67,12 +87,32 @@ class SignedInHome extends ConsumerWidget {
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () {
-                      AppHaptics.selection();
-                      ref.invalidate(myProfileProvider);
-                    },
-                    child: const Text('Retry'),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          AppHaptics.selection();
+                          ref.invalidate(myProfileProvider);
+                        },
+                        child: const Text('Retry'),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () {
+                          AppHaptics.selection();
+                          ref.read(authControllerProvider.notifier).logout();
+                        },
+                        child: const Text('Sign out'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Build $_buildSha',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
               ),
