@@ -30,6 +30,7 @@ TOOLS = "http://schemas.android.com/tools"
 WORKER_MANIFEST = "android/app/src/workerStandalone/AndroidManifest.xml"
 CUSTOMER_OVERLAY = "android/app/src/main/AndroidManifest.xml"
 ADMIN_OVERLAY = "android/app/src/admin/AndroidManifest.xml"
+SUPERADMIN_OVERLAY = "android/app/src/superadmin/AndroidManifest.xml"
 
 REQUIRED = (
     "android.permission.ACCESS_FINE_LOCATION",
@@ -113,6 +114,26 @@ def other_app_problems(label: str, root: ET.Element) -> list[str]:
     ]
 
 
+def stripped_by_overlay_problems(label: str, root: ET.Element) -> list[str]:
+    """The three the main manifest grants and an admin console must not.
+
+    Checked at the SOURCE, before anything is built: this runs in seconds and
+    the failure names the file to edit, where the same mistake found by
+    verify_apk_release.py costs a twenty-minute Android build first.
+    """
+    _granted, removed = granted_and_removed(root)
+    return [
+        f'{label} manifest must strip {permission} with tools:node="remove" - '
+        "it is granted by the main manifest and this app has no use for it"
+        for permission in (
+            "android.permission.RECORD_AUDIO",
+            "android.permission.ACCESS_FINE_LOCATION",
+            "android.permission.ACCESS_COARSE_LOCATION",
+        )
+        if permission not in removed
+    ]
+
+
 def parse(path: Path) -> ET.Element:
     return ET.parse(path).getroot()
 
@@ -155,6 +176,28 @@ def self_test() -> None:
     )
     assert worker_problems(root_of(granted_background)), "granted background location must fail"
 
+    # An admin console overlay that strips the three, and one that does not.
+    strips = """
+    <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
+      <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+      <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove"/>
+      <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove"/>
+    </manifest>"""
+    assert not stripped_by_overlay_problems("x", root_of(strips))
+
+    # AN EMPTY OVERLAY IS THE REAL FAILURE MODE - a new flavor with no file,
+    # or a file somebody emptied, inherits all three from the main manifest
+    # while every other check stays green.
+    empty = '<manifest xmlns:android="http://schemas.android.com/apk/res/android"/>'
+    assert len(stripped_by_overlay_problems("x", root_of(empty))) == 3
+
+    partial = strips.replace(
+        '<uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>',
+        "",
+    )
+    assert stripped_by_overlay_problems("x", root_of(partial)), "a missing one must fail"
+
     no_type = complete.replace(' android:foregroundServiceType="location"', "")
     assert worker_problems(root_of(no_type)), "service without foregroundServiceType must fail"
 
@@ -189,6 +232,13 @@ def main() -> int:
     problems = worker_problems(parse(here / WORKER_MANIFEST))
     problems += other_app_problems("customer", parse(here / CUSTOMER_OVERLAY))
     problems += other_app_problems("admin", parse(here / ADMIN_OVERLAY))
+    problems += other_app_problems("super admin", parse(here / SUPERADMIN_OVERLAY))
+    # THE OVERLAY HAS TO EXIST, not merely be clean. A flavor with no overlay
+    # inherits the main manifest's microphone and precise location, and an
+    # empty file would pass every check above while shipping all three - which
+    # is exactly what the first build of this flavor did.
+    problems += stripped_by_overlay_problems(
+        "super admin", parse(here / SUPERADMIN_OVERLAY))
     if problems:
         for problem in problems:
             print(f"FAIL: {problem}", file=sys.stderr)
