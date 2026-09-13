@@ -112,6 +112,37 @@ void main() {
     expect(find.text('Retry'), findsOneWidget);
   });
 
+  group('the ordinary error screen is not a dead end', () {
+    // WHAT WENT WRONG. A merchant on a build older than the forced-change
+    // screen signed in holding a one-time password, landed on this screen,
+    // and the only control was Retry - which re-asks a question with one
+    // permanent answer. Signed in, so no login page to go back to; nothing
+    // on screen to sign out with. Stuck.
+    final ordinary = ApiException(
+        statusCode: 403, message: 'This account is not associated with a shop.');
+
+    testWidgets('it offers a way out, not just a way round again',
+        (tester) async {
+      await tester.pumpWidget(app(ordinary));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Retry'), findsOneWidget);
+      expect(find.text('Sign out'), findsOneWidget,
+          reason: 'an error Retry cannot fix must still be escapable');
+    });
+
+    testWidgets('it names the build, because Profile is behind this failure',
+        (tester) async {
+      // "Is this actually the latest APK" is repeatedly the real answer, and
+      // the Profile screen that normally shows the build sha is behind the
+      // very call that just failed.
+      await tester.pumpWidget(app(ordinary));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Build '), findsOneWidget);
+    });
+  });
+
   testWidgets('a signed-in account with nothing owed sees the app',
       (tester) async {
     await tester.pumpWidget(ProviderScope(

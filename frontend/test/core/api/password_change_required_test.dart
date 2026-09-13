@@ -65,6 +65,28 @@ void main() {
           'Set your own password before using the app.');
     });
 
+    test('the exact body JwtFilter writes is understood', () async {
+      // BYTE FOR BYTE what rejectUntilPasswordChanged() sends. The cases
+      // above prove the predicate; this proves it against the string the
+      // server actually produces, so a reworded or restructured body cannot
+      // quietly stop being recognised.
+      //
+      // A plain test(), not testWidgets(): the request goes through
+      // ApiClient's real interceptor, whose retry path awaits a
+      // Future.delayed that never completes inside a widget test's
+      // fake-async zone. That cost a hung run to learn.
+      final refusal = await refusalFrom(const {
+        'status': 403,
+        'error': 'Forbidden',
+        'code': 'PASSWORD_CHANGE_REQUIRED',
+        'message': 'Set your own password before using the app. '
+            'This account is still on the one-time password it was created '
+            'with.',
+      });
+
+      expect(meansPasswordChangeRequired(refusal), isTrue);
+    });
+
     test('a 403 with no code leaves it null rather than guessing', () async {
       final refusal = await refusalFrom(
           const {'message': 'You do not have permission to do that.'});
