@@ -207,6 +207,8 @@ class _TheBusiness extends ConsumerWidget {
                 ),
             ],
           ),
+          if (merchant.ownerCustomerId != null)
+            MerchantOwnerRecovery(ownerCustomerId: merchant.ownerCustomerId!),
         ],
       ),
     );

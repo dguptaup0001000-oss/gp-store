@@ -113,6 +113,98 @@ class PlatformShopCard extends ConsumerWidget {
   }
 }
 
+/// Getting a merchant's owner back into their own account.
+///
+/// TWO BUTTONS BECAUSE THERE ARE TWO SECRETS and they are lost separately. A
+/// merchant who never received the activation code needs a new code, not a new
+/// password - reissuing the password as well would sign them out of a session
+/// they are happily using. Neither button can read the old secret back: both
+/// are stored as hashes, deliberately, so "I lost it" and "it leaked" have the
+/// same answer.
+///
+/// ON BOTH SCREENS THAT SHOW A MERCHANT. A recovery that exists on the list
+/// card and not on the detail screen is a recovery the platform owner has to
+/// remember a route to, at the moment they are least able to.
+class MerchantOwnerRecovery extends ConsumerWidget {
+  const MerchantOwnerRecovery({super.key, required this.ownerCustomerId});
+
+  final int ownerCustomerId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        TextButton.icon(
+          onPressed: hapticize(() => _resetPassword(context, ref)),
+          icon: const Icon(Icons.key_outlined, size: 18),
+          label: const Text('Reset password'),
+        ),
+        TextButton.icon(
+          onPressed: hapticize(() => _reissueCode(context, ref)),
+          icon: const Icon(Icons.pin_outlined, size: 18),
+          label: const Text('New activation code'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _reissueCode(BuildContext context, WidgetRef ref) async {
+    final reason = await askPlatformReason(context, 'New activation code');
+    if (reason == null || !context.mounted) return;
+    try {
+      final issued = await ref
+          .read(platformRepositoryProvider)
+          .reissueActivationCode(customerId: ownerCustomerId, reason: reason);
+      if (!context.mounted) return;
+      await showOneTimePassword(context, issued);
+    } catch (error) {
+      if (context.mounted) platformSay(context, extractErrorMessage(error));
+    }
+  }
+
+  Future<void> _resetPassword(BuildContext context, WidgetRef ref) async {
+    // ASKED FIRST, because this is destructive in a way the other buttons here
+    // are not: it ends the merchant's sessions and the password they chose
+    // stops working. Doing that by a mis-tap while they are mid-order is worth
+    // one confirmation.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reset their password?'),
+        content: const Text(
+          'They will be signed out everywhere and the password they chose '
+          'will stop working. You get a new one-time password to hand over, '
+          'shown once.',
+          style: TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final opened = await ref
+          .read(platformRepositoryProvider)
+          .resetStaffPassword(customerId: ownerCustomerId);
+      if (!context.mounted) return;
+      await showOneTimePassword(context, opened);
+    } catch (error) {
+      if (context.mounted) platformSay(context, extractErrorMessage(error));
+    }
+  }
+}
+
 /// Asks why, before anything is changed.
 ///
 /// Returns null when the reviewer backs out, an empty string when they went

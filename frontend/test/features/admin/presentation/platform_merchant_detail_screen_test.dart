@@ -21,6 +21,7 @@ void main() {
     legalName: 'Gupta Hardware',
     displayName: 'Gupta Hardware',
     status: 'ACTIVE',
+    ownerCustomerId: 993,
   );
 
   PlatformShopView shop(int id, String name, String status) => PlatformShopView(
@@ -151,6 +152,41 @@ void main() {
     expect(find.textContaining('No shops under this business yet'),
         findsOneWidget);
     expect(find.widgetWithText(FloatingActionButton, 'Add shop'), findsOneWidget);
+  });
+
+  testWidgets('the owner can be got back in from here, not only from the list',
+      (tester) async {
+    await tester.pumpWidget(host(PlatformMerchantDetail(
+      merchant: oneShopBusiness,
+      shops: [shop(11, 'Gupta Hardware Mandi', 'ACTIVE')],
+      shopCount: 1,
+    )));
+    await tester.pumpAndSettle();
+
+    // A merchant on the phone saying "it will not let me in" is the moment
+    // the platform owner is least able to remember which screen holds the
+    // recovery. It is on both.
+    expect(find.text('Reset password'), findsOneWidget);
+    expect(find.text('New activation code'), findsOneWidget,
+        reason: 'the code and the password are lost separately, so reissuing '
+            'one must not force the other');
+  });
+
+  testWidgets('a business with no owner account is offered no recovery',
+      (tester) async {
+    await tester.pumpWidget(host(const PlatformMerchantDetail(
+      merchant: MerchantView(
+          id: 10, legalName: 'Paperwork Only', status: 'APPROVED'),
+      shops: [],
+      shopCount: 0,
+    )));
+    await tester.pumpAndSettle();
+
+    // Registering a business without an owner login is allowed - the papers
+    // sometimes arrive before the person does - and there is no account to
+    // reset until one is opened.
+    expect(find.text('Reset password'), findsNothing);
+    expect(find.text('New activation code'), findsNothing);
   });
 
   testWidgets('a removed business offers nothing and says its records stay',
