@@ -469,17 +469,26 @@ else in this report was done.
    UPDATE customers SET role = 'SUPER_ADMIN' WHERE role = 'PLATFORM_ADMIN';
    ```
 
-4. **Confirm who the platform owner is.** Exactly one account should hold
-   `SUPER_ADMIN`, and it should be yours:
+4. **Done — and the answer was "nobody".** The **Who runs the shop** workflow
+   was run against production and reported one staff account, `dg****@gmail.com`
+   (id 1), role `ADMIN`, on Shop #1's staff. **Zero** `SUPER_ADMIN` rows.
 
-   ```sql
-   SELECT id, email, role FROM customers WHERE role = 'SUPER_ADMIN';
-   ```
+   So nothing could open Merchants & Shops, nothing could register a merchant,
+   and the Super Admin APK was correctly refusing the only account there was.
+   `V66__the_platform_owner_holds_super_admin.sql` promotes that account, once,
+   guarded so it can never mint a second platform owner.
 
-   A real *shop* owner must be `ADMIN` and on that shop's `shop_staff`, not
-   `SUPER_ADMIN` — a `SUPER_ADMIN` resolves to the whole marketplace rather
-   than to their own storefront, which is right for you and wrong for a
-   merchant.
+   **What that costs, stated because it is not nothing.** `TenantResolver`
+   returns the platform-wide scope to anyone holding `PERM_PLATFORM_ADMIN`
+   *before* it looks at their home shop, so this account's shop screens now
+   span the marketplace rather than Shop #1. With one shop that is the same
+   data. **When a second merchant exists it is not**, and that account will
+   need to name a shop (`X-Shop-Id`, the shop switcher) to work inside one.
+
+   The alternative — a separate `SUPER_ADMIN` login, leaving id 1 as Shop #1's
+   `ADMIN` — remains the cleaner long-term shape and is a registration plus one
+   `UPDATE` away. A real *shop* owner must be `ADMIN` and on that shop's
+   `shop_staff`, not `SUPER_ADMIN`.
 
 5. **Merchant settlement, when you want it.** Money currently lands in one
    platform account. Moving to merchant-collects needs KYC, bank details and
