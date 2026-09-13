@@ -26,6 +26,7 @@ PT_LOAD = 1
 
 CUSTOMER_PACKAGE = "in.gpstore.customer"
 ADMIN_PACKAGE = "in.gpstore.admin"
+SUPERADMIN_PACKAGE = "in.gpstore.superadmin"
 WORKER_PACKAGE = "com.gpstore.worker"
 
 # Only the worker runs a location foreground service. Forbidding the pair in
@@ -64,6 +65,11 @@ ADMIN_REQUIRED_PERMISSIONS = {
     # Paired thermal printer for order receipts.
     "android.permission.BLUETOOTH_CONNECT",
 }
+# The platform owner approves merchants and opens shops. No voice search, no
+# map, no delivery, no receipt printer - so it REQUIRES nothing and forbids
+# what the admin APK forbids. src/superadmin/AndroidManifest.xml strips the
+# three the main manifest would otherwise hand it.
+SUPERADMIN_FORBIDDEN_PERMISSIONS = ADMIN_FORBIDDEN_PERMISSIONS
 WORKER_REQUIRED_PERMISSIONS = {
     "android.permission.CAMERA",
     # Without these the location service dies on Android 14 the instant it
@@ -109,6 +115,10 @@ def permission_violations(package: str, perms: set[str]) -> list[str]:
         missing = sorted(ADMIN_REQUIRED_PERMISSIONS - perms)
         if missing:
             problems.append(f"admin APK must declare {missing}")
+    if package == SUPERADMIN_PACKAGE:
+        extra = sorted(perms & SUPERADMIN_FORBIDDEN_PERMISSIONS)
+        if extra:
+            problems.append(f"super admin APK must not declare {extra}")
     if package == WORKER_PACKAGE:
         extra = sorted(perms & WORKER_FORBIDDEN_PERMISSIONS)
         if extra:
@@ -253,9 +263,19 @@ def native_lib_elf_problems(apk: str) -> list[str]:
 
 
 def expected_package(apk: str) -> str | None:
+    """Which applicationId this filename promises.
+
+    SUPERADMIN IS TESTED BEFORE ADMIN, and that order is the whole comment:
+    "admin" is a substring of "superadmin", so the obvious order demanded
+    in.gpstore.admin from gpstore-superadmin-release.apk and failed a build
+    whose APK was perfectly correct. That is not a hypothetical - it is what
+    the first CI run of the super admin flavor did.
+    """
     name = os.path.basename(apk).lower()
     if "worker" in name:
         return WORKER_PACKAGE
+    if "superadmin" in name:
+        return SUPERADMIN_PACKAGE
     if "admin" in name:
         return ADMIN_PACKAGE
     if "customer" in name:
@@ -358,15 +378,23 @@ def main() -> None:
             print(f"FORBIDDEN_PAYLOAD {problem}")
             failed = True
 
-    worker_pkgs = {pkg for name, pkg in seen.items() if "worker" in name.lower()}
-    admin_pkgs = {pkg for name, pkg in seen.items() if "admin" in name.lower()}
-    customer_pkgs = {
-        pkg for name, pkg in seen.items() if "customer" in name.lower()
-    }
+    # SAME SUBSTRING TRAP AS expected_package. Matching "admin" loosely would
+    # put the super admin APK in the admin group, and this check only compares
+    # ACROSS groups - so the one pair most likely to collide, admin and super
+    # admin, would never be compared at all.
+    def group(token: str) -> set[str]:
+        return {
+            pkg
+            for name, pkg in seen.items()
+            if token in name.lower()
+            and (token != "admin" or "superadmin" not in name.lower())
+        }
+
     groups = (
-        ("worker", worker_pkgs),
-        ("admin", admin_pkgs),
-        ("customer", customer_pkgs),
+        ("worker", group("worker")),
+        ("superadmin", group("superadmin")),
+        ("admin", group("admin")),
+        ("customer", group("customer")),
     )
     for i, (left_name, left) in enumerate(groups):
         for right_name, right in groups[i + 1 :]:
@@ -508,6 +536,29 @@ if __name__ == "__main__":
             with zipfile.ZipFile(clean_bundle, "w") as zf:
                 zf.writestr("base/assets/flutter_assets/AssetManifest.json", b"{}")
             assert not forbidden_payload_problems(clean_bundle)
+
+        # THE SUBSTRING TRAP, PINNED. "admin" is inside "superadmin", so the
+        # obvious ordering demanded in.gpstore.admin from a correctly built
+        # gpstore-superadmin-release.apk and turned CI red on an APK that was
+        # right. Cheap to assert, and the failure it prevents cost a build.
+        assert expected_package("gpstore-superadmin-release.apk") == SUPERADMIN_PACKAGE
+        assert expected_package("gpstore-superadmin-armv7.apk") == SUPERADMIN_PACKAGE
+        assert expected_package("gpstore-admin-release.apk") == ADMIN_PACKAGE
+        assert expected_package("gpstore-customer-release.apk") == CUSTOMER_PACKAGE
+        assert expected_package("gpstore-worker-arm64.apk") == WORKER_PACKAGE
+
+        # And the super admin APK is held to the admin APK's forbidden set:
+        # microphone and precise location in the platform owner's console is
+        # the kind of permission nobody can explain later.
+        assert permission_violations(
+            SUPERADMIN_PACKAGE, {"android.permission.RECORD_AUDIO"}
+        ), "RECORD_AUDIO must be refused in the super admin APK"
+        assert permission_violations(
+            SUPERADMIN_PACKAGE, {"android.permission.ACCESS_FINE_LOCATION"}
+        ), "precise location must be refused in the super admin APK"
+        assert not permission_violations(
+            SUPERADMIN_PACKAGE, {"android.permission.INTERNET"}
+        )
         print("self-test ok")
         sys.exit(0)
     main()

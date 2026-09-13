@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Super Admin APK: the platform owner approves merchants and opens
+         shops. It has no voice search, no map, and no delivery. Without this
+         overlay the flavor inherits all three from the main manifest - which
+         is exactly what the first CI build of it shipped, and what
+         verify_apk_release.py refuses for the admin APK beside it.
+
+         Microphone and precise location in the one app whose whole job is
+         administrative is the kind of permission nobody can explain later. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove"/>
+</manifest>
