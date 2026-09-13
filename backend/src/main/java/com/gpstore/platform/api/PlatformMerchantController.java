@@ -28,17 +28,20 @@ public class PlatformMerchantController {
     private final ShopMembership membership;
     private final com.gpstore.money.ShopEarnings earnings;
     private final com.gpstore.platform.PlatformStaffService staffService;
+    private final com.gpstore.platform.PlatformOnboardingService onboardingService;
 
     public PlatformMerchantController(MerchantLifecycleService merchantLifecycle,
                                       ShopLifecycleService shopLifecycle,
                                       ShopMembership membership,
                                       com.gpstore.money.ShopEarnings earnings,
-                                      com.gpstore.platform.PlatformStaffService staffService) {
+                                      com.gpstore.platform.PlatformStaffService staffService,
+                                      com.gpstore.platform.PlatformOnboardingService onboardingService) {
         this.merchantLifecycle = merchantLifecycle;
         this.shopLifecycle = shopLifecycle;
         this.membership = membership;
         this.earnings = earnings;
         this.staffService = staffService;
+        this.onboardingService = onboardingService;
     }
 
     // ------------------------------------------------------------- the market
@@ -232,6 +235,62 @@ public class PlatformMerchantController {
     @DeleteMapping("/shops/{shopId}/staff/{customerId}")
     public void removeStaff(@PathVariable Long shopId, @PathVariable Long customerId) {
         membership.revoke(shopId, customerId);
+    }
+
+    // --------------------------------------------------- one-screen onboard
+
+    /**
+     * Everything the platform owner can know about a new merchant.
+     *
+     * SIX FIELDS, AND FIVE OF THEM ARE UNAVOIDABLE. The business needs a
+     * name; the owner needs a name and an email, because the email IS their
+     * login; and the shop needs a location and a delivery radius or the
+     * marketplace offers it to nobody. shopCode is the one that may be left
+     * out - it is derived from the business name - and demo defaults to a
+     * real merchant.
+     *
+     * Everything else the long form asks for (trading name, contact phone,
+     * contact email, time zone) either has a sensible default or can be
+     * edited afterwards, and asking for it up front is what made opening a
+     * shop feel like paperwork.
+     */
+    public record OnboardMerchantRequest(String businessName,
+                                         String ownerName,
+                                         String ownerEmail,
+                                         String ownerPhone,
+                                         String shopCode,
+                                         Double latitude,
+                                         Double longitude,
+                                         java.math.BigDecimal maxDeliveryRadiusKm,
+                                         String timeZone,
+                                         Boolean demo) {}
+
+    /**
+     * Opens a merchant's login, registers the business, walks it to APPROVED
+     * and opens its shop - in one transaction.
+     *
+     * The one-time password is in this response and nowhere else, exactly as
+     * for POST /staff.
+     *
+     * IT STOPS SHORT OF TRADING, deliberately. See
+     * PlatformOnboardingService: the shop it opens has empty shelves, and a
+     * findable shop with nothing to sell is worse than one that is not
+     * findable yet.
+     */
+    @PostMapping("/onboard")
+    public PlatformOnboardingService.OnboardedMerchant onboard(
+            @RequestBody OnboardMerchantRequest request) {
+        return onboardingService.onboard(
+                request.businessName(),
+                request.ownerName(),
+                request.ownerEmail(),
+                request.ownerPhone(),
+                request.shopCode(),
+                request.latitude(),
+                request.longitude(),
+                request.maxDeliveryRadiusKm(),
+                request.timeZone(),
+                Boolean.TRUE.equals(request.demo()));
     }
 
     // -------------------------------------------------------------- staff

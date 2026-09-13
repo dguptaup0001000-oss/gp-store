@@ -125,3 +125,29 @@ class OpenedStaffAccount with _$OpenedStaffAccount {
   factory OpenedStaffAccount.fromJson(Map<String, dynamic> json) =>
       _$OpenedStaffAccountFromJson(json);
 }
+
+/// Everything one call to POST /api/platform/onboard produced.
+///
+/// The whole point of the endpoint is that these arrive together or not at
+/// all - a merchant, its shop, and the one credential to hand over. Five
+/// separate calls could leave any subset of them behind.
+@freezed
+class OnboardedMerchant with _$OnboardedMerchant {
+  const factory OnboardedMerchant({
+    required int merchantId,
+    String? businessName,
+    required int shopId,
+
+    /// Derived from the business name when none was given, so the console
+    /// shows what it became rather than what was asked for.
+    String? shopCode,
+    required int ownerCustomerId,
+    String? ownerEmail,
+
+    /// Shown once. There is no route that returns it again.
+    String? oneTimePassword,
+  }) = _OnboardedMerchant;
+
+  factory OnboardedMerchant.fromJson(Map<String, dynamic> json) =>
+      _$OnboardedMerchantFromJson(json);
+}

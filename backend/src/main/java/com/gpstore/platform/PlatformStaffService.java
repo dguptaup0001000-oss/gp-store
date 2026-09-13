@@ -142,11 +142,27 @@ public class PlatformStaffService {
             throw new ConflictException("An account with that email already exists.");
         }
 
+        // THE PHONE IS UNIQUE TOO, and saying so is not symmetry for its own
+        // sake. customers.mobile_number carries a UNIQUE constraint, so
+        // without this check a duplicate arrives as a
+        // DataIntegrityViolationException - a 500 with a constraint name in
+        // it - instead of a sentence naming the problem.
+        //
+        // It is the likely collision, not the unlikely one: a shopkeeper
+        // being onboarded may well already have a customer account on
+        // GP-STORE under the same number, and the platform owner typing it
+        // in has no way to know.
+        String cleanPhone = blankToNull(mobileNumber);
+        if (cleanPhone != null && customers.findByMobileNumber(cleanPhone).isPresent()) {
+            throw new ConflictException(
+                    "An account already uses that phone number. Leave it out, or use "
+                            + "the number this person actually wants on their staff account.");
+        }
+
         Customer staff = new Customer();
         staff.setFullName(cleanName);
         staff.setEmail(cleanEmail);
-        staff.setMobileNumber(mobileNumber == null || mobileNumber.isBlank()
-                ? null : mobileNumber.trim());
+        staff.setMobileNumber(cleanPhone);
         staff.setRole(role);
         staff.setActive(Boolean.TRUE);
         staff.setEnabled(Boolean.TRUE);
@@ -242,5 +258,9 @@ public class PlatformStaffService {
             throw new BadRequestException(message);
         }
         return value.trim();
+    }
+
+    private static String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
     }
 }

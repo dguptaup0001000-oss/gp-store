@@ -10,13 +10,26 @@ This is the sequence a real merchant goes through. Every step is an API call a
 platform administrator or the merchant themselves actually makes. There is no
 seeding script in the happy path and no SQL.
 
-> **Steps 0–5 are a screen now — and it is the first screen of its own app.**
-> **GP-STORE Super Admin** (`gpstore-superadmin-release.apk`,
-> `in.gpstore.superadmin`) opens on **Merchants & Shops**: it opens the
-> merchant's login, registers the merchant, walks it through review, opens a
-> shop under it, and puts an account on that shop's staff list. The API calls
-> below are what those buttons send, and remain the reference — but opening a
-> real shop no longer needs a terminal.
+> **Steps 0–4 are ONE form and ONE request now — and it is the first screen
+> of its own app.** **GP-STORE Super Admin**
+> (`gpstore-superadmin-release.apk`, `in.gpstore.superadmin`) opens on
+> **Merchants & Shops**; the **Merchant** button there asks for six things
+> — business name, owner's name, owner's email, owner's phone, the shop's
+> pin, and how far it delivers — and sends them to
+> **`POST /api/platform/onboard`**. That one call opens the merchant's login,
+> registers the business, walks it through `PENDING_REVIEW` to `APPROVED`
+> with the reason recorded, and opens their shop, in a single transaction.
+>
+> **It is one transaction because it used to be five requests.** Each of
+> steps 0–4 could fail on its own, and a failure at step 3 left a real
+> business half-onboarded — an account that exists, a merchant stuck in
+> `APPLICATION`, no shop — with nothing on the screen able to finish it or
+> undo it. Now either all of it happened or none of it did.
+>
+> The steps below are still exactly what that request performs, in order, and
+> remain the reference — they are just no longer five things a person does.
+> The individual routes all still exist and are still the way to do anything
+> the one screen does not cover.
 >
 > The same screen is still reachable in **GP-STORE Admin** under
 > **Marketplace → Merchants & Shops**, as the last group in the sidebar and
@@ -41,6 +54,7 @@ seeding script in the happy path and no SQL.
 
 | # | Who | Call | What it means |
 |---|---|---|---|
+| **0–4** | **Platform** | **`POST /api/platform/onboard`** | **All five below, in one transaction.** What the Super Admin app's **Merchant** button sends. Returns the merchant, the shop, the owner's account and the one-time password. |
 | 0 | Platform | `POST /api/platform/staff` | The merchant's **login** is opened, as an `ADMIN`. Returns a one-time password, once. |
 | 1 | Platform | `POST /api/platform/merchants` | The **business** applies, with step 0's account as `ownerCustomerId`. Not a shop yet. |
 | 2 | Platform | `PUT /api/platform/merchants/{id}/status` → `PENDING_REVIEW` | Somebody is looking at the papers. |
@@ -54,6 +68,19 @@ seeding script in the happy path and no SQL.
 | 10 | Merchant | `PUT /api/shop/listings/{variantId}/stock` | **How much of it they have.** |
 | 11 | Platform | `PUT /api/platform/merchants/{id}/status` → `ACTIVE` | The business is trading. |
 | 12 | Platform | `PUT /api/platform/shops/{id}/status` → `ACTIVE` | The shop is trading. |
+
+**`POST /api/platform/onboard` deliberately stops at step 4.** It does not
+throw switches 11 and 12, and the form says so before it is submitted: the
+shop it opens has empty shelves, and a findable storefront with nothing in it
+is worse than no storefront. The merchant signs in with the one-time password,
+is forced to change it, puts stock up, and only then does the platform press
+**Let them trade**.
+
+**It also does not derive what only a person knows.** The shop code comes from
+the business name and the trading name defaults to the legal one, but the pin
+and the delivery radius are asked for and required — `GET /api/shop/readiness`
+counts a shop with neither as blocked, because the distance search that decides
+who is offered a shop skips it entirely.
 
 **Steps 11 and 12 are two switches and both are real.** A shop can be `ACTIVE`
 under a merchant that is only `APPROVED`: everything built, nothing selling.
@@ -245,9 +272,20 @@ shop nobody closes is a shop a customer can eventually be offered.
 
 ---
 
-## Two things this flow got wrong, and what fixed them
+## Three things this flow got wrong, and what fixed them
 
-Both were found by running the onboarding for real rather than by reading it.
+All three were found by running the onboarding for real rather than by reading
+it.
+
+**A duplicate phone number came back as a 500 with a constraint name in it.**
+`POST /api/platform/staff` checked that no account already used the email and
+said nothing about the phone — but `customers.mobile_number` is `UNIQUE`, so a
+second account on the same number arrived as a raw
+`DataIntegrityViolationException`. It is the likely collision, not the
+unlikely one: a shopkeeper being onboarded may well already have a GP-STORE
+*customer* account on the same number, and the platform owner typing it in has
+no way to know. It is now refused with a sentence naming the problem, and
+`OneScreenOnboardingTest.aDuplicatePhoneIsExplained` fails without it.
 
 **There was no route to stock a shelf.** A shop could set its price and had no
 way at all to say how much it had: `/api/inventory` wants a whole `Inventory`
@@ -280,3 +318,22 @@ two methods:
 
 Both directions are pinned by a test, because the mistake was available in
 both.
+
+**Five requests meant a half-onboarded merchant nobody could finish.** Opening
+the login, registering the business, sending it to review, approving it and
+opening the shop were five calls from the console, and the order mattered in
+ways nothing on screen explained — approving straight from `APPLICATION` is
+refused, and a shop cannot be opened under a merchant that is not approved
+yet. A failure at any one of them left real rows behind and no way to carry on
+or back out. `POST /api/platform/onboard` performs the same five steps inside
+one `@Transactional` method.
+
+That property is pinned rather than asserted in a comment:
+`OneScreenOnboardingTest.nothingSurvivesAFailure` onboards one merchant, then
+tries to onboard a second one onto the **shop code the first already took** —
+so the refusal lands at the *last* step, after the login and the business have
+been created — and asserts the second owner's account does not exist
+afterwards. Removing `@Transactional` fails it with *"the staff account
+created before the refusal must be rolled back"*. An earlier version of that
+test used a duplicate **email**, which is refused at step one before anything
+is created; it passed with the annotation removed, and was proving nothing.

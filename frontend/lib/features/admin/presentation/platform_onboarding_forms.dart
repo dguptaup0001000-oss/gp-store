@@ -277,6 +277,240 @@ class _PlatformMerchantFormDialogState
   }
 }
 
+/// Onboards a merchant in one screen.
+///
+/// SIX FIELDS, AND THE LONG WAY ROUND NEEDED FIFTEEN ACROSS TWO TABS AND A
+/// STATE MACHINE. Registering a business, walking it through review, opening
+/// a shop and opening the owner's login were four separate jobs, and the
+/// order mattered in ways nothing on screen explained - approving straight
+/// from APPLICATION is refused, and a shop cannot be opened under a merchant
+/// that is not approved yet.
+///
+/// Everything here is something only a person can know. The shop code is
+/// derived from the business name, the trading name defaults to the legal
+/// one, and the lifecycle is walked server-side with the reason it actually
+/// had.
+///
+/// IT STOPS SHORT OF TRADING, and says so. The shop it opens has empty
+/// shelves; switching it on would put a findable storefront with nothing in
+/// it in front of customers.
+class PlatformOnboardMerchantDialog extends ConsumerStatefulWidget {
+  const PlatformOnboardMerchantDialog({super.key});
+
+  /// "26.7606, 83.3732" - exactly what Google Maps copies.
+  ///
+  /// ONE FIELD, NOT TWO, and it takes the string a person already has on
+  /// their clipboard. Two number fields ask somebody to split a value by
+  /// hand and get the halves the right way round; this asks for a paste.
+  /// Returns null when it is not a usable pair.
+  static ({double lat, double lng})? parseLocation(String raw) {
+    final parts = raw.trim().split(RegExp(r'[,\s]+'));
+    if (parts.length != 2) return null;
+    final lat = double.tryParse(parts[0]);
+    final lng = double.tryParse(parts[1]);
+    if (lat == null || lng == null) return null;
+    // A pin outside these is not a place on Earth, and is far more likely to
+    // be the two halves swapped than a real coordinate.
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return (lat: lat, lng: lng);
+  }
+
+  @override
+  ConsumerState<PlatformOnboardMerchantDialog> createState() =>
+      _PlatformOnboardMerchantDialogState();
+}
+
+class _PlatformOnboardMerchantDialogState
+    extends ConsumerState<PlatformOnboardMerchantDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _business = TextEditingController();
+  final _ownerName = TextEditingController();
+  final _ownerEmail = TextEditingController();
+  final _ownerPhone = TextEditingController();
+  final _location = TextEditingController();
+  final _radius = TextEditingController(text: '5');
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _business.dispose();
+    _ownerName.dispose();
+    _ownerEmail.dispose();
+    _ownerPhone.dispose();
+    _location.dispose();
+    _radius.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final where = PlatformOnboardMerchantDialog.parseLocation(_location.text)!;
+    setState(() => _saving = true);
+
+    try {
+      final opened = await ref.read(platformRepositoryProvider).onboardMerchant(
+            businessName: _business.text.trim(),
+            ownerName: _ownerName.text.trim(),
+            ownerEmail: _ownerEmail.text.trim(),
+            ownerPhone: _ownerPhone.text.trim(),
+            latitude: where.lat,
+            longitude: where.lng,
+            maxDeliveryRadiusKm: double.parse(_radius.text.trim()),
+          );
+      ref.invalidate(platformMerchantsProvider);
+      ref.invalidate(platformShopsProvider);
+      if (!mounted) return;
+
+      // BLOCKING, AND BEFORE THIS DIALOG CLOSES. This is the only time the
+      // password exists.
+      await showOneTimePassword(
+          context,
+          OpenedStaffAccount(
+            customerId: opened.ownerCustomerId,
+            email: opened.ownerEmail,
+            role: 'ADMIN',
+            oneTimePassword: opened.oneTimePassword,
+          ));
+      if (!mounted) return;
+      Navigator.of(context).pop(opened);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(extractErrorMessage(error))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Onboard a merchant'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This opens the owner\'s login, registers the business, '
+                'approves it and opens their shop. You get a one-time '
+                'password to hand over.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _business,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Business name *',
+                  hintText: 'What customers will see',
+                ),
+                validator: (value) => (value == null || value.trim().isEmpty)
+                    ? 'The business needs a name'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _ownerName,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: "Owner's name *"),
+                validator: (value) => (value == null || value.trim().isEmpty)
+                    ? 'The owner needs a name'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _ownerEmail,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: "Owner's email *",
+                  helperText: 'This is their login. Refused if an account '
+                      'already uses it.',
+                  helperMaxLines: 2,
+                ),
+                validator: (value) {
+                  final raw = value?.trim() ?? '';
+                  if (raw.isEmpty) {
+                    return 'An email is the login, so it is required';
+                  }
+                  return raw.contains('@') ? null : 'That is not an email address';
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _ownerPhone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: "Owner's phone",
+                  helperText: 'Optional. Refused if another account uses it.',
+                  helperMaxLines: 2,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _location,
+                keyboardType: TextInputType.text,
+                decoration: const InputDecoration(
+                  labelText: 'Shop location *',
+                  hintText: '26.7606, 83.3732',
+                  helperText: 'Paste from Google Maps. Customers are matched '
+                      'to shops by distance, so a shop with no pin is offered '
+                      'to nobody.',
+                  helperMaxLines: 3,
+                ),
+                validator: (value) =>
+                    PlatformOnboardMerchantDialog.parseLocation(value ?? '') == null
+                    ? 'Paste a latitude and longitude, like 26.7606, 83.3732'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _radius,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Delivers up to (km) *',
+                  helperText: 'A shop that has not said is offered to nobody.',
+                  helperMaxLines: 2,
+                ),
+                validator: (value) {
+                  final km = double.tryParse((value ?? '').trim());
+                  if (km == null) return 'How many kilometres?';
+                  return km > 0 ? null : 'Must be more than zero';
+                },
+              ),
+              const SizedBox(height: 16),
+              // SAYS WHAT IS STILL MISSING, because the owner wanted a shop
+              // that sells and is getting one that cannot yet.
+              const Text(
+                'The shop opens with empty shelves, so it is not trading yet. '
+                'The merchant signs in, puts stock up, and then you press '
+                'Let them trade.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : hapticize(_save),
+          child: _saving
+              ? const SizedBox(
+                  height: 16, width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Onboard'),
+        ),
+      ],
+    );
+  }
+}
+
 /// Opens a storefront under an approved merchant.
 class PlatformShopFormDialog extends ConsumerStatefulWidget {
   const PlatformShopFormDialog({super.key, this.merchants = const []});
