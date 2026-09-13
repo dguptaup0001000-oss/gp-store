@@ -441,10 +441,16 @@ else in this report was done.
    HTTP and then attacks the wall between the new shop and Shop #1. What
    remains yours is the merchant.
 
-2. **A phone, and the APK.** `build-apk` produces one on every CI run.
-   Install it and walk the customer journey, the merchant back office and the
+2. **A phone, and the APKs.** `build-apk` produces all four on every CI run:
+   customer, **super admin**, admin and worker. Install them and walk the
+   customer journey, the platform console, the merchant back office and the
    worker app. This is the only item on this list that nothing automated can
    substitute for.
+
+   **GP-STORE Super Admin** (`gpstore-superadmin-release.apk`) is yours and
+   opens on Merchants & Shops. It installs alongside GP-STORE Admin rather
+   than replacing it — separate applicationIds — so you can hold the owner's
+   app while a merchant signs into theirs on the phone next to you.
 
 3. **Check for `PLATFORM_ADMIN` accounts.** Run the **Who runs the shop**
    workflow in GitHub Actions: it answers this and item 4 together against the

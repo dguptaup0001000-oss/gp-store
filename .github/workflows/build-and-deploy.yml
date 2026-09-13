@@ -6,7 +6,9 @@
 # (arm64-v8a customer, APP_ENV=production, API
 # https://api.gpstore.co.in/v1). Admin is a separate app:
 # gpstore-admin-release.apk. Worker is a third app:
-# gpstore-worker-arm64.apk and gpstore-worker-armv7.apk.
+# gpstore-worker-arm64.apk and gpstore-worker-armv7.apk. Super Admin is a
+# fourth: gpstore-superadmin-release.apk / -armv7.apk, the platform owner's
+# console (in.gpstore.superadmin), APK only - no Play bundle.
 # Do not produce a combined customer+admin production APK.
 # GitHub UI zip size is not the APK size; the job summary prints
 # actual bytes, MiB, ABI, and SHA-256.
@@ -36,6 +38,7 @@
 # Customer applicationId: in.gpstore.customer
 # Admin applicationId:    in.gpstore.admin
 # Worker applicationId:   com.gpstore.worker
+# Super Admin applicationId: in.gpstore.superadmin
 #
 # Release keystore: CI never invents a keystore and never commits one.
 # It only decodes the operator-stored ANDROID_KEYSTORE_* secrets into a
@@ -407,6 +410,37 @@ jobs:
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
 
+      - name: Build Super Admin APK
+        env:
+          ALLOW_DEBUG_RELEASE_SIGNING: ${{ steps.play_signing.outputs.enabled == 'true' && '0' || '1' }}
+        # The platform owner's APK (in.gpstore.superadmin). Same console, but
+        # it opens on Merchants & Shops and refuses an account that is not the
+        # platform owner.
+        #
+        # NO FIREBASE, BY DESIGN AND BY NECESSITY. This applicationId has no
+        # client entry in the Firebase project, so android/app/build.gradle
+        # skips the google-services plugin for any task naming this flavor -
+        # otherwise the build would fail with "No matching client found" until
+        # somebody registered a new Android app in the Firebase console. It
+        # needs none: every push this project sends is one shop's order.
+        #
+        # NO APP BUNDLE, deliberately. Customer and Admin get one because they
+        # are the apps that could reach Play. This one is for a single person
+        # and is sideloaded; a Play listing for the platform owner's console
+        # is not something to produce by accident.
+        run: |
+          if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
+            echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
+            exit 1
+          fi
+          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
+            --flavor superadmin \
+            -t lib/super_admin_main.dart \
+            --dart-define=GPSTORE_APP=superadmin \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+
       - name: Name customer and admin APKs and report actual sizes
         # arm64-v8a is the production phone APK. armeabi-v7a is legacy 32-bit
         # only, uploaded under its own name so it is not mistaken for a bundle.
@@ -419,7 +453,8 @@ jobs:
           OUT=build/app/outputs/flutter-apk
           python3 tool/rename_flavor_apks.py "$OUT" \
             customer gpstore-customer-release.apk gpstore-customer-armv7.apk \
-            admin gpstore-admin-release.apk gpstore-admin-armv7.apk
+            admin gpstore-admin-release.apk gpstore-admin-armv7.apk \
+            superadmin gpstore-superadmin-release.apk gpstore-superadmin-armv7.apk
           VERSION="$(python3 -c "import pathlib,re; t=pathlib.Path('pubspec.yaml').read_text(); m=re.search(r'^version:\\s*(\\S+)', t, re.M); print(m.group(1) if m else 'unknown')")"
           python3 tool/report_apk_artifacts.py "$OUT" "$PACKAGE_SHA" "$PACKAGE_SHORT" "$VERSION"
 
@@ -439,7 +474,9 @@ jobs:
             build/app/outputs/flutter-apk/gpstore-customer-release.apk \
             build/app/outputs/flutter-apk/gpstore-customer-armv7.apk \
             build/app/outputs/flutter-apk/gpstore-admin-release.apk \
-            build/app/outputs/flutter-apk/gpstore-admin-armv7.apk
+            build/app/outputs/flutter-apk/gpstore-admin-armv7.apk \
+            build/app/outputs/flutter-apk/gpstore-superadmin-release.apk \
+            build/app/outputs/flutter-apk/gpstore-superadmin-armv7.apk
 
       - name: Build Customer App Bundle
         if: steps.play_signing.outputs.enabled == 'true'
@@ -525,6 +562,26 @@ jobs:
           path: |
             frontend/build/app/outputs/flutter-apk/gpstore-admin-armv7.apk
             frontend/build/app/outputs/flutter-apk/gpstore-admin-armv7.apk.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload super admin ARM64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-superadmin-release.apk
+          path: |
+            frontend/build/app/outputs/flutter-apk/gpstore-superadmin-release.apk
+            frontend/build/app/outputs/flutter-apk/gpstore-superadmin-release.apk.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload super admin ARMv7 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-superadmin-armv7.apk
+          path: |
+            frontend/build/app/outputs/flutter-apk/gpstore-superadmin-armv7.apk
+            frontend/build/app/outputs/flutter-apk/gpstore-superadmin-armv7.apk.sha256
           if-no-files-found: error
           retention-days: 90
 

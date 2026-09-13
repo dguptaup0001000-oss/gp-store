@@ -27,7 +27,18 @@ class AdminShell extends StatefulWidget {
     this.onSignOut,
     this.operatorName,
     this.role,
+    this.home,
   });
+
+  /// The destination this shell opens on, and returns to.
+  ///
+  /// Null means [AdminNav.dashboard] - one shop's working day, which is what
+  /// the admin APK wants. The super admin APK passes the platform console
+  /// instead: the platform owner's first question is never "how did this shop
+  /// trade today", it is "which merchants and shops exist". Landing them on a
+  /// shop dashboard and asking them to find Marketplace in a sidebar is what
+  /// the separate APK exists to stop.
+  final AdminDestination? home;
 
   final VoidCallback? onSignOut;
 
@@ -44,7 +55,9 @@ class AdminShell extends StatefulWidget {
 }
 
 class _AdminShellState extends State<AdminShell> {
-  String _selectedId = AdminNav.dashboardId;
+  late String _selectedId = _home.id;
+
+  AdminDestination get _home => widget.home ?? AdminNav.dashboard;
 
   Set<AdminPermission> get _permissions =>
       AdminRoles.permissionsFor(widget.role);
@@ -57,10 +70,10 @@ class _AdminShellState extends State<AdminShell> {
       return;
     }
 
-    // Phone: the drawer is already closing, and the dashboard is what is
-    // behind it, so only a real destination needs a route.
-    if (destination.id == AdminNav.dashboardId) {
-      setState(() => _selectedId = AdminNav.dashboardId);
+    // Phone: the drawer is already closing, and the home destination is what
+    // is behind it, so only a different destination needs a route.
+    if (destination.id == _home.id) {
+      setState(() => _selectedId = _home.id);
       return;
     }
     Navigator.of(context).push(MaterialPageRoute(builder: destination.builder));
@@ -92,7 +105,7 @@ class _AdminShellState extends State<AdminShell> {
         shape: const Border(
           bottom: BorderSide(color: AdminColors.border),
         ),
-        title: const Text('Dashboard', style: AdminText.sectionTitle),
+        title: Text(_home.label, style: AdminText.sectionTitle),
         actions: _headerActions(context),
       ),
       drawer: Drawer(
@@ -116,7 +129,7 @@ class _AdminShellState extends State<AdminShell> {
           ),
         ),
       ),
-      body: const AdminDashboardScreen(),
+      body: Builder(builder: _home.builder),
     );
   }
 
@@ -130,7 +143,7 @@ class _AdminShellState extends State<AdminShell> {
     // takes effect on the next request, and the server would refuse the
     // screen anyway. Fall back rather than render a pane that only 403s.
     if (!AdminNav.isVisible(destination, _permissions)) {
-      destination = AdminNav.dashboard;
+      destination = _home;
     }
     return Scaffold(
       backgroundColor: AdminColors.background,
