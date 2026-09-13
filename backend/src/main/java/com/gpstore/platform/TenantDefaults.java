@@ -19,6 +19,9 @@ import java.util.function.Supplier;
  */
 public final class TenantDefaults {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(TenantDefaults.class);
+
     private static volatile PlatformMode mode = PlatformMode.SINGLE_SHOP;
     private static volatile Supplier<Long> singleShopIdSource;
     private static volatile Long resolvedSingleShopId;
@@ -116,29 +119,30 @@ public final class TenantDefaults {
         TenantScope scope = TenantContext.current();
         if (scope != null && scope.isSingleShop()) {
             Long inScope = scope.requireShopId();
-            // A CONTRADICTION IS A BUG, NOT A PREFERENCE, and resolving it
-            // quietly is how one stayed hidden.
+            // THE SCOPE WINS, AND THAT IS THE POINT. A shop id arriving on an
+            // object - from a request body, say - must never place the row in
+            // a shop the credential does not reach; CrossTenantShopCatalogTest
+            // smuggles one in and asserts exactly this.
             //
-            // The scope still wins - code that names a shop must never be able
-            // to write into one the credential does not reach, which is the
-            // property this method exists for. But when the row SAYS which
-            // shop it is for and the thread says a different one, silently
-            // rewriting the row put it somewhere nobody asked for: opening a
-            // shop wrote the new storefront's staff row into whichever shop
-            // the phone's X-Shop-Id happened to name, where it collided with
-            // the row already there and surfaced as a generic conflict that
-            // named nothing.
+            // BUT IT IS NOW SAID OUT LOUD, because the overwrite is not always
+            // a smuggling attempt being neutralised. Opening a shop set the new
+            // storefront's staff row to the new shop and had it quietly rewritten
+            // to whichever shop the phone's X-Shop-Id named, where it collided
+            // with the membership already there. The refusal reached the console
+            // as a generic conflict, and nothing anywhere recorded that a row
+            // had been moved. One WARN would have answered it in seconds.
             //
-            // Refusing costs a loud failure in the one case that was already
-            // broken, and buys a named one instead of a puzzle.
+            // Not an exception: a client body naming another shop is an ordinary
+            // event on a normal path, and failing those requests would turn a
+            // defence that works into an outage.
             if (declared != null && !declared.equals(inScope)) {
-                throw new IllegalStateException(
-                        "Refusing to insert a " + entityType.getSimpleName() + " for shop "
-                                + declared + " while the work on this thread is scoped to shop "
-                                + inScope + ". One of the two is wrong, and guessing which would "
-                                + "write the row into a shop nobody named. Code that means a "
-                                + "particular shop must say so with "
-                                + "TenantContext.runWithin(TenantScope.ofShop(...), ...).");
+                log.warn("Placing a {} in shop {} although the row asked for shop {}. The scope on "
+                                + "this thread wins, which is correct for a shop id that arrived on "
+                                + "a request - but if this row was built by code that MEANT shop {}, "
+                                + "that code must say so with "
+                                + "TenantContext.runWithin(TenantScope.ofShop(...), ...) or its row "
+                                + "lands somewhere nobody named.",
+                        entityType.getSimpleName(), inScope, declared, declared);
             }
             return inScope;
         }
