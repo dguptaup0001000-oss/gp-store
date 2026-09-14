@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/api/error_messages.dart';
-import '../../../core/images/gp_network_image.dart';
 import '../data/worker_repository.dart';
 import '../domain/worker_models.dart';
 
@@ -584,28 +583,36 @@ class _PackingPhoto extends StatelessWidget {
       return placeholder;
     }
 
-    // THROUGH THE APP'S ONE IMAGE PIPELINE, not a raw Image.network.
-    // This used to fetch the full original and cache nothing, so a rider
-    // scrolling a twenty-line packing list on storeroom signal downloaded
-    // twenty full-size photographs to draw twenty 52px thumbnails - and
-    // downloaded them again on the next order. GpNetworkImage asks the CDN
-    // for a thumbnail, decodes at the screen's density rather than the
-    // file's, and keeps it on disk.
+    // THE ONE SCREEN IN THE APP THAT MAY NOT USE GpNetworkImage, and the
+    // reason is the rider's APK rather than this screen.
     //
-    // No spinner, same as before: GpNetworkImage's own placeholder is a
-    // calm block, which is what a packing list on a slow connection wants.
-    return SizedBox(
-      width: _size,
-      height: _size,
-      child: GpNetworkImage(
-        url: source,
-        renderWidth: _size,
+    // CI builds the delivery-worker APK through tool/with_worker_pubspec.sh,
+    // which swaps in pubspec.worker.yaml - a deliberately short dependency
+    // list that leaves out Firebase, WebView, TTS, BLE, speech, Cashfree AND
+    // cached_network_image, so none of that native code is packaged into an
+    // APK a rider installs. GpNetworkImage is built on cached_network_image,
+    // so importing it here does not merely add a dependency: it fails the
+    // release build outright with "Couldn't resolve the package
+    // 'cached_network_image'". That is exactly what happened when this was
+    // "tidied" onto the shared widget, and worker_apk_stays_slim_test now
+    // fails for it in seconds instead of three minutes into a Gradle build.
+    //
+    // The cost is real and accepted: no disk cache and no CDN sizing on this
+    // list. Paying it in bytes on every rider's phone, for every order, to
+    // save a re-fetch of a 52px thumbnail is the worse trade.
+    //
+    // No spinner. A packing list that fills with turning circles on a
+    // storeroom connection reads worse than one that fills in quietly.
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(
+        source,
+        width: _size,
+        height: _size,
         fit: BoxFit.cover,
-        borderRadius: BorderRadius.circular(8),
-        fallbackIcon: Icons.inventory_2_outlined,
-        fallbackIconSize: 24,
-        placeholderColor: theme.colorScheme.surfaceContainerHighest,
-        placeholderIconColor: theme.colorScheme.outline,
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : placeholder,
+        errorBuilder: (context, error, stack) => placeholder,
       ),
     );
   }
