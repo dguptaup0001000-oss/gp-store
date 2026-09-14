@@ -48,10 +48,16 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final offersAsync = ref.watch(activeOffersProvider);
-    final brandsAsync = ref.watch(brandsProvider);
-    // Categories are watched inside PopularCategories rather than here, so the
-    // whole page does not rebuild when they land - only the eight tiles do.
+    // NOTHING THAT MERELY ARRIVES IS WATCHED AT THIS LEVEL. Categories,
+    // offers and brands are each watched inside their own Consumer below, so
+    // when one of them lands only that section rebuilds. Watched here - as
+    // they were - every arrival rebuilt the whole page, including the
+    // CustomScrollView and the sliver list under it, three times on a cold
+    // open (§12: do not rebuild the entire home screen unnecessarily).
+    //
+    // The gate below IS watched here, because it changes what the page is
+    // allowed to request and that is a decision about the page rather than
+    // about one section.
     final belowFoldReady = ref.watch(homeBelowFoldReadyProvider);
     // Watched HERE rather than inside HomeFeedSlivers.build, which runs inside
     // ScrollToTop's builder callback and so executes during ScrollToTop's
@@ -59,12 +65,10 @@ class HomeScreen extends ConsumerWidget {
     final feedAsync = belowFoldReady
         ? ref.watch(productFeedProvider)
         : const AsyncValue<ProductFeedState>.loading();
-    final isLoggedIn =
-        ref.watch(authControllerProvider).status == AuthStatus.authenticated;
+    final isLoggedIn = ref.watch(authControllerProvider).status == AuthStatus.authenticated;
 
     void openProduct(Product product) => Navigator.of(context).push(
-          MaterialPageRoute(
-              builder: (_) => ProductDetailScreen(product: product)),
+          MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
         );
 
     return Scaffold(
@@ -94,8 +98,7 @@ class HomeScreen extends ConsumerWidget {
                 Future.sync(() => ref.invalidate(productFeedProvider)),
               ]),
               child: ScrollToTop(
-                builder: (context, scrollController) =>
-                    NotificationListener<ScrollNotification>(
+                builder: (context, scrollController) => NotificationListener<ScrollNotification>(
                   onNotification: (notification) {
                     // Trigger a page BEFORE the customer hits the bottom, so
                     // the next products are usually already there by the time
@@ -129,21 +132,23 @@ class HomeScreen extends ConsumerWidget {
                           const PopularCategories(),
                           const NearbyShopsSection(),
 
-                          offersAsync.when(
-                            loading: () => const SizedBox.shrink(),
-                            error: (e, s) => SectionLoadError(
-                              message: "Couldn't load offers",
-                              onRetry: () => ref.invalidate(activeOffersProvider),
-                            ),
-                            data: (offers) => offers.isEmpty
-                                // §8: no section for data that is not there.
-                                // An empty offers banner is a heading over a
-                                // blank strip.
-                                ? const SizedBox.shrink()
-                                : Padding(
-                                    padding: const EdgeInsets.only(top: 8),
-                                    child: OffersBanner(offers: offers),
+                          Consumer(
+                            builder: (context, ref, _) => ref.watch(activeOffersProvider).when(
+                                  loading: () => const SizedBox.shrink(),
+                                  error: (e, s) => SectionLoadError(
+                                    message: "Couldn't load offers",
+                                    onRetry: () => ref.invalidate(activeOffersProvider),
                                   ),
+                                  data: (offers) => offers.isEmpty
+                                      // §8: no section for data that is not
+                                      // there. An empty offers banner is a
+                                      // heading over a blank strip.
+                                      ? const SizedBox.shrink()
+                                      : Padding(
+                                          padding: const EdgeInsets.only(top: 8),
+                                          child: OffersBanner(offers: offers),
+                                        ),
+                                ),
                           ),
 
                           // SECOND WAVE, from here down. Each section is a
@@ -154,14 +159,12 @@ class HomeScreen extends ConsumerWidget {
                           // request.
                           if (isLoggedIn)
                             Consumer(
-                              builder: (context, ref, _) =>
-                                  HorizontalProductSection(
+                              builder: (context, ref, _) => HorizontalProductSection(
                                 title: 'Recommended for you',
                                 provider: belowFoldReady
                                     ? ref.watch(recommendedForMeProvider)
                                     : const AsyncValue.loading(),
-                                onRetry: () =>
-                                    ref.invalidate(recommendedForMeProvider),
+                                onRetry: () => ref.invalidate(recommendedForMeProvider),
                                 onProductTap: openProduct,
                                 onSeeAllTap: () => Navigator.of(context).push(
                                   MaterialPageRoute(
@@ -177,8 +180,7 @@ class HomeScreen extends ConsumerWidget {
                             ),
 
                           Consumer(
-                            builder: (context, ref, _) =>
-                                HorizontalProductSection(
+                            builder: (context, ref, _) => HorizontalProductSection(
                               title: 'Trending now',
                               provider: belowFoldReady
                                   ? ref.watch(trendingProvider)
@@ -189,41 +191,39 @@ class HomeScreen extends ConsumerWidget {
                                 MaterialPageRoute(
                                   builder: (_) => SeeAllProductsScreen(
                                     title: 'Trending now',
-                                    fetchProducts: () => ref
-                                        .read(productsRepositoryProvider)
-                                        .getTrending(limit: 50),
+                                    fetchProducts: () =>
+                                        ref.read(productsRepositoryProvider).getTrending(limit: 50),
                                   ),
                                 ),
                               ),
                             ),
                           ),
 
-                          brandsAsync.when(
-                            loading: () => const SizedBox.shrink(),
-                            error: (e, s) => SectionLoadError(
-                              message: "Couldn't load brands",
-                              onRetry: () => ref.invalidate(brandsProvider),
-                            ),
-                            data: (brands) => BrandsRow(
-                              brands: brands,
-                              onBrandTap: (brand) => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        BrandProductsScreen(brand: brand)),
-                              ),
-                              // THE ONLY WAY TO THE FULL BRAND LIST now that
-                              // the second brand banner is gone. Removing a
-                              // surface must not orphan a screen.
-                              onSeeAll: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) => const BrandsScreen()),
-                              ),
-                            ),
+                          Consumer(
+                            builder: (context, ref, _) => ref.watch(brandsProvider).when(
+                                  loading: () => const SizedBox.shrink(),
+                                  error: (e, s) => SectionLoadError(
+                                    message: "Couldn't load brands",
+                                    onRetry: () => ref.invalidate(brandsProvider),
+                                  ),
+                                  data: (brands) => BrandsRow(
+                                    brands: brands,
+                                    onBrandTap: (brand) => Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                          builder: (_) => BrandProductsScreen(brand: brand)),
+                                    ),
+                                    // THE ONLY WAY TO THE FULL BRAND LIST now that
+                                    // the second brand banner is gone. Removing a
+                                    // surface must not orphan a screen.
+                                    onSeeAll: () => Navigator.of(context).push(
+                                      MaterialPageRoute(builder: (_) => const BrandsScreen()),
+                                    ),
+                                  ),
+                                ),
                           ),
 
                           Consumer(
-                            builder: (context, ref, _) =>
-                                HorizontalProductSection(
+                            builder: (context, ref, _) => HorizontalProductSection(
                               title: 'New arrivals',
                               provider: belowFoldReady
                                   ? ref.watch(newArrivalsProvider)
