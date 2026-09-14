@@ -112,8 +112,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('GP-STORE verified'), findsNWidgets(2));
-      expect(find.textContaining('1.2 km away'), findsOneWidget);
-      expect(find.textContaining('4.6 km away'), findsOneWidget);
+      // THE CLAIM IS THE DISTANCE, NOT THE SENTENCE. The row used to read
+      // "1.2 km away · delivers up to 8 km" on its own line; the shared card
+      // now reads "1.2 km · delivers to 8 km" beside the rating. What has to
+      // stay true is that a customer choosing between two shops can see how
+      // far each one is, so that is what this matches on.
+      expect(find.textContaining('1.2 km'), findsOneWidget);
+      expect(find.textContaining('4.6 km'), findsOneWidget);
     });
 
     testWidgets('nothing nearby offers the next rung, and says what it found',

@@ -64,6 +64,15 @@ class Storefront with _$Storefront {
     String? nextDeliveryDate,
     String? supportPhone,
     String? timeZone,
+
+    /// What customers have said, on the list and not only on the shop page.
+    ///
+    /// NULL AVERAGE WITH A ZERO COUNT MEANS UNRATED, and every screen must
+    /// draw it that way. A new kirana nobody has rated yet is not a nought
+    /// out of five, and an app that says so is libelling a real merchant. The
+    /// server sends null rather than 0.0 for exactly this reason.
+    double? ratingAverage,
+    @Default(0) int ratingCount,
   }) = _Storefront;
 
   factory Storefront.fromJson(Map<String, dynamic> json) => _$StorefrontFromJson(json);

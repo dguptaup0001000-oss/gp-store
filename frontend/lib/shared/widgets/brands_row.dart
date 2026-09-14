@@ -5,10 +5,24 @@ import '../../features/products/domain/brand_models.dart';
 import 'brand_avatar.dart';
 
 class BrandsRow extends StatelessWidget {
-  const BrandsRow({super.key, required this.brands, this.onBrandTap});
+  const BrandsRow({
+    super.key,
+    required this.brands,
+    this.onBrandTap,
+    this.onSeeAll,
+  });
 
   final List<BrandSummary> brands;
   final void Function(BrandSummary brand)? onBrandTap;
+
+  /// The full brand list, when the caller has somewhere to send them.
+  ///
+  /// THIS ROW SHOWS WHAT FITS, and a customer looking for a brand that did not
+  /// fit needs a way to the rest. It used to live on a second brand banner
+  /// below the fold; that banner is gone and the route it owned would have
+  /// gone with it, which is how a screen becomes unreachable without anybody
+  /// deleting it.
+  final VoidCallback? onSeeAll;
 
   @override
   Widget build(BuildContext context) {
@@ -18,8 +32,17 @@ class BrandsRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-          child: Text('Shop by Brand', style: Theme.of(context).textTheme.titleLarge),
+          padding: EdgeInsets.fromLTRB(16, 20, onSeeAll == null ? 16 : 8, 4),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text('Shop by brand',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              ),
+              if (onSeeAll != null)
+                TextButton(onPressed: onSeeAll, child: const Text('See all')),
+            ],
+          ),
         ),
         SizedBox(
           height: 104,

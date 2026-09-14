@@ -74,6 +74,14 @@ final deliveryPinProvider = Provider<({double lat, double lng})?>((ref) {
   return (lat: chosen.latitude, lng: chosen.longitude);
 });
 
+/// Which shop the app is acting for, as a plain id.
+///
+/// A NAMED PROVIDER RATHER THAN shopContextProvider READ DIRECTLY, so a widget
+/// that only wants to draw a tick beside the current shop does not have to
+/// import the holder that CHANGES it. Reading and switching are different
+/// privileges to hand a widget, even inside one app.
+final selectedShopIdProvider = Provider<int?>((ref) => ref.watch(shopContextProvider));
+
 /// The storefront the customer is currently shopping, when they have chosen
 /// one. Null under a single shop, and null on a marketplace until they pick.
 ///

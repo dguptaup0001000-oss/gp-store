@@ -85,19 +85,32 @@ class AppColors {
   /// Pale violet wash, the lavender-side counterpart to [peach].
   static const mist = Color(0xFFEDE7FA);
 
-  /// The ground. Clearly lavender rather than a grey that happens to lean
-  /// violet, but calm enough to sit under a screen of product photography
-  /// all day without tiring the eye.
-  static const background = Color(0xFFEFEBFA);
+  /// The ground. Near-white with the faintest violet lean.
+  ///
+  /// THIS USED TO BE A CLEAR LAVENDER (#EFEBFA) and the change is deliberate.
+  /// A tinted ground under a marketplace of many categories fights every
+  /// product photograph on it: groceries, saris, phones and medicine strips
+  /// all have to sit on the same surface, and a surface with an opinion makes
+  /// two thirds of them look wrong. A kirana-only app could afford the
+  /// warmth; a marketplace cannot.
+  ///
+  /// STILL NOT A GREY. The violet lean is what stops this being any other
+  /// app's default white, and it is the reason the brand colour below reads
+  /// as belonging to the screen rather than as paint applied to it.
+  static const background = Color(0xFFF8F7FC);
 
-  /// A paler violet for section bands. Lighter than [background] on purpose:
-  /// depth comes from a section lifting toward the light, not from it
-  /// darkening, which would read as a shadow across the products.
-  static const surfaceSoft = Color(0xFFF7F4FD);
+  /// Section bands. Lighter than [background] on purpose: depth comes from a
+  /// section lifting toward the light, not from it darkening, which would
+  /// read as a shadow across the products.
+  static const surfaceSoft = Color(0xFFFDFCFF);
 
-  /// Cards and floating surfaces. Warm white, not pure white - pure white on
-  /// lavender is the combination that looks clinical.
-  static const cardBackground = Color(0xFFFFFCF8);
+  /// Cards and floating surfaces. White.
+  ///
+  /// WARM WHITE WAS THE OLD RULE and it went with the lavender ground - on
+  /// lavender, pure white reads clinical. On a near-white ground the warmth
+  /// reads as a page that has yellowed, and product photography against it
+  /// picks up a cast. White is the honest surface for a shelf.
+  static const cardBackground = Color(0xFFFFFFFF);
 
   static const error = Color(0xFFC0392B);
 

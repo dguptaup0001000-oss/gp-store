@@ -7,6 +7,7 @@ import 'package:gpstore/core/marketplace/marketplace_models.dart';
 import 'package:gpstore/core/marketplace/marketplace_providers.dart';
 import 'package:gpstore/core/store/store_status.dart';
 import 'package:gpstore/core/store/store_status_provider.dart';
+import 'package:gpstore/features/address/presentation/address_providers.dart';
 import 'package:gpstore/features/home/presentation/home_screen.dart';
 import 'package:gpstore/features/products/data/products_repository.dart';
 import 'package:gpstore/features/products/domain/brand_models.dart';
@@ -106,6 +107,13 @@ void main() {
           // the request budget of the ORDINARY home screen.
           marketplaceModeProvider
               .overrideWith((ref) async => MarketplaceMode.singleShop),
+          // The header names the address the order is going to, which is
+          // visible content and so genuinely belongs in the first wave - but
+          // it is not a PRODUCT request, and this test measures the product
+          // request budget. Left real it opens a Dio call the test binding
+          // never resolves, and the pending timer fails the test for a reason
+          // that has nothing to do with what it is asserting.
+          myAddressesProvider.overrideWith((ref) async => const []),
         ],
         child: const MaterialApp(home: HomeScreen()),
       ),
