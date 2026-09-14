@@ -45,10 +45,17 @@ class MarketplaceRepository {
   /// can actually deliver here. A radius is the second tap, and the server
   /// keeps climbing its own ladder until it finds something rather than
   /// answering an empty screen at each rung in turn.
+  /// [categoryId] NARROWS EACH RUNG OF THE LADDER, not the answer. The server
+  /// keeps climbing until it finds a radius that has a shop selling this
+  /// category - so a customer whose nearest shops are all kiranas is shown the
+  /// chemist eleven kilometres out rather than an empty screen they cannot
+  /// widen their way off. Null asks the question the released app already
+  /// asks, unchanged.
   Future<DiscoveryPage> discover({
     double? latitude,
     double? longitude,
     double? radiusKm,
+    int? categoryId,
   }) async {
     final response = await apiClient.dio.get(
       '/api/marketplace/discovery',
@@ -56,6 +63,7 @@ class MarketplaceRepository {
         if (latitude != null) 'lat': latitude,
         if (longitude != null) 'lng': longitude,
         if (radiusKm != null) 'radiusKm': radiusKm,
+        if (categoryId != null) 'categoryId': categoryId,
       },
     );
     return DiscoveryPage.fromJson(Map<String, dynamic>.from(response.data as Map));
@@ -69,6 +77,26 @@ class MarketplaceRepository {
   Future<StorefrontDetail> storefront(int shopId) async {
     final response = await apiClient.dio.get('/api/marketplace/shops/$shopId');
     return StorefrontDetail.fromJson(Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// The categories somebody near this pin actually stocks.
+  ///
+  /// EMPTY IS AN ANSWER. A pin no shop serves has nothing to buy, and the home
+  /// screen says so rather than drawing a catalogue that leads nowhere.
+  Future<List<MarketCategory>> categoriesNear({
+    required double latitude,
+    required double longitude,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/marketplace/categories',
+      queryParameters: {'lat': latitude, 'lng': longitude},
+    );
+    final data = response.data;
+    if (data is! List) return const [];
+    return data
+        .whereType<Map>()
+        .map((e) => MarketCategory.fromJson(Map<String, dynamic>.from(e)))
+        .toList(growable: false);
   }
 
   Future<MarketplaceMode> mode() async {

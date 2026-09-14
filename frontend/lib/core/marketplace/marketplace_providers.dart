@@ -74,6 +74,14 @@ final deliveryPinProvider = Provider<({double lat, double lng})?>((ref) {
   return (lat: chosen.latitude, lng: chosen.longitude);
 });
 
+/// Which shop the app is acting for, as a plain id.
+///
+/// A NAMED PROVIDER RATHER THAN shopContextProvider READ DIRECTLY, so a widget
+/// that only wants to draw a tick beside the current shop does not have to
+/// import the holder that CHANGES it. Reading and switching are different
+/// privileges to hand a widget, even inside one app.
+final selectedShopIdProvider = Provider<int?>((ref) => ref.watch(shopContextProvider));
+
 /// The storefront the customer is currently shopping, when they have chosen
 /// one. Null under a single shop, and null on a marketplace until they pick.
 ///
@@ -133,6 +141,50 @@ final discoveryProvider = FutureProvider.autoDispose
         latitude: point.lat,
         longitude: point.lng,
         radiusKm: radiusKm,
+      );
+});
+
+/// The categories this customer can actually buy from, most-stocked first.
+///
+/// THE HOME SCREEN'S CATEGORY SHELF. Not `categoriesProvider`, which is the
+/// catalogue - every category the platform has defined, priced and listed by
+/// whichever shop the app is currently acting for. This one is the
+/// marketplace's answer to "what can I buy here", so a town with four kiranas
+/// and a chemist is offered groceries and medicine rather than twenty doors
+/// that open onto nothing.
+///
+/// NULL PIN MEANS NO ANSWER, NOT AN EMPTY ONE. A customer with no address yet
+/// cannot be told which categories serve them, and the screen falls back to
+/// the catalogue rather than showing them an empty marketplace.
+final marketCategoriesProvider =
+    FutureProvider.autoDispose<List<MarketCategory>>((ref) async {
+  final pin = ref.watch(deliveryPinProvider);
+  if (pin == null) return const [];
+  return ref
+      .watch(marketplaceRepositoryProvider)
+      .categoriesNear(latitude: pin.lat, longitude: pin.lng);
+});
+
+/// The shops near this customer that sell one category, nearest first.
+///
+/// THE RADIUS IS SHARED WITH [discoveryProvider] on purpose. "Search farther"
+/// is one idea in this app, and a customer who widened the search on the shop
+/// picker has said something about how far they are willing to look that stays
+/// true when they open a category.
+///
+/// EVERY DECISION IS THE SERVER'S: which shops serve the pin, which of them
+/// stock the category, what order they come in, and when to climb to the next
+/// rung. Nothing here re-sorts or re-filters the list.
+final categoryShopsProvider = FutureProvider.autoDispose
+    .family<DiscoveryPage, int>((ref, categoryId) {
+  final pin = ref.watch(deliveryPinProvider);
+  if (pin == null) return Future.value(const DiscoveryPage());
+  final radiusKm = ref.watch(discoveryRadiusProvider);
+  return ref.watch(marketplaceRepositoryProvider).discover(
+        latitude: pin.lat,
+        longitude: pin.lng,
+        radiusKm: radiusKm,
+        categoryId: categoryId,
       );
 });
 

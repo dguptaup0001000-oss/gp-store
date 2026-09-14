@@ -64,6 +64,15 @@ class Storefront with _$Storefront {
     String? nextDeliveryDate,
     String? supportPhone,
     String? timeZone,
+
+    /// What customers have said, on the list and not only on the shop page.
+    ///
+    /// NULL AVERAGE WITH A ZERO COUNT MEANS UNRATED, and every screen must
+    /// draw it that way. A new kirana nobody has rated yet is not a nought
+    /// out of five, and an app that says so is libelling a real merchant. The
+    /// server sends null rather than 0.0 for exactly this reason.
+    double? ratingAverage,
+    @Default(0) int ratingCount,
   }) = _Storefront;
 
   factory Storefront.fromJson(Map<String, dynamic> json) => _$StorefrontFromJson(json);
@@ -174,6 +183,35 @@ class DiscoveryPage with _$DiscoveryPage {
 
   /// Whether there is a farther rung to offer.
   bool get canSearchFarther => nextRadiusKm != null;
+}
+
+/// A category a customer at this pin can actually buy from, and how many
+/// nearby shops sell it.
+///
+/// NOT THE CATALOGUE. `/api/categories` lists every category the platform has
+/// ever defined, which is the right answer for a Super Admin and the wrong one
+/// for a customer in a town with four kiranas and a chemist: it offers twenty
+/// doors, eighteen of which open onto "no shops found". This is the answer to
+/// the customer's question instead - what can I buy here - and `shopCount` is
+/// why the list can be ordered by usefulness rather than by row id.
+///
+/// THE ID IS THE CATALOGUE'S. Nothing here is a second copy of a category; the
+/// Super Admin renames one in one place and every screen follows.
+@freezed
+class MarketCategory with _$MarketCategory {
+  const factory MarketCategory({
+    required int categoryId,
+    String? name,
+    String? imageUrl,
+
+    /// How many shops serving this pin stock it. Never zero - a category no
+    /// shop stocks is absent from the list rather than present with a zero,
+    /// because a zero is a door that opens onto nothing.
+    @Default(0) int shopCount,
+  }) = _MarketCategory;
+
+  factory MarketCategory.fromJson(Map<String, dynamic> json) =>
+      _$MarketCategoryFromJson(json);
 }
 
 /// One shop's answer to "what would this item cost me, from you?"

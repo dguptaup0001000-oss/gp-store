@@ -15,6 +15,7 @@ import '../../wishlist/presentation/wishlist_providers.dart';
 import '../domain/product_models.dart';
 import 'product_detail_screen.dart';
 import 'products_providers.dart';
+import 'search_matches.dart';
 import 'recent_searches.dart';
 import 'voice_search_sheet.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
@@ -341,15 +342,30 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     }
 
     if (_results.isEmpty) {
-      return _NoResults(
-        query: _controller.text.trim(),
-        recentTerms: _recentTerms,
-        onTap: hapticizeValue(_runTerm),
+      // A SHOP OR A CATEGORY IS STILL AN ANSWER. Typing a chemist's name
+      // matches no product at all, and "No results" over a screen that could
+      // have offered the chemist is the search box failing at the one thing
+      // it was asked to do.
+      return ListView(
+        children: [
+          SearchMatches(query: _controller.text),
+          _NoResults(
+            query: _controller.text.trim(),
+            recentTerms: _recentTerms,
+            onTap: hapticizeValue(_runTerm),
+            shrinkWrap: true,
+          ),
+        ],
       );
     }
 
     return Column(
       children: [
+        // SHOPS AND CATEGORIES FIRST. "Sharma Medical" is a shop and
+        // "medicine" is a category; a search box that only ever answers with
+        // products sends somebody looking for a chemist through a list of
+        // paracetamol strips to find one. Draws nothing when nothing matches.
+        SearchMatches(query: _controller.text),
         // What Smart Search understood, above the results it produced.
         _SearchInterpretation(
           query: _controller.text.trim(),
@@ -696,16 +712,27 @@ class _RecentSearches extends StatelessWidget {
 /// genuinely useful, whereas "here is some rice because you typed something
 /// we did not understand" is noise.
 class _NoResults extends StatelessWidget {
-  const _NoResults({required this.query, required this.recentTerms, required this.onTap});
+  const _NoResults({
+    required this.query,
+    required this.recentTerms,
+    required this.onTap,
+    this.shrinkWrap = false,
+  });
 
   final String query;
   final List<String> recentTerms;
   final ValueChanged<String> onTap;
 
+  /// True when this sits inside another scroll view - under the shop and
+  /// category matches, which are a result even when no product is.
+  final bool shrinkWrap;
+
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 40, 16, 16),
+      shrinkWrap: shrinkWrap,
+      physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
+      padding: EdgeInsets.fromLTRB(16, shrinkWrap ? 16 : 40, 16, 16),
       children: [
         const Icon(Icons.search_off, size: 40, color: AppColors.textSecondary),
         const SizedBox(height: 12),

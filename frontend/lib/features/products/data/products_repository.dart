@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
+
 import '../../../core/api/api_client.dart';
+import '../../../core/marketplace/shop_context.dart';
 import '../domain/bestseller_models.dart';
 import '../domain/brand_models.dart';
 import '../domain/product_models.dart';
@@ -171,10 +173,21 @@ class ProductsRepository {
   /// after empty page forever. Spring's Page JSON already carries `last`;
   /// every other method in this file throws it away and returns a bare
   /// List, which is exactly why none of them can drive infinite scroll.
-  Future<ProductPage> fetchFeed({int page = 0, int size = 20}) async {
+  /// A page of the catalogue, priced and listed by whichever shop is asking.
+  ///
+  /// [shopId] READS ANOTHER SHOP'S SHELF WITHOUT MOVING IN. Left null this is
+  /// the request the app has always made: the shop the customer is currently
+  /// in, or Shop #1 under a single shop. Naming one asks a specific
+  /// storefront what it has, which is what lets a customer look at a shop
+  /// before deciding to switch to it - and the server still refuses any shop
+  /// the caller is not entitled to, so this asks rather than decides.
+  Future<ProductPage> fetchFeed({int page = 0, int size = 20, int? shopId}) async {
     final response = await apiClient.dio.get(
       '/api/products/feed',
       queryParameters: {'page': page, 'size': size},
+      options: shopId == null
+          ? null
+          : Options(headers: {shopHeaderName: shopId.toString()}),
     );
 
     final data = response.data as Map<String, dynamic>;

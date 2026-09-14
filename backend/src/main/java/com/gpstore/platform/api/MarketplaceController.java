@@ -47,13 +47,22 @@ public class MarketplaceController {
     private final com.gpstore.platform.ShopReliability reliability;
     private final com.gpstore.platform.shopinfo.ShopPolicyRepository policies;
     private final com.gpstore.rating.ShopRatingService ratings;
+    private final com.gpstore.discovery.ShopCategoryPresence shelves;
+    private final com.gpstore.discovery.PublicShopStars stars;
+    private final com.gpstore.repository.CategoryRepository categories;
 
     public MarketplaceController(ShopDiscovery discovery, ShopRepository shops,
                                  PlatformProperties platform, ShopScopeSwitch shopScope,
                                  DeliveryScheduleService schedule,
                                  com.gpstore.platform.ShopReliability reliability,
                                  com.gpstore.platform.shopinfo.ShopPolicyRepository policies,
-                                 com.gpstore.rating.ShopRatingService ratings) {
+                                 com.gpstore.rating.ShopRatingService ratings,
+                                 com.gpstore.discovery.ShopCategoryPresence shelves,
+                                 com.gpstore.discovery.PublicShopStars stars,
+                                 com.gpstore.repository.CategoryRepository categories) {
+        this.shelves = shelves;
+        this.stars = stars;
+        this.categories = categories;
         this.ratings = ratings;
         this.reliability = reliability;
         this.policies = policies;
@@ -91,7 +100,19 @@ public class MarketplaceController {
                                  String closureReason,
                                  java.time.LocalDateTime pausedUntil,
                                  LocalDate nextDeliveryDate,
-                                 String supportPhone, String timeZone) {}
+                                 String supportPhone, String timeZone,
+                                 // WHAT CUSTOMERS SAID, on the list rather
+                                 // than only on the page. Choosing between
+                                 // four kiranas without their ratings is
+                                 // choosing on distance alone. Batched in one
+                                 // query for the whole list (PublicShopStars),
+                                 // so this costs the list less than the
+                                 // settings read already above it.
+                                 //
+                                 // ZERO COUNT MEANS UNRATED, NOT NOUGHT STARS,
+                                 // and every screen must draw it that way.
+                                 Double ratingAverage,
+                                 int ratingCount) {}
 
     /**
      * A page of discovery: what was searched, what came back, and how much
@@ -147,9 +168,7 @@ public class MarketplaceController {
             // cannot be proved deliverable is not deliverable.
             return List.of();
         }
-        return discovery.shopsServing(lat, lng).stream()
-                .map(this::view)
-                .toList();
+        return viewAll(discovery.shopsServing(lat, lng));
     }
 
     /**
@@ -172,7 +191,8 @@ public class MarketplaceController {
     @GetMapping("/discovery")
     public DiscoveryView discover(@RequestParam(required = false) Double lat,
                                   @RequestParam(required = false) Double lng,
-                                  @RequestParam(required = false) BigDecimal radiusKm) {
+                                  @RequestParam(required = false) BigDecimal radiusKm,
+                                  @RequestParam(required = false) Long categoryId) {
         if (lat == null || lng == null) {
             return DiscoveryView.of(null, discovery.nextSearchRadius(null).orElse(null),
                     discovery.ladder().max(), List.of());
@@ -184,7 +204,7 @@ public class MarketplaceController {
         if (radiusKm == null) {
             return DiscoveryView.of(null, discovery.nextSearchRadius(null).orElse(null),
                     discovery.ladder().max(),
-                    discovery.shopsServing(lat, lng).stream().map(this::view).toList());
+                    viewAll(sellersOf(categoryId, discovery.shopsServing(lat, lng))));
         }
 
         // A RADIUS MEANS "SEARCH FARTHER", and §6 says farther keeps going
@@ -192,12 +212,114 @@ public class MarketplaceController {
         // each rung in turn. Clamping happens in the ladder, not here, so the
         // bound holds for every caller (§78: a client value may narrow it,
         // never widen it).
-        ShopDiscovery.RadiusSearch search = discovery.searchOutwards(lat, lng, radiusKm);
+        //
+        // THE CATEGORY NARROWS EACH RUNG AS THE LADDER DRAWS IT, which is why
+        // it is handed in rather than applied to the answer. Filtering the
+        // result would tell a customer looking for a chemist "no shops found"
+        // while the ladder sat on a rung full of kiranas, and "search farther"
+        // could not help them because the search had already succeeded.
+        ShopDiscovery.RadiusSearch search =
+                discovery.searchOutwards(lat, lng, radiusKm, rung -> sellersOf(categoryId, rung));
         return new DiscoveryView(
                 search.searchedKm(), search.nextKm(), search.maxKm(),
-                search.shops().stream().map(this::view).toList(),
+                viewAll(search.shops()),
                 search.askedKm(), search.widened(), search.message());
     }
+
+    /**
+     * The shops in this list that actually sell the category, in the order
+     * they arrived.
+     *
+     * ORDER IS NOT TOUCHED. The ranking is the marketplace's - nearest first,
+     * off the ladder - and re-sorting here by how many listings a shop has in
+     * the category would be a second ranking algorithm competing with the one
+     * the rest of the app uses (§4: reuse the existing ranking, do not invent
+     * one).
+     *
+     * A NULL CATEGORY IS NOT A FILTER, so the plain discovery call does not
+     * pay for a query it does not need.
+     */
+    private List<ShopDiscovery.NearbyShop> sellersOf(Long categoryId,
+                                                     List<ShopDiscovery.NearbyShop> found) {
+        if (categoryId == null || found.isEmpty()) {
+            return found;
+        }
+        java.util.Map<Long, java.util.Set<Long>> shelves = this.shelves.categoriesOnTheShelvesOf(
+                found.stream().map(near -> near.shop().getId()).toList());
+        return found.stream()
+                .filter(near -> shelves.getOrDefault(near.shop().getId(), java.util.Set.of())
+                        .contains(categoryId))
+                .toList();
+    }
+
+    /**
+     * The categories a customer at this pin can actually buy from, and how
+     * many shops near them sell each.
+     *
+     * WHY NOT JUST /api/categories. That route is the CATALOGUE - every
+     * category the platform has ever defined, which is the right answer for a
+     * Super Admin and the wrong one for a customer in a town with four
+     * kiranas and a chemist. Drawing the full catalogue on their home screen
+     * offers twenty doors, eighteen of which open onto "no shops found". This
+     * route answers the customer's question instead: what can I buy here.
+     *
+     * NO RADIUS, SO THIS IS THE LOCAL LIST. The deliberate asymmetry with
+     * /discovery is that a customer is shown the categories somebody will
+     * actually deliver to them; searching farther is a decision they make
+     * inside a category, not before choosing one.
+     *
+     * EMPTY IS AN ANSWER. A pin with no shop serving it has nothing to buy,
+     * and the screen says so rather than drawing a catalogue that leads
+     * nowhere.
+     */
+    @Transactional(readOnly = true)
+    @GetMapping("/categories")
+    public List<MarketCategoryView> categoriesNear(@RequestParam(required = false) Double lat,
+                                                   @RequestParam(required = false) Double lng) {
+        if (lat == null || lng == null) {
+            return List.of();
+        }
+        List<ShopDiscovery.NearbyShop> serving = discovery.shopsServing(lat, lng);
+        if (serving.isEmpty()) {
+            return List.of();
+        }
+        java.util.Map<Long, java.util.Set<Long>> byShop = shelves.categoriesOnTheShelvesOf(
+                serving.stream().map(near -> near.shop().getId()).toList());
+
+        java.util.Map<Long, Integer> shopCounts = new java.util.LinkedHashMap<>();
+        for (java.util.Set<Long> ofOneShop : byShop.values()) {
+            for (Long categoryId : ofOneShop) {
+                shopCounts.merge(categoryId, 1, Integer::sum);
+            }
+        }
+        if (shopCounts.isEmpty()) {
+            return List.of();
+        }
+
+        // MOST-SERVED FIRST, and that IS a ranking - but it is a ranking of
+        // categories rather than of shops, and it is the only sensible one: a
+        // category twelve nearby shops stock is more use to this customer than
+        // one a single shop stocks. Ties break on the catalogue's own order so
+        // the list does not shuffle between two identical requests.
+        return categories.findAllById(shopCounts.keySet()).stream()
+                .filter(category -> Boolean.TRUE.equals(category.getActive()))
+                .map(category -> new MarketCategoryView(category.getId(), category.getName(),
+                        category.getImageUrl(), shopCounts.getOrDefault(category.getId(), 0)))
+                .sorted(java.util.Comparator
+                        .comparingInt(MarketCategoryView::shopCount).reversed()
+                        .thenComparing(MarketCategoryView::categoryId))
+                .toList();
+    }
+
+    /**
+     * One category, named, with how many nearby shops sell it.
+     *
+     * CARRIES THE CATALOGUE'S OWN id, name and image rather than a second copy
+     * of them - the Super Admin edits a category in one place and every screen
+     * that draws it follows, which is what §2 asks for.
+     */
+    public record MarketCategoryView(Long categoryId, String name, String imageUrl,
+                                     int shopCount) {}
 
     /**
      * One storefront, by id.
@@ -233,7 +355,9 @@ public class MarketplaceController {
                         .map(p -> new PolicyView(p.getKindName(), p.getBody()))
                         .toList());
 
-        return new StorefrontDetail(view(shop, null, null), trusted, promises,
+        return new StorefrontDetail(
+                view(shop, null, null, stars.forShops(List.of(shopId)).get(shopId)),
+                trusted, promises,
                 shop.getBusinessName(), rating);
     }
 
@@ -274,8 +398,23 @@ public class MarketplaceController {
                 "multiShop", platform.getMode().isMultiShop());
     }
 
-    private StorefrontView view(ShopDiscovery.NearbyShop nearby) {
-        return view(nearby.shop(), nearby.distanceKm(), nearby.deliversHere());
+    private StorefrontView view(ShopDiscovery.NearbyShop nearby,
+                                java.util.Map<Long, com.gpstore.discovery.PublicShopStars.Stars> stars) {
+        return view(nearby.shop(), nearby.distanceKm(), nearby.deliversHere(),
+                stars.get(nearby.shop().getId()));
+    }
+
+    /**
+     * The same list, with every shop's stars read in one query rather than one
+     * each.
+     *
+     * ONE PLACE, so a list endpoint cannot be added later that draws shops
+     * without their ratings - or worse, draws them by asking per shop.
+     */
+    private List<StorefrontView> viewAll(List<ShopDiscovery.NearbyShop> nearby) {
+        java.util.Map<Long, com.gpstore.discovery.PublicShopStars.Stars> theirStars =
+                stars.forShops(nearby.stream().map(near -> near.shop().getId()).toList());
+        return nearby.stream().map(near -> view(near, theirStars)).toList();
     }
 
     /**
@@ -302,7 +441,8 @@ public class MarketplaceController {
      * affordable because a discovery list is a handful of shops in one town,
      * not a catalogue; if it ever stops being, this is the line to batch.
      */
-    private StorefrontView view(Shop shop, Double distanceKm, Boolean deliversHere) {
+    private StorefrontView view(Shop shop, Double distanceKm, Boolean deliversHere,
+                                com.gpstore.discovery.PublicShopStars.Stars theirStars) {
         StoreStatus status = shopScope.within(shop.getId(), schedule::getStoreStatus);
         return new StorefrontView(shop.getId(), shop.getCode(), shop.getDisplayName(),
                 shop.getLatitude(), shop.getLongitude(),
@@ -313,6 +453,8 @@ public class MarketplaceController {
                 status.browsingOpen(), status.acceptingOrders(),
                 status.closedToday(), status.closureReason(), status.pausedUntil(),
                 status.deliveryDate(),
-                shop.getSupportPhone(), shop.getTimeZone());
+                shop.getSupportPhone(), shop.getTimeZone(),
+                theirStars == null ? null : theirStars.average(),
+                theirStars == null ? 0 : (int) theirStars.count());
     }
 }

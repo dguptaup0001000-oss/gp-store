@@ -50,20 +50,36 @@ void main() {
       expect(_contrast(AppColors.primary, const Color(0xFFFFFFFF)), greaterThanOrEqualTo(4.5));
     });
 
-    test('the ground is lavender, and clearly so', () {
-      // Violet must be visible, not a grey that happens to lean violet.
+    test('the ground leans violet without being a tint', () {
+      // THIS RULE CHANGED, AND ON PURPose. It used to demand a CLEARLY
+      // lavender ground, which suited an app that sold groceries. GP-STORE
+      // sells groceries, saris, phones and medicine on the same screen, and a
+      // ground with an opinion makes two thirds of that photography look
+      // wrong. So the lean survives and the tint does not.
+      //
+      // The lean is still required: it is what keeps this from being any
+      // other app's default white, and what makes the violet brand colour
+      // read as belonging to the screen rather than as paint on top of it.
       expect(AppColors.background.b, greaterThan(AppColors.background.g));
       expect(AppColors.background.r, greaterThan(AppColors.background.g));
-      // Still light enough to sit under a screen of products.
-      expect(_luminance(AppColors.background), greaterThan(0.75));
+      // Near-white now, not merely light: the old ground passed 0.75 at a
+      // visible lavender, so that bound would not have caught a regression
+      // back to it.
+      expect(_luminance(AppColors.background), greaterThan(0.92));
     });
 
-    test('cards are warm and lift off the lavender ground', () {
-      // Warm: red above blue. Pure white on lavender is the combination that
-      // reads clinical, which is the opposite of the intent.
-      expect(AppColors.cardBackground.r, greaterThan(AppColors.cardBackground.b));
+    test('cards are white and lift off the ground', () {
+      // ALSO CHANGED. Warm white was right on lavender, where pure white
+      // reads clinical. On a near-white ground the warmth reads as paper that
+      // has yellowed, and every product photograph on it picks up the cast.
+      // What has to survive is the LIFT - a card the same value as the ground
+      // is not a card - so that is what is pinned rather than the hue.
       expect(AppColors.cardBackground, isNot(AppColors.background));
-      expect(_luminance(AppColors.cardBackground), greaterThan(_luminance(AppColors.background)));
+      expect(_luminance(AppColors.cardBackground),
+          greaterThan(_luminance(AppColors.background)));
+      // Neutral, not warm and not cool: a shelf must not tint what is on it.
+      expect(AppColors.cardBackground.r, AppColors.cardBackground.g);
+      expect(AppColors.cardBackground.g, AppColors.cardBackground.b);
     });
 
     test('section bands lift toward the light rather than darkening', () {

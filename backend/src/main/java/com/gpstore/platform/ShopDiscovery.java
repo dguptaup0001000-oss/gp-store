@@ -192,6 +192,33 @@ public class ShopDiscovery {
      */
     @Transactional(readOnly = true)
     public RadiusSearch searchOutwards(Double latitude, Double longitude, BigDecimal fromKm) {
+        return searchOutwards(latitude, longitude, fromKm, rung -> rung);
+    }
+
+    /**
+     * The same ladder, climbed until a rung has something the caller wants.
+     *
+     * <p>WHY THE NARROWING HAPPENS INSIDE THE LOOP rather than to the result.
+     * Filtering afterwards asks "are there shops within 8 km?" and then throws
+     * away the ones that do not sell medicine - so a customer looking for a
+     * chemist is told "no shops found" while the ladder sits on a rung full of
+     * kiranas, and "search farther" cannot help because the search already
+     * succeeded. Narrowing each rung as it is drawn means the ladder keeps
+     * climbing until it finds a rung with a chemist on it, which is what §6
+     * promises and what the customer asked for.
+     *
+     * <p>ONE CALL PER RUNG, not one per shop: the operator is handed the whole
+     * rung so a caller that needs a database round trip to decide can make one
+     * of them instead of twenty.
+     *
+     * @param narrow keeps the shops this caller cares about, in the order it
+     *               was given them - the distance ordering is the ladder's and
+     *               must not be rewritten here (§4: the ranking is the
+     *               marketplace's, not the screen's)
+     */
+    @Transactional(readOnly = true)
+    public RadiusSearch searchOutwards(Double latitude, Double longitude, BigDecimal fromKm,
+                                       java.util.function.UnaryOperator<List<NearbyShop>> narrow) {
         BigDecimal asked = fromKm == null ? ladder.first() : ladder.clamp(fromKm);
         if (latitude == null || longitude == null) {
             return new RadiusSearch(asked, asked, ladder.next(asked).orElse(null),
@@ -200,7 +227,7 @@ public class ShopDiscovery {
 
         BigDecimal at = asked;
         while (true) {
-            List<NearbyShop> found = shopsWithin(latitude, longitude, at);
+            List<NearbyShop> found = narrow.apply(shopsWithin(latitude, longitude, at));
             boolean widened = at.compareTo(asked) > 0;
             if (!found.isEmpty()) {
                 return new RadiusSearch(asked, at, ladder.next(at).orElse(null),

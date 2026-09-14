@@ -70,6 +70,47 @@ public interface ShopProductVariantRepository extends JpaRepository<ShopProductV
     List<ShelfLine> findShelfLines(@Param("variantIds") Collection<Long> variantIds);
 
     /**
+     * Which categories each of these shops actually has on its shelf.
+     *
+     * WHAT MAKES A SHOP A "KIRANA SHOP" HERE. Nothing declares it. A shop
+     * belongs to a category when it is actually listing something orderable in
+     * that category, which is the only definition that stays true on its own:
+     * a merchant who stops stocking medicine stops appearing under Medicine
+     * the moment their last listing goes, without anybody remembering to edit
+     * a tag. A declared category would be a second, staler truth beside this
+     * one, and the customer would be shown shops that sell nothing they came
+     * for.
+     *
+     * READS TWO COLUMNS AND NOTHING ELSE, and that is deliberate rather than
+     * incidental. This is the ONE query in the customer-facing marketplace
+     * that spans shops (ShopCategoryPresence runs it in platform scope, with
+     * the shop filter off), so what it selects is what a public caller can
+     * learn. "Shop 6 sells groceries" is already public - it is the answer the
+     * discovery screen exists to give. A price, a stock level or a cost here
+     * would not be, so nothing else is selected, and
+     * CategoryDiscoveryTest pins the projection.
+     *
+     * GROUPED RATHER THAN DISTINCT so the count comes free for a caller that
+     * wants to rank by how deep a shop's range in a category is.
+     */
+    @Query("select s.shopId as shopId, p.category.id as categoryId, count(s) as listings "
+            + "from ShopProductVariant s, ProductVariant v, Product p "
+            + "where v.id = s.productVariantId and p.id = v.product.id "
+            + "and s.shopId in :shopIds "
+            + "and s.available = true and s.active = true "
+            + "and v.available = true and v.active = true "
+            + "and p.active = true and p.category.id is not null "
+            + "group by s.shopId, p.category.id")
+    List<ShelfCategory> findShelfCategories(@Param("shopIds") Collection<Long> shopIds);
+
+    /** One shop, one category it stocks, and how many listings it has there. */
+    interface ShelfCategory {
+        Long getShopId();
+        Long getCategoryId();
+        long getListings();
+    }
+
+    /**
      * One basket line's stock and price at one shop.
      *
      * THE FLAGS MATTER AS MUCH AS THE PRICE. A shop can delist an item it

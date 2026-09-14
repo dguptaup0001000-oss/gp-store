@@ -138,8 +138,24 @@ class ApiClient {
     // NOT on auth endpoints, and not when nothing has been chosen. A request
     // that names no shop is the normal case and the one the shipped app makes:
     // the backend answers Shop #1 under SINGLE_SHOP without being asked.
+    //
+    // A CALLER THAT ALREADY NAMED A SHOP IS NOT OVERRULED. This used to
+    // overwrite the header unconditionally, which meant one screen could not
+    // read another shop's shelf without first SWITCHING the whole app to it -
+    // so looking at a competitor's prices threw away the categories, the
+    // basket pricing and the feed belonging to the shop the customer was
+    // actually in. The default belongs here; an explicit choice belongs to
+    // the call site, and this supplies the first without silencing the
+    // second.
+    //
+    // IT GRANTS NOTHING EITHER WAY. A shop id on a request may only NARROW a
+    // scope the credential already permits - TenantResolver.select refuses a
+    // shop the caller is not entitled to rather than honouring it - so a call
+    // site naming a shop is asking, not deciding.
     final shopId = activeShopId?.call();
-    if (!isAuthEndpoint && shopId != null) {
+    if (!isAuthEndpoint &&
+        shopId != null &&
+        !options.headers.containsKey('X-Shop-Id')) {
       options.headers['X-Shop-Id'] = shopId.toString();
     }
     handler.next(options);
