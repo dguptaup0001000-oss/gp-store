@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/config/app_environment.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class PrivacyPolicyScreen extends StatelessWidget {
   const PrivacyPolicyScreen({super.key});
@@ -29,10 +30,10 @@ class PrivacyPolicyScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           TextButton(
-            onPressed: () => launchUrl(
-              Uri.parse(AppEnvironment.publicPrivacyPolicyUrl),
-              mode: LaunchMode.externalApplication,
-            ),
+            onPressed: hapticize(() => launchUrl(
+                  Uri.parse(AppEnvironment.publicPrivacyPolicyUrl),
+                  mode: LaunchMode.externalApplication,
+                )),
             child: const Text('Open the public privacy policy'),
           ),
           const SizedBox(height: 8),

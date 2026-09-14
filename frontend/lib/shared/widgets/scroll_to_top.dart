@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/util/haptic_widgets.dart';
+import '../../core/util/app_haptics.dart';
 
 /// Wraps a scrollable page and floats a "Back to top" pill over it once the
 /// customer has scrolled a meaningful distance.
@@ -97,7 +97,7 @@ class _ScrollToTopState extends State<ScrollToTop> {
   Future<void> _backToTop() async {
     if (!_controller.hasClients) return;
 
-    HapticFeedback.selectionClick();
+    AppHaptics.selection();
 
     // animateTo, not jumpTo: this scrolls the page the customer is already
     // on. Nothing is rebuilt, refetched or reset - the feed keeps every page

@@ -230,7 +230,7 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
           children: [
             Text('Items', style: Theme.of(context).textTheme.titleMedium),
             TextButton.icon(
-              onPressed: _isBuyingAgain ? null : _buyAgain,
+              onPressed: _isBuyingAgain ? null : hapticize(_buyAgain),
               icon: _isBuyingAgain
                   ? const SizedBox(
                       height: 14,
@@ -384,7 +384,7 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
         if (order.isCancellable) ...[
           const SizedBox(height: 24),
           OutlinedButton(
-            onPressed: _isCancelling ? null : _cancelOrder,
+            onPressed: _isCancelling ? null : hapticize(_cancelOrder, feedback: AppHapticFeedback.heavy),
             style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.error,
                 side: const BorderSide(color: AppColors.error)),

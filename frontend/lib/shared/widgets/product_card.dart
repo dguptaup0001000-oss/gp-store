@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../core/images/gp_network_image.dart';
 import '../../core/util/haptic_widgets.dart';
+import '../../core/util/app_haptics.dart';
 
 /// Reusable across every horizontal section on the home screen, search
 /// results, and category browsing - one widget, one place to fix/improve it.
@@ -129,7 +129,7 @@ class _ProductCardState extends State<ProductCard> {
             onPressed: !isInStock || (onOptionsPressed ?? onAddPressed) == null
                 ? null
                 : () {
-                    HapticFeedback.mediumImpact();
+                    AppHaptics.heavy();
                     (onOptionsPressed ?? onAddPressed)!();
                   },
             style: OutlinedButton.styleFrom(
@@ -201,7 +201,7 @@ class _ProductCardState extends State<ProductCard> {
               onTap: onTap == null
                   ? null
                   : () {
-                      HapticFeedback.selectionClick();
+                      AppHaptics.selection();
                       onTap();
                     },
               child: LayoutBuilder(builder: (context, constraints) {
@@ -314,7 +314,7 @@ class _ProductCardState extends State<ProductCard> {
                           // exactly what a shopper wants at that moment, and
                           // it is the only action still open to them here.
                           onTap: hapticize(() {
-                            HapticFeedback.lightImpact();
+                            AppHaptics.action();
                             onWishlistToggle();
                           }),
                           child: Container(
@@ -507,7 +507,7 @@ class _StepperButton extends StatelessWidget {
       onTap: onPressed == null
           ? null
           : () {
-              HapticFeedback.lightImpact();
+              AppHaptics.action();
               onPressed!();
             },
       // Padding rather than a smaller icon: the tap target stays finger-sized

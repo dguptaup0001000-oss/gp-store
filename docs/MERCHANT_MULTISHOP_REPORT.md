@@ -256,6 +256,104 @@ Both applied from an empty database through the full Flyway replay. All new
 columns are nullable and nothing was backfilled, so an existing merchant is
 unaffected until a code is issued.
 
+### 17. Every tap, through one place
+
+Thirty raw `HapticFeedback.*` calls had grown back across eighteen files. Each
+one bypassed `AppHaptics` — the wrapper that exists because "haptics were
+already called in about twenty places, each picking an intensity by hand". A
+raw call ignores `AppHaptics.enabled` (so it reaches the platform channel
+during widget tests), is invisible to `AppHaptics.callCount` (so the
+"one tap produces exactly one haptic" assertion cannot see it, which is exactly
+the double-buzz bug that assertion exists to catch), and picks its own
+intensity.
+
+All thirty were refactored 1:1 — `selectionClick` → `selection()`,
+`lightImpact` → `action()`, `mediumImpact` → `heavy()` — so nothing about how
+the app feels changed. About twenty genuinely-missing haptics were added at the
+same time, on controls that had none: Brands see-all, the horizontal product
+rails, category browse, login, register, change password, write review, request
+return, add address, order detail, order group, voice search, brand products,
+product detail, profile avatar, address list, the variant picker, and Apply
+coupon at checkout.
+
+Then a guard: `test/core/util/one_place_for_haptics_test.dart` walks `lib/` and
+fails naming file and line on any `HapticFeedback.` outside the wrapper, with a
+second test proving the pattern can still see a bypass.
+
+A full pass over every interactive callback took the suspect list from 44 to 12
+to 9, and each of the nine was read and confirmed a false positive — a
+`TextField.onChanged` (which must not buzz per keystroke), a callback forwarded
+into a widget that hapticizes it, or a handler that already buzzes inside
+itself. Those are recorded rather than "fixed", because adding a second buzz to
+any of them would be the defect.
+
+**Mutation:** put a raw `HapticFeedback.mediumImpact()` back in any `lib/` file
+→ `nothing calls HapticFeedback directly except AppHaptics` fails and names it.
+
+### 18. Every remote image, through one place
+
+Eight `Image.network` call sites had drifted outside `GpNetworkImage` — one on
+the rider's packing list, seven across the shopkeeper's screens. All eight were
+scrolling lists of thumbnails, which is the worst possible place to lose what
+that widget holds:
+
+- **no disk cache.** `Image.network` caches in memory for as long as the widget
+  lives. Scrolling back up a catalogue re-downloaded every photograph, and
+  reopening the screen re-downloaded all of them again.
+- **no CDN size.** A 48-pixel row pulled the full original — up to 1600px — over
+  a shop's mobile data.
+- **no decode cap.** Each tile decoded at the file's resolution rather than the
+  screen's, so twenty rows each held a full-resolution bitmap. That is the
+  specific thing that makes a scroll stutter on a cheap phone.
+
+They were outside for a cosmetic reason: `GpNetworkImage` drew its stand-in in
+the storefront palette, and those screens are drawn in the admin one. Two
+palettes is not a reason for two image pipelines, so the palette became an
+argument — `placeholderColor`, `placeholderIconColor`, and a `placeholder`
+widget for the one case an icon cannot express (a customer avatar, where the
+stand-in is the person's initial). Every customer-app call site passes none of
+them and did not change.
+
+Guard: `test/core/images/one_place_for_images_test.dart`, same shape —
+`Image.network`, `NetworkImage` and the underlying `CachedNetworkImage` outside
+`gp_network_image.dart` all fail it by file and line.
+
+**Mutation:** replace any converted site with `Image.network(...)` →
+`nothing builds a remote image except GpNetworkImage` fails and names it.
+
+### 19. What the lag audit could and could not establish
+
+Structural causes of jank, all checkable from source and all checked:
+
+- **`saveLayer`: none, app-wide.** No `Opacity` widget, no `BackdropFilter`, no
+  `ImageFiltered`, no `Clip.antiAliasWithSaveLayer` anywhere in `lib/`. The
+  theme's "shadows, transforms and alpha only" rule is genuinely held rather
+  than merely written down.
+- **`shrinkWrap: true`: seven sites, all bounded.** Eight fixed category cells,
+  one product's variants, a `Flexible` shop switcher, a capped empty-state, and
+  three admin screens. None wraps an unbounded API list.
+- **Non-lazy `for (final … in …)` spreads: all bounded.** Shop comparison is
+  capped server-side at `ShopOffers.MAX_SHOPS_COMPARED = 20`; cart groups and
+  order lines are bounded by one basket; search matches are capped at three; the
+  returns one is arithmetic, not widget building.
+- **Provider families: every key is an `int` or a record.** Both have value
+  equality, so none of them re-fetches on every rebuild — the failure mode that
+  looks like a slow screen and is actually an infinite request loop.
+- **Timers and controllers: all disposed.** Nine files create an
+  `AnimationController` or a `Timer.periodic`; eight have `dispose()`, and the
+  ninth (`AdminOrderSoundWatcher`) is released through `ref.onDispose`.
+- **Home rebuild scope** is already pinned by `home_rebuild_scope_test`: each
+  section sits in its own `Consumer`, so one section's data arriving does not
+  rebuild the screen.
+
+**What this does not establish.** None of it is a frame time. Measuring jank
+means a profile build on a real phone, and the honest statement is that nobody
+has run one. Structural causes being absent makes stutter unlikely; it does not
+make the app measured. The same caveat as everywhere else in this document
+applies with particular force here — the most consequential defect found in this
+work (merchants handed credentials that could not sign in) passed every
+automated check there was.
+
 ---
 
 ## USER ACTION REQUIRED
@@ -306,7 +404,7 @@ not have signed in.
 cd backend && mvn clean verify
 
 # flutter
-# last run: 805 tests passing, analyze at its 41-info baseline, no warnings
+# last run: 842 tests passing, analyze at 40 infos, no warnings, no errors
 cd frontend && flutter analyze && flutter test
 ```
 

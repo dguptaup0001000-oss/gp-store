@@ -168,7 +168,9 @@ class _BrandProductsScreenState extends ConsumerState<BrandProductsScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 32),
                   child: Text(_feed.errorMessage!, textAlign: TextAlign.center),
                 ),
-                TextButton(onPressed: _feed.retry, child: const Text('Retry')),
+                TextButton(
+              onPressed: hapticize(_feed.retry),
+              child: const Text('Retry')),
               ],
             ),
           ),
@@ -254,7 +256,9 @@ class _BrandProductsScreenState extends ConsumerState<BrandProductsScreen> {
               "Couldn't load more right now",
               style: const TextStyle(color: AppColors.textSecondary),
             ),
-            TextButton(onPressed: _feed.advance, child: const Text('Try again')),
+            TextButton(
+                onPressed: hapticize(_feed.advance),
+                child: const Text('Try again')),
           ],
         ),
       );

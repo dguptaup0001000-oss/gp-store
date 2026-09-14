@@ -1,9 +1,9 @@
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../data/cart_repository.dart';
 import '../domain/cart_models.dart';
+import '../../../core/util/app_haptics.dart';
 
 final cartRepositoryProvider = Provider<CartRepository>((ref) {
   return CartRepository(apiClient: ref.watch(apiClientProvider));
@@ -70,7 +70,7 @@ class CartController extends AsyncNotifier<CartModel> {
       state = AsyncData(result);
       // Physical confirmation the tap registered. Fires on success only, so
       // a failed add never feels like it worked.
-      HapticFeedback.lightImpact();
+      AppHaptics.action();
     } catch (error, stackTrace) {
       _rollback(previous, error, stackTrace);
     } finally {
@@ -105,7 +105,7 @@ class CartController extends AsyncNotifier<CartModel> {
       // prices, availability and totals are all recomputed server-side, so
       // any drift is corrected here rather than persisting in the UI.
       state = AsyncData(result);
-      HapticFeedback.selectionClick();
+      AppHaptics.selection();
     } catch (error, stackTrace) {
       _rollback(previous, error, stackTrace);
     } finally {
@@ -127,7 +127,7 @@ class CartController extends AsyncNotifier<CartModel> {
 
       final result = await repository.removeItem(cartItemId: cartItemId);
       state = AsyncData(result);
-      HapticFeedback.lightImpact();
+      AppHaptics.action();
     } catch (error, stackTrace) {
       _rollback(previous, error, stackTrace);
     } finally {

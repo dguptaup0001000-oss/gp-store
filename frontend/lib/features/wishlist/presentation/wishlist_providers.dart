@@ -1,9 +1,9 @@
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../data/wishlist_repository.dart';
 import '../domain/wishlist_models.dart';
+import '../../../core/util/app_haptics.dart';
 
 final wishlistRepositoryProvider = Provider<WishlistRepository>((ref) {
   return WishlistRepository(apiClient: ref.watch(apiClientProvider));
@@ -61,7 +61,7 @@ class WishlistController extends AsyncNotifier<List<WishlistItem>> {
         return repository.getMyWishlist();
       });
       if (state.hasValue) {
-        HapticFeedback.selectionClick();
+        AppHaptics.selection();
       }
     } finally {
       _mutationInFlight = false;

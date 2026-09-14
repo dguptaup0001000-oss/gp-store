@@ -1,13 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../cart/domain/cart_models.dart';
 import '../domain/checkout_models.dart';
 import '../../../core/images/gp_network_image.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../../core/util/app_haptics.dart';
 
 /// The 10-second pause between tapping "Place Order" and the order/payment
 /// actually being created. Shows the full price breakdown and product list
@@ -61,7 +61,7 @@ class _OrderCancellationCountdownScreenState
   }
 
   void _cancel() {
-    HapticFeedback.lightImpact();
+    AppHaptics.action();
     _timer?.cancel();
     Navigator.of(context).pop(false);
   }
