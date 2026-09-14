@@ -292,7 +292,7 @@ any of them would be the defect.
 
 ### 18. Every remote image, through one place
 
-Eight `Image.network` call sites had drifted outside `GpNetworkImage` — one on
+Eight `Image.network` call sites sat outside `GpNetworkImage` — one on
 the rider's packing list, seven across the shopkeeper's screens. All eight were
 scrolling lists of thumbnails, which is the worst possible place to lose what
 that widget holds:
@@ -306,20 +306,49 @@ that widget holds:
   screen's, so twenty rows each held a full-resolution bitmap. That is the
   specific thing that makes a scroll stutter on a cheap phone.
 
-They were outside for a cosmetic reason: `GpNetworkImage` drew its stand-in in
-the storefront palette, and those screens are drawn in the admin one. Two
-palettes is not a reason for two image pipelines, so the palette became an
-argument — `placeholderColor`, `placeholderIconColor`, and a `placeholder`
-widget for the one case an icon cannot express (a customer avatar, where the
-stand-in is the person's initial). Every customer-app call site passes none of
-them and did not change.
+**Seven were outside for a cosmetic reason:** `GpNetworkImage` drew its
+stand-in in the storefront palette, and those screens are drawn in the admin
+one. Two palettes is not a reason for two image pipelines, so the palette
+became an argument — `placeholderColor`, `placeholderIconColor`, and a
+`placeholder` widget for the one case an icon cannot express (a customer
+avatar, where the stand-in is the person's initial). Every customer-app call
+site passes none of them and did not change.
 
-Guard: `test/core/images/one_place_for_images_test.dart`, same shape —
-`Image.network`, `NetworkImage` and the underlying `CachedNetworkImage` outside
-`gp_network_image.dart` all fail it by file and line.
+**The eighth was a real exception, and converting it broke the release build.**
+The rider's packing list stays on `Image.network`. The delivery-worker APK is
+built through `tool/with_worker_pubspec.sh`, which swaps in
+`pubspec.worker.yaml` — a deliberately short dependency list that leaves out
+Firebase, WebView, TTS, BLE, speech, Cashfree *and* `cached_network_image`, so
+none of that native code is packaged into an APK a rider installs. Importing
+`GpNetworkImage` from a worker screen therefore does not cost a dependency; it
+fails the build outright with `Couldn't resolve the package
+'cached_network_image'`.
 
-**Mutation:** replace any converted site with `Image.network(...)` →
-`nothing builds a remote image except GpNetworkImage` fails and names it.
+That is not hypothetical. It was pushed, it merged, and it turned `main` red.
+842 Flutter tests passed, `flutter analyze` was clean and the customer APK
+built — because all of those resolve against the full `pubspec.yaml`. The
+worker build was the only thing in the repository using the short one, and
+nothing checked it until Gradle did, three minutes in, after the merge.
+
+Guards, both mutation-checked:
+
+- `test/core/images/one_place_for_images_test.dart` — `Image.network`,
+  `NetworkImage` and the underlying `CachedNetworkImage` outside
+  `gp_network_image.dart` fail it by file and line. The worker screen is
+  exempt, and **the exemption expires by itself**: a third test fails the day
+  `cached_network_image` appears in `pubspec.worker.yaml`, so the entry cannot
+  outlive its reason.
+- `test/core/images/worker_apk_stays_slim_test.dart` — walks the real import
+  graph from `lib/worker_main.dart` and fails on any `package:` import absent
+  from `pubspec.worker.yaml`, printing the chain that reached it. It guards
+  itself too, asserting the walk still reaches the worker screens and still
+  excludes `gp_network_image.dart`, so a broken walk cannot pass by seeing
+  nothing.
+
+**Mutation:** re-add the `GpNetworkImage` import to `worker_order_screen.dart`
+→ the slim test fails in three seconds naming `package:cached_network_image`
+and the chain `worker_order_screen.dart → gp_network_image.dart`. That is the
+same fact CI took three minutes and a red `main` to report.
 
 ### 19. What the lag audit could and could not establish
 
@@ -404,7 +433,7 @@ not have signed in.
 cd backend && mvn clean verify
 
 # flutter
-# last run: 842 tests passing, analyze at 40 infos, no warnings, no errors
+# last run: 845 tests passing, analyze at 40 infos, no warnings, no errors
 cd frontend && flutter analyze && flutter test
 ```
 

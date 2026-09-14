@@ -19,10 +19,22 @@ import 'package:flutter_test/flutter_test.dart';
 /// EIGHT SITES HAD DRIFTED BACK OUT by the time this test was written - one on
 /// the rider's packing list and seven across the shopkeeper's screens - and
 /// every one of them was a scrolling list of thumbnails, the single worst
-/// place to lose all three. They were outside because GpNetworkImage drew its
+/// place to lose all three. Seven were outside because GpNetworkImage drew its
 /// stand-in in the storefront palette and those screens are drawn in the admin
 /// one. Two palettes is not a reason for two image pipelines, so the palette
-/// became an argument and the sites came back in.
+/// became an argument and those seven came back in.
+///
+/// THE EIGHTH IS A REAL EXCEPTION, not drift. The delivery-worker APK is built
+/// against `pubspec.worker.yaml`, which deliberately has no
+/// cached_network_image - so importing GpNetworkImage from a worker screen
+/// does not cost a dependency, it fails the release build outright. See
+/// `worker_apk_stays_slim_test.dart`, which walks that import graph and is the
+/// test that catches it before a push rather than after a merge.
+///
+/// The exemption below EXPIRES BY ITSELF: it is allowed only while the worker
+/// pubspec really lacks the package. Add cached_network_image there one day
+/// and this test starts demanding the conversion, rather than quietly
+/// protecting a stale allowlist entry.
 void main() {
   test('nothing builds a remote image except GpNetworkImage', () {
     final offenders = <String>[];
@@ -34,6 +46,7 @@ void main() {
           continue;
         }
         if (entity is! File || !entity.path.endsWith('.dart')) continue;
+        if (_exempt.any(entity.path.endsWith)) continue;
 
         final lines = entity.readAsLinesSync();
         for (var i = 0; i < lines.length; i++) {
@@ -84,4 +97,31 @@ void main() {
     expect(provider.hasMatch('      child: GpNetworkImage(url: source,'), isFalse);
     expect(package.hasMatch('/// ... through CachedNetworkImage, which is'), isFalse);
   });
+
+  test('the worker exemption is still earned', () {
+    // THE EXEMPTION CHECKS ITSELF. It exists only because the delivery-worker
+    // APK is built against a pubspec that has no cached_network_image. If that
+    // ever stops being true, the reason is gone and the file above must be
+    // converted like every other - so this fails then, instead of the
+    // allowlist entry silently outliving its justification.
+    final worker = File('pubspec.worker.yaml').readAsStringSync();
+
+    expect(
+      worker.contains(RegExp(r'^\s*cached_network_image\s*:', multiLine: true)),
+      isFalse,
+      reason: 'pubspec.worker.yaml now carries cached_network_image, so the '
+          'worker screens can use GpNetworkImage like everything else. Convert '
+          '${_exempt.join(', ')} and delete this exemption.',
+    );
+  });
 }
+
+/// Files the rule cannot apply to, each with the reason it cannot.
+///
+/// Kept to file names rather than directories: an exemption wide enough to
+/// cover a folder is wide enough to cover the next file somebody puts in it.
+const _exempt = <String>[
+  // Built under pubspec.worker.yaml, which has no cached_network_image. The
+  // test above fails if that stops being true.
+  'features/worker/presentation/worker_order_screen.dart',
+];
