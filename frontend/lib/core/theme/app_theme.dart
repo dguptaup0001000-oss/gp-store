@@ -159,10 +159,17 @@ class AppColors {
 class AppElevation {
   AppElevation._();
 
-  /// A card at rest. Sits on the page, clearly above the background.
+  /// A card at rest. Sits on the page, just above the background.
+  ///
+  /// LIGHTER THAN IT WAS, because the ground is. On the old lavender these
+  /// two shadows were what separated a card from the page; on a near-white
+  /// ground the same shadows are a grey halo around every tile, and a grid of
+  /// them is the heaviness the redesign is removing. Depth now comes mostly
+  /// from a hairline border and the card simply being whiter than the page,
+  /// with the shadow doing the last ten per cent.
   static const card = <BoxShadow>[
-    BoxShadow(color: Color(0x0F221F41), blurRadius: 2, offset: Offset(0, 1)),
-    BoxShadow(color: Color(0x14221F41), blurRadius: 12, offset: Offset(0, 4)),
+    BoxShadow(color: Color(0x0A221F41), blurRadius: 2, offset: Offset(0, 1)),
+    BoxShadow(color: Color(0x0D221F41), blurRadius: 6, offset: Offset(0, 2)),
   ];
 
   /// A card under the finger. Shadows tighten and pull IN rather than
@@ -177,15 +184,24 @@ class AppElevation {
   ///
   /// Offset further down and blurred wider than the card's own shadow, so the
   /// product reads as a separate object resting ON the card rather than
-  /// printed onto it. This is the single effect that does most of the work.
+  /// printed onto it. This is the single effect that does most of the work,
+  /// which is why it survives the lightening above rather than going with it -
+  /// halved, not removed.
   static const product = <BoxShadow>[
-    BoxShadow(color: Color(0x1A221F41), blurRadius: 18, offset: Offset(0, 8)),
+    BoxShadow(color: Color(0x12221F41), blurRadius: 10, offset: Offset(0, 4)),
   ];
 
   /// Category icons and other small tiles - the same idea, scaled down.
   static const tile = <BoxShadow>[
-    BoxShadow(color: Color(0x12221F41), blurRadius: 8, offset: Offset(0, 3)),
+    BoxShadow(color: Color(0x0D221F41), blurRadius: 5, offset: Offset(0, 2)),
   ];
+
+  /// The hairline that does the work the shadows used to.
+  ///
+  /// A BORDER RATHER THAN A HEAVIER SHADOW is what keeps a card readable on a
+  /// near-white ground without a halo, and it costs a stroke rather than a
+  /// blur - which matters in a grid of forty product cards being flung past.
+  static Border get hairline => Border.all(color: AppColors.divider);
 }
 
 /// Shared corner-radius constants so every screen rounds consistently.

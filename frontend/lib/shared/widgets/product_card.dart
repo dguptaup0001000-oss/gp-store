@@ -176,6 +176,7 @@ class _ProductCardState extends State<ProductCard> {
           decoration: BoxDecoration(
             color: AppColors.cardBackground,
             borderRadius: BorderRadius.circular(AppRadius.md),
+            border: AppElevation.hairline,
             // Two-layer shadow that tightens under the finger - see
             // AppElevation for why a pressed object's shadow shrinks rather
             // than fades.

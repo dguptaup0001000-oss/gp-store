@@ -62,7 +62,7 @@ class RecordingRepository implements ProductsRepository {
   }
 
   @override
-  Future<ProductPage> fetchFeed({int page = 0, int size = 20}) async {
+  Future<ProductPage> fetchFeed({int page = 0, int size = 20, int? shopId}) async {
     calls.add('feed');
     return const ProductPage(products: [], page: 0, hasNext: false, totalElements: 0);
   }

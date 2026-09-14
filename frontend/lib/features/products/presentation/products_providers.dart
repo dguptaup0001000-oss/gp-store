@@ -132,3 +132,18 @@ final recommendedForMeProvider = FutureProvider<List<Product>>((ref) {
   }
   return ref.watch(productsRepositoryProvider).getRecommendedForMe();
 });
+
+/// The first page of one shop's shelf, read without switching to that shop.
+///
+/// autoDispose AND FAMILIED BY SHOP, because this is what one open shop page
+/// is looking at. A customer comparing four chemists would otherwise
+/// accumulate four shelves for the rest of the session, and the one they will
+/// come back to is the one they are about to switch into - where the ordinary
+/// feed will fetch it again anyway, correctly scoped.
+final shopShelfPreviewProvider =
+    FutureProvider.autoDispose.family<List<Product>, int>((ref, shopId) async {
+  final page = await ref
+      .watch(productsRepositoryProvider)
+      .fetchFeed(page: 0, size: 10, shopId: shopId);
+  return page.products;
+});

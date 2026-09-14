@@ -177,11 +177,17 @@ void main() {
       expect(find.textContaining('128 ratings'), findsOneWidget);
       expect(find.textContaining('Last 30 days: 4.8'), findsOneWidget);
       expect(find.textContaining('118 from customers who ordered'), findsOneWidget);
-      // Hours, delivery, and the shop's own promises.
+      // Hours, delivery, and the shop's own promises - all below the fold
+      // now that the shelf opens the page, which is the right order: a
+      // customer choosing between two chemists chooses on what is stocked,
+      // not on the returns policy. They scroll for these, so the test does.
+      await tester.scrollUntilVisible(find.text('Open now.'), 200,
+          scrollable: find.byType(Scrollable).first);
       expect(find.text('Open now.'), findsOneWidget);
+      await tester.scrollUntilVisible(
+          find.textContaining('Delivers up to 8 km'), 200,
+          scrollable: find.byType(Scrollable).first);
       expect(find.textContaining('Delivers up to 8 km'), findsOneWidget);
-      // The promises sit below the fold on a phone-sized screen, which is
-      // where a customer would have to scroll to find them too.
       await tester.scrollUntilVisible(
           find.text('Returns within 2 days.'), 200,
           scrollable: find.byType(Scrollable).first);

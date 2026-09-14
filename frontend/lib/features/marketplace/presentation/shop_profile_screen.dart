@@ -7,6 +7,7 @@ import '../../../core/marketplace/marketplace_models.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/marketplace/shop_context.dart';
 import '../../../core/theme/app_theme.dart';
+import 'shop_shelf_preview.dart';
 import '../../../core/util/haptic_widgets.dart';
 
 /// One shop, as a customer deciding whether to buy from it sees it.
@@ -77,6 +78,19 @@ class _Profile extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             children: [
               _Header(detail: detail),
+              const SizedBox(height: 16),
+              // WHAT THE SHOP HAS, ABOVE WHAT THE SHOP PROMISES. This page
+              // used to open on the rating, the hours and the returns policy -
+              // a reference card. A customer choosing between two chemists is
+              // not choosing on returns policy; they are choosing on whether
+              // the shop stocks what they came for, so the shelf comes first.
+              _Section(
+                title: 'On the shelf',
+                child: ShopShelfPreview(
+                  shopId: shop.shopId,
+                  shopName: shop.displayName ?? 'this shop',
+                ),
+              ),
               const SizedBox(height: 16),
               _RatingBlock(rating: detail.rating),
               const SizedBox(height: 16),
