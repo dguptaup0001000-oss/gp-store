@@ -76,6 +76,44 @@ public interface ShopRatingRepository extends JpaRepository<ShopRating, Long> {
     RatingTally tallySince(@Param("since") LocalDateTime since);
 
     /**
+     * The stars several shops are showing, in one query.
+     *
+     * <p>WHY THIS EXISTS BESIDE {@link #tallyForever()}. That one answers for
+     * the shop in scope, which is right for a shop's own page and wrong for a
+     * list: a discovery screen showing twelve shops would switch scope and ask
+     * twelve times, and each of those is three queries. This is the same
+     * arithmetic - the same hidden-rating rule, the same average - grouped by
+     * shop so a list costs one round trip however long it is.
+     *
+     * <p>NAMES THE SHOP EXPLICITLY because it is run with the tenant filter
+     * off (see PublicShopStars): the ids come from the discovery list the
+     * caller already has, and nothing outside them can come back.
+     *
+     * <p>THE SAME EXCLUSIONS, deliberately duplicated rather than abstracted.
+     * If a shop's own page and the list beside it counted different ratings,
+     * a customer would see 4.6 on the card and 4.4 on the page - and the bug
+     * would look like a rounding error rather than two rules.
+     */
+    @Query("""
+            SELECT r.shopId AS shopId, COUNT(r) AS count,
+                   COALESCE(AVG(CAST(r.rating AS double)), 0.0) AS average
+            FROM ShopRating r
+            WHERE r.shopId IN :shopIds
+              AND (r.hiddenAt IS NULL OR r.hiddenReason NOT IN
+                     (com.gpstore.rating.HideReason.SPAM,
+                      com.gpstore.rating.HideReason.IMPERSONATION))
+            GROUP BY r.shopId
+            """)
+    List<ShopStars> starsByShop(@Param("shopIds") java.util.Collection<Long> shopIds);
+
+    /** One shop's public star rating: the average, and how many said so. */
+    interface ShopStars {
+        Long getShopId();
+        long getCount();
+        double getAverage();
+    }
+
+    /**
      * How often each reason was given (§18), so a shopkeeper can act on it.
      */
     @Query("""

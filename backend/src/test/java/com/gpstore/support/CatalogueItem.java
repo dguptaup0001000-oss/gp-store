@@ -55,6 +55,11 @@ public final class CatalogueItem {
         return variantId;
     }
 
+    /** The category this item's product sits in. */
+    public Long categoryId() {
+        return categoryId;
+    }
+
     public Long productId() {
         return productId;
     }
