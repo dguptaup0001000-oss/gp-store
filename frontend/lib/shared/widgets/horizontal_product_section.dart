@@ -6,6 +6,7 @@ import '../../features/cart/presentation/cart_providers.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../features/wishlist/presentation/wishlist_providers.dart';
 import 'product_card.dart';
+import '../../core/util/haptic_widgets.dart';
 
 /// One reusable section for every horizontal product row on the home screen
 /// (New Arrivals, Trending, Recommended, etc.) - handles loading, error (with
@@ -64,7 +65,9 @@ class HorizontalProductSection extends ConsumerWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  TextButton(onPressed: onRetry, child: const Text('Retry')),
+                  TextButton(
+              onPressed: hapticizeOrNull(onRetry),
+              child: const Text('Retry')),
                 ],
               ),
             ),
@@ -143,7 +146,9 @@ class _SectionShell extends StatelessWidget {
             children: [
               Text(title, style: Theme.of(context).textTheme.titleLarge),
               if (onSeeAllTap != null)
-                TextButton(onPressed: onSeeAllTap, child: const Text('See All')),
+                TextButton(
+                onPressed: hapticizeOrNull(onSeeAllTap),
+                child: const Text('See All')),
             ],
           ),
         ),

@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_client.dart';
@@ -17,6 +16,7 @@ import '../domain/auth_models.dart';
 // that import THIS one, but does not bring it into this file's own scope -
 // and AuthController below calls it directly.
 import '../../../core/api/error_messages.dart';
+import '../../../core/util/app_haptics.dart';
 export '../../../core/api/error_messages.dart' show extractErrorMessage;
 
 final tokenStorageProvider = Provider<TokenStorage>((ref) => TokenStorage());
@@ -108,7 +108,7 @@ class AuthController extends StateNotifier<AuthState> {
       final auth = await _repository.login(
           email: email, password: password, rememberMe: rememberMe);
       state = AuthState(status: AuthStatus.authenticated, user: auth);
-      HapticFeedback.mediumImpact();
+      AppHaptics.heavy();
       return true;
     } catch (e) {
       state = AuthState(
@@ -134,7 +134,7 @@ class AuthController extends StateNotifier<AuthState> {
         password: password,
       );
       state = AuthState(status: AuthStatus.authenticated, user: auth);
-      HapticFeedback.mediumImpact();
+      AppHaptics.heavy();
       return true;
     } catch (e) {
       state = AuthState(

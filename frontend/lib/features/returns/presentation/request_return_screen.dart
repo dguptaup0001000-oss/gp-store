@@ -153,7 +153,7 @@ class _RequestReturnScreenState extends ConsumerState<RequestReturnScreen> {
                 ),
               const SizedBox(height: 16),
               FilledButton(
-                onPressed: _chosen.isEmpty || _isSending ? null : _send,
+                onPressed: _chosen.isEmpty || _isSending ? null : hapticize(_send),
                 child: _isSending
                     ? const SizedBox(
                         height: 20,

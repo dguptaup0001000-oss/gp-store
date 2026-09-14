@@ -1,12 +1,12 @@
 import 'dart:async';
 
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/otp_user_messages.dart';
 import '../domain/shop_email.dart';
 import '../domain/password_policy.dart';
 import 'auth_providers.dart';
+import '../../../core/util/app_haptics.dart';
 
 enum PasswordResetStep {
   enteringPhone,
@@ -84,7 +84,7 @@ class PasswordResetController extends StateNotifier<PasswordResetState> {
         resendSecondsRemaining: resendCooldown.inSeconds,
       );
       _startCountdown();
-      HapticFeedback.lightImpact();
+      AppHaptics.action();
       return true;
     } catch (e) {
       state = state.copyWith(
@@ -112,7 +112,7 @@ class PasswordResetController extends StateNotifier<PasswordResetState> {
           );
       _countdown?.cancel();
       state = state.copyWith(step: PasswordResetStep.settingPassword);
-      HapticFeedback.lightImpact();
+      AppHaptics.action();
       return true;
     } catch (e) {
       final expired = _sentAt != null && DateTime.now().difference(_sentAt!) >= otpLifetime;
@@ -148,7 +148,7 @@ class PasswordResetController extends StateNotifier<PasswordResetState> {
           );
       _resetToken = null;
       state = state.copyWith(step: PasswordResetStep.success);
-      HapticFeedback.mediumImpact();
+      AppHaptics.heavy();
       return true;
     } catch (e) {
       state = state.copyWith(

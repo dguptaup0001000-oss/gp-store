@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../domain/password_policy.dart';
 import 'auth_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../../core/util/app_haptics.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -34,7 +34,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    HapticFeedback.mediumImpact();
+    AppHaptics.heavy();
     setState(() => _isSubmitting = true);
 
     final success = await ref.read(authControllerProvider.notifier).register(
@@ -106,7 +106,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 ),
                 const SizedBox(height: 24),
                 FilledButton(
-                  onPressed: _isSubmitting ? null : _submit,
+                  onPressed: _isSubmitting ? null : hapticize(_submit),
                   child: _isSubmitting
                       ? const SizedBox(
                           height: 20,

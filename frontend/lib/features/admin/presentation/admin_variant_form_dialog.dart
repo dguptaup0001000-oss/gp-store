@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/images/gp_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart' show extractErrorMessage;
@@ -501,16 +502,20 @@ class _PhotoThumb extends StatelessWidget {
                       : null,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Image.network(
-                  url,
+                child: SizedBox(
                   height: 88,
                   width: 88,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                    height: 88,
-                    width: 88,
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    child: const Icon(Icons.broken_image_outlined, size: 20),
+                  // Through the app's one image pipeline. These tiles are
+                  // redrawn every time the dialog rebuilds - on every field
+                  // edit - and a raw Image.network refetched each original.
+                  child: GpNetworkImage(
+                    url: url,
+                    renderWidth: 88,
+                    fit: BoxFit.cover,
+                    fallbackIcon: Icons.broken_image_outlined,
+                    fallbackIconSize: 20,
+                    placeholderColor: theme.colorScheme.surfaceContainerHighest,
+                    placeholderIconColor: theme.colorScheme.outline,
                   ),
                 ),
               ),

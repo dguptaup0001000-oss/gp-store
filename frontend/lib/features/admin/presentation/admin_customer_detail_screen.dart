@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/images/gp_network_image.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -179,15 +180,19 @@ class _Avatar extends StatelessWidget {
     final source = url;
     if (source == null || source.isEmpty) return fallback;
 
+    // Through the app's one image pipeline, with the initial kept as the
+    // stand-in: a grey icon where a person's photograph should be tells the
+    // shopkeeper nothing, and the letter tells them who they are looking at.
     return ClipOval(
-      child: Image.network(
-        source,
+      child: SizedBox(
         width: _size,
         height: _size,
-        fit: BoxFit.cover,
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : fallback,
-        errorBuilder: (context, error, stack) => fallback,
+        child: GpNetworkImage(
+          url: source,
+          renderWidth: _size,
+          fit: BoxFit.cover,
+          placeholder: fallback,
+        ),
       ),
     );
   }
@@ -765,16 +770,18 @@ class _Thumb extends StatelessWidget {
     final source = url;
     if (source == null || source.isEmpty) return placeholder;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AdminRadius.sm),
-      child: Image.network(
-        source,
-        width: _size,
-        height: _size,
+    return SizedBox(
+      width: _size,
+      height: _size,
+      child: GpNetworkImage(
+        url: source,
+        renderWidth: _size,
         fit: BoxFit.cover,
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : placeholder,
-        errorBuilder: (context, error, stack) => placeholder,
+        borderRadius: BorderRadius.circular(AdminRadius.sm),
+        fallbackIcon: Icons.inventory_2_outlined,
+        fallbackIconSize: 18,
+        placeholderColor: AdminColors.neutralBg,
+        placeholderIconColor: AdminColors.textMuted,
       ),
     );
   }

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../core/theme/app_theme.dart';
 import 'categories/presentation/categories_screen.dart';
 import 'home/presentation/home_screen.dart';
 import 'orders/presentation/order_history_screen.dart';
 import 'profile/presentation/profile_screen.dart';
+import '../core/util/app_haptics.dart';
 
 /// Bottom-nav shell for logged-in customers, wrapping the four primary
 /// destinations. Uses IndexedStack (not a fresh push per tab) so each
@@ -35,7 +35,7 @@ class _CustomerShellState extends State<CustomerShell> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) {
-          if (index != _selectedIndex) HapticFeedback.selectionClick();
+          if (index != _selectedIndex) AppHaptics.selection();
           setState(() => _selectedIndex = index);
         },
         type: BottomNavigationBarType.fixed,

@@ -41,6 +41,9 @@ class GpNetworkImage extends StatelessWidget {
     this.fallbackIcon = Icons.image_not_supported_outlined,
     this.fallbackIconSize,
     this.borderRadius,
+    this.placeholderColor,
+    this.placeholderIconColor,
+    this.placeholder,
   });
 
   /// For an image that fills whatever box it is handed - a product card in a
@@ -57,6 +60,9 @@ class GpNetworkImage extends StatelessWidget {
     this.fallbackIcon = Icons.image_not_supported_outlined,
     this.fallbackIconSize,
     this.borderRadius,
+    this.placeholderColor,
+    this.placeholderIconColor,
+    this.placeholder,
   }) : renderWidth = null;
 
   /// Straight from the model. Null, empty or unreachable all end up at the
@@ -80,6 +86,30 @@ class GpNetworkImage extends StatelessWidget {
   final IconData fallbackIcon;
   final double? fallbackIconSize;
   final BorderRadius? borderRadius;
+
+  /// The storefront palette, unless a caller says otherwise.
+  ///
+  /// WHY THESE EXIST AT ALL. The admin and worker apps had their own raw
+  /// Image.network call sites - no disk cache, no CDN size, no decode cap -
+  /// and the reason they were never moved onto this widget was cosmetic: a
+  /// shopkeeper's catalogue list is drawn in AdminColors, and this widget's
+  /// placeholder is drawn in AppColors. Two palettes is not a reason for two
+  /// image pipelines, so the palette became an argument.
+  ///
+  /// Null means the storefront's own colours, which is every customer-app
+  /// call site and the reason nothing there had to change.
+  final Color? placeholderColor;
+  final Color? placeholderIconColor;
+
+  /// A caller's own stand-in, drawn both while the picture is coming and if
+  /// it never does.
+  ///
+  /// For the one case the icon above cannot express: a customer avatar,
+  /// where the stand-in is the person's initial rather than a picture icon.
+  /// Supplying it must not be the easy path - the shared placeholder is why
+  /// a half-loaded grid looks the same everywhere - so it exists for that
+  /// case and is null everywhere else.
+  final Widget? placeholder;
 
   /// Decoding beyond 3x buys nothing a human can see and costs real memory on
   /// the densest phones, where a long grid of full-density decodes is exactly
@@ -149,12 +179,15 @@ class GpNetworkImage extends StatelessWidget {
   /// not having arrived yet, which is the truth. It also costs no ticker per
   /// tile, which matters when twenty of them are on screen at once.
   Widget _placeholder({required double width, required bool isLoading}) {
+    final own = placeholder;
+    if (own != null) return own;
+
     final size = fallbackIconSize ?? (width * 0.28).clamp(_minIconSize, _maxIconSize);
 
     return Container(
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: AppColors.surfaceSoft,
+        color: placeholderColor ?? AppColors.surfaceSoft,
         borderRadius: borderRadius,
       ),
       child: Icon(
@@ -162,7 +195,7 @@ class GpNetworkImage extends StatelessWidget {
         size: size,
         // Faint on purpose: a placeholder that competes with the real images
         // beside it makes a half-loaded grid look broken rather than busy.
-        color: AppColors.textSecondary.withValues(alpha: 0.45),
+        color: placeholderIconColor ?? AppColors.textSecondary.withValues(alpha: 0.45),
       ),
     );
   }

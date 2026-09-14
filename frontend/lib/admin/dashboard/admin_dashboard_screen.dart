@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/images/gp_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/util/haptic_widgets.dart';
@@ -485,17 +486,19 @@ class _TopProductRow extends StatelessWidget {
                     child: Icon(Icons.image_not_supported_outlined,
                         size: 18, color: AdminColors.textMuted),
                   )
-                : Image.network(
-                    imageUrl,
+                // A product photograph failing to load must never take the
+                // dashboard with it, so the fallback below is still a quiet
+                // box rather than an error. It goes through the app's one
+                // image pipeline now: cached, asked for at thumbnail size,
+                // and decoded at the screen's density instead of the file's.
+                : GpNetworkImage(
+                    url: imageUrl,
+                    renderWidth: 40,
                     fit: BoxFit.cover,
-                    // A product photograph failing to load must never take
-                    // the dashboard with it - the URL is a short-lived
-                    // signed GET and can expire while the screen is open.
-                    errorBuilder: (_, __, ___) => const ColoredBox(
-                      color: AdminColors.neutralBg,
-                      child: Icon(Icons.broken_image_outlined,
-                          size: 18, color: AdminColors.textMuted),
-                    ),
+                    fallbackIcon: Icons.broken_image_outlined,
+                    fallbackIconSize: 18,
+                    placeholderColor: AdminColors.neutralBg,
+                    placeholderIconColor: AdminColors.textMuted,
                   ),
           ),
         ),

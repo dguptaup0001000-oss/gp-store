@@ -1020,7 +1020,9 @@ class _Message extends StatelessWidget {
                 style: const TextStyle(color: AppColors.textSecondary)),
             if (action != null) ...[
               const SizedBox(height: 12),
-              OutlinedButton(onPressed: onAction, child: Text(action!)),
+              OutlinedButton(
+              onPressed: hapticizeOrNull(onAction),
+              child: Text(action!)),
             ],
           ],
         ),

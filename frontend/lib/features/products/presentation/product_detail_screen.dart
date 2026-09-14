@@ -177,7 +177,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                           return ChoiceChip(
                             label: Text('${_formatQty(v.quantity)} ${v.unit ?? ''}'),
                             selected: isSelected,
-                            onSelected: (_) => setState(() => _selectedVariant = v),
+                            onSelected: hapticizeValue((_) => setState(() => _selectedVariant = v)),
                           );
                         }).toList(),
                       ),
@@ -312,7 +312,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                             icon: const Icon(Icons.remove),
                             color: AppColors.primary,
                             tooltip: 'Decrease quantity',
-                            onPressed: _quantity > 1 ? () => setState(() => _quantity--) : null,
+                            onPressed: _quantity > 1
+                    ? hapticize(() => setState(() => _quantity--),
+                        feedback: AppHapticFeedback.action)
+                    : null,
                           ),
                           Text('$_quantity', style: const TextStyle(fontWeight: FontWeight.w600)),
                           IconButton(
@@ -327,7 +330,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                     const SizedBox(width: 16),
                     Expanded(
                       child: FilledButton(
-                        onPressed: (isInStock && !_isAdding) ? _addToCart : null,
+                        onPressed: (isInStock && !_isAdding)
+                  ? hapticize(_addToCart, feedback: AppHapticFeedback.action)
+                  : null,
                         child: _isAdding
                             ? const SizedBox(
                                 height: 20,

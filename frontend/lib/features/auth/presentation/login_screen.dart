@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,6 +6,7 @@ import '../../../core/theme/app_theme.dart';
 
 import 'auth_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../../core/util/app_haptics.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key, this.allowRegister = true});
@@ -40,7 +40,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     // network round-trip resolves - AuthController.login() still fires its
     // own haptic on confirmed success, this one is the immediate "the app
     // felt that" response every tap should have.
-    HapticFeedback.mediumImpact();
+    AppHaptics.heavy();
     setState(() => _isSubmitting = true);
 
     final success = await ref.read(authControllerProvider.notifier).login(
@@ -217,7 +217,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             const SizedBox(height: 12),
 
                             FilledButton(
-                              onPressed: _isSubmitting ? null : _submit,
+                              onPressed: _isSubmitting ? null : hapticize(_submit),
                               child: _isSubmitting
                                   ? const SizedBox(
                                       height: 20,

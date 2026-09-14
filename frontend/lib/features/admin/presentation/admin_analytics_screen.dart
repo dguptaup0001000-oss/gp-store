@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/images/gp_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../admin/dashboard/admin_revenue_chart.dart';
@@ -441,16 +442,17 @@ class _TopProductRow extends StatelessWidget {
                     child: Icon(Icons.image_not_supported_outlined,
                         size: 18, color: AdminColors.textMuted),
                   )
-                : Image.network(
-                    imageUrl,
+                // A broken photograph must not take the page down, so the
+                // fallback stays a quiet box. Through the app's one image
+                // pipeline: cached, CDN-sized, decode-capped.
+                : GpNetworkImage(
+                    url: imageUrl,
+                    renderWidth: 40,
                     fit: BoxFit.cover,
-                    // A signed image URL can expire while this screen is
-                    // open. A broken photograph must not take the page down.
-                    errorBuilder: (_, __, ___) => const ColoredBox(
-                      color: AdminColors.neutralBg,
-                      child: Icon(Icons.broken_image_outlined,
-                          size: 18, color: AdminColors.textMuted),
-                    ),
+                    fallbackIcon: Icons.broken_image_outlined,
+                    fallbackIconSize: 18,
+                    placeholderColor: AdminColors.neutralBg,
+                    placeholderIconColor: AdminColors.textMuted,
                   ),
           ),
         ),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/brand_models.dart';
 import 'brand_avatar.dart';
+import '../../core/util/haptic_widgets.dart';
 
 class BrandsRow extends StatelessWidget {
   const BrandsRow({
@@ -40,7 +41,9 @@ class BrandsRow extends StatelessWidget {
                     style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
               ),
               if (onSeeAll != null)
-                TextButton(onPressed: onSeeAll, child: const Text('See all')),
+                TextButton(
+                    onPressed: hapticizeOrNull(onSeeAll),
+                    child: const Text('See all')),
             ],
           ),
         ),

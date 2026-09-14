@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/brand_models.dart';
 import '../../core/util/haptic_widgets.dart';
+import '../../core/util/app_haptics.dart';
 
 /// A filter control as a single tappable pill.
 ///
@@ -42,7 +42,7 @@ class FilterPill extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.md),
         onTap: hapticize(() {
-          HapticFeedback.selectionClick();
+          AppHaptics.selection();
           onTap();
         }),
         child: Container(

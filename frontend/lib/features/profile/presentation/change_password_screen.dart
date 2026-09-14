@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/domain/password_policy.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 /// Change-password form, in two modes.
 ///
@@ -153,7 +154,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
                 ),
                 const SizedBox(height: 24),
                 FilledButton(
-                  onPressed: _isSaving ? null : _save,
+                  onPressed: _isSaving ? null : hapticize(_save),
                   child: _isSaving
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Text('Save'),

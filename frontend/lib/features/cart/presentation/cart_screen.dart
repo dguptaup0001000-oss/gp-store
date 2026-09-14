@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/marketplace/marketplace_models.dart';
@@ -14,6 +13,7 @@ import '../domain/cart_models.dart';
 import 'cart_providers.dart';
 import '../../../core/images/gp_network_image.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../../core/util/app_haptics.dart';
 
 class CartScreen extends ConsumerWidget {
   const CartScreen({super.key});
@@ -227,7 +227,7 @@ class _QuantityStepper extends ConsumerWidget {
             padding: EdgeInsets.zero,
             tooltip: item.quantity <= 1 ? 'Remove from cart' : 'Decrease quantity',
             onPressed: hapticize(() {
-              HapticFeedback.selectionClick();
+              AppHaptics.selection();
               final newQuantity = item.quantity - 1;
               if (newQuantity <= 0) {
                 ref.read(cartControllerProvider.notifier).removeItem(cartItemId: item.cartItemId);
@@ -249,7 +249,7 @@ class _QuantityStepper extends ConsumerWidget {
             padding: EdgeInsets.zero,
             tooltip: 'Increase quantity',
             onPressed: hapticize(() {
-              HapticFeedback.selectionClick();
+              AppHaptics.selection();
               ref
                   .read(cartControllerProvider.notifier)
                   .updateQuantity(cartItemId: item.cartItemId, quantity: item.quantity + 1);
@@ -326,7 +326,7 @@ class _CartSummary extends ConsumerWidget {
               onPressed: cart.items.any((item) => item.available == false)
                   ? null
                   : hapticize(() {
-                HapticFeedback.mediumImpact();
+                AppHaptics.heavy();
 
                 // Start loading the address list BEFORE navigating. Checkout
                 // needs it to auto-select a delivery address, and it used to

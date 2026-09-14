@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../../core/api/error_messages.dart';
 import '../data/worker_location_service.dart';
@@ -7,6 +6,7 @@ import '../data/worker_repository.dart';
 import '../domain/worker_models.dart';
 import 'worker_order_screen.dart';
 import 'worker_scan_screen.dart';
+import '../../../core/util/app_haptics.dart';
 
 /// Name, code, territory, today's count, and one very large button.
 ///
@@ -202,7 +202,7 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
   }
 
   Future<void> _openScanner() async {
-    HapticFeedback.selectionClick();
+    AppHaptics.selection();
     final outcome = await Navigator.of(context).push<ScanOutcome>(
       MaterialPageRoute(
         builder: (_) => WorkerScanScreen(repository: widget.repository),

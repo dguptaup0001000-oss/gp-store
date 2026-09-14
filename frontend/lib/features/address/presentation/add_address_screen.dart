@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/address_models.dart';
 import 'address_providers.dart';
+import '../../../core/util/haptic_widgets.dart';
 
 class AddAddressScreen extends ConsumerStatefulWidget {
   const AddAddressScreen({super.key, this.existingAddress});
@@ -223,7 +224,7 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 OutlinedButton.icon(
-                  onPressed: _isFetchingLocation ? null : _useMyLocation,
+                  onPressed: _isFetchingLocation ? null : hapticize(_useMyLocation),
                   icon: _isFetchingLocation
                       ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.my_location),
@@ -283,7 +284,7 @@ class _AddAddressScreenState extends ConsumerState<AddAddressScreen> {
 
                 const SizedBox(height: 24),
                 FilledButton(
-                  onPressed: _isSaving ? null : _save,
+                  onPressed: _isSaving ? null : hapticize(_save),
                   child: _isSaving
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : Text(_isEditing ? 'Save Changes' : 'Save Address'),

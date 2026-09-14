@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/api/error_messages.dart';
+import '../../../core/images/gp_network_image.dart';
 import '../data/worker_repository.dart';
 import '../domain/worker_models.dart';
 
@@ -583,18 +584,28 @@ class _PackingPhoto extends StatelessWidget {
       return placeholder;
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.network(
-        source,
-        width: _size,
-        height: _size,
+    // THROUGH THE APP'S ONE IMAGE PIPELINE, not a raw Image.network.
+    // This used to fetch the full original and cache nothing, so a rider
+    // scrolling a twenty-line packing list on storeroom signal downloaded
+    // twenty full-size photographs to draw twenty 52px thumbnails - and
+    // downloaded them again on the next order. GpNetworkImage asks the CDN
+    // for a thumbnail, decodes at the screen's density rather than the
+    // file's, and keeps it on disk.
+    //
+    // No spinner, same as before: GpNetworkImage's own placeholder is a
+    // calm block, which is what a packing list on a slow connection wants.
+    return SizedBox(
+      width: _size,
+      height: _size,
+      child: GpNetworkImage(
+        url: source,
+        renderWidth: _size,
         fit: BoxFit.cover,
-        // No spinner. A packing list that fills with turning circles on a
-        // storeroom connection reads worse than one that fills in quietly.
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : placeholder,
-        errorBuilder: (context, error, stack) => placeholder,
+        borderRadius: BorderRadius.circular(8),
+        fallbackIcon: Icons.inventory_2_outlined,
+        fallbackIconSize: 24,
+        placeholderColor: theme.colorScheme.surfaceContainerHighest,
+        placeholderIconColor: theme.colorScheme.outline,
       ),
     );
   }

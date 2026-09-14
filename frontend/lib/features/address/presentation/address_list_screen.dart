@@ -152,7 +152,9 @@ class _AddressTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return InkWell(
-      onTap: selectMode ? () => Navigator.of(context).pop(address) : null,
+      onTap: selectMode
+          ? hapticize(() => Navigator.of(context).pop(address))
+          : null,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.all(14),
@@ -185,10 +187,10 @@ class _AddressTile extends ConsumerWidget {
             if (!selectMode)
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, size: 20),
-                onSelected: (value) {
+                onSelected: hapticizeValue((String value) {
                   if (value == 'edit') _edit(context, ref);
                   if (value == 'delete') _delete(context, ref);
-                },
+                }),
                 itemBuilder: (context) => const [
                   PopupMenuItem(value: 'edit', child: Text('Edit')),
                   PopupMenuItem(value: 'delete', child: Text('Delete')),

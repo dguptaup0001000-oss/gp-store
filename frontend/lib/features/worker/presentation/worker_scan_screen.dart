@@ -1,12 +1,12 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../core/api/error_messages.dart';
 import '../data/worker_repository.dart';
 import '../domain/worker_models.dart';
+import '../../../core/util/app_haptics.dart';
 
 /// Camera, one scan, one answer.
 ///
@@ -81,7 +81,7 @@ class _WorkerScanScreenState extends State<WorkerScanScreen> {
     try {
       await _controller.stop();
     } catch (_) {}
-    HapticFeedback.mediumImpact();
+    AppHaptics.heavy();
 
     ScanOutcome outcome;
     try {

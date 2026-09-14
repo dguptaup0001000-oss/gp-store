@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/images/gp_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../admin/design/admin_components.dart';
@@ -399,16 +400,21 @@ class _ItemPhoto extends StatelessWidget {
       return placeholder;
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: Image.network(
-        source,
-        width: _size,
-        height: _size,
+    // The app's one image pipeline: cached on disk, asked for at thumbnail
+    // size, decoded at the screen's density. Same quiet box while it comes
+    // and if it never does.
+    return SizedBox(
+      width: _size,
+      height: _size,
+      child: GpNetworkImage(
+        url: source,
+        renderWidth: _size,
         fit: BoxFit.cover,
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : placeholder,
-        errorBuilder: (context, error, stack) => placeholder,
+        borderRadius: BorderRadius.circular(6),
+        fallbackIcon: Icons.inventory_2_outlined,
+        fallbackIconSize: 18,
+        placeholderColor: theme.colorScheme.surfaceContainerHighest,
+        placeholderIconColor: theme.colorScheme.outline,
       ),
     );
   }

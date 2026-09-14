@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/otp_user_messages.dart';
 import '../domain/shop_email.dart';
 import 'auth_providers.dart';
+import '../../../core/util/app_haptics.dart';
 
 enum OtpFlowStep { enteringPhone, sendingOtp, otpSent, verifying }
 
@@ -75,7 +75,7 @@ class OtpFlowController extends StateNotifier<OtpFlowState> {
         resendSecondsRemaining: resendCooldown.inSeconds,
       );
       _startCountdown();
-      HapticFeedback.lightImpact();
+      AppHaptics.action();
       return true;
     } catch (e) {
       state = state.copyWith(
@@ -105,7 +105,7 @@ class OtpFlowController extends StateNotifier<OtpFlowState> {
 
       _countdown?.cancel();
       _ref.read(authControllerProvider.notifier).setAuthenticated(auth);
-      HapticFeedback.mediumImpact();
+      AppHaptics.heavy();
       return true;
     } catch (e) {
       final expired = _sentAt != null && DateTime.now().difference(_sentAt!) >= otpLifetime;

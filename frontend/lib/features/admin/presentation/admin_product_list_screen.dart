@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/images/gp_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../admin/design/admin_components.dart';
@@ -300,17 +301,19 @@ class _Thumbnail extends StatelessWidget {
                 child: Icon(Icons.image_not_supported_outlined,
                     size: 20, color: AdminColors.textMuted),
               )
-            : Image.network(
-                source,
+            // A photograph that fails to load must never take the catalogue
+            // with it. This is the list a shopkeeper scrolls all day, which
+            // is exactly why it goes through the app's one image pipeline:
+            // a raw Image.network fetched every full-size original again on
+            // every scroll to draw a 48px row.
+            : GpNetworkImage(
+                url: source,
+                renderWidth: 48,
                 fit: BoxFit.cover,
-                // A photograph that fails to load must never take the
-                // catalogue with it: these are short-lived signed URLs and
-                // one can expire while the screen is open.
-                errorBuilder: (_, __, ___) => const ColoredBox(
-                  color: AdminColors.neutralBg,
-                  child: Icon(Icons.broken_image_outlined,
-                      size: 20, color: AdminColors.textMuted),
-                ),
+                fallbackIcon: Icons.broken_image_outlined,
+                fallbackIconSize: 20,
+                placeholderColor: AdminColors.neutralBg,
+                placeholderIconColor: AdminColors.textMuted,
               ),
       ),
     );

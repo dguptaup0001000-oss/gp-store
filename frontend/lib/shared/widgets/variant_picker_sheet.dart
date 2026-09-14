@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/error_messages.dart';
@@ -7,6 +6,8 @@ import '../../core/theme/app_theme.dart';
 import '../../features/cart/presentation/cart_providers.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../features/products/presentation/products_providers.dart';
+import '../../core/util/app_haptics.dart';
+import '../../core/util/haptic_widgets.dart';
 
 /// Choosing a pack size without leaving the grid.
 ///
@@ -84,8 +85,8 @@ class _VariantPickerSheet extends ConsumerWidget {
                       Text("Couldn't load the sizes: ${extractErrorMessage(error)}"),
                       const SizedBox(height: 12),
                       OutlinedButton(
-                        onPressed: () =>
-                            ref.invalidate(productDetailProvider(product.id)),
+                        onPressed: hapticize(() =>
+                            ref.invalidate(productDetailProvider(product.id))),
                         child: const Text('Try again'),
                       ),
                     ],
@@ -205,7 +206,7 @@ class _VariantRow extends ConsumerWidget {
                 : quantity == 0
                     ? OutlinedButton(
                         onPressed: () => _guard(context, () async {
-                          HapticFeedback.mediumImpact();
+                          AppHaptics.heavy();
                           await ref
                               .read(cartControllerProvider.notifier)
                               .addToCart(variantId: variant.id, quantity: 1);
@@ -304,7 +305,7 @@ class _SheetStepper extends StatelessWidget {
   Widget _button(IconData icon, VoidCallback onPressed) {
     return InkWell(
       onTap: () {
-        HapticFeedback.lightImpact();
+        AppHaptics.action();
         onPressed();
       },
       child: Padding(

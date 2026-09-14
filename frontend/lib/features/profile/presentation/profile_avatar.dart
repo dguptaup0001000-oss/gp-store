@@ -68,19 +68,20 @@ class _ProfileAvatarState extends ConsumerState<ProfileAvatar> {
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
               title: const Text('Take a photo'),
-              onTap: () => Navigator.pop(sheetContext, 'camera'),
+              onTap: hapticize(() => Navigator.pop(sheetContext, 'camera')),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(sheetContext, 'gallery'),
+              onTap: hapticize(() => Navigator.pop(sheetContext, 'gallery')),
             ),
             if (hasPhoto)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: AppColors.error),
                 title: const Text('Remove photo',
                     style: TextStyle(color: AppColors.error)),
-                onTap: () => Navigator.pop(sheetContext, 'remove'),
+                onTap: hapticize(() => Navigator.pop(sheetContext, 'remove'),
+                  feedback: AppHapticFeedback.heavy),
               ),
           ],
         ),

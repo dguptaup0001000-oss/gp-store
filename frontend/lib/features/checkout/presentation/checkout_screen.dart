@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -23,6 +22,7 @@ import '../../orders/presentation/order_detail_screen.dart';
 import '../../../core/store/store_status.dart';
 import '../../../core/store/store_status_provider.dart';
 import '../../../shared/widgets/store_status_banner.dart';
+import '../../../core/util/app_haptics.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
@@ -158,7 +158,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final preview = _preview;
     if (preview == null) return;
     setState(() => _isPlacingOrder = true);
-    HapticFeedback.mediumImpact();
+    AppHaptics.heavy();
     final cartItems =
         ref.read(cartControllerProvider).valueOrNull?.items ?? const [];
 
@@ -610,7 +610,7 @@ class CheckoutCouponRow extends StatelessWidget {
         const SizedBox(width: 8),
         FilledButton(
           style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
-          onPressed: applyEnabled ? onApply : null,
+          onPressed: applyEnabled ? hapticize(onApply) : null,
           child: const Text('Apply'),
         ),
       ],

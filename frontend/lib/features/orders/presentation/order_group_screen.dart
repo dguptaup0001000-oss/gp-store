@@ -236,7 +236,7 @@ class _CancelWholeCheckoutState extends ConsumerState<_CancelWholeCheckout> {
   @override
   Widget build(BuildContext context) {
     return OutlinedButton(
-      onPressed: _busy ? null : _confirmThenCancel,
+      onPressed: _busy ? null : hapticize(_confirmThenCancel, feedback: AppHapticFeedback.heavy),
       child: Text(_busy ? 'Cancelling…' : 'Cancel this checkout'),
     );
   }
@@ -254,11 +254,12 @@ class _CancelWholeCheckoutState extends ConsumerState<_CancelWholeCheckout> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: hapticize(() => Navigator.of(dialogContext).pop(false)),
             child: const Text('Keep it'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+            onPressed: hapticize(() => Navigator.of(dialogContext).pop(true),
+                feedback: AppHapticFeedback.heavy),
             child: const Text('Cancel it'),
           ),
         ],

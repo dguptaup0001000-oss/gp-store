@@ -86,7 +86,7 @@ class _WriteReviewDialogState extends ConsumerState<WriteReviewDialog> {
       actions: [
         TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
         FilledButton(
-          onPressed: _isSaving ? null : _submit,
+          onPressed: _isSaving ? null : hapticize(_submit),
           child: _isSaving
               ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Submit'),
