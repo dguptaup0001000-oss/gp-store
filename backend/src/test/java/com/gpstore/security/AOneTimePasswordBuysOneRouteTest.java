@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gpstore.entity.Role;
 import com.gpstore.auth.OtpPurpose;
 import com.gpstore.platform.PlatformStaffService;
+import com.gpstore.platform.PlatformProperties;
+import com.gpstore.platform.ShopRepository;
+import com.gpstore.platform.TenantContextFilter;
 import com.gpstore.service.JwtService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -58,6 +61,8 @@ class AOneTimePasswordBuysOneRouteTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private com.gpstore.service.AuthService authService;
     @Autowired private com.gpstore.otp.OtpProvider otpProvider;
+    @Autowired private ShopRepository shops;
+    @Autowired private PlatformProperties platform;
 
     private final List<Long> opened = new ArrayList<>();
     private final String tag = "onetime" + System.nanoTime();
@@ -165,6 +170,12 @@ class AOneTimePasswordBuysOneRouteTest {
         // tenant grant.
         mockMvc.perform(get("/api/shop/profile")
                         .header("Authorization", "Bearer " + account.token()))
+                .andExpect(status().isForbidden());
+
+        Long firstShop = shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId();
+        mockMvc.perform(get("/api/shop/profile")
+                        .header("Authorization", "Bearer " + account.token())
+                        .header(TenantContextFilter.SHOP_HEADER, firstShop.toString()))
                 .andExpect(status().isForbidden());
     }
 
