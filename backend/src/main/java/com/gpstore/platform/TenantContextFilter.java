@@ -1,5 +1,9 @@
 package com.gpstore.platform;
 
+import com.gpstore.security.AdminPermission;
+import com.gpstore.security.AuthenticatedUser;
+import com.gpstore.security.CurrentUser;
+import com.gpstore.security.RolePermissions;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -44,9 +48,16 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
     private final ShopOperationGate operationGate;
 
-    public TenantContextFilter(TenantResolver resolver, ShopOperationGate operationGate) {
+    private final ShopMembership membership;
+
+    private final CurrentUser currentUser;
+
+    public TenantContextFilter(TenantResolver resolver, ShopOperationGate operationGate,
+                               ShopMembership membership, CurrentUser currentUser) {
         this.resolver = resolver;
         this.operationGate = operationGate;
+        this.membership = membership;
+        this.currentUser = currentUser;
     }
 
     @Override
@@ -85,6 +96,11 @@ public class TenantContextFilter extends OncePerRequestFilter {
         }
 
         try {
+            if (!mayEnterMerchantBackOffice(request)) {
+                response.sendError(HttpServletResponse.SC_FORBIDDEN,
+                        "This account is not associated with this shop.");
+                return;
+            }
             if (!mayProceed(request)) {
                 response.sendError(HttpServletResponse.SC_FORBIDDEN,
                         "This shop is suspended or closed, so it cannot be changed. You can "
@@ -95,6 +111,45 @@ public class TenantContextFilter extends OncePerRequestFilter {
         } finally {
             TenantContext.clear();
         }
+    }
+
+    /**
+     * A staff-shaped credential is not itself a shop grant.
+     *
+     * SINGLE_SHOP deliberately gives every request a storefront scope so
+     * existing customer clients need no shop header. That compatibility
+     * fallback must not turn an ACTIVE account carrying a staff role into the
+     * merchant of Shop #1. Every merchant self-service route therefore also
+     * requires the live shop_staff row that TenantResolver uses for explicit
+     * shop selection. Platform administrators are marketplace actors rather
+     * than shop staff and retain their separate cross-shop authority.
+     *
+     * Anonymous and customer requests are left for Spring Security to answer,
+     * preserving the established 401/403 contract. This check only closes the
+     * gap where a valid staff role would otherwise pass route authorization.
+     */
+    private boolean mayEnterMerchantBackOffice(HttpServletRequest request) {
+        String path = com.gpstore.config.RequestPath.of(request);
+        if (!path.startsWith("/api/shop/")) {
+            return true;
+        }
+        if (currentUser.has(AdminPermission.PLATFORM_ADMIN)) {
+            return true;
+        }
+        AuthenticatedUser principal;
+        try {
+            principal = currentUser.get();
+        } catch (IllegalStateException noAuthenticatedPrincipal) {
+            return true;
+        }
+        if (RolePermissions.forRoleName(principal.getRole()).isEmpty()) {
+            return true;
+        }
+        TenantScope scope = TenantContext.current();
+        return principal.getCustomerId() != null
+                && scope != null
+                && scope.isSingleShop()
+                && membership.permits(principal.getCustomerId(), scope.shopId());
     }
 
     /**

@@ -2,7 +2,6 @@ package com.gpstore.platform;
 
 import com.gpstore.security.AdminPermission;
 import com.gpstore.security.CurrentUser;
-import com.gpstore.security.RolePermissions;
 
 import java.util.Optional;
 import org.springframework.stereotype.Component;
@@ -84,25 +83,11 @@ public class TenantResolver {
             // decision with its own consequences for how customers browse
             // (SingleShopBrowseIsUnchangedTest pins those). What is wrong here
             // is narrower and true in every mode: an account that belongs to a
-            // particular shop belongs to THAT shop. Only a shopper credential
-            // with no shop of its own has any business falling back to the
-            // first one; shop staff must have an explicit membership.
+            // particular shop belongs to THAT shop. Only a credential with no
+            // shop of its own - a shopper, an account on nobody's roster - has
+            // any business falling back to the first one.
             Long own = shopThisCredentialBelongsTo();
-            if (own != null) {
-                return TenantScope.ofShop(own);
-            }
-            // SINGLE_SHOP MAY SUPPLY A STOREFRONT TO A SHOPPER, BUT NEVER A
-            // JOB TO A STAFF ACCOUNT. An ADMIN role plus an ACTIVE customer
-            // row is not a merchant relationship; the shop_staff row is the
-            // authorization. Falling through here used to hand an otherwise
-            // unattached ADMIN Shop #1, including every back-office route its
-            // role permits. Real JWT principals are distinguished from the
-            // lightweight test principals used by older resolver unit tests.
-            if (currentCredentialRequiresShopMembership()) {
-                throw new IllegalStateException(
-                        "This staff account is not associated with a shop.");
-            }
-            return TenantScope.ofShop(firstShopId());
+            return TenantScope.ofShop(own != null ? own : firstShopId());
         }
 
         // A platform administrator legitimately spans shops.
@@ -239,8 +224,8 @@ public class TenantResolver {
         // prevent. A staff account is restricted to the shops it is staff of,
         // full stop; if a shopkeeper wants to shop elsewhere, that is a
         // customer account.
-        boolean isStaffSomewhere = currentCredentialRequiresShopMembership()
-                || (customerId != null && !membership.shopIdsFor(customerId).isEmpty());
+        boolean isStaffSomewhere =
+                customerId != null && !membership.shopIdsFor(customerId).isEmpty();
         if (!isStaffSomewhere && discovery.isBrowsableByCustomers(requestedShopId)) {
             return TenantScope.ofShop(requestedShopId);
         }
@@ -277,25 +262,6 @@ public class TenantResolver {
     }
 
     /**
-     * Whether this is a real shop-staff session which must have a live roster
-     * row before it receives any tenant scope.
-     *
-     * Platform actors are deliberately excluded: their authority is the
-     * platform role itself and they are not merchant staff. Customers and
-     * legacy DELIVERY_BOY customer sessions also remain shoppers here; a
-     * worker-app session is resolved from its delivery-partner roster above.
-     */
-    private boolean currentCredentialRequiresShopMembership() {
-        try {
-            String role = currentUser.get().getRole();
-            return !currentUser.has(AdminPermission.PLATFORM_ADMIN)
-                    && !RolePermissions.forRoleName(role).isEmpty();
-        } catch (RuntimeException noRealJwtPrincipal) {
-            return false;
-        }
-    }
-
-    /**
      * Shop #1's id, looked up by its code rather than assumed to be 1.
      *
      * The constant exists (Shop.FIRST_SHOP_ID) and is right today, but a
@@ -312,11 +278,10 @@ public class TenantResolver {
      * truth for "which shop is this person's" is how the two branches drift
      * apart, and this branch is the one that runs in production.
      *
-     * NULL IS AN ANSWER FOR A SHOPPER. A shopper has no shop of their own and
-     * legitimately falls back to the first shop under a single-shop
-     * deployment. A staff account with no membership is refused by resolve();
-     * otherwise an ACTIVE account plus a role string would silently become a
-     * merchant of Shop #1.
+     * NULL IS AN ANSWER. A shopper has no shop of their own, and neither does
+     * a staff account nobody has put on a roster yet. Both legitimately fall
+     * back to the first shop under a single-shop deployment - that is what
+     * makes this branch backwards compatible for everybody who works today.
      */
     private Long shopThisCredentialBelongsTo() {
         Long workerId = currentWorkerIdOrNull();
