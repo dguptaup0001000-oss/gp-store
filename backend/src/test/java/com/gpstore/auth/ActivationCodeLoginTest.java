@@ -171,6 +171,30 @@ class ActivationCodeLoginTest {
     }
 
     @Test
+    @DisplayName("the first-login code is exactly fifteen characters")
+    void shorterAndLongerCodesAreRefused() {
+        var made = onboardOne();
+
+        assertThrows(AuthException.class, () -> auth.login(
+                signIn(made.ownerEmail(), made.oneTimePassword(), "A23456789BCDEF")));
+        assertThrows(AuthException.class, () -> auth.login(
+                signIn(made.ownerEmail(), made.oneTimePassword(), "A23456789BCDEFGH")));
+    }
+
+    @Test
+    @DisplayName("an expired code is refused even with the right temporary password")
+    void expiredCodesAreRefused() {
+        var made = onboardOne();
+        Customer owner = customers.findById(made.ownerCustomerId()).orElseThrow();
+        owner.setActivationCodeIssuedAt(java.time.LocalDateTime.now().minusDays(8));
+        customers.save(owner);
+
+        AuthException refused = assertThrows(AuthException.class, () -> auth.login(
+                signIn(made.ownerEmail(), made.oneTimePassword(), made.activationCode())));
+        assertTrue(refused.getMessage().toLowerCase().contains("expired"));
+    }
+
+    @Test
     @DisplayName("a wrong password is refused even with the right code")
     void theCodeDoesNotReplaceThePassword() {
         var made = onboardOne();
@@ -202,6 +226,21 @@ class ActivationCodeLoginTest {
 
         Customer owner = customers.findById(made.ownerCustomerId()).orElseThrow();
         assertNotNull(owner.getActivationCodeClaimedAt(), "the claim must be recorded");
+    }
+
+    @Test
+    @DisplayName("the spent handover pair cannot be reused after the permanent password is set")
+    void aUsedCodeCannotRestoreTheTemporaryPassword() {
+        var made = onboardOne();
+        auth.login(signIn(made.ownerEmail(), made.oneTimePassword(), made.activationCode()));
+        auth.changePassword(made.ownerCustomerId(), made.oneTimePassword(), "TheirOwnPass42");
+
+        assertThrows(AuthException.class, () -> auth.login(
+                signIn(made.ownerEmail(), made.oneTimePassword(), made.activationCode())));
+
+        var later = auth.login(signIn(made.ownerEmail(), "TheirOwnPass42", null));
+        assertNotNull(later.getToken());
+        assertFalse(later.isMustChangePassword());
     }
 
     @Test

@@ -30,13 +30,21 @@ class AuthRepository {
     return auth;
   }
 
-  Future<AuthResponse> login(
-      {required String email,
-      required String password,
-      bool rememberMe = true}) async {
+  Future<AuthResponse> login({
+    required String email,
+    required String password,
+    String? activationCode,
+    bool rememberMe = true,
+  }) async {
+    final cleanActivationCode = activationCode?.trim();
     final response = await apiClient.dio.post(
       '/api/auth/login',
-      data: {'email': email, 'password': password},
+      data: {
+        'email': email,
+        'password': password,
+        if (cleanActivationCode != null && cleanActivationCode.isNotEmpty)
+          'activationCode': cleanActivationCode,
+      },
     );
 
     final auth = AuthResponse.fromJson(response.data as Map<String, dynamic>);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/admin/shell/shop_switcher_bar.dart';
+import 'package:gpstore/core/marketplace/shop_context.dart';
 import 'package:gpstore/features/admin/domain/shop_admin_models.dart';
 import 'package:gpstore/features/admin/presentation/shop_self_service_providers.dart';
 
@@ -54,8 +55,17 @@ void main() {
 
   testWidgets('the sheet lists every shop and ticks the current one',
       (tester) async {
-    await tester.pumpWidget(
-        host(const MyShops(shops: [gpStore, hardware, saree], acting: 1)));
+    final container = ProviderContainer(overrides: [
+      myShopsProvider.overrideWith((ref) async =>
+          const MyShops(shops: [gpStore, hardware, saree], acting: 1)),
+    ]);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(
+        home: Scaffold(body: ShopSwitcherBar()),
+      ),
+    ));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Switch'));
@@ -65,6 +75,12 @@ void main() {
     expect(find.text('Deepak Hardware'), findsOneWidget);
     expect(find.text('Deepak Saree'), findsOneWidget);
     expect(find.byIcon(Icons.check_circle), findsOneWidget);
+
+    await tester.tap(find.text('Deepak Hardware'));
+    await tester.pumpAndSettle();
+
+    expect(container.read(shopContextProvider), hardware.shopId,
+        reason: 'three-or-more shops must use the same real switch path as two');
   });
 
   testWidgets('a closed shop is listed but cannot be entered', (tester) async {

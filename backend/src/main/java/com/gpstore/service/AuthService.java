@@ -57,6 +57,7 @@ public class AuthService {
     private final TransactionTemplate transactionTemplate;
     private final SecureRandom secureRandom = new SecureRandom();
     private final int passwordResetTokenMinutes;
+    private final int activationCodeExpiryHours;
     private final OtpChannel otpChannel;
     private final com.gpstore.security.CustomerAccountStatusService accountStatusService;
 
@@ -69,6 +70,7 @@ public class AuthService {
                         ObjectProvider<Clock> clocks,
                         PlatformTransactionManager transactionManager,
                         @Value("${otp.password-reset-token-minutes:10}") int passwordResetTokenMinutes,
+                        @Value("${auth.activation-code-expiry-hours:168}") int activationCodeExpiryHours,
                         @Value("${otp.channel:EMAIL}") String otpChannel,
                         com.gpstore.security.CustomerAccountStatusService accountStatusService) {
         this.customerRepository = customerRepository;
@@ -80,6 +82,7 @@ public class AuthService {
         this.clock = clocks.getIfAvailable(Clock::systemDefaultZone);
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.passwordResetTokenMinutes = Math.max(1, passwordResetTokenMinutes);
+        this.activationCodeExpiryHours = Math.max(1, activationCodeExpiryHours);
         this.otpChannel = OtpChannel.from(otpChannel);
         this.accountStatusService = accountStatusService;
     }
@@ -165,13 +168,22 @@ public class AuthService {
         if (!outstanding) {
             return;
         }
+        java.time.LocalDateTime issuedAt = customer.getActivationCodeIssuedAt();
+        boolean expired = issuedAt == null
+                || !issuedAt.plusHours(activationCodeExpiryHours)
+                        .isAfter(java.time.LocalDateTime.now(clock));
+        if (expired) {
+            throw new AuthException(
+                    "This activation code has expired. Ask the super admin for a new "
+                            + "15-character activation code.");
+        }
         if (!com.gpstore.auth.ActivationCodes.matches(typed, fingerprint)) {
             throw new AuthException(
                     "This account has not been activated yet. Sign in with the email, the "
                             + "temporary password and the 15-character activation code you were "
                             + "given.");
         }
-        customer.setActivationCodeClaimedAt(java.time.LocalDateTime.now());
+        customer.setActivationCodeClaimedAt(java.time.LocalDateTime.now(clock));
         customerRepository.save(customer);
         // The snapshot JwtFilter reads caches for two seconds; without this a
         // claim would not be visible to the very next request.

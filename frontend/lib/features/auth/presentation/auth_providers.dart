@@ -99,14 +99,20 @@ class AuthController extends StateNotifier<AuthState> {
             hasSession ? AuthStatus.authenticated : AuthStatus.unauthenticated);
   }
 
-  Future<bool> login(
-      {required String email,
-      required String password,
-      bool rememberMe = true}) async {
+  Future<bool> login({
+    required String email,
+    required String password,
+    String? activationCode,
+    bool rememberMe = true,
+  }) async {
     state = state.copyWith(status: AuthStatus.unknown, errorMessage: null);
     try {
       final auth = await _repository.login(
-          email: email, password: password, rememberMe: rememberMe);
+          email: email,
+          password: password,
+          activationCode: activationCode,
+          rememberMe: rememberMe,
+        );
       state = AuthState(status: AuthStatus.authenticated, user: auth);
       AppHaptics.heavy();
       return true;

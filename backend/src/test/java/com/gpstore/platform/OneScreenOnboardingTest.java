@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -59,6 +60,8 @@ class OneScreenOnboardingTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private PlatformOnboardingService onboarding;
     @Autowired private ShopLifecycleService shopLifecycle;
+    @Autowired private MerchantLifecycleService merchantLifecycle;
+    @Autowired private ShopTradingGate tradingGate;
     @Autowired private MerchantRepository merchants;
     @Autowired private ShopRepository shops;
     @Autowired private JdbcTemplate jdbc;
@@ -248,6 +251,49 @@ class OneScreenOnboardingTest {
     }
 
     @Test
+    @DisplayName("an APPROVED merchant can configure its back office before trading")
+    void approvedMerchantCanConfigureTheBackOffice() throws Exception {
+        String tag = tag();
+        var result = onboardOne("Back Office " + tag, tag + "@example.test");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .put("/api/shop/profile")
+                        .with(authentication(merchantOwner(result.ownerCustomerId())))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Stocking Up\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Stocking Up"));
+    }
+
+    @Test
+    @DisplayName("customers cannot trade until Super Admin deliberately activates merchant and shop")
+    void customerTradingWaitsForThePlatformSwitches() {
+        String tag = tag();
+        var result = onboardOne("Not Yet Trading " + tag, tag + "@example.test");
+
+        TenantContext.runWithin(TenantScope.ofShop(result.shopId()), () -> {
+            assertThrows(RuntimeException.class, tradingGate::requireCanAcceptOrders,
+                    "APPROVED is back-office access, not permission to take customer orders");
+            return null;
+        });
+
+        merchantLifecycle.transition(result.merchantId(), MerchantStatus.ACTIVE,
+                "Super Admin selected Let them trade");
+        TenantContext.runWithin(TenantScope.ofShop(result.shopId()), () -> {
+            assertThrows(RuntimeException.class, tradingGate::requireCanAcceptOrders,
+                    "the empty DRAFT storefront must still be opened explicitly");
+            return null;
+        });
+
+        shopLifecycle.transitionAsPlatform(result.shopId(), ShopStatus.ACTIVE,
+                "stock and hours checked");
+        TenantContext.runWithin(TenantScope.ofShop(result.shopId()), () -> {
+            assertDoesNotThrow(tradingGate::requireCanAcceptOrders);
+            return null;
+        });
+    }
+
+    @Test
     @DisplayName("the shop is opened where it is, and says how far it delivers")
     void theShopCanActuallyBeFound() {
         String tag = tag();
@@ -309,6 +355,16 @@ class OneScreenOnboardingTest {
         }
         return new UsernamePasswordAuthenticationToken(
                 new AuthenticatedUser(1L, "owner@example.test", Role.SUPER_ADMIN.name()),
+                null, authorities);
+    }
+
+    private UsernamePasswordAuthenticationToken merchantOwner(Long customerId) {
+        List<GrantedAuthority> authorities = new ArrayList<>();
+        for (String authority : RolePermissions.authorityNames(Role.ADMIN)) {
+            authorities.add(new SimpleGrantedAuthority(authority));
+        }
+        return new UsernamePasswordAuthenticationToken(
+                new AuthenticatedUser(customerId, "merchant@example.test", Role.ADMIN.name()),
                 null, authorities);
     }
 

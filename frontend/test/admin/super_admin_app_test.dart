@@ -103,12 +103,18 @@ void main() {
   });
 
   group('AppKind', () {
-    test('defaults to customer with no dart-define', () {
-      // These tests run without --dart-define, so this is the default path.
-      // A typo in a build command must produce the least-privileged copy.
-      expect(AppKind.current, AppKind.customer);
-      expect(AppKind.isSuperAdmin, isFalse);
-      expect(AppKind.tokenKeyPrefix, isEmpty);
+    test('uses the configured app identity and defaults safely', () {
+      const raw =
+          String.fromEnvironment('GPSTORE_APP', defaultValue: 'customer');
+      final expected = switch (raw) {
+        'admin' => AppKind.admin,
+        'superadmin' => AppKind.superAdmin,
+        _ => AppKind.customer,
+      };
+
+      expect(AppKind.current, expected);
+      expect(AppKind.isSuperAdmin, expected == AppKind.superAdmin);
+      expect(AppKind.tokenKeyPrefix, AppKind.prefixFor(expected));
     });
 
     test('no two apps share a token prefix', () {

@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gpstore.entity.Role;
 import com.gpstore.auth.OtpPurpose;
 import com.gpstore.platform.PlatformStaffService;
+import com.gpstore.platform.PlatformProperties;
+import com.gpstore.platform.ShopRepository;
+import com.gpstore.platform.TenantContextFilter;
 import com.gpstore.service.JwtService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -58,6 +61,8 @@ class AOneTimePasswordBuysOneRouteTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private com.gpstore.service.AuthService authService;
     @Autowired private com.gpstore.otp.OtpProvider otpProvider;
+    @Autowired private ShopRepository shops;
+    @Autowired private PlatformProperties platform;
 
     private final List<Long> opened = new ArrayList<>();
     private final String tag = "onetime" + System.nanoTime();
@@ -144,6 +149,34 @@ class AOneTimePasswordBuysOneRouteTest {
         mockMvc.perform(get("/api/orders/my-orders")
                         .header("Authorization", "Bearer " + merchant.token()))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("ACTIVE and ADMIN alone do not create merchant or shop authority")
+    void anActiveAdminWithoutShopMembershipIsNotAMerchant() throws Exception {
+        Opened account = openMerchant();
+
+        mockMvc.perform(put("/api/auth/change-password")
+                        .header("Authorization", "Bearer " + account.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"%s","newPassword":"TheirOwnPass42"}
+                                """.formatted(account.account().oneTimePassword())))
+                .andExpect(status().isOk());
+
+        // The account is enabled, active and has the ADMIN role, and it owes
+        // no password change. It still has no merchant/shop membership, so a
+        // role string or the customer account's ACTIVE flag must not become a
+        // tenant grant.
+        mockMvc.perform(get("/api/shop/profile")
+                        .header("Authorization", "Bearer " + account.token()))
+                .andExpect(status().isForbidden());
+
+        Long firstShop = shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId();
+        mockMvc.perform(get("/api/shop/profile")
+                        .header("Authorization", "Bearer " + account.token())
+                        .header(TenantContextFilter.SHOP_HEADER, firstShop.toString()))
+                .andExpect(status().isForbidden());
     }
 
     @Test

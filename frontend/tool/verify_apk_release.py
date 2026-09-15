@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Fail if a release APK is unsigned, not zip-aligned, 4 KiB ELF-aligned, or has the wrong package.
+"""Fail if a release APK/AAB carries 4 KiB-aligned native libraries.
+
+APK checks also cover signing, ZIP alignment, permissions, and package identity.
+AAB checks cover every packaged ELF as well as forbidden payloads, so Play's
+actual upload artifact cannot bypass the native-library gate applied to APKs.
 
 Prints the signer DN so CI logs distinguish Android Debug from a Play key.
 Does not re-sign. Do not unzip/modify/sign APKs by hand.
@@ -228,18 +232,25 @@ def fake_elf64_le(load_aligns: list[int]) -> bytes:
     return header + phdrs
 
 
-def native_lib_elf_problems(apk: str) -> list[str]:
-    """Fail native libs whose PT_LOAD alignment is below 16 KiB."""
+def native_lib_elf_problems(archive: str) -> list[str]:
+    """Fail native libs whose PT_LOAD alignment is below 16 KiB.
+
+    APK paths start ``lib/<abi>/...`` while App Bundles use
+    ``base/lib/<abi>/...`` (and may add feature-module prefixes). Matching both
+    matters: Google Play installs from the AAB, so checking only the sideload
+    APK can produce a green release gate beside a rejected Play upload.
+    """
     problems: list[str] = []
     try:
-        with zipfile.ZipFile(apk) as zf:
+        with zipfile.ZipFile(archive) as zf:
             names = [
                 info.filename
                 for info in zf.infolist()
-                if info.filename.startswith("lib/") and info.filename.endswith(".so")
+                if info.filename.endswith(".so")
+                and (info.filename.startswith("lib/") or "/lib/" in info.filename)
             ]
             if not names:
-                return ["no lib/**/*.so in APK"]
+                return ["no native lib/**/*.so in archive"]
             for name in names:
                 blob = zf.read(name)
                 try:
@@ -258,7 +269,7 @@ def native_lib_elf_problems(apk: str) -> list[str]:
                         "(16 KiB page)"
                     )
     except zipfile.BadZipFile as exc:
-        return [f"not a zip/apk: {exc}"]
+        return [f"not an APK/AAB zip archive: {exc}"]
     return problems
 
 
@@ -410,11 +421,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # THE BUNDLE IS WHAT GOES TO PLAY. The checks above are APK-specific
-    # (signature, zipalign, ELF load alignment), but a desktop binary shipping
-    # inside an .aab reaches real phones just the same - and stripping it from
-    # the APKs while leaving it in the bundle would be the worst outcome: a
-    # green check and a shipped .exe.
+    # THE BUNDLE IS WHAT GOES TO PLAY. Signature and zipalign checks are
+    # APK-specific; native ELF alignment and forbidden-payload checks apply to
+    # both APK and AAB archives. A green sideload APK beside a rejected or
+    # unsafe Play upload would be a false release signal.
     if len(sys.argv) > 2 and sys.argv[1] == "--payload-only":
         failed = False
         for archive in sys.argv[2:]:
@@ -424,6 +434,13 @@ if __name__ == "__main__":
                 failed = True
             if not problems:
                 print(f"PAYLOAD_OK {os.path.basename(archive)}")
+            if archive.lower().endswith(".aab"):
+                elf_problems = native_lib_elf_problems(archive)
+                for problem in elf_problems:
+                    print(f"ELF_ALIGN_TOO_SMALL {archive}: {problem}")
+                    failed = True
+                if not elf_problems:
+                    print(f"AAB_ELF_ALIGN_OK {os.path.basename(archive)} (16 KiB page)")
         sys.exit(1 if failed else 0)
 
     if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
@@ -535,7 +552,22 @@ if __name__ == "__main__":
             clean_bundle = os.path.join(tmp, "clean.aab")
             with zipfile.ZipFile(clean_bundle, "w") as zf:
                 zf.writestr("base/assets/flutter_assets/AssetManifest.json", b"{}")
+                zf.writestr(
+                    "base/lib/arm64-v8a/libapp.so",
+                    fake_elf64_le([16384, 16384, 16384]),
+                )
             assert not forbidden_payload_problems(clean_bundle)
+            assert not native_lib_elf_problems(clean_bundle)
+
+            bad_bundle = os.path.join(tmp, "bad.aab")
+            with zipfile.ZipFile(bad_bundle, "w") as zf:
+                zf.writestr(
+                    "base/lib/arm64-v8a/libplugin.so",
+                    fake_elf64_le([4096, 4096, 4096]),
+                )
+            assert native_lib_elf_problems(bad_bundle), (
+                "a 4 KiB library under base/lib in an AAB must fail"
+            )
 
         # THE SUBSTRING TRAP, PINNED. "admin" is inside "superadmin", so the
         # obvious ordering demanded in.gpstore.admin from a correctly built
