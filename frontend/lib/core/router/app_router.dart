@@ -22,6 +22,7 @@ GoRouter createGoRouter({
   required Ref ref,
   required Widget home,
   bool allowRegister = true,
+  bool allowActivationCode = false,
   List<RouteBase> extraRoutes = const [],
 }) {
   return GoRouter(
@@ -41,7 +42,10 @@ GoRouter createGoRouter({
       GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
       GoRoute(
         path: '/login',
-        builder: (context, state) => LoginScreen(allowRegister: allowRegister),
+        builder: (context, state) => LoginScreen(
+          allowRegister: allowRegister,
+          allowActivationCode: allowActivationCode,
+        ),
       ),
       GoRoute(path: '/login/otp', builder: (context, state) => const OtpLoginScreen()),
       GoRoute(

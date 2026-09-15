@@ -63,6 +63,13 @@ class _AdminShellState extends State<AdminShell> {
   Set<AdminPermission> get _permissions =>
       AdminRoles.permissionsFor(widget.role);
 
+  /// Shop selection belongs to the merchant owner account, whose backend role
+  /// is ADMIN. The platform owner spans the marketplace, and other shop staff
+  /// are attached to the shop where they work; neither should be offered a
+  /// merchant-owner control merely because their role has admin permissions.
+  bool get _showShopSwitcher =>
+      widget.role?.trim().toUpperCase() == AdminRoles.admin;
+
   List<AdminNavGroup> get _groups => AdminNav.groupsFor(_permissions);
 
   void _select(AdminDestination destination, {required bool wide}) {
@@ -113,10 +120,12 @@ class _AdminShellState extends State<AdminShell> {
         // there are two, because from then on a merchant who thinks they are
         // in GP Store and is actually in Deepak Hardware will change the wrong
         // prices and not find out until a customer complains (§64).
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(0),
-          child: ShopSwitcherBar(),
-        ),
+        bottom: _showShopSwitcher
+            ? const PreferredSize(
+                preferredSize: Size.fromHeight(0),
+                child: ShopSwitcherBar(),
+              )
+            : null,
       ),
       drawer: Drawer(
         backgroundColor: AdminColors.sidebar,

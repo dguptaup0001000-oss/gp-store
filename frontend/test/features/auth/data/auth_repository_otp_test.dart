@@ -84,6 +84,8 @@ void main() {
       final data = Map<String, dynamic>.from(options.data as Map);
       expect(data['email'], 'a@b.com');
       expect(data['password'], 'Passw0rd!');
+      expect(data.containsKey('activationCode'), isFalse,
+          reason: 'ordinary logins must remain email and password only');
       return const FakeResponse({
         'token': 'access-pw',
         'refreshToken': 'refresh-pw',
@@ -96,5 +98,34 @@ void main() {
     final auth = await repository.login(email: 'a@b.com', password: 'Passw0rd!');
     expect(auth.token, 'access-pw');
     expect(await tokenStorage.getAccessToken(), 'access-pw');
+  });
+
+  test('merchant first login sends the 15-character activation code', () async {
+    Map<String, dynamic>? body;
+    adapter.on('POST', '/api/auth/login', (options) {
+      body = Map<String, dynamic>.from(options.data as Map);
+      return const FakeResponse({
+        'token': 'access-merchant',
+        'refreshToken': 'refresh-merchant',
+        'customerId': 1003,
+        'email': 'merchant@gpstore.test',
+        'role': 'ADMIN',
+        'mustChangePassword': true,
+      });
+    });
+
+    final auth = await repository.login(
+      email: 'merchant@gpstore.test',
+      password: 'OneTimePass42',
+      activationCode: '7KQ4N8ZP2H5RX9M',
+    );
+
+    expect(body, {
+      'email': 'merchant@gpstore.test',
+      'password': 'OneTimePass42',
+      'activationCode': '7KQ4N8ZP2H5RX9M',
+    });
+    expect(auth.role, 'ADMIN');
+    expect(auth.mustChangePassword, isTrue);
   });
 }

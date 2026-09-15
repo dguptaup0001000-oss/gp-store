@@ -21,30 +21,22 @@ from typing import Any
 
 # Checks that must be SUCCESS before this script merges anything.
 #
-# flutter-checks was added after PR #153 merged with a failing Flutter test.
-# The two backend jobs were the whole list, so a Dart failure could not block
-# a merge - and because build-apk is ignored below, nothing else compiled the
-# app either. The result was that no Dart in this repository was gated by
-# anything at all, which is not what "ignore the APK build" was meant to mean.
-REQUIRED_CHECK_NAMES = ("build-and-test", "schema-migrate", "flutter-checks")
+# A release-changing PR is not mergeable until both the code checks and the
+# actual Android artifacts are green. build-apk verifies every final APK/AAB,
+# including the 16-KB ELF alignment gate; leaving it out lets a source-level
+# configuration pass while an incompatible native library still ships.
+REQUIRED_CHECK_NAMES = (
+    "build-and-test",
+    "schema-migrate",
+    "flutter-checks",
+    "build-apk",
+)
 IGNORE_CHECK_NAMES = {
     "enable github auto-merge",
     "enable auto-merge",
     "auto-merge eligible prs",
     "auto-merge eligible pr",
     "auto-merge eligible pr into main",
-    # APK builds are a separate release artifact, and this ignore is still
-    # right: a missing Play keystore or a signing hiccup must not block a
-    # backend fix, and three signed release builds take ~16 minutes that
-    # every merge would otherwise wait for.
-    #
-    # It is only SAFE, though, because flutter-checks above now runs the
-    # analyzer and the Flutter tests separately, in about two minutes, with
-    # no secrets. Before that job existed this entry silently ignored the
-    # app's correctness along with its packaging. Do not remove
-    # flutter-checks from REQUIRED_CHECK_NAMES and leave these here.
-    "build-apk",
-    "build apk and deploy web",
 }
 FAIL_CONCLUSIONS = {
     "FAILURE",
@@ -285,7 +277,7 @@ def is_permission_error(text: str) -> bool:
     )
 
 
-def merge_eligible_pr(number: int, *, ci_already_green: bool = False) -> str:
+def merge_eligible_pr(number: int) -> str:
     """Return merged, queued, skip, or wait."""
     data = pr_view(number)
     url = data.get("url")
@@ -317,18 +309,13 @@ def merge_eligible_pr(number: int, *, ci_already_green: bool = False) -> str:
     if failing:
         log("Not merging; failing checks: " + ", ".join(failing))
         return "skip"
-    if (missing or pending) and not ci_already_green:
+    if missing or pending:
         log(
             "Required CI is not green yet "
             f"(missing={missing or '-'} pending={pending or '-'}). "
-            "Will merge when workflow CI completes."
+            "Will merge only when every required workflow completes."
         )
         return "wait"
-    if ci_already_green and (missing or pending):
-        log(
-            "Workflow CI already succeeded on this SHA; "
-            f"rollup still missing/pending {missing + pending}. Proceeding."
-        )
 
     native_ok, native_text = try_native_automerge(number)
     if native_ok:
@@ -365,11 +352,6 @@ def main() -> None:
     parser.add_argument("--pr", type=int, default=0)
     parser.add_argument("--sha", default="")
     parser.add_argument("--wait-seconds", type=int, default=90)
-    parser.add_argument(
-        "--ci-already-green",
-        action="store_true",
-        help="Set when workflow CI already completed successfully for this SHA.",
-    )
     args = parser.parse_args()
     if "GITHUB_REPOSITORY" not in os.environ:
         fail("GITHUB_REPOSITORY is not set")
@@ -379,7 +361,7 @@ def main() -> None:
     number = find_pr(args.pr or None, args.sha or None)
     deadline = time.time() + max(args.wait_seconds, 0)
     while True:
-        result = merge_eligible_pr(number, ci_already_green=args.ci_already_green)
+        result = merge_eligible_pr(number)
         if result != "wait" or time.time() >= deadline:
             if result == "wait":
                 log("Timed out waiting for required CI; not merging.")

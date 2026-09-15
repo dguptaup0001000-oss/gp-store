@@ -64,10 +64,6 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/build-and-deploy.yml'
-      - '.github/scripts/automerge_eligible_pr.py'
   workflow_dispatch:
     inputs:
       sha:
@@ -231,11 +227,18 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           GIT_REF: ${{ github.ref }}
           WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPOSITORY: ${{ github.repository }}
         run: |
           set +x
           require_release=0
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            require_release=0
+            # Same-repository PRs are release candidates and must build the
+            # signed AABs that the 16-KB gate examines. Forks cannot receive
+            # signing secrets, so they retain the debug-signed compile path.
+            if [ "$PR_HEAD_REPOSITORY" = "$THIS_REPOSITORY" ]; then
+              require_release=1
+            fi
           elif [ "$EVENT_NAME" = "workflow_run" ]; then
             if [ "$WORKFLOW_HEAD_BRANCH" = "main" ]; then
               require_release=1
@@ -245,11 +248,11 @@ jobs:
           fi
           if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
             if [ "$require_release" = "1" ]; then
-              echo "::error::ANDROID_KEYSTORE_BASE64 is required for main APK builds. Debug-signed APKs (CN=Android Debug) are not a production artifact. Set repo secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD, and ANDROID_KEY_ALIAS. CI will not generate a keystore."
+              echo "::error::ANDROID_KEYSTORE_BASE64 is required for main and same-repository PR release builds. Debug-signed APKs (CN=Android Debug) are not a production artifact. Set repo secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD, and ANDROID_KEY_ALIAS. CI will not generate a keystore."
               {
                 echo "### Android signing"
                 echo ""
-                echo "Release keystore is **missing** and this is a main build. The job failed closed so a production-named APK is not Android Debug signed."
+                echo "Release keystore is **missing** on a release-required build. The job failed closed so a production-named APK is not Android Debug signed."
                 echo "Set repo secrets \`ANDROID_KEYSTORE_BASE64\`, \`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_PASSWORD\`, and \`ANDROID_KEY_ALIAS\`."
               } >> "$GITHUB_STEP_SUMMARY"
               exit 1
@@ -514,14 +517,15 @@ jobs:
           mv build/app/outputs/bundle/adminRelease/app-admin-release.aab \
             build/app/outputs/bundle/admin/gpstore-admin-release.aab
 
-      # The bundle is what Play receives. The APK checks above are
-      # APK-specific, so without this a desktop binary could be stripped from
-      # every APK and still ship to real phones inside the .aab.
-      - name: Verify app bundles carry no desktop binaries
+      # The bundle is what Play receives. It needs its own native ELF and
+      # payload scan so a passing sideload APK cannot sit beside a Play upload
+      # that contains a 4 KiB library or a forbidden desktop binary.
+      - name: Verify app bundle payloads and 16 KiB ELF alignment
         if: steps.play_signing.outputs.enabled == 'true'
         working-directory: frontend
         run: |
           python3 tool/verify_apk_release.py --payload-only \
+            build/app/outputs/bundle/worker/gpstore-worker-release.aab \
             build/app/outputs/bundle/customer/gpstore-customer-release.aab \
             build/app/outputs/bundle/admin/gpstore-admin-release.aab
 
@@ -619,3 +623,29 @@ jobs:
           name: gpstore-admin-release.aab
           path: frontend/build/app/outputs/bundle/admin/gpstore-admin-release.aab
 
+  automerge-after-release:
+    name: Auto-merge after release validation
+    needs: [build-apk]
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.build-apk.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Merge only after CI and every release artifact are green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile .github/scripts/automerge_eligible_pr.py
+          python3 .github/scripts/automerge_eligible_pr.py \
+            --pr "${{ github.event.pull_request.number }}" --wait-seconds 120

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/admin/shell/admin_shell.dart';
+import 'package:gpstore/features/admin/domain/shop_admin_models.dart';
+import 'package:gpstore/features/admin/presentation/shop_self_service_providers.dart';
 
 import '../support/test_api_client.dart';
 
@@ -83,5 +85,79 @@ void main() {
     // No operatorName at all: the role must still be shown, because it is the
     // half that answers the question.
     expect(find.text('Delivery Manager'), findsOneWidget);
+  });
+
+  testWidgets('the platform owner never gets a merchant shop switcher',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        myShopsProvider.overrideWith((ref) async => const MyShops(
+              shops: [
+                ShopChoice(
+                  shopId: 1,
+                  displayName: 'GP Store',
+                  status: 'ACTIVE',
+                  operable: true,
+                  acting: true,
+                ),
+                ShopChoice(
+                  shopId: 2,
+                  displayName: 'Second Shop',
+                  status: 'ACTIVE',
+                  operable: true,
+                ),
+              ],
+              acting: 1,
+            )),
+      ],
+      child: const MaterialApp(
+        home: AdminShell(role: 'SUPER_ADMIN'),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Switch'), findsNothing,
+        reason: 'shop switching is a merchant-admin tool, not a platform-owner tool');
+  });
+
+  testWidgets('non-owner shop staff never get the merchant shop switcher',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        myShopsProvider.overrideWith((ref) async => const MyShops(
+              shops: [
+                ShopChoice(
+                  shopId: 1,
+                  displayName: 'GP Store',
+                  status: 'ACTIVE',
+                  operable: true,
+                  acting: true,
+                ),
+                ShopChoice(
+                  shopId: 2,
+                  displayName: 'Second Shop',
+                  status: 'ACTIVE',
+                  operable: true,
+                ),
+              ],
+              acting: 1,
+            )),
+      ],
+      child: const MaterialApp(
+        home: AdminShell(role: 'ORDER_MANAGER'),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Switch'), findsNothing,
+        reason: 'only the merchant-owner ADMIN role owns shop switching');
   });
 }

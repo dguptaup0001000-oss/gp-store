@@ -1,18 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
-
-import 'auth_providers.dart';
-import '../../../core/util/haptic_widgets.dart';
 import '../../../core/util/app_haptics.dart';
+import '../../../core/util/haptic_widgets.dart';
+import 'auth_providers.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key, this.allowRegister = true});
+  const LoginScreen({
+    super.key,
+    this.allowRegister = true,
+    this.allowActivationCode = false,
+  });
 
   /// Customer APK only. The admin APK must not offer shopper signup.
   final bool allowRegister;
+
+  /// Merchant-admin APK only. Platform-created merchant accounts must enter
+  /// the 15-character activation code on their first sign-in. Customer and
+  /// super-admin logins never show a field they cannot use.
+  final bool allowActivationCode;
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -22,6 +31,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _activationCodeController = TextEditingController();
   bool _isSubmitting = false;
   bool _obscurePassword = true;
   bool _rememberMe = true;
@@ -30,6 +40,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _activationCodeController.dispose();
     super.dispose();
   }
 
@@ -46,6 +57,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final success = await ref.read(authControllerProvider.notifier).login(
           email: _emailController.text.trim(),
           password: _passwordController.text,
+          activationCode: widget.allowActivationCode
+              ? _activationCodeController.text.trim()
+              : null,
           rememberMe: _rememberMe,
         );
 
@@ -140,7 +154,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           children: [
                             Text('Welcome back!', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 20)),
                             const SizedBox(height: 2),
-                            Text('Login to continue shopping', style: Theme.of(context).textTheme.bodyMedium),
+                            Text(
+                              widget.allowActivationCode
+                                  ? 'Login to manage your shop'
+                                  : 'Login to continue shopping',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
                             const SizedBox(height: 20),
 
                             const Text('Email', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
@@ -192,6 +211,51 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 return null;
                               },
                             ),
+                            if (widget.allowActivationCode) ...[
+                              const SizedBox(height: 16),
+                              const Text(
+                                '15-character activation code',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w600, fontSize: 13),
+                              ),
+                              const SizedBox(height: 6),
+                              TextFormField(
+                                controller: _activationCodeController,
+                                autocorrect: false,
+                                enableSuggestions: false,
+                                textCapitalization: TextCapitalization.none,
+                                maxLength: 15,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(
+                                      RegExp(r'[A-Za-z0-9]')),
+                                  LengthLimitingTextInputFormatter(15),
+                                ],
+                                decoration: InputDecoration(
+                                  hintText: 'Required for first login only',
+                                  counterText: '',
+                                  helperText:
+                                      'Enter the code given by the super admin. Leave blank on later sign-ins.',
+                                  helperMaxLines: 2,
+                                  prefixIcon: Padding(
+                                    padding: const EdgeInsets.all(10),
+                                    child: CircleAvatar(
+                                      radius: 12,
+                                      backgroundColor: AppColors.primary
+                                          .withValues(alpha: 0.12),
+                                      child: const Icon(Icons.pin_outlined,
+                                          size: 15, color: AppColors.primary),
+                                    ),
+                                  ),
+                                ),
+                                validator: (value) {
+                                  final code = value?.trim() ?? '';
+                                  if (code.isNotEmpty && code.length != 15) {
+                                    return 'Enter all 15 characters';
+                                  }
+                                  return null;
+                                },
+                              ),
+                            ],
                             const SizedBox(height: 10),
 
                             Row(

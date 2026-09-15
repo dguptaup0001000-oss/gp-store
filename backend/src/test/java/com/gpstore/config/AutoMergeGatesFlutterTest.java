@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Auto-merge must wait for something that compiles the Flutter app.
+ * Auto-merge must wait for code checks and the real release artifacts.
  *
  * WHAT WENT WRONG. Auto-merge waited for two backend jobs. The only job that
  * ran the analyzer and the Flutter tests - build-apk - was on the IGNORE list,
@@ -21,17 +21,16 @@ import static org.junit.jupiter.api.Assertions.*;
  * anything. PR #153 merged twenty-seven seconds before its own Flutter failure
  * was reported, and main carried a leaked timer until #154 fixed it.
  *
- * The fix separates the two concerns rather than trading them off:
- * flutter-checks (fast, no secrets) is required; build-apk (slow, needs a
- * keystore) stays ignored. That only holds while BOTH halves stay true, and
- * both are one careless edit away from silently reverting - deleting the job,
- * dropping it from the required list, or adding it to the ignore list would
- * each restore the old behaviour without failing anything else.
+ * flutter-checks catches Dart failures quickly. build-apk is also required
+ * because it builds the final APK/AAB payloads and rejects a native library
+ * that is not 16-KB compatible. Both gates have to stay required: a source
+ * configuration is not proof of the bytes that will be shipped.
  */
 @DisplayName("Auto-merge cannot merge Dart nobody compiled")
 class AutoMergeGatesFlutterTest {
 
     private static final String FLUTTER_JOB = "flutter-checks";
+    private static final String RELEASE_JOB = "build-apk";
 
     private static Path repo(String relative) {
         Path fromModule = Path.of("..", relative);
@@ -71,6 +70,56 @@ class AutoMergeGatesFlutterTest {
         // on reading; it just quietly stops gating.
         assertFalse(ignored.contains("\"" + FLUTTER_JOB + "\""),
                 FLUTTER_JOB + " is both required and ignored, so it gates nothing");
+    }
+
+    @Test
+    @DisplayName("the release-artifact job is required and cannot be ignored")
+    void releaseArtifactsGateTheMerge() throws IOException {
+        String script = read(".github/scripts/automerge_eligible_pr.py");
+
+        int requiredStart = script.indexOf("REQUIRED_CHECK_NAMES");
+        String required = script.substring(
+                requiredStart, script.indexOf(')', requiredStart));
+        assertTrue(required.contains(RELEASE_JOB),
+                "the merge gate must wait for final APK/AAB validation");
+
+        int ignoredStart = script.indexOf("IGNORE_CHECK_NAMES");
+        String ignored = script.substring(ignoredStart, script.indexOf('}', ignoredStart));
+        assertFalse(ignored.contains("\"" + RELEASE_JOB + "\""),
+                "the 16-KB release-artifact gate cannot also be ignored");
+        assertFalse(script.contains("ci_already_green"),
+                "an earlier workflow cannot bypass a missing/pending release build");
+    }
+
+    @Test
+    @DisplayName("all produced app bundles pass through the 16-KB payload validator")
+    void everyAppBundleIsValidated() throws IOException {
+        String workflow = read(".github/workflows/build-and-deploy.yml");
+        int start = workflow.indexOf("Verify app bundle payloads and 16 KiB ELF alignment");
+        assertTrue(start >= 0, "the AAB 16-KB validation step is missing");
+        String step = workflow.substring(
+                start, workflow.indexOf("\n      - name:", start + 10));
+
+        assertTrue(step.contains("verify_apk_release.py --payload-only"));
+        assertTrue(step.contains("gpstore-worker-release.aab"));
+        assertTrue(step.contains("gpstore-customer-release.aab"));
+        assertTrue(step.contains("gpstore-admin-release.aab"));
+    }
+
+    @Test
+    @DisplayName("NDK r28 and the CameraX native-library workaround agree on 16 KB")
+    void androidNativeWorkaroundsDoNotConflict() throws IOException {
+        String gradle = read("frontend/android/app/build.gradle");
+
+        assertTrue(gradle.contains("28.2.13676358"), "NDK r28.2 must stay pinned");
+        assertTrue(gradle.contains("def camerax = \"1.4.2\""),
+                "CameraX 1.4.2+ supplies the compatible image-processing JNI library");
+        assertTrue(gradle.contains("force \"androidx.camera:camera-core:$camerax\""),
+                "the transitive CameraX 1.3.x library must not win dependency resolution");
+        assertTrue(gradle.contains("useLegacyPackaging false"),
+                "modern JNI packaging is required for 16-KB ZIP alignment");
+        assertFalse(gradle.contains("max-page-size=4096"),
+                "a 4-KB linker override would conflict with NDK r28");
     }
 
     @Test

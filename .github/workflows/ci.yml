@@ -148,6 +148,33 @@ jobs:
           REDIS_PORT: 6379
         run: ./mvnw -B clean verify
 
+      - name: Summarize backend test counts
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob
+          import os
+          import xml.etree.ElementTree as ET
+
+          totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+          reports = glob.glob("target/surefire-reports/*.xml")
+          for path in reports:
+              root = ET.parse(path).getroot()
+              for key in totals:
+                  totals[key] += int(root.attrib.get(key, 0))
+          passed = totals["tests"] - totals["failures"] - totals["errors"] - totals["skipped"]
+          failed = totals["failures"] + totals["errors"]
+          line = (
+              f"BACKEND_TEST_SUMMARY tests={totals['tests']} pass={passed} "
+              f"fail={failed} skipped={totals['skipped']} reports={len(reports)}"
+          )
+          print(line)
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as out:
+                  out.write("## Backend tests\n\n" + line + "\n")
+          PY
+
       # WHAT ACTUALLY FAILED, where it can actually be found.
       #
       # Postgres and Redis service-container logs are dumped at job teardown,
@@ -748,22 +775,15 @@ jobs:
           name: schema-migrate-surefire-reports
           path: backend/target/surefire-reports/
 
-  # THE ONLY JOB THAT COMPILES DART BEFORE A MERGE.
+  # THE FAST DART GATE BEFORE A MERGE.
   #
-  # It exists because of a specific failure. build-apk runs analyze, the
-  # Flutter tests AND three release builds, and auto-merge deliberately
-  # IGNORES it - a missing Play keystore must not block a backend fix. The
-  # side effect nobody noticed is that ignoring build-apk ignored the only
-  # check that compiles the app at all, so no Dart was gated by anything:
+  # It exists because of a specific failure. build-apk runs analyze, tests
+  # and release builds, but there was once no fast Dart gate at all:
   # PR #153 merged with a failing Flutter test, and main carried a leaked
   # timer until #154.
   #
-  # Requiring build-apk instead would have fixed that and broken the original
-  # rule - and cost every merge sixteen minutes, which is what three signed
-  # release builds take. So the two concerns are separated here rather than
-  # traded off: correctness of the code (fast, hermetic, no secrets) is
-  # required; producing the release artifact (slow, needs a keystore) stays
-  # ignored.
+  # This job reports correctness early. The release job is also required now,
+  # because a 16-KB claim must be proved against the final APK/AAB payloads.
   #
   # Deliberately duplicates build-apk's Flutter setup instead of sharing it.
   # The alternative is making the packaging job depend on this one, which
@@ -803,10 +823,38 @@ jobs:
         # null-check, a class used but never imported. The analyzer compiles
         # every library in lib/; `flutter test` compiles only what a test
         # reaches.
-        run: flutter analyze --no-fatal-infos
+        run: |
+          flutter analyze --no-fatal-infos
+          for app in customer merchant-admin super-admin worker; do
+            echo "FLUTTER_ANALYZE_SUMMARY app=$app result=PASS scope=shared-monorepo"
+          done
 
-      - name: Run Flutter tests
-        run: flutter test
+      - name: Run Flutter tests for every application entrypoint
+        run: |
+          set -Eeuo pipefail
+          python3 tool/summarize_flutter_test_events.py --self-test
+          mkdir -p build/test-results
+          for app in customer admin superadmin worker; do
+            log="build/test-results/$app.jsonl"
+            set +e
+            flutter test --machine --dart-define=GPSTORE_APP="$app" | tee "$log"
+            flutter_status=${PIPESTATUS[0]}
+            set -e
+            summary_status=0
+            python3 tool/summarize_flutter_test_events.py "$log" --app "$app" || summary_status=$?
+            if [ "$flutter_status" -ne 0 ] || [ "$summary_status" -ne 0 ]; then
+              echo "::error::Flutter tests failed for $app"
+              exit 1
+            fi
+          done
+
+      - name: Upload per-app Flutter test events
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-test-events
+          path: frontend/build/test-results/*.jsonl
+          if-no-files-found: error
 
   build-and-push-image:
     needs: [build-and-test, schema-migrate]
@@ -898,4 +946,5 @@ jobs:
             echo "Not a pull_request event; nothing to merge."
             exit 0
           fi
-          python3 .github/scripts/automerge_eligible_pr.py --pr "${{ github.event.pull_request.number }}" --ci-already-green --wait-seconds 60
+          python3 .github/scripts/automerge_eligible_pr.py \
+            --pr "${{ github.event.pull_request.number }}" --wait-seconds 120

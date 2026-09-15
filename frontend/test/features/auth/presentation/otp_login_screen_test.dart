@@ -81,7 +81,12 @@ class _FakeAuthRepository extends AuthRepository {
   }
 
   @override
-  Future<AuthResponse> login({required String email, required String password, bool rememberMe = true}) async {
+  Future<AuthResponse> login({
+    required String email,
+    required String password,
+    String? activationCode,
+    bool rememberMe = true,
+  }) async {
     await tokenStorage.saveTokens(accessToken: 'pw-access', refreshToken: 'pw-refresh');
     return AuthResponse(
       token: 'pw-access',

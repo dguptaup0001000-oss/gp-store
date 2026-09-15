@@ -147,6 +147,28 @@ class AOneTimePasswordBuysOneRouteTest {
     }
 
     @Test
+    @DisplayName("ACTIVE and ADMIN alone do not create merchant or shop authority")
+    void anActiveAdminWithoutShopMembershipIsNotAMerchant() throws Exception {
+        Opened account = openMerchant();
+
+        mockMvc.perform(put("/api/auth/change-password")
+                        .header("Authorization", "Bearer " + account.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"%s","newPassword":"TheirOwnPass42"}
+                                """.formatted(account.account().oneTimePassword())))
+                .andExpect(status().isOk());
+
+        // The account is enabled, active and has the ADMIN role, and it owes
+        // no password change. It still has no merchant/shop membership, so a
+        // role string or the customer account's ACTIVE flag must not become a
+        // tenant grant.
+        mockMvc.perform(get("/api/shop/profile")
+                        .header("Authorization", "Bearer " + account.token()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     @DisplayName("a wrong current password does not lift the gate")
     void aFailedChangeKeepsTheGateClosed() throws Exception {
         Opened merchant = openMerchant();

@@ -9,5 +9,6 @@ final adminRouterProvider = Provider<GoRouter>((ref) {
     ref: ref,
     home: const AdminRootScreen(),
     allowRegister: false,
+    allowActivationCode: true,
   );
 });

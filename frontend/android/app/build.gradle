@@ -40,6 +40,13 @@ def noFirebaseClient = workerApk || superAdminApk
 // operator sets CRASHLYTICS_MAPPING_UPLOAD=1. Runtime Crashlytics
 // (the Dart plugin) does not need this Gradle plugin.
 def crashlyticsMappingUpload = (System.getenv("CRASHLYTICS_MAPPING_UPLOAD") ?: "0") == "1"
+
+// Flutter 3.35.7 defaults to NDK r27. Android's 16 KiB guidance requires
+// explicit linker flags on r27 and says r28+ produces 16 KiB-aligned native
+// code by default. Plugins that compile native code are outside our direct
+// linker control, so pin the whole application to r28 instead of trusting each
+// plugin to remember the r27 flags independently.
+def pageSizeCompatibleNdk = "28.2.13676358"
 if (!noFirebaseClient) {
     // Needs android/app/google-services.json to exist (see
     // FIREBASE_SETUP.md) - without it, this line makes the build fail
@@ -81,7 +88,7 @@ android {
     // than a hardcoded number that goes stale - this is the modern,
     // future-proof pattern `flutter create` itself uses.
     compileSdk flutter.compileSdkVersion
-    ndkVersion flutter.ndkVersion
+    ndkVersion pageSizeCompatibleNdk
 
 
     compileOptions {

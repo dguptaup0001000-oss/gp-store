@@ -34,9 +34,16 @@ void main() {
     expect(src.contains('features/checkout/'), isFalse);
   });
 
-  test('AppKind defaults to customer without a dart-define', () {
-    expect(AppKind.current, AppKind.customer);
-    expect(AppKind.tokenKeyPrefix, isEmpty);
+  test('AppKind follows the build identity and defaults safely', () {
+    const raw = String.fromEnvironment('GPSTORE_APP', defaultValue: 'customer');
+    final expected = switch (raw) {
+      'admin' => AppKind.admin,
+      'superadmin' => AppKind.superAdmin,
+      _ => AppKind.customer,
+    };
+
+    expect(AppKind.current, expected);
+    expect(AppKind.tokenKeyPrefix, AppKind.prefixFor(expected));
   });
 
   test('super admin entrypoint does not import the shopping shell', () {
