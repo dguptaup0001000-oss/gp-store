@@ -24,6 +24,12 @@ def summarize(lines: Iterable[str]) -> tuple[int, int, int, int, bool]:
             event = json.loads(raw)
         except json.JSONDecodeError:
             continue
+        # Flutter may interleave VM service protocol messages such as
+        # ``[{"event":"test.startedProcess", ...}]`` with the machine
+        # reporter's object events. They are valid JSON but are not test
+        # result records, so ignore them instead of aborting the summary.
+        if not isinstance(event, dict):
+            continue
         event_type = event.get("type")
         if event_type == "testStart":
             test = event.get("test") or {}
@@ -64,6 +70,7 @@ def self_test() -> None:
 {"type":"testStart","test":{"id":3,"name":"fails"}}
 {"type":"testDone","testID":3,"result":"failure","hidden":false,"skipped":false}
 {"type":"testDone","testID":99,"result":"success","hidden":true,"skipped":false}
+[{"event":"test.startedProcess","params":{"vmServiceUri":null}}]
 {"type":"done","success":false}
 """
     assert summarize(io.StringIO(data)) == (3, 1, 1, 1, False)
