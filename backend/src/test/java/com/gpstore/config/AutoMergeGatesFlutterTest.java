@@ -92,6 +92,20 @@ class AutoMergeGatesFlutterTest {
     }
 
     @Test
+    @DisplayName("the workflow-run compatibility flag is accepted without bypassing gates")
+    void workflowRunFlagIsAccepted() throws IOException {
+        String script = read(".github/scripts/automerge_eligible_pr.py");
+        String workflow = read(".github/workflows/enable-auto-merge.yml");
+
+        assertTrue(workflow.contains("--ci-already-green"),
+                "the backup auto-merge workflow must identify its successful CI trigger");
+        assertTrue(script.contains("\"--ci-already-green\""),
+                "the merge helper must accept the workflow-run compatibility flag");
+        assertTrue(script.contains("classify_checks(data.get(\"statusCheckRollup\"))"),
+                "accepting the compatibility flag must not bypass required status checks");
+    }
+
+    @Test
     @DisplayName("all produced app bundles pass through the 16-KB payload validator")
     void everyAppBundleIsValidated() throws IOException {
         String workflow = read(".github/workflows/build-and-deploy.yml");
@@ -104,6 +118,7 @@ class AutoMergeGatesFlutterTest {
         assertTrue(step.contains("gpstore-worker-release.aab"));
         assertTrue(step.contains("gpstore-customer-release.aab"));
         assertTrue(step.contains("gpstore-admin-release.aab"));
+        assertTrue(step.contains("gpstore-superadmin-release.aab"));
     }
 
     @Test

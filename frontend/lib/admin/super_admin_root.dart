@@ -49,7 +49,7 @@ class SuperAdminRootScreen extends ConsumerWidget {
       );
     }
     return AdminShell(
-      home: AdminNav.platformConsole,
+      home: AdminNav.controlTower,
       operatorName: profile.fullName,
       role: profile.role,
       onSignOut: () => ref.read(authControllerProvider.notifier).logout(),

@@ -2,6 +2,8 @@ package com.gpstore.service;
 
 import com.gpstore.config.ClientIpResolver;
 import com.gpstore.entity.AuditLog;
+import com.gpstore.platform.TenantContext;
+import com.gpstore.platform.TenantScope;
 import com.gpstore.repository.AuditLogRepository;
 import com.gpstore.security.AuthenticatedUser;
 import org.springframework.data.domain.Page;
@@ -13,6 +15,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
+import org.slf4j.MDC;
 
 @Service
 public class AuditLogService {
@@ -34,32 +37,82 @@ public class AuditLogService {
      * (not a fabricated value) for system-triggered actions with no human actor.
      */
     public void log(String action, String entityType, Long entityId, String details) {
+        log(action, entityType, entityId, null, null, null, null, null, details);
+    }
+
+    /**
+     * Structured form used by platform actions. Existing callers keep using
+     * the compact overload, so this extends rather than forks the audit trail.
+     * Values stored here are states and categories, never credentials or the
+     * plaintext PII a platform operator revealed.
+     */
+    public void log(String action, String entityType, Long entityId,
+                    Long merchantId, Long shopId, String previousState,
+                    String newState, String reason, String details) {
         try {
-            AuditLog entry = new AuditLog();
-
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth != null && auth.getPrincipal() instanceof AuthenticatedUser user) {
-                entry.setActorCustomerId(user.getCustomerId());
-                entry.setActorEmail(user.getEmail());
-                entry.setActorRole(user.getRole());
-            }
-
-            entry.setAction(action);
-            entry.setEntityType(entityType);
-            entry.setEntityId(entityId);
-            // Client IP appended when a real HTTP request is in progress - a
-            // scheduled job (like the delivery-guarantee or payment-expiry
-            // checks) has no request at all, so this stays absent for those,
-            // which is correct rather than fabricated.
-            entry.setDetails(details + clientIpSuffix());
-            entry.setOccurredAt(LocalDateTime.now());
-
-            repository.save(entry);
+            repository.save(entry(action, entityType, entityId, merchantId, shopId,
+                    previousState, newState, reason, details));
         } catch (Exception ex) {
             // Deliberately swallowed - audit logging is observability, not a
             // business rule. A logging failure must never roll back or block
             // the real operation (e.g. a refund) it's trying to record.
         }
+    }
+
+    /**
+     * Audit operation whose success is a precondition of the privileged
+     * action. Use this for PII reveals and platform lifecycle changes: if the
+     * append cannot be written, the surrounding transaction must fail rather
+     * than perform an action with no accountable record.
+     */
+    public void logRequired(String action, String entityType, Long entityId, String details) {
+        logRequired(action, entityType, entityId,
+                null, null, null, null, null, details);
+    }
+
+    public void logRequired(String action, String entityType, Long entityId,
+                            Long merchantId, Long shopId, String previousState,
+                            String newState, String reason, String details) {
+        repository.save(entry(action, entityType, entityId, merchantId, shopId,
+                previousState, newState, reason, details));
+    }
+
+    private AuditLog entry(String action, String entityType, Long entityId,
+                           Long merchantId, Long shopId, String previousState,
+                           String newState, String reason, String details) {
+        AuditLog entry = new AuditLog();
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof AuthenticatedUser user) {
+            entry.setActorCustomerId(user.getCustomerId());
+            entry.setActorEmail(user.getEmail());
+            entry.setActorRole(user.getRole());
+        }
+
+        entry.setAction(action);
+        entry.setEntityType(entityType);
+        entry.setEntityId(entityId);
+        entry.setMerchantId(merchantId);
+        // Audit rows are a platform-wide append stream, so they are not
+        // Hibernate-filtered entities. Preserve the active tenant as
+        // explicit context instead. The read methods below then apply the
+        // same scope deliberately: a merchant sees only its current shop,
+        // while a platform scope sees the complete stream.
+        TenantScope scope = TenantContext.current();
+        entry.setShopId(scope != null && scope.isSingleShop()
+                ? scope.requireShopId()
+                : shopId);
+        entry.setPreviousState(previousState);
+        entry.setNewState(newState);
+        entry.setReason(reason);
+        entry.setRequestId(MDC.get(com.gpstore.config.RequestIdFilter.MDC_KEY));
+        // Client IP appended when a real HTTP request is in progress - a
+        // scheduled job (like the delivery-guarantee or payment-expiry
+        // checks) has no request at all, so this stays absent for those,
+        // which is correct rather than fabricated.
+        entry.setDetails((details == null ? "" : details) + clientIpSuffix());
+        entry.setOccurredAt(LocalDateTime.now());
+        return entry;
     }
 
     private String clientIpSuffix() {
@@ -77,14 +130,28 @@ public class AuditLogService {
     }
 
     public Page<AuditLog> getForEntity(String entityType, Long entityId, Pageable pageable) {
+        TenantScope scope = TenantContext.require();
+        if (scope.isSingleShop()) {
+            return repository.findByShopIdAndEntityTypeAndEntityIdOrderByOccurredAtDesc(
+                    scope.requireShopId(), entityType, entityId, pageable);
+        }
         return repository.findByEntityTypeAndEntityIdOrderByOccurredAtDesc(entityType, entityId, pageable);
     }
 
     public Page<AuditLog> getForActor(Long actorCustomerId, Pageable pageable) {
+        TenantScope scope = TenantContext.require();
+        if (scope.isSingleShop()) {
+            return repository.findByShopIdAndActorCustomerIdOrderByOccurredAtDesc(
+                    scope.requireShopId(), actorCustomerId, pageable);
+        }
         return repository.findByActorCustomerIdOrderByOccurredAtDesc(actorCustomerId, pageable);
     }
 
     public Page<AuditLog> getAll(Pageable pageable) {
+        TenantScope scope = TenantContext.require();
+        if (scope.isSingleShop()) {
+            return repository.findByShopIdOrderByOccurredAtDesc(scope.requireShopId(), pageable);
+        }
         return repository.findAllByOrderByOccurredAtDesc(pageable);
     }
 }

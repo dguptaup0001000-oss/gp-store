@@ -79,9 +79,11 @@ private Boolean enabled;
      * in with email and password, exactly as it always has.
      */
     @Column(name = "activation_code_hash", length = 64)
+    @JsonIgnore
     private String activationCodeHash;
 
     @Column(name = "activation_code_issued_at")
+    @JsonIgnore
     private java.time.LocalDateTime activationCodeIssuedAt;
 
     /**
@@ -93,7 +95,23 @@ private Boolean enabled;
      * and an audit trail that cannot see the first claim is half a trail.
      */
     @Column(name = "activation_code_claimed_at")
+    @JsonIgnore
     private java.time.LocalDateTime activationCodeClaimedAt;
+
+    /**
+     * When this account was created. Null is intentionally valid for legacy
+     * rows: inventing a timestamp during migration would turn a deployment
+     * date into a customer's registration date.
+     */
+    @Column(name = "created_at")
+    private java.time.LocalDateTime createdAt;
+
+    @PrePersist
+    void stampCreatedAt() {
+        if (createdAt == null) {
+            createdAt = java.time.LocalDateTime.now();
+        }
+    }
     
     // Same reasoning as cart below: addresses have their own dedicated
     // endpoint (GET /api/addresses/mine, see AddressController), and without

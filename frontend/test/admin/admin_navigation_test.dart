@@ -36,7 +36,10 @@ void main() {
   };
 
   test('every screen the console used to list is still reachable', () {
-    final labels = AdminNav.all.map((d) => d.label).toSet();
+    final labels = AdminNav.groups
+        .expand((group) => group.destinations)
+        .map((d) => d.label)
+        .toSet();
     // containsAll, not equality. This set is the OLD home screen's tiles, and
     // its job is that none of them vanished - so a destination added since
     // then is not a failure of this test. Equality only happened to work
@@ -76,11 +79,43 @@ void main() {
       // which no shop role holds - see admin_permissions_test. It is in this
       // console rather than a fifth app because the platform operator and the
       // shopkeeper use the same screens for orders, customers and audit.
-      'Merchants & Shops',
     };
 
-    final labels = AdminNav.all.map((d) => d.label).toSet();
+    final labels = AdminNav.groups
+        .expand((group) => group.destinations)
+        .map((d) => d.label)
+        .toSet();
     expect(labels.difference(expected), addedSince);
+  });
+
+  test('the platform owner gets a separate control-tower navigation', () {
+    final labels = AdminNav.superAdminGroups
+        .expand((group) => group.destinations)
+        .map((d) => d.label)
+        .toSet();
+
+    expect(labels, {
+      'Control Tower',
+      'Merchants',
+      'Shops',
+      'Customers',
+      'Merchant Administration',
+      'Orders',
+      'Workers',
+      'Products',
+      'Finance',
+      'Payments',
+      'Refunds',
+      'Returns',
+      'Product Reviews',
+      'Shop Reviews',
+      'Security',
+      'Audit Logs',
+      'System Health',
+    });
+    expect(labels, isNot(contains('My Shop')));
+    expect(labels, isNot(contains('Store Hours')));
+    expect(labels, isNot(contains('Receipt Printer')));
   });
 
   test('ids are unique - they are the selection key', () {

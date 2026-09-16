@@ -1,5 +1,6 @@
 import '../../../core/api/api_client.dart';
 import '../domain/platform_models.dart';
+import '../domain/control_tower_models.dart';
 
 /// The platform's own surface: merchants, shops, and the market.
 ///
@@ -13,6 +14,144 @@ class PlatformRepository {
   PlatformRepository({required this.apiClient});
 
   final ApiClient apiClient;
+
+  Future<PlatformSearchPage> globalSearch({
+    required String query,
+    int page = 0,
+    int size = 20,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/platform/control/search',
+      queryParameters: {'q': query, 'page': page, 'size': size},
+    );
+    return PlatformSearchPage.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
+  Future<PlatformDashboardSummary> controlTowerDashboard({
+    required DateTime from,
+    required DateTime to,
+    int? merchantId,
+    int? shopId,
+    String? orderStatus,
+    String? paymentStatus,
+    String? paymentMethod,
+  }) async {
+    String date(DateTime value) =>
+        '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';
+    final response = await apiClient.dio.get(
+      '/api/platform/control/dashboard',
+      queryParameters: {
+        'from': date(from),
+        'to': date(to),
+        if (merchantId != null) 'merchantId': merchantId,
+        if (shopId != null) 'shopId': shopId,
+        if (orderStatus?.trim().isNotEmpty == true)
+          'orderStatus': orderStatus!.trim(),
+        if (paymentStatus?.trim().isNotEmpty == true)
+          'paymentStatus': paymentStatus!.trim(),
+        if (paymentMethod?.trim().isNotEmpty == true)
+          'paymentMethod': paymentMethod!.trim(),
+      },
+    );
+    return PlatformDashboardSummary.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
+  Future<Map<String, dynamic>> controlTowerEntity({
+    required String entityType,
+    required int entityId,
+  }) async {
+    final segment = switch (entityType.toUpperCase()) {
+      'CUSTOMER' => 'customers',
+      'MERCHANT' => 'merchants',
+      'SHOP' => 'shops',
+      _ => throw ArgumentError('No 360 view for $entityType'),
+    };
+    final response =
+        await apiClient.dio.get('/api/platform/control/$segment/$entityId');
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<String?> revealCustomerPii({
+    required int customerId,
+    required String field,
+    required String reason,
+  }) async {
+    final response = await apiClient.dio.post(
+      '/api/platform/control/customers/$customerId/reveal',
+      data: {'field': field, 'reason': reason},
+    );
+    final body = Map<String, dynamic>.from(response.data as Map);
+    return body['value']?.toString();
+  }
+
+  Future<PlatformResourcePage> controlTowerResource({
+    required String resource,
+    String query = '',
+    int page = 0,
+    int size = 25,
+    String? status,
+    int? merchantId,
+    int? shopId,
+    int? customerId,
+    int? workerId,
+    String? paymentStatus,
+    String? paymentMethod,
+    String? category,
+    String? stockStatus,
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/platform/control/$resource',
+      queryParameters: {
+        if (query.trim().isNotEmpty) 'q': query.trim(),
+        'page': page,
+        'size': size,
+        if (status?.trim().isNotEmpty == true) 'status': status!.trim(),
+        if (merchantId != null) 'merchantId': merchantId,
+        if (shopId != null) 'shopId': shopId,
+        if (customerId != null) 'customerId': customerId,
+        if (workerId != null) 'workerId': workerId,
+        if (paymentStatus?.trim().isNotEmpty == true)
+          'paymentStatus': paymentStatus!.trim(),
+        if (paymentMethod?.trim().isNotEmpty == true)
+          'paymentMethod': paymentMethod!.trim(),
+        if (category?.trim().isNotEmpty == true) 'category': category!.trim(),
+        if (stockStatus?.trim().isNotEmpty == true)
+          'stockStatus': stockStatus!.trim(),
+        if (from != null) 'from': _date(from),
+        if (to != null) 'to': _date(to),
+      },
+    );
+    return PlatformResourcePage.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
+  static String _date(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
+
+  Future<Map<String, dynamic>> controlTowerOrder(int orderId) async {
+    final response =
+        await apiClient.dio.get('/api/platform/control/orders/$orderId');
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<Map<String, dynamic>> systemHealth() async {
+    final responses = await Future.wait([
+      apiClient.dio.get('/api/admin/ops/status'),
+      apiClient.dio.get('/api/version'),
+    ]);
+    return {
+      'health': Map<String, dynamic>.from(responses[0].data as Map),
+      'version': Map<String, dynamic>.from(responses[1].data as Map),
+    };
+  }
 
   Future<List<MerchantView>> merchants() async {
     final response = await apiClient.dio.get('/api/platform/merchants');

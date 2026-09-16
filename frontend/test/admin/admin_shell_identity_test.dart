@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/admin/shell/admin_shell.dart';
+import 'package:gpstore/admin/shell/admin_destinations.dart';
 import 'package:gpstore/features/admin/domain/shop_admin_models.dart';
 import 'package:gpstore/features/admin/presentation/shop_self_service_providers.dart';
 
@@ -122,6 +123,29 @@ void main() {
 
     expect(find.text('Switch'), findsNothing,
         reason: 'shop switching is a merchant-admin tool, not a platform-owner tool');
+  });
+
+  testWidgets('the platform owner gets platform navigation, not merchant tools',
+      (tester) async {
+    await pumpPhone(
+        tester,
+        const AdminShell(
+          home: AdminNav.controlTower,
+          role: 'SUPER_ADMIN',
+        ));
+    await openDrawer(tester);
+
+    expect(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.text('Control Tower'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Merchant Administration'), findsOneWidget);
+    expect(find.text('My Shop'), findsNothing);
+    expect(find.text('Receipt Printer'), findsNothing);
+    expect(find.text('Store Hours'), findsNothing);
   });
 
   testWidgets('non-owner shop staff never get the merchant shop switcher',

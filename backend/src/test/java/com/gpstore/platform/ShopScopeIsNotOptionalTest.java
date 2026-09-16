@@ -102,7 +102,19 @@ class ShopScopeIsNotOptionalTest {
      * All three are asserted by MultiShopCheckoutTest.
      */
     private static final Set<String> SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY =
-            Set.of("cart_items", "outbox_events");
+            Set.of("audit_logs", "cart_items", "outbox_events");
+
+    /*
+     * audit_logs is the third deliberate context column. The stream contains
+     * both shop events and platform events, so a null shop is meaningful and
+     * marking the entity ShopOwned would make legitimate platform audit rows
+     * impossible to insert. AuditLogService stamps the current shop on every
+     * shop-scoped write and explicitly predicates both merchant read paths by
+     * TenantContext.require(). Platform scope alone receives the full stream.
+     * PlatformControlTowerSecurityTest and the audit isolation regression test
+     * pin both sides; this exemption is therefore an explicit alternate
+     * boundary, not an unowned tenant column.
+     */
 
     /*
      * outbox_events is the second one, and for a different reason worth

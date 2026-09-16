@@ -26,6 +26,9 @@ void main() {
   const saree = ShopChoice(
       shopId: 3, code: 'DEEPAK-SAREE', displayName: 'Deepak Saree',
       status: 'CLOSED', operable: false);
+  const pharmacy = ShopChoice(
+      shopId: 4, code: 'DEEPAK-PHARMACY', displayName: 'Deepak Pharmacy',
+      status: 'ACTIVE', operable: true);
 
   testWidgets('with one shop the switcher is not there at all', (tester) async {
     await tester.pumpWidget(host(const MyShops(shops: [gpStore], acting: 1)));
@@ -81,6 +84,31 @@ void main() {
 
     expect(container.read(shopContextProvider), hardware.shopId,
         reason: 'three-or-more shops must use the same real switch path as two');
+  });
+
+  testWidgets('four and more shops have no client-side maximum', (tester) async {
+    final container = ProviderContainer(overrides: [
+      myShopsProvider.overrideWith((ref) async => const MyShops(
+            shops: [gpStore, hardware, saree, pharmacy],
+            acting: 1,
+          )),
+    ]);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(home: Scaffold(body: ShopSwitcherBar())),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Switch'), findsOneWidget);
+    await tester.tap(find.text('Switch'));
+    await tester.pumpAndSettle();
+    expect(find.text('Deepak Pharmacy'), findsOneWidget);
+
+    await tester.tap(find.text('Deepak Pharmacy'));
+    await tester.pumpAndSettle();
+    expect(container.read(shopContextProvider), 4,
+        reason: 'the switcher must work for every authorized shop, not stop at three');
   });
 
   testWidgets('a closed shop is listed but cannot be entered', (tester) async {

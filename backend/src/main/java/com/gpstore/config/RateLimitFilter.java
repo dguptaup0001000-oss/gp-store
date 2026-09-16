@@ -288,7 +288,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return Bucket.AUTH;
         }
 
-        if (path.startsWith("/api/products/search")) {
+        if (path.startsWith("/api/products/search")
+                || path.equals("/api/platform/control/search")) {
             return Bucket.SEARCH;
         }
 
@@ -355,6 +356,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         if (isWrite && (path.equals("/api/notifications/broadcast")
                 || path.startsWith("/api/admin/")
+                || path.startsWith("/api/platform/")
                 || path.startsWith("/api/worker/")
                 || path.startsWith("/api/deliveries")
                 || path.startsWith("/api/inventory")

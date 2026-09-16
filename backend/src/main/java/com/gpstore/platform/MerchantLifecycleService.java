@@ -78,8 +78,9 @@ public class MerchantLifecycleService {
         merchant.setActive(Boolean.TRUE);
 
         Merchant saved = merchants.save(merchant);
-        auditLog.log("MERCHANT_REGISTERED", "Merchant", saved.getId(),
-                "status=APPLICATION, demo=" + demo);
+        auditLog.logRequired("MERCHANT_REGISTERED", "Merchant", saved.getId(),
+                saved.getId(), null, null, MerchantStatus.APPLICATION.name(),
+                "merchant registered", "demo=" + demo);
         return saved;
     }
 
@@ -116,8 +117,9 @@ public class MerchantLifecycleService {
         }
 
         Merchant saved = merchants.save(merchant);
-        auditLog.log("MERCHANT_STATUS_CHANGED", "Merchant", saved.getId(),
-                current + " -> " + next + ": " + reason.trim());
+        auditLog.logRequired("MERCHANT_STATUS_CHANGED", "Merchant", saved.getId(),
+                saved.getId(), null, current.name(), next.name(), reason.trim(),
+                "merchant lifecycle transition");
 
         // A business that has stopped stops its shops with it. Left alone,
         // a removed merchant's storefronts would go on taking orders that
@@ -139,8 +141,9 @@ public class MerchantLifecycleService {
                     });
                     shop.setStatusReason("Merchant " + next + ": " + reason.trim());
                     shops.save(shop);
-                    auditLog.log("SHOP_STATUS_CHANGED", "Shop", shop.getId(),
-                            "followed merchant to " + shop.getStatus());
+                    auditLog.logRequired("SHOP_STATUS_CHANGED", "Shop", shop.getId(),
+                            saved.getId(), shop.getId(), null, shop.getStatus().name(),
+                            reason.trim(), "followed merchant lifecycle transition");
                 }
             }
         }
