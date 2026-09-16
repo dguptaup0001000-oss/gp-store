@@ -23,6 +23,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -253,6 +255,48 @@ class AShopStocksItsOwnShelfTest {
     class TwoShops {
 
         @Test
+        @DisplayName("merchant product management returns only the authenticated shop's shelf")
+        void merchantProductReadIsShopScoped() throws Exception {
+            com.gpstore.support.CatalogueItem onlyAtB =
+                    com.gpstore.support.CatalogueItem.create(
+                            tag + "-only-b", jdbc, categories, products, variants);
+            try {
+                listVariant(ownerA, variantId, 95.00);
+                listVariant(ownerB, onlyAtB.variantId(), 88.00);
+
+                String a = body(get("/api/products/admin/all"), ownerA, null);
+                assertTrue(productIds(a).contains(item.productId()), a);
+                assertFalse(productIds(a).contains(onlyAtB.productId()),
+                        "Shop A can see a product listed only by Shop B: " + a);
+                assertEquals(Set.of(variantId), variantIdsFor(a, item.productId()),
+                        "Shop A received central variants it has not listed");
+
+                String b = body(get("/api/products/admin/all"), ownerB, null);
+                assertTrue(productIds(b).contains(onlyAtB.productId()), b);
+                assertFalse(productIds(b).contains(item.productId()),
+                        "Shop B can see a product listed only by Shop A: " + b);
+
+                // The same endpoint remains a platform-wide central catalogue
+                // view for the platform owner; Super Admin is not silently
+                // narrowed to one merchant while fixing the merchant app.
+                String platform = bodyAs(
+                        get("/api/products/admin/all"), ownerA, Role.SUPER_ADMIN, null);
+                assertTrue(productIds(platform).containsAll(
+                        Set.of(item.productId(), onlyAtB.productId())), platform);
+
+                // The header selects only among shops membership already
+                // permits. It cannot turn the scoped read into Shop B's shelf.
+                MvcResult manipulated = send(
+                        get("/api/products/admin/all")
+                                .header("X-Shop-Id", String.valueOf(shopB)),
+                        ownerA, null);
+                assertEquals(403, manipulated.getResponse().getStatus());
+            } finally {
+                onlyAtB.remove();
+            }
+        }
+
+        @Test
         @DisplayName("each shop's count is its own")
         void stockIsPerShop() throws Exception {
             list(ownerA, 95.00);
@@ -387,9 +431,24 @@ class AShopStocksItsOwnShelfTest {
     }
 
     private void list(Long owner, double price) throws Exception {
-        perform(put("/api/shop/listings/" + variantId), owner,
+        listVariant(owner, variantId, price);
+    }
+
+    private void listVariant(Long owner, Long selectedVariantId, double price) throws Exception {
+        perform(put("/api/shop/listings/" + selectedVariantId), owner,
                 "{\"sellingPrice\":%s,\"mrp\":%s,\"available\":true,\"active\":true}"
                         .formatted(price, price + 15), 200);
+    }
+
+    private Set<Long> productIds(String json) {
+        List<Number> ids = com.jayway.jsonpath.JsonPath.read(json, "$[*].id");
+        return ids.stream().map(Number::longValue).collect(Collectors.toSet());
+    }
+
+    private Set<Long> variantIdsFor(String json, Long productId) {
+        List<Number> ids = com.jayway.jsonpath.JsonPath.read(
+                json, "$[?(@.id == " + productId + ")].variants[*].id");
+        return ids.stream().map(Number::longValue).collect(Collectors.toSet());
     }
 
     private Integer rowsFor(long shop) {
@@ -429,6 +488,20 @@ class AShopStocksItsOwnShelfTest {
         return content;
     }
 
+    private String bodyAs(MockHttpServletRequestBuilder request, Long accountId, Role role,
+                          String json) throws Exception {
+        request.with(authentication(tokenFor(accountId, role)));
+        if (json != null) {
+            request.contentType(MediaType.APPLICATION_JSON).content(json);
+        }
+        MvcResult result = mockMvc.perform(request).andReturn();
+        assertTrue(result.getResponse().getStatus() >= 200
+                        && result.getResponse().getStatus() < 300,
+                request + " returned " + result.getResponse().getStatus() + ": "
+                        + result.getResponse().getContentAsString());
+        return result.getResponse().getContentAsString();
+    }
+
     private void perform(MockHttpServletRequestBuilder request, Long accountId, String json,
                          int expected) throws Exception {
         MvcResult result = send(request, accountId, json);
@@ -446,12 +519,16 @@ class AShopStocksItsOwnShelfTest {
     }
 
     private UsernamePasswordAuthenticationToken tokenFor(Long accountId) {
+        return tokenFor(accountId, Role.ADMIN);
+    }
+
+    private UsernamePasswordAuthenticationToken tokenFor(Long accountId, Role role) {
         List<GrantedAuthority> authorities = new ArrayList<>();
-        for (String authority : RolePermissions.authorityNames(Role.ADMIN)) {
+        for (String authority : RolePermissions.authorityNames(role)) {
             authorities.add(new SimpleGrantedAuthority(authority));
         }
         return new UsernamePasswordAuthenticationToken(
-                new AuthenticatedUser(accountId, tag + "@example.test", Role.ADMIN.name()),
+                new AuthenticatedUser(accountId, tag + "@example.test", role.name()),
                 null, authorities);
     }
 }

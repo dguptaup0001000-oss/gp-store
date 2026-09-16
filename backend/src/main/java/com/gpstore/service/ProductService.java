@@ -34,6 +34,7 @@ public class ProductService {
     private final com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue;
     private final com.gpstore.catalog.shop.ShopStock shopStock;
     private final com.gpstore.platform.PlatformProperties platform;
+    private final com.gpstore.platform.ShopRepository shops;
 
     public ProductService(
             ProductRepository productRepository,
@@ -42,8 +43,10 @@ public class ProductService {
             com.gpstore.repository.CategoryRepository categoryRepository,
             com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue,
             com.gpstore.catalog.shop.ShopStock shopStock,
-            com.gpstore.platform.PlatformProperties platform) {
+            com.gpstore.platform.PlatformProperties platform,
+            com.gpstore.platform.ShopRepository shops) {
         this.shopStock = shopStock;
+        this.shops = shops;
         this.productRepository = productRepository;
         this.productImageRepository = productImageRepository;
         this.productBrowseRepository = productBrowseRepository;
@@ -144,12 +147,58 @@ public class ProductService {
         return batchFetchWithVariants(productRepository.findSellable(requireListing(), pageable)).getContent();
     }
 
-    /** Admin management view - includes inactive/deactivated products too, unlike the customer-facing list above. */
+    /**
+     * Admin management view - includes inactive/deactivated products too.
+     *
+     * <p>A platform administrator sees the central catalogue. A merchant in a
+     * marketplace sees only products and variants represented by listing rows
+     * on the authenticated shop's shelf. The scope is server-derived; there
+     * is no shop id argument to manipulate. A genuine one-shop deployment
+     * retains the legacy central-catalogue editor unchanged.
+     */
     @Transactional(readOnly = true)
     public List<ProductResponse> getAllForAdmin() {
-        return productRepository
-                .findAllByOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, ADMIN_UNPAGINATED_CAP))
-                .map(p -> ProductResponse.forAdmin(p, shopPricedCatalogue.termsFor(p)))
+        org.springframework.data.domain.PageRequest page =
+                org.springframework.data.domain.PageRequest.of(0, ADMIN_UNPAGINATED_CAP);
+        com.gpstore.platform.TenantScope scope =
+                com.gpstore.platform.TenantContext.require();
+        boolean marketplaceMerchant = scope.isSingleShop()
+                && (platform.getMode().isMultiShop() || shops.countByDeletedAtIsNull() > 1);
+
+        if (scope.isPlatform()) {
+            // There is no single shop price in a platform scope. Passing all
+            // listing rows to a map keyed only by variant id would choose an
+            // arbitrary merchant's price when several shops sell the same
+            // variant, so the platform view deliberately shows the central
+            // catalogue defaults here. Per-shop prices live in the control
+            // tower's product resource, keyed by shop.
+            return productRepository.findAllByOrderByCreatedAtDesc(page)
+                    .map(ProductResponse::forAdmin)
+                    .toList();
+        }
+
+        if (!marketplaceMerchant) {
+            return productRepository.findAllByOrderByCreatedAtDesc(page)
+                    .map(p -> ProductResponse.forAdmin(
+                            p, shopPricedCatalogue.termsFor(p)))
+                    .toList();
+        }
+
+        List<Long> orderedIds = productRepository.findAllListedForCurrentShop(page)
+                .stream().map(Product::getId).toList();
+        if (orderedIds.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Product> byId = new HashMap<>();
+        for (Product product : productRepository.findByIdIn(orderedIds)) {
+            byId.put(product.getId(), product);
+        }
+        Map<Long, com.gpstore.catalog.shop.ShopProductVariant> shopTerms =
+                shopPricedCatalogue.termsFor(byId.values());
+        return orderedIds.stream()
+                .map(byId::get)
+                .filter(java.util.Objects::nonNull)
+                .map(product -> ProductResponse.forShopAdmin(product, shopTerms))
                 .toList();
     }
 

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/features/admin/data/platform_repository.dart';
+import 'package:gpstore/features/admin/domain/control_tower_models.dart';
 
 import '../../../support/test_api_client.dart';
 
@@ -7,6 +8,20 @@ void main() {
   setUpAll(setUpFakeSecureStorage);
 
   group('PlatformRepository', () {
+    test('search model accepts legacy contact keys without re-masking them', () {
+      final result = PlatformSearchResult.fromJson(const {
+        'entityType': 'CUSTOMER',
+        'entityId': 7,
+        'title': 'Legacy App Customer',
+        'reference': 'C-7',
+        'maskedEmail': 'complete@example.test',
+        'maskedPhone': '9876543210',
+      });
+
+      expect(result.email, 'complete@example.test');
+      expect(result.phone, '9876543210');
+    });
+
     test('global search is server-side, paged, and parses entity types', () async {
       final adapter = FakeHttpClientAdapter();
       adapter.on('GET', '/api/platform/control/search', (options) {
@@ -20,7 +35,7 @@ void main() {
               'entityId': 42,
               'title': 'Deepak Kumar',
               'reference': 'C-42',
-              'maskedEmail': 'd***@example.test'
+              'email': 'deepak@example.test'
             }
           ],
           'page': 2,
@@ -35,6 +50,7 @@ void main() {
 
       expect(page.content.single.entityType, 'CUSTOMER');
       expect(page.content.single.entityId, 42);
+      expect(page.content.single.email, 'deepak@example.test');
       expect(page.hasMore, isTrue);
     });
 

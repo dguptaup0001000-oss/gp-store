@@ -474,16 +474,25 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
   }
 
   String _subtitle(Map<String, dynamic> row) => row.entries
-      .where((entry) => entry.value != null && !const {'id', 'orderNumber', 'product', 'name'}.contains(entry.key))
+      .where((entry) => entry.value != null &&
+          !const {'id', 'orderNumber', 'product', 'name'}.contains(entry.key) &&
+          !(entry.key == 'maskedEmail' && row.containsKey('email')) &&
+          !(entry.key == 'maskedPhone' && row.containsKey('phone')))
       .take(5)
       .map((entry) => '${_label(entry.key)}: ${entry.value}')
       .join(' · ');
 
-  static String _label(String value) => value
-      .replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}')
-      .split(' ')
-      .map((part) => part.isEmpty ? part : '${part[0].toUpperCase()}${part.substring(1)}')
-      .join(' ');
+  static String _label(String value) {
+    if (value == 'maskedEmail') return 'Email';
+    if (value == 'maskedPhone') return 'Phone';
+    return value
+        .replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}')
+        .split(' ')
+        .map((part) => part.isEmpty
+            ? part
+            : '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
+  }
 }
 
 class PlatformOrder360Screen extends ConsumerStatefulWidget {

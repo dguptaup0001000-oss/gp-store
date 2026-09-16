@@ -19,7 +19,10 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -62,6 +65,10 @@ class SecondMerchantLandsInTheirOwnShopTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private PlatformOnboardingService onboarding;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private com.gpstore.catalog.shop.ShopCatalog shopCatalog;
+    @Autowired private com.gpstore.repository.CategoryRepository categories;
+    @Autowired private com.gpstore.repository.ProductRepository products;
+    @Autowired private com.gpstore.repository.ProductVariantRepository variants;
 
     private final List<Long> madeShops = new ArrayList<>();
     private final List<Long> madeMerchants = new ArrayList<>();
@@ -130,5 +137,44 @@ class SecondMerchantLandsInTheirOwnShopTest {
                         + "TenantResolver.resolve() returns Shop #1 to every account before it "
                         + "checks membership, so a second merchant reads the first merchant's "
                         + "business. Body was: " + body);
+    }
+
+    @Test
+    @DisplayName("production-default mode still isolates the second merchant's product list")
+    void theSecondMerchantSeesOnlyItsShelfInTheDefaultMode() throws Exception {
+        String tag = "second-products" + System.nanoTime();
+        var made = onboarding.onboard("Gupta Phones " + tag, "Owner " + tag,
+                tag + "@example.test", uniquePhone(), null,
+                26.7606, 83.3732, new BigDecimal("5.0"), null, false);
+        madeMerchants.add(made.merchantId());
+        madeShops.add(made.shopId());
+        madeCustomers.add(made.ownerCustomerId());
+
+        var phone = com.gpstore.support.CatalogueItem.create(
+                tag + "-phone", jdbc, categories, products, variants);
+        var kirana = com.gpstore.support.CatalogueItem.create(
+                tag + "-kirana", jdbc, categories, products, variants);
+        try {
+            TenantContext.runWithin(TenantScope.ofShop(made.shopId()),
+                    () -> shopCatalog.list(variants.findById(phone.variantId()).orElseThrow()));
+            TenantContext.runWithin(TenantScope.ofShop(Shop.FIRST_SHOP_ID),
+                    () -> shopCatalog.list(variants.findById(kirana.variantId()).orElseThrow()));
+
+            String body = mockMvc.perform(get("/api/products/admin/all")
+                            .with(authentication(owner(made.ownerCustomerId()))))
+                    .andReturn().getResponse().getContentAsString();
+            Set<Long> ids = productIds(body);
+            assertTrue(ids.contains(phone.productId()), body);
+            assertFalse(ids.contains(kirana.productId()),
+                    "The phone merchant received Shop #1's kirana product: " + body);
+        } finally {
+            phone.remove();
+            kirana.remove();
+        }
+    }
+
+    private Set<Long> productIds(String json) {
+        List<Number> ids = com.jayway.jsonpath.JsonPath.read(json, "$[*].id");
+        return ids.stream().map(Number::longValue).collect(Collectors.toSet());
     }
 }

@@ -70,30 +70,36 @@ class PlatformControlTowerSecurityTest {
     }
 
     @Test
-    void platformSearchIsPagedMaskedAndDoesNotLeakSecrets() throws Exception {
+    void platformSearchReturnsOperationalContactsButDoesNotLeakSecrets() throws Exception {
         String body = mockMvc.perform(get("/api/platform/control/search")
-                        .param("q", tag)
+                        .param("q", tag + "-customer")
                         .param("page", "0")
                         .param("size", "1")
                         .with(authentication(token(platformAdmin, Role.PLATFORM_ADMIN))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.content[0].email")
+                        .value(tag + "-customer@example.test"))
                 .andReturn().getResponse().getContentAsString();
 
-        assertFalse(body.contains(tag + "-customer@example.test"), body);
+        assertTrue(body.contains(tag + "-customer@example.test"), body);
         assertFalse(body.contains("0123456789abcdef"), body);
+        assertFalse(body.contains("not-a-real-hash"), body);
         assertFalse(body.toLowerCase().contains("password"), body);
         assertFalse(body.toLowerCase().contains("activationcode"), body);
     }
 
     @Test
-    void customer360IsMaskedAndRevealRequiresReasonAndIsAudited() throws Exception {
+    void customer360IsOperationallyCompleteAndLegacyRevealRemainsAudited() throws Exception {
         String detail = mockMvc.perform(get("/api/platform/control/customers/{id}", customer)
                         .with(authentication(token(platformAdmin, Role.PLATFORM_ADMIN))))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.identity.email")
+                        .value(tag + "-customer@example.test"))
                 .andReturn().getResponse().getContentAsString();
-        assertFalse(detail.contains(tag + "-customer@example.test"), detail);
+        assertTrue(detail.contains(tag + "-customer@example.test"), detail);
         assertFalse(detail.contains("0123456789abcdef"), detail);
+        assertFalse(detail.contains("not-a-real-hash"), detail);
 
         mockMvc.perform(post("/api/platform/control/customers/{id}/reveal", customer)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -117,6 +123,23 @@ class PlatformControlTowerSecurityTest {
                 """, String.class, customer);
         assertTrue(auditDetails.contains("field=email"));
         assertFalse(auditDetails.contains(tag + "-customer@example.test"));
+    }
+
+    @Test
+    void platformCustomerListReturnsFullOperationalContactWithoutCredentials() throws Exception {
+        String body = mockMvc.perform(get("/api/platform/control/customers")
+                        .param("q", tag + "-customer")
+                        .with(authentication(token(platformAdmin, Role.PLATFORM_ADMIN))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].email")
+                        .value(tag + "-customer@example.test"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertTrue(body.contains(tag + "-customer@example.test"), body);
+        assertFalse(body.contains("0123456789abcdef"), body);
+        assertFalse(body.contains("not-a-real-hash"), body);
+        assertFalse(body.toLowerCase().contains("activation_code"), body);
+        assertFalse(body.toLowerCase().contains("refresh_token"), body);
     }
 
     @Test
