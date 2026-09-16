@@ -57,7 +57,7 @@ public class PlatformControlTowerController {
         return service.shop(id);
     }
 
-    @GetMapping("/{resource:customers|merchants|shops|orders|workers|products|payments|refunds|returns|reviews|audit}")
+    @GetMapping("/{resource:customers|merchants|shops|orders|workers|products|payments|refunds|returns|reviews|shop-reviews|security|audit}")
     public PlatformControlTowerService.PageEnvelope<java.util.Map<String, Object>> resource(
             @PathVariable String resource,
             @RequestParam(required = false, defaultValue = "") String q,

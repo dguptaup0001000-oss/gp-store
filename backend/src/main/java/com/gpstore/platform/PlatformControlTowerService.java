@@ -431,6 +431,7 @@ public class PlatformControlTowerService {
             case "workers" -> "w.deleted_at IS NULL";
             case "merchants" -> "m.deleted_at IS NULL";
             case "shops" -> "s.deleted_at IS NULL";
+            case "security" -> "(a.action LIKE '%LOGIN%' OR a.action LIKE '%ACTIVATION%' OR a.action LIKE '%PASSWORD%' OR a.action LIKE '%SUSPEND%' OR a.action LIKE '%REACTIVAT%' OR a.action LIKE '%ROLE%' OR a.action LIKE '%PII%' OR a.action LIKE '%ACCESS%')";
             default -> "";
         };
         String where;
@@ -451,7 +452,7 @@ public class PlatformControlTowerService {
                 row.put("maskedPhone", maskPhone(string(row.get("maskedPhone"))));
                 row.put("maskedEmail", maskEmail(string(row.get("maskedEmail"))));
             });
-        } else if (resource.equals("audit")) {
+        } else if (resource.equals("audit") || resource.equals("security")) {
             content.forEach(row -> row.put("actorEmail", maskEmail(string(row.get("actorEmail")))));
         }
         Long total = jdbc.queryForObject("SELECT count(*) " + sql.from() + where, params, Long.class);
@@ -544,7 +545,24 @@ public class PlatformControlTowerService {
                     """, "FROM reviews r JOIN products p ON p.id=r.product_id LEFT JOIN customers c ON c.id=r.customer_id",
                     "lower(COALESCE(p.name,'')) LIKE :pattern OR lower(COALESCE(c.full_name,'')) LIKE :pattern OR lower(COALESCE(r.comment,'')) LIKE :pattern",
                     "ORDER BY r.review_date DESC,r.id DESC");
+            case "shop-reviews" -> new ResourceSql("""
+                    SELECT r.id id,'SHOP' "reviewType",r.rating rating,r.comment review,
+                           r.created_at "createdAt",r.reported_at "reportedAt",r.hidden_at "hiddenAt",
+                           s.id "shopId",s.display_name shop,m.id "merchantId",
+                           COALESCE(m.display_name,m.legal_name) merchant,c.full_name customer
+                    """, "FROM shop_ratings r JOIN shops s ON s.id=r.shop_id JOIN merchants m ON m.id=s.merchant_id LEFT JOIN customers c ON c.id=r.customer_id",
+                    "lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR lower(COALESCE(c.full_name,'')) LIKE :pattern OR lower(COALESCE(r.comment,'')) LIKE :pattern",
+                    "ORDER BY r.created_at DESC,r.id DESC");
             case "audit" -> new ResourceSql("""
+                    SELECT a.id id,a.occurred_at "occurredAt",a.actor_customer_id "actorUserId",
+                           a.actor_email "actorEmail",a.actor_role "actorRole",a.action action,
+                           a.entity_type "targetType",a.entity_id "targetId",a.merchant_id "merchantId",
+                           a.shop_id "shopId",a.previous_state "previousState",a.new_state "newState",
+                           a.reason reason,a.request_id "requestId",a.details details
+                    """, "FROM audit_logs a",
+                    "lower(COALESCE(a.action,'')) LIKE :pattern OR lower(COALESCE(a.entity_type,'')) LIKE :pattern OR lower(COALESCE(a.actor_email,'')) LIKE :pattern OR lower(COALESCE(a.request_id,'')) LIKE :pattern",
+                    "ORDER BY a.occurred_at DESC,a.id DESC");
+            case "security" -> new ResourceSql("""
                     SELECT a.id id,a.occurred_at "occurredAt",a.actor_customer_id "actorUserId",
                            a.actor_email "actorEmail",a.actor_role "actorRole",a.action action,
                            a.entity_type "targetType",a.entity_id "targetId",a.merchant_id "merchantId",

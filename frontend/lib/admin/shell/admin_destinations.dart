@@ -429,7 +429,11 @@ class AdminNav {
       title: 'Trust & System',
       destinations: [
         AdminDestination(id: 'platform-reviews', requires: AdminPermission.platformAdmin,
-            label: 'Reviews', icon: Icons.rate_review_outlined, builder: _platformReviews),
+            label: 'Product Reviews', icon: Icons.rate_review_outlined, builder: _platformReviews),
+        AdminDestination(id: 'platform-shop-reviews', requires: AdminPermission.platformAdmin,
+            label: 'Shop Reviews', icon: Icons.reviews_outlined, builder: _platformShopReviews),
+        AdminDestination(id: 'platform-security', requires: AdminPermission.platformAdmin,
+            label: 'Security', icon: Icons.security_outlined, builder: _platformSecurity),
         AdminDestination(
           id: 'platform-audit',
           requires: AdminPermission.auditView,
@@ -550,6 +554,10 @@ class AdminNav {
   static Widget _platformReturns(BuildContext context) => const PlatformResourceScreen(
       resource: 'returns', title: 'Returns', icon: Icons.assignment_return_outlined);
   static Widget _platformReviews(BuildContext context) => const PlatformResourceScreen(
-      resource: 'reviews', title: 'Reviews', icon: Icons.rate_review_outlined);
+      resource: 'reviews', title: 'Product Reviews', icon: Icons.rate_review_outlined);
+  static Widget _platformShopReviews(BuildContext context) => const PlatformResourceScreen(
+      resource: 'shop-reviews', title: 'Shop Reviews', icon: Icons.reviews_outlined);
+  static Widget _platformSecurity(BuildContext context) => const PlatformResourceScreen(
+      resource: 'security', title: 'Security Events', icon: Icons.security_outlined);
   static Widget _platformHealth(BuildContext context) => const PlatformSystemHealthScreen();
 }
