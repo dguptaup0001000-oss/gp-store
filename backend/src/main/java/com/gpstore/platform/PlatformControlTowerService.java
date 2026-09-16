@@ -7,6 +7,7 @@ import com.gpstore.presence.PresenceTracker;
 import com.gpstore.service.AuditLogService;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -270,7 +271,8 @@ public class PlatformControlTowerService {
 
         Map<String, Long> statuses = new LinkedHashMap<>();
         jdbc.query("SELECT order_status, count(*) total FROM orders WHERE order_date >= :from AND order_date < :to GROUP BY order_status",
-                range, rs -> statuses.put(rs.getString("order_status"), rs.getLong("total")));
+                range, (RowCallbackHandler) rs ->
+                        statuses.put(rs.getString("order_status"), rs.getLong("total")));
 
         Map<String, Object> money = jdbc.queryForMap("""
                 SELECT COALESCE(SUM(o.total_amount), 0) gmv,
@@ -645,7 +647,8 @@ public class PlatformControlTowerService {
 
     private Map<String, Long> statusCounts(String sql, Long id) {
         Map<String, Long> result = new LinkedHashMap<>();
-        jdbc.query(sql, Map.of("id", id), rs -> result.put(rs.getString(1), rs.getLong(2)));
+        jdbc.query(sql, Map.of("id", id), (RowCallbackHandler) rs ->
+                result.put(rs.getString(1), rs.getLong(2)));
         return result;
     }
 
