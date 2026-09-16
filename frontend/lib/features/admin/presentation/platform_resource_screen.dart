@@ -157,7 +157,7 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
                     onPressed: _showFilters,
                     icon: Badge(
                       isLabelVisible: _filterCount > 0,
-                      label: Text('${_filterCount}'),
+                      label: Text('$_filterCount'),
                       child: const Icon(Icons.tune_rounded),
                     ),
                   ),

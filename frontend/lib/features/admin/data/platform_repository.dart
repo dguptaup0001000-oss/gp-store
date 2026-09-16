@@ -36,8 +36,6 @@ class PlatformRepository {
     String? orderStatus,
     String? paymentStatus,
     String? paymentMethod,
-    String? category,
-    String? stockStatus,
   }) async {
     String date(DateTime value) =>
         '${value.year.toString().padLeft(4, '0')}-'
@@ -56,9 +54,6 @@ class PlatformRepository {
           'paymentStatus': paymentStatus!.trim(),
         if (paymentMethod?.trim().isNotEmpty == true)
           'paymentMethod': paymentMethod!.trim(),
-        if (category?.trim().isNotEmpty == true) 'category': category!.trim(),
-        if (stockStatus?.trim().isNotEmpty == true)
-          'stockStatus': stockStatus!.trim(),
       },
     );
     return PlatformDashboardSummary.fromJson(
@@ -105,6 +100,8 @@ class PlatformRepository {
     int? workerId,
     String? paymentStatus,
     String? paymentMethod,
+    String? category,
+    String? stockStatus,
     DateTime? from,
     DateTime? to,
   }) async {
@@ -123,6 +120,9 @@ class PlatformRepository {
           'paymentStatus': paymentStatus!.trim(),
         if (paymentMethod?.trim().isNotEmpty == true)
           'paymentMethod': paymentMethod!.trim(),
+        if (category?.trim().isNotEmpty == true) 'category': category!.trim(),
+        if (stockStatus?.trim().isNotEmpty == true)
+          'stockStatus': stockStatus!.trim(),
         if (from != null) 'from': _date(from),
         if (to != null) 'to': _date(to),
       },
