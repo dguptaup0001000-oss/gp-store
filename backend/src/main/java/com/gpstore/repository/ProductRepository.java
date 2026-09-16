@@ -1,5 +1,6 @@
 package com.gpstore.repository;
 
+import com.gpstore.catalog.shop.ShopProductVariant;
 import com.gpstore.entity.Product;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -156,6 +157,28 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     // inactive/deactivated products too, still capped via Pageable.
     @EntityGraph(attributePaths = {"category"})
     Page<Product> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    /**
+     * Products represented on the current shop's shelf, including inactive
+     * listings so a merchant can inspect and reactivate something it delisted.
+     *
+     * <p>{@link ShopProductVariant} is shop-filtered by the tenant scope. No
+     * shop id is accepted here, so a caller cannot turn this into another
+     * merchant's catalogue by changing a request value. Variants are fetched
+     * separately in one batch by {@code ProductService}; joining that
+     * collection in a paged query would make Hibernate paginate multiplied
+     * rows instead of products.
+     */
+    @EntityGraph(attributePaths = {"category"})
+    @Query("""
+            SELECT p FROM Product p
+            WHERE EXISTS (
+                SELECT 1 FROM ProductVariant v, ShopProductVariant l
+                WHERE v.product = p AND l.productVariantId = v.id
+            )
+            ORDER BY p.createdAt DESC, p.id DESC
+            """)
+    Page<Product> findAllListedForCurrentShop(Pageable pageable);
 
     /**
      * Only brands that actually have at least one active product - the

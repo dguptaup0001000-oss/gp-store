@@ -258,6 +258,32 @@ public class ProductResponse implements Serializable {
         return base.withPrivacy(product.getIsPrivateProduct(), product.getCustomerDisplayName());
     }
 
+    /**
+     * A merchant's management view of the central catalogue item.
+     *
+     * <p>The product description is shared, but the variants returned here
+     * are only the ones this authenticated shop has listed. Returning every
+     * central variant and merely overlaying this shop's prices would still
+     * disclose another merchant's shelf in the Merchant Admin app. Inactive
+     * listing rows stay visible so the merchant can manage or reactivate
+     * their own historical listing.
+     */
+    public static ProductResponse forShopAdmin(Product product,
+            java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings) {
+        ProductResponse base = from(product, listings);
+        if (base == null) return null;
+        List<VariantResponse> shopVariants = base.variants == null
+                ? List.of()
+                : base.variants.stream()
+                        .filter(variant -> listings.containsKey(variant.getId()))
+                        .toList();
+        return new ProductResponse(
+                base.id, base.name, base.brand, base.category, shopVariants, base.active,
+                base.images, base.model3dUrl, base.subcategory, base.bestseller,
+                base.featured, base.testData, product.getIsPrivateProduct(),
+                product.getCustomerDisplayName(), shopVariants.size());
+    }
+
     private ProductResponse withPrivacy(Boolean isPrivateProduct, String customerDisplayName) {
         return new ProductResponse(id, name, brand, category, variants, active, images,
                 model3dUrl, subcategory, bestseller, featured, testData,
