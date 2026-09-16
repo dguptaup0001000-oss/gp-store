@@ -142,7 +142,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Merchants & Shops'), findsOneWidget);
+    expect(find.text('Merchant Administration'), findsOneWidget);
     expect(find.text('My Shop'), findsNothing);
     expect(find.text('Receipt Printer'), findsNothing);
     expect(find.text('Store Hours'), findsNothing);

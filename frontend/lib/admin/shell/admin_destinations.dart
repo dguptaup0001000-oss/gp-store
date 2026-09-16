@@ -107,9 +107,9 @@ class AdminNav {
   static const AdminDestination platformConsole = AdminDestination(
     id: 'platform',
     requires: AdminPermission.platformAdmin,
-    label: 'Merchants & Shops',
+    label: 'Merchant Administration',
     icon: Icons.hub_outlined,
-    description: 'Approve, suspend, and see the whole market',
+    description: 'Approve, pause, suspend, and manage merchant access',
     builder: _platform,
   );
 
@@ -369,17 +369,6 @@ class AdminNav {
         ),
       ],
     ),
-    // THE MARKETPLACE ITSELF, and it is last because almost nobody sees it.
-    //
-    // platformAdmin is the one permission no shop role holds - RolePermissions
-    // builds each shop role by SUBTRACTING it - so this group is invisible to
-    // every merchant, including a shop owner holding everything their own shop
-    // can grant. Hiding it is only tidiness; the server refuses the routes
-    // regardless.
-    AdminNavGroup(
-      title: 'Marketplace',
-      destinations: [platformConsole],
-    ),
   ];
 
   /// Platform-owner navigation is deliberately separate from merchant
@@ -400,6 +389,7 @@ class AdminNav {
             label: 'Shops', icon: Icons.storefront_outlined, builder: _platformShops),
         AdminDestination(id: 'platform-customers', requires: AdminPermission.platformAdmin,
             label: 'Customers', icon: Icons.people_outline, builder: _platformCustomers),
+        platformConsole,
       ],
     ),
     AdminNavGroup(

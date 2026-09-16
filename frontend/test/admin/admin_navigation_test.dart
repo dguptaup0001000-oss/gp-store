@@ -79,7 +79,6 @@ void main() {
       // which no shop role holds - see admin_permissions_test. It is in this
       // console rather than a fifth app because the platform operator and the
       // shopkeeper use the same screens for orders, customers and audit.
-      'Merchants & Shops',
     };
 
     final labels = AdminNav.groups
@@ -100,6 +99,7 @@ void main() {
       'Merchants',
       'Shops',
       'Customers',
+      'Merchant Administration',
       'Orders',
       'Workers',
       'Products',

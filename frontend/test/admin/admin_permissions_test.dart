@@ -185,14 +185,14 @@ void main() {
       // shop can grant still does not run the market. The exception is named
       // rather than the set loosened, so adding a second platform-only
       // destination fails here until somebody decides it belongs.
-      final shopDestinations = AdminNav.all
-          .where((d) => d.requires != AdminPermission.platformAdmin)
+      final shopDestinations = AdminNav.groups
+          .expand((group) => group.destinations)
           .map((d) => d.label)
           .toSet();
       expect(labels.toSet(), shopDestinations);
     });
 
-    test('no SHOP role can see the marketplace console, and the platform role can', () {
+    test('no shop role can see platform navigation, and the platform role can', () {
       // The server refuses /api/platform/** regardless; this is the other
       // half - not offering a shopkeeper a door that only ever answers 403,
       // and not hiding it from the one person whose job it is.
@@ -205,9 +205,20 @@ void main() {
         // marketplace console is exactly its job.
         if (role == AdminRoles.platformAdmin ||
             role == AdminRoles.superAdmin) {
-          expect(labels, contains('Merchants & Shops'), reason: role);
+          expect(
+            labels,
+            containsAll([
+              'Control Tower',
+              'Merchants',
+              'Shops',
+              'Merchant Administration',
+            ]),
+            reason: role,
+          );
+          expect(labels, isNot(contains('My Shop')), reason: role);
         } else {
-          expect(labels, isNot(contains('Merchants & Shops')), reason: role);
+          expect(labels, isNot(contains('Control Tower')), reason: role);
+          expect(labels, isNot(contains('Merchant Administration')), reason: role);
         }
       }
     });
@@ -250,11 +261,16 @@ void main() {
       }
     });
 
-    test('every role keeps the dashboard, so nobody lands nowhere', () {
+    test('shop roles keep Dashboard while platform roles open Control Tower', () {
       for (final role in AdminRoles.all) {
         final groups = AdminNav.groupsFor(AdminRoles.permissionsFor(role));
         final ids = [for (final g in groups) ...g.destinations.map((d) => d.id)];
-        expect(ids, contains(AdminNav.dashboardId), reason: role);
+        if (role == AdminRoles.platformAdmin || role == AdminRoles.superAdmin) {
+          expect(ids, contains(AdminNav.controlTower.id), reason: role);
+          expect(ids, isNot(contains(AdminNav.dashboardId)), reason: role);
+        } else {
+          expect(ids, contains(AdminNav.dashboardId), reason: role);
+        }
       }
     });
 
