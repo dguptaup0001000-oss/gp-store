@@ -32,6 +32,22 @@ public class AuditLog {
 
     private Long entityId;
 
+    private Long merchantId;
+
+    private Long shopId;
+
+    @Column(length = 500)
+    private String previousState;
+
+    @Column(length = 500)
+    private String newState;
+
+    @Column(length = 500)
+    private String reason;
+
+    @Column(length = 64)
+    private String requestId;
+
     // Free-text context - e.g. "status: CONFIRMED -> PACKING" or "refund amount: 450.00"
     @Column(length = 1000)
     private String details;

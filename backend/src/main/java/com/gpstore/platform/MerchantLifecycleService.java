@@ -117,7 +117,8 @@ public class MerchantLifecycleService {
 
         Merchant saved = merchants.save(merchant);
         auditLog.log("MERCHANT_STATUS_CHANGED", "Merchant", saved.getId(),
-                current + " -> " + next + ": " + reason.trim());
+                saved.getId(), null, current.name(), next.name(), reason.trim(),
+                "merchant lifecycle transition");
 
         // A business that has stopped stops its shops with it. Left alone,
         // a removed merchant's storefronts would go on taking orders that
@@ -140,7 +141,8 @@ public class MerchantLifecycleService {
                     shop.setStatusReason("Merchant " + next + ": " + reason.trim());
                     shops.save(shop);
                     auditLog.log("SHOP_STATUS_CHANGED", "Shop", shop.getId(),
-                            "followed merchant to " + shop.getStatus());
+                            saved.getId(), shop.getId(), null, shop.getStatus().name(),
+                            reason.trim(), "followed merchant lifecycle transition");
                 }
             }
         }

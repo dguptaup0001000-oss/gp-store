@@ -236,7 +236,8 @@ public class ShopLifecycleService {
 
         Shop saved = shops.save(shop);
         auditLog.log("SHOP_STATUS_CHANGED", "Shop", saved.getId(),
-                actorKind + ": " + current + " -> " + next + ": " + reason.trim());
+                saved.getMerchantId(), saved.getId(), current.name(), next.name(),
+                reason.trim(), "actorKind=" + actorKind);
         return saved;
     }
 }

@@ -102,6 +102,17 @@ class RateLimitFilterTest {
     }
 
     @Test
+    void privilegedPlatformSearchUsesTheSearchBucket() throws Exception {
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(61L);
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request("GET", "/api/platform/control/search"), response,
+                new MockFilterChain());
+
+        assertEquals(429, response.getStatus());
+    }
+
+    @Test
     void checkoutSessionAndVerifyAreRateLimited() throws Exception {
         when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(21L);
 

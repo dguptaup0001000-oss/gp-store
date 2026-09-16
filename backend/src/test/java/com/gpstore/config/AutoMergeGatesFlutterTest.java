@@ -104,6 +104,7 @@ class AutoMergeGatesFlutterTest {
         assertTrue(step.contains("gpstore-worker-release.aab"));
         assertTrue(step.contains("gpstore-customer-release.aab"));
         assertTrue(step.contains("gpstore-admin-release.aab"));
+        assertTrue(step.contains("gpstore-superadmin-release.aab"));
     }
 
     @Test

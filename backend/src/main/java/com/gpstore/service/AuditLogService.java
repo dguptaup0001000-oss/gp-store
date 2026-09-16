@@ -13,6 +13,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
+import org.slf4j.MDC;
 
 @Service
 public class AuditLogService {
@@ -34,6 +35,18 @@ public class AuditLogService {
      * (not a fabricated value) for system-triggered actions with no human actor.
      */
     public void log(String action, String entityType, Long entityId, String details) {
+        log(action, entityType, entityId, null, null, null, null, null, details);
+    }
+
+    /**
+     * Structured form used by platform actions. Existing callers keep using
+     * the compact overload, so this extends rather than forks the audit trail.
+     * Values stored here are states and categories, never credentials or the
+     * plaintext PII a platform operator revealed.
+     */
+    public void log(String action, String entityType, Long entityId,
+                    Long merchantId, Long shopId, String previousState,
+                    String newState, String reason, String details) {
         try {
             AuditLog entry = new AuditLog();
 
@@ -47,11 +60,17 @@ public class AuditLogService {
             entry.setAction(action);
             entry.setEntityType(entityType);
             entry.setEntityId(entityId);
+            entry.setMerchantId(merchantId);
+            entry.setShopId(shopId);
+            entry.setPreviousState(previousState);
+            entry.setNewState(newState);
+            entry.setReason(reason);
+            entry.setRequestId(MDC.get(com.gpstore.config.RequestIdFilter.MDC_KEY));
             // Client IP appended when a real HTTP request is in progress - a
             // scheduled job (like the delivery-guarantee or payment-expiry
             // checks) has no request at all, so this stays absent for those,
             // which is correct rather than fabricated.
-            entry.setDetails(details + clientIpSuffix());
+            entry.setDetails((details == null ? "" : details) + clientIpSuffix());
             entry.setOccurredAt(LocalDateTime.now());
 
             repository.save(entry);
