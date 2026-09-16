@@ -14,8 +14,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -83,5 +85,16 @@ class AuditLogTenantIsolationTest {
                 5L, "Order", 99L, page);
         verify(repository, never()).findByEntityTypeAndEntityIdOrderByOccurredAtDesc(
                 eq("Order"), eq(99L), any());
+    }
+
+    @Test
+    void requiredAuditFailureStopsThePrivilegedOperation() {
+        var service = new AuditLogService(repository, clientIpResolver);
+        doThrow(new IllegalStateException("audit store unavailable"))
+                .when(repository).save(any(AuditLog.class));
+
+        assertThrows(IllegalStateException.class, () -> service.logRequired(
+                "SENSITIVE_PII_REVEALED", "Customer", 7L,
+                null, null, null, null, "support case", "field=email"));
     }
 }

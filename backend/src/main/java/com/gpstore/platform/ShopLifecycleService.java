@@ -106,8 +106,9 @@ public class ShopLifecycleService {
         shop.setActive(Boolean.TRUE);
 
         Shop saved = shops.save(shop);
-        auditLog.log("SHOP_OPENED", "Shop", saved.getId(),
-                "merchant=" + merchantId + ", code=" + saved.getCode() + ", status=DRAFT");
+        auditLog.logRequired("SHOP_OPENED", "Shop", saved.getId(),
+                merchantId, saved.getId(), null, ShopStatus.DRAFT.name(),
+                "shop opened", "code=" + saved.getCode());
 
         // A NEW SHOP IS COMPLETE FROM THE START. Its operating settings and
         // its delivery pricing are per-shop rows (V49), and a shop without
@@ -183,8 +184,10 @@ public class ShopLifecycleService {
         shop.setVerifiedBy(level == ShopVerificationLevel.NONE ? null : "GP-STORE");
         Shop saved = shops.save(shop);
 
-        auditLog.log("SHOP_VERIFICATION_CHANGED", "Shop", shopId,
-                previous + " -> " + level + (note == null ? "" : ": " + note));
+        auditLog.logRequired("SHOP_VERIFICATION_CHANGED", "Shop", shopId,
+                saved.getMerchantId(), shopId, previous.name(), level.name(),
+                note == null || note.isBlank() ? "verification changed" : note.trim(),
+                "shop verification level changed");
         return saved;
     }
 
@@ -235,7 +238,7 @@ public class ShopLifecycleService {
         }
 
         Shop saved = shops.save(shop);
-        auditLog.log("SHOP_STATUS_CHANGED", "Shop", saved.getId(),
+        auditLog.logRequired("SHOP_STATUS_CHANGED", "Shop", saved.getId(),
                 saved.getMerchantId(), saved.getId(), current.name(), next.name(),
                 reason.trim(), "actorKind=" + actorKind);
         return saved;

@@ -165,7 +165,7 @@ public class PlatformControlTowerService {
                 params, Long.class);
         long total = count == null ? 0 : count;
         // Do not log the term: it may itself be a phone number or email.
-        audit.log("PLATFORM_GLOBAL_SEARCH", "PlatformSearch", null,
+        audit.logRequired("PLATFORM_GLOBAL_SEARCH", "PlatformSearch", null,
                 null, null, null, null, "platform investigation",
                 "queryLength=" + term.length() + ", page=" + page
                         + ", resultCount=" + content.size());
@@ -372,7 +372,7 @@ public class PlatformControlTowerService {
                 "SELECT email, mobile_number FROM customers WHERE id=:id", Map.of("id", id));
         if (rows.isEmpty()) throw new ResourceNotFoundException("Customer not found");
         String value = (String) rows.getFirst().get(field.equals("email") ? "email" : "mobile_number");
-        audit.log("SENSITIVE_PII_REVEALED", "Customer", id, null, null,
+        audit.logRequired("SENSITIVE_PII_REVEALED", "Customer", id, null, null,
                 null, null, reason.trim(), "field=" + field);
         return new RevealedPii(id, field, value);
     }
@@ -396,7 +396,7 @@ public class PlatformControlTowerService {
         return new Merchant360(identity.getFirst(), shops,
                 number(totals.get("orders")), number(totals.get("completed")), number(totals.get("cancelled")),
                 decimal(totals.get("gmv")), decimal(totals.get("delivery")), decimal(totals.get("refunds")),
-                decimal(totals.get("gmv")).subtract(decimal(totals.get("delivery"))).subtract(decimal(totals.get("refunds"))).max(BigDecimal.ZERO),
+                decimal(totals.get("gmv")),
                 ledgerTotalForMerchant(id, "COMMISSION"), ledgerTotalForMerchant(id, "PLATFORM_FEE"));
     }
 

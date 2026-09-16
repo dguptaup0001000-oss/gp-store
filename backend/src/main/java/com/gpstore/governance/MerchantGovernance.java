@@ -168,7 +168,7 @@ public class MerchantGovernance {
             stopTrading(merchant, shopId, level, reason, actor);
         }
 
-        auditLog.log("MERCHANT_" + level, "Merchant", merchantId,
+        auditLog.logRequired("MERCHANT_" + level, "Merchant", merchantId,
                 reason + " by " + actor + (detail == null ? "" : ": " + detail));
         return saved;
     }
@@ -242,7 +242,7 @@ public class MerchantGovernance {
             resumeTrading(original, actor);
         }
 
-        auditLog.log("MERCHANT_REINSTATED", "Merchant", original.getMerchantId(),
+        auditLog.logRequired("MERCHANT_REINSTATED", "Merchant", original.getMerchantId(),
                 "lifting action " + actionId + " by " + actor
                         + (note == null ? "" : ": " + note));
         return saved;
@@ -295,7 +295,7 @@ public class MerchantGovernance {
         action.setAppealText(written);
         action.setAppealedAt(LocalDateTime.now());
         MerchantGovernanceAction saved = actions.save(action);
-        auditLog.log("MERCHANT_APPEALED", "Merchant", merchantId,
+        auditLog.logRequired("MERCHANT_APPEALED", "Merchant", merchantId,
                 "appealed action " + actionId);
         return saved;
     }
@@ -339,7 +339,7 @@ public class MerchantGovernance {
             resumeTrading(saved, actor);
         }
 
-        auditLog.log("MERCHANT_APPEAL_" + outcome, "Merchant", saved.getMerchantId(),
+        auditLog.logRequired("MERCHANT_APPEAL_" + outcome, "Merchant", saved.getMerchantId(),
                 "action " + actionId + " by " + actor + (note == null ? "" : ": " + note));
         return saved;
     }

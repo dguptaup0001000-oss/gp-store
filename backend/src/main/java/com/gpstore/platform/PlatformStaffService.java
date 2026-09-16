@@ -203,7 +203,7 @@ public class PlatformStaffService {
         // ROLE AND ID ONLY. The audit trail must record that the platform
         // opened a privileged account - that is exactly the kind of act it
         // exists for - and must not record the credential.
-        auditLog.log("STAFF_ACCOUNT_OPENED", "Customer", saved.getId(),
+        auditLog.logRequired("STAFF_ACCOUNT_OPENED", "Customer", saved.getId(),
                 "role=" + role.name() + ", mustChangePassword=true");
 
         return new OpenedAccount(saved.getId(), saved.getEmail(), role.name(), oneTime,
@@ -267,7 +267,7 @@ public class PlatformStaffService {
         // credential being replaced is exactly the kind of act that has to be
         // accountable later; the secret is not, because an audit log that
         // carries secrets is a second place to steal them from.
-        auditLog.log("STAFF_ACTIVATION_CODE_REISSUED", "Customer", customerId,
+        auditLog.logRequired("STAFF_ACTIVATION_CODE_REISSUED", "Customer", customerId,
                 "role=" + role.name() + ", reason="
                         + (reason == null || reason.isBlank() ? "(none given)" : reason.trim()));
 
@@ -312,7 +312,7 @@ public class PlatformStaffService {
         // the reset would not bite until it expired.
         accountStatus.invalidate(customerId);
 
-        auditLog.log("STAFF_PASSWORD_RESET", "Customer", customerId,
+        auditLog.logRequired("STAFF_PASSWORD_RESET", "Customer", customerId,
                 "role=" + role.name() + ", mustChangePassword=true, sessionsRevoked=true");
 
         return new OpenedAccount(customerId, staff.getEmail(), role.name(), oneTime);
