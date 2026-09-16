@@ -135,7 +135,13 @@ void main() {
         ));
     await openDrawer(tester);
 
-    expect(find.text('Control Tower'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.text('Control Tower'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Merchants & Shops'), findsOneWidget);
     expect(find.text('My Shop'), findsNothing);
     expect(find.text('Receipt Printer'), findsNothing);

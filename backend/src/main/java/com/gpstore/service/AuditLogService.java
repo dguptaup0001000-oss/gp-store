@@ -2,6 +2,8 @@ package com.gpstore.service;
 
 import com.gpstore.config.ClientIpResolver;
 import com.gpstore.entity.AuditLog;
+import com.gpstore.platform.TenantContext;
+import com.gpstore.platform.TenantScope;
 import com.gpstore.repository.AuditLogRepository;
 import com.gpstore.security.AuthenticatedUser;
 import org.springframework.data.domain.Page;
@@ -61,7 +63,15 @@ public class AuditLogService {
             entry.setEntityType(entityType);
             entry.setEntityId(entityId);
             entry.setMerchantId(merchantId);
-            entry.setShopId(shopId);
+            // Audit rows are a platform-wide append stream, so they are not
+            // Hibernate-filtered entities. Preserve the active tenant as
+            // explicit context instead. The read methods below then apply the
+            // same scope deliberately: a merchant sees only its current shop,
+            // while a platform scope sees the complete stream.
+            TenantScope scope = TenantContext.current();
+            entry.setShopId(scope != null && scope.isSingleShop()
+                    ? scope.requireShopId()
+                    : shopId);
             entry.setPreviousState(previousState);
             entry.setNewState(newState);
             entry.setReason(reason);
@@ -96,14 +106,28 @@ public class AuditLogService {
     }
 
     public Page<AuditLog> getForEntity(String entityType, Long entityId, Pageable pageable) {
+        TenantScope scope = TenantContext.require();
+        if (scope.isSingleShop()) {
+            return repository.findByShopIdAndEntityTypeAndEntityIdOrderByOccurredAtDesc(
+                    scope.requireShopId(), entityType, entityId, pageable);
+        }
         return repository.findByEntityTypeAndEntityIdOrderByOccurredAtDesc(entityType, entityId, pageable);
     }
 
     public Page<AuditLog> getForActor(Long actorCustomerId, Pageable pageable) {
+        TenantScope scope = TenantContext.require();
+        if (scope.isSingleShop()) {
+            return repository.findByShopIdAndActorCustomerIdOrderByOccurredAtDesc(
+                    scope.requireShopId(), actorCustomerId, pageable);
+        }
         return repository.findByActorCustomerIdOrderByOccurredAtDesc(actorCustomerId, pageable);
     }
 
     public Page<AuditLog> getAll(Pageable pageable) {
+        TenantScope scope = TenantContext.require();
+        if (scope.isSingleShop()) {
+            return repository.findByShopIdOrderByOccurredAtDesc(scope.requireShopId(), pageable);
+        }
         return repository.findAllByOrderByOccurredAtDesc(pageable);
     }
 }

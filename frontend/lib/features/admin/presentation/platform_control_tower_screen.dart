@@ -111,11 +111,6 @@ class _PlatformControlTowerScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AdminColors.background,
-      appBar: AppBar(
-        title: const Text('Control Tower'),
-        backgroundColor: AdminColors.surface,
-        surfaceTintColor: AdminColors.surface,
-      ),
       body: RefreshIndicator(
         onRefresh: () async => _reloadDashboard(),
         child: ListView(

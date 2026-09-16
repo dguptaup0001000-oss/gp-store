@@ -12,4 +12,12 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
     Page<AuditLog> findByActorCustomerIdOrderByOccurredAtDesc(Long actorCustomerId, Pageable pageable);
 
     Page<AuditLog> findAllByOrderByOccurredAtDesc(Pageable pageable);
+
+    Page<AuditLog> findByShopIdOrderByOccurredAtDesc(Long shopId, Pageable pageable);
+
+    Page<AuditLog> findByShopIdAndActorCustomerIdOrderByOccurredAtDesc(
+            Long shopId, Long actorCustomerId, Pageable pageable);
+
+    Page<AuditLog> findByShopIdAndEntityTypeAndEntityIdOrderByOccurredAtDesc(
+            Long shopId, String entityType, Long entityId, Pageable pageable);
 }

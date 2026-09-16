@@ -400,7 +400,6 @@ class AdminNav {
             label: 'Shops', icon: Icons.storefront_outlined, builder: _platformShops),
         AdminDestination(id: 'platform-customers', requires: AdminPermission.platformAdmin,
             label: 'Customers', icon: Icons.people_outline, builder: _platformCustomers),
-        platformConsole,
       ],
     ),
     AdminNavGroup(
