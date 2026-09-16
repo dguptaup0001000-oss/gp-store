@@ -330,8 +330,14 @@ class _Dashboard extends StatelessWidget {
           _Kpi('Suspended merchants', '${summary.count('suspendedMerchants')}', Icons.block_outlined),
           _Kpi('Shops', '${summary.count('totalShops')}', Icons.storefront_outlined),
           _Kpi('Accepting orders', '${summary.count('acceptingOrdersShops')}', Icons.shopping_bag_outlined),
+          _Kpi('Paused shops', '${summary.count('pausedShops')}', Icons.pause_circle_outline),
+          _Kpi('Closed shops', '${summary.count('closedShops')}', Icons.store_mall_directory_outlined),
+          _Kpi('Suspended shops', '${summary.count('suspendedShops')}', Icons.block_outlined),
           _Kpi('Customers', '${summary.count('totalCustomers')}', Icons.people_outline),
+          _Kpi('Active customer accounts', '${summary.count('activeCustomerAccounts')}', Icons.person_outline),
+          _Kpi('New customers', '${summary.count('newCustomers')}', Icons.person_add_alt_outlined),
           _Kpi('Workers', '${summary.count('totalWorkers')}', Icons.badge_outlined),
+          _Kpi('Active workers', '${summary.count('activeWorkers')}', Icons.delivery_dining_outlined),
         ]),
         const SizedBox(height: AdminSpacing.xl),
         Text('Orders', style: AdminText.sectionTitle),
@@ -340,7 +346,8 @@ class _Dashboard extends StatelessWidget {
           for (final status in const [
             'PENDING_CONFIRMATION', 'CONFIRMED', 'PACKING', 'PACKED',
             'READY_TO_DISPATCH', 'OUT_FOR_DELIVERY', 'DELIVERED',
-            'COMPLETED', 'CANCELLED', 'REJECTED', 'DELIVERY_FAILED'
+            'COMPLETED', 'CANCELLED', 'REJECTED', 'DELIVERY_FAILED',
+            'RETURNED', 'REFUNDED'
           ])
             _Kpi(
               AdminStatusBadge.humanizeStatus(status),
@@ -358,11 +365,14 @@ class _Dashboard extends StatelessWidget {
         const SizedBox(height: AdminSpacing.md),
         _grid([
           _Kpi('GMV', '₹${summary.money('gmv')}', Icons.show_chart_rounded),
+          _Kpi('Completed checkout total', '₹${summary.money('completedSales')}', Icons.receipt_long_outlined),
           _Kpi('Merchant product sales', '₹${summary.money('merchantProductSales')}', Icons.store_outlined),
           _Kpi('Delivery charges', '₹${summary.money('deliveryCharges')}', Icons.local_shipping_outlined),
           _Kpi('Refunds', '₹${summary.money('refunds')}', Icons.currency_rupee_rounded),
           _Kpi('Commission ledger', '₹${summary.money('platformCommission')}', Icons.percent_rounded),
           _Kpi('Platform-fee ledger', '₹${summary.money('platformFees')}', Icons.account_balance_outlined),
+          _Kpi('Cancellation fees', '₹${summary.money('cancellationFees')}', Icons.cancel_outlined),
+          _Kpi('Adjustments', '₹${summary.money('platformAdjustments')}', Icons.tune_outlined),
         ]),
         const SizedBox(height: AdminSpacing.lg),
         AdminSectionCard(

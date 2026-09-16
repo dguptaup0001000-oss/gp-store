@@ -273,20 +273,32 @@ public class PlatformControlTowerService {
         jdbc.query("SELECT order_status, count(*) total FROM orders WHERE order_date >= :from AND order_date < :to GROUP BY order_status",
                 range, (RowCallbackHandler) rs ->
                         statuses.put(rs.getString("order_status"), rs.getLong("total")));
+        statuses.put("RETURNED", count("""
+                SELECT count(DISTINCT r.order_id) FROM order_returns r
+                WHERE r.status='APPROVED' AND r.decided_at>=:from AND r.decided_at<:to
+                """, range.getValues()));
+        statuses.put("REFUNDED", count("""
+                SELECT count(DISTINCT p.order_id) FROM refunds r
+                JOIN payments p ON p.id=r.payment_id
+                WHERE r.status='SUCCEEDED' AND r.settled_at>=:from AND r.settled_at<:to
+                """, range.getValues()));
 
         Map<String, Object> money = jdbc.queryForMap("""
-                SELECT COALESCE(SUM(o.total_amount), 0) gmv,
-                       COALESCE(SUM(o.delivery_fee), 0) delivery,
-                       COALESCE(SUM(o.cancellation_fee), 0) cancellation
+                SELECT COALESCE(SUM(o.total_amount - COALESCE(o.delivery_fee,0)), 0) gmv,
+                       COALESCE(SUM(o.total_amount), 0) completed_sales,
+                       COALESCE(SUM(o.delivery_fee), 0) delivery
                 FROM orders o
                 WHERE o.order_status IN ('DELIVERED','COMPLETED')
                   AND o.order_date >= :from AND o.order_date < :to
                 """, range);
         BigDecimal refunds = decimal(jdbc.queryForObject("""
                 SELECT COALESCE(SUM(r.amount), 0) FROM refunds r
-                JOIN payments p ON p.id = r.payment_id
-                JOIN orders o ON o.id = p.order_id
-                WHERE r.status = 'SUCCEEDED' AND o.order_date >= :from AND o.order_date < :to
+                WHERE r.status = 'SUCCEEDED'
+                  AND r.settled_at >= :from AND r.settled_at < :to
+                """, range, BigDecimal.class));
+        BigDecimal cancellation = decimal(jdbc.queryForObject("""
+                SELECT COALESCE(SUM(o.cancellation_fee), 0) FROM orders o
+                WHERE o.order_date >= :from AND o.order_date < :to
                 """, range, BigDecimal.class));
         BigDecimal commission = ledgerTotal("COMMISSION", from, to)
                 .add(ledgerTotal("COMMISSION_REVERSAL", from, to));
@@ -295,10 +307,10 @@ public class PlatformControlTowerService {
         BigDecimal adjustments = ledgerTotal("ADJUSTMENT", from, to)
                 .add(ledgerTotal("INTERVENTION_RECOVERY", from, to));
         BigDecimal gmv = decimal(money.get("gmv"));
+        BigDecimal completedSales = decimal(money.get("completed_sales"));
         BigDecimal delivery = decimal(money.get("delivery"));
-        FinanceSummary finance = new FinanceSummary(gmv, gmv,
-                gmv.subtract(delivery).subtract(refunds).max(BigDecimal.ZERO),
-                delivery, refunds, decimal(money.get("cancellation")),
+        FinanceSummary finance = new FinanceSummary(gmv, completedSales,
+                gmv, delivery, refunds, cancellation,
                 commission, fees, adjustments, false);
 
         PresenceSnapshot snapshot = presence.snapshot();
@@ -630,7 +642,9 @@ public class PlatformControlTowerService {
                        (SELECT count(*) FROM delivery_partners w WHERE w.shop_id=s.id AND w.deleted_at IS NULL) workers,
                        (SELECT count(*) FROM shop_product_variants spv WHERE spv.shop_id=s.id AND spv.active=true) products,
                        (SELECT count(*) FROM orders o WHERE o.shop_id=s.id) orders,
-                       (SELECT COALESCE(sum(o.total_amount),0) FROM orders o WHERE o.shop_id=s.id AND o.order_status IN ('DELIVERED','COMPLETED')) gmv
+                       (SELECT COALESCE(sum(o.total_amount-COALESCE(o.delivery_fee,0)),0)
+                          FROM orders o WHERE o.shop_id=s.id
+                           AND o.order_status IN ('DELIVERED','COMPLETED')) gmv
                 FROM shops s LEFT JOIN store_operations_settings ops ON ops.shop_id=s.id
                 """ + where + " ORDER BY s.id", params, (rs, row) -> new ShopLine(
                 rs.getLong("id"), "S-" + rs.getLong("id"), rs.getString("code"), rs.getString("display_name"),
@@ -645,7 +659,8 @@ public class PlatformControlTowerService {
                 SELECT count(o.id) orders,
                        COALESCE(sum(CASE WHEN o.order_status IN ('DELIVERED','COMPLETED') THEN 1 ELSE 0 END),0) completed,
                        COALESCE(sum(CASE WHEN o.order_status IN ('CANCELLED','REJECTED') THEN 1 ELSE 0 END),0) cancelled,
-                       COALESCE(sum(CASE WHEN o.order_status IN ('DELIVERED','COMPLETED') THEN o.total_amount ELSE 0 END),0) gmv,
+                       COALESCE(sum(CASE WHEN o.order_status IN ('DELIVERED','COMPLETED')
+                                         THEN o.total_amount-COALESCE(o.delivery_fee,0) ELSE 0 END),0) gmv,
                        COALESCE(sum(CASE WHEN o.order_status IN ('DELIVERED','COMPLETED') THEN o.delivery_fee ELSE 0 END),0) delivery,
                        COALESCE(sum(o.cancellation_fee),0) cancellation,
                        COALESCE((SELECT sum(r.amount) FROM refunds r JOIN payments p ON p.id=r.payment_id JOIN orders ro ON ro.id=p.order_id JOIN shops rs ON rs.id=ro.shop_id WHERE r.status='SUCCEEDED' AND

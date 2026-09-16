@@ -24,6 +24,7 @@ import '../../features/admin/presentation/admin_voice_settings_screen.dart';
 import '../../features/admin/presentation/my_shop_screen.dart';
 import '../../features/admin/presentation/platform_console_screen.dart';
 import '../../features/admin/presentation/platform_control_tower_screen.dart';
+import '../../features/admin/presentation/platform_finance_screen.dart';
 import '../../features/admin/presentation/platform_resource_screen.dart';
 import '../../features/admin/presentation/platform_system_health_screen.dart';
 import '../../features/admin/presentation/shop_earnings_screen.dart';
@@ -406,6 +407,8 @@ class AdminNav {
     AdminNavGroup(
       title: 'Money',
       destinations: [
+        AdminDestination(id: 'platform-finance', requires: AdminPermission.platformAdmin,
+            label: 'Finance', icon: Icons.account_balance_outlined, builder: _platformFinance),
         AdminDestination(id: 'platform-payments', requires: AdminPermission.platformAdmin,
             label: 'Payments', icon: Icons.payments_outlined, builder: _platformPayments),
         AdminDestination(id: 'platform-refunds', requires: AdminPermission.platformAdmin,
@@ -536,6 +539,7 @@ class AdminNav {
       resource: 'workers', title: 'Workers', icon: Icons.badge_outlined);
   static Widget _platformProducts(BuildContext context) => const PlatformResourceScreen(
       resource: 'products', title: 'Products', icon: Icons.inventory_2_outlined);
+  static Widget _platformFinance(BuildContext context) => const PlatformFinanceScreen();
   static Widget _platformPayments(BuildContext context) => const PlatformResourceScreen(
       resource: 'payments', title: 'Payments', icon: Icons.payments_outlined);
   static Widget _platformRefunds(BuildContext context) => const PlatformResourceScreen(

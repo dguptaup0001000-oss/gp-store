@@ -103,6 +103,7 @@ void main() {
       'Orders',
       'Workers',
       'Products',
+      'Finance',
       'Payments',
       'Refunds',
       'Returns',
