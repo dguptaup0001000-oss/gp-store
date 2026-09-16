@@ -44,6 +44,11 @@ void main() {
       adapter.on('GET', '/api/platform/control/dashboard', (options) {
         expect(options.queryParameters['from'], '2026-09-01');
         expect(options.queryParameters['to'], '2026-09-07');
+        expect(options.queryParameters['merchantId'], 7);
+        expect(options.queryParameters['shopId'], 9);
+        expect(options.queryParameters['orderStatus'], 'DELIVERED');
+        expect(options.queryParameters['paymentStatus'], 'SUCCESS');
+        expect(options.queryParameters['paymentMethod'], 'ONLINE');
         return const FakeResponse({
           'from': '2026-09-01T00:00:00',
           'to': '2026-09-08T00:00:00',
@@ -64,6 +69,11 @@ void main() {
           .controlTowerDashboard(
         from: DateTime(2026, 9, 1),
         to: DateTime(2026, 9, 7),
+        merchantId: 7,
+        shopId: 9,
+        orderStatus: 'DELIVERED',
+        paymentStatus: 'SUCCESS',
+        paymentMethod: 'ONLINE',
       );
 
       expect(summary.count('totalMerchants'), 3);

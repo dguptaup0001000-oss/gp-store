@@ -23,6 +23,11 @@ class _PlatformFinanceScreenState
   int _days = 1;
   bool _yesterday = false;
   DateTimeRange? _custom;
+  int? _merchantId;
+  int? _shopId;
+  String? _orderStatus;
+  String? _paymentStatus;
+  String? _paymentMethod;
   late Future<PlatformDashboardSummary> _future;
 
   @override
@@ -50,6 +55,11 @@ class _PlatformFinanceScreenState
     return ref.read(platformRepositoryProvider).controlTowerDashboard(
           from: range.start,
           to: range.end,
+          merchantId: _merchantId,
+          shopId: _shopId,
+          orderStatus: _orderStatus,
+          paymentStatus: _paymentStatus,
+          paymentMethod: _paymentMethod,
         );
   }
 
@@ -65,6 +75,21 @@ class _PlatformFinanceScreenState
             padding: const EdgeInsets.all(AdminSpacing.lg),
             children: [
               _rangePicker(),
+              if (_filterLabels.isNotEmpty) ...[
+                const SizedBox(height: AdminSpacing.sm),
+                Wrap(
+                  spacing: AdminSpacing.sm,
+                  runSpacing: AdminSpacing.sm,
+                  children: [
+                    for (final label in _filterLabels) Chip(label: Text(label)),
+                    ActionChip(
+                      label: const Text('Clear filters'),
+                      avatar: const Icon(Icons.close_rounded, size: 17),
+                      onPressed: _clearFilters,
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: AdminSpacing.md),
               const AdminSectionCard(
                 title: 'Money definitions',
@@ -142,8 +167,102 @@ class _PlatformFinanceScreenState
               _reload();
             },
           ),
+          ActionChip(
+            avatar: const Icon(Icons.tune_rounded, size: 18),
+            label: Text(_filterLabels.isEmpty
+                ? 'Filters'
+                : 'Filters (${_filterLabels.length})'),
+            onPressed: _showFilters,
+          ),
         ],
       );
+
+  List<String> get _filterLabels => [
+        if (_merchantId != null) 'Merchant: $_merchantId',
+        if (_shopId != null) 'Shop: $_shopId',
+        if (_orderStatus != null) 'Order: $_orderStatus',
+        if (_paymentStatus != null) 'Payment: $_paymentStatus',
+        if (_paymentMethod != null) 'Method: $_paymentMethod',
+      ];
+
+  void _clearFilters() {
+    _merchantId = null;
+    _shopId = null;
+    _orderStatus = null;
+    _paymentStatus = null;
+    _paymentMethod = null;
+    _reload();
+  }
+
+  Future<void> _showFilters() async {
+    final merchant = TextEditingController(text: _merchantId?.toString());
+    final shop = TextEditingController(text: _shopId?.toString());
+    final order = TextEditingController(text: _orderStatus);
+    final payment = TextEditingController(text: _paymentStatus);
+    final method = TextEditingController(text: _paymentMethod);
+    final apply = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Finance filters'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            _field(merchant, 'Merchant ID', numeric: true),
+            _field(shop, 'Shop ID', numeric: true),
+            _field(order, 'Order status'),
+            _field(payment, 'Payment status'),
+            _field(method, 'Payment method'),
+          ]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+    );
+    if (apply == true && mounted) {
+      _merchantId = _id(merchant.text);
+      _shopId = _id(shop.text);
+      _orderStatus = _text(order.text);
+      _paymentStatus = _text(payment.text);
+      _paymentMethod = _text(method.text);
+      _reload();
+    }
+    for (final controller in [merchant, shop, order, payment, method]) {
+      controller.dispose();
+    }
+  }
+
+  Widget _field(TextEditingController controller, String label,
+          {bool numeric = false}) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: AdminSpacing.sm),
+        child: TextField(
+          controller: controller,
+          keyboardType: numeric ? TextInputType.number : TextInputType.text,
+          textCapitalization:
+              numeric ? TextCapitalization.none : TextCapitalization.characters,
+          decoration: InputDecoration(
+            labelText: label,
+            border: const OutlineInputBorder(),
+          ),
+        ),
+      );
+
+  static int? _id(String value) {
+    final parsed = int.tryParse(value.trim());
+    return parsed != null && parsed > 0 ? parsed : null;
+  }
+
+  static String? _text(String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
 
   Widget _money(PlatformDashboardSummary summary) => Column(
         children: [
@@ -197,6 +316,13 @@ class _PlatformFinanceScreenState
                         icon: drill == 'refunds'
                             ? Icons.currency_rupee_outlined
                             : Icons.receipt_long_outlined,
+                        initialStatus:
+                            drill == 'orders' ? _orderStatus : null,
+                        initialMerchantId: _merchantId,
+                        initialShopId: _shopId,
+                        initialPaymentStatus: _paymentStatus,
+                        initialPaymentMethod: _paymentMethod,
+                        initialDateRange: _range,
                       ),
                     )),
           ),

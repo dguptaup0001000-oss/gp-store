@@ -34,10 +34,13 @@ class PlatformFinanceSemanticsTest {
     private Long cancelledOrderId;
     private Long paymentId;
     private Long shopId;
+    private Long merchantId;
 
     @BeforeEach
     void insertExactMoneyFacts() {
         shopId = jdbc.queryForObject("SELECT id FROM shops ORDER BY id LIMIT 1", Long.class);
+        merchantId = jdbc.queryForObject(
+                "SELECT merchant_id FROM shops WHERE id=?", Long.class, shopId);
         String deliveredNumber = "TOWER-MONEY-" + System.nanoTime();
         String cancelledNumber = deliveredNumber + "-C";
         Timestamp when = Timestamp.valueOf(FROM.plusHours(10));
@@ -100,7 +103,7 @@ class PlatformFinanceSemanticsTest {
         var page = service.resource("orders", "", 0, 25,
                 new PlatformControlTowerService.ResourceFilters(
                         "delivered", null, shopId, null, null,
-                        "success", "online", FROM, TO));
+                        "success", "online", null, null, FROM, TO));
 
         assertEquals(1L, page.totalElements());
         assertEquals(deliveredOrderId,
@@ -108,10 +111,23 @@ class PlatformFinanceSemanticsTest {
     }
 
     @Test
+    void financeFiltersApplyToAuthoritativeServerSideAggregates() {
+        PlatformControlTowerService.DashboardSummary summary = service.dashboard(FROM, TO,
+                new PlatformControlTowerService.DashboardFilters(
+                        merchantId, shopId, "delivered", "success", "online"));
+
+        assertEquals(new BigDecimal("100.00"), summary.finance().gmv());
+        assertEquals(new BigDecimal("25.00"), summary.finance().deliveryCharges());
+        assertEquals(new BigDecimal("20.00"), summary.finance().refunds());
+        assertEquals(new BigDecimal("0.00"), summary.finance().cancellationFees());
+        assertEquals(1L, summary.orderStatuses().get("DELIVERED"));
+    }
+
+    @Test
     void unsupportedStructuredFilterIsRejectedInsteadOfIgnored() {
         var filters = new PlatformControlTowerService.ResourceFilters(
                 null, 1L, null, null, null,
-                null, null, null, null);
+                null, null, null, null, null, null);
 
         assertThrows(com.gpstore.exception.BadRequestException.class,
                 () -> service.resource("customers", "", 0, 25, filters));

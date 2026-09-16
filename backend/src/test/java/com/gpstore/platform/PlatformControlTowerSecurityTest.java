@@ -121,10 +121,16 @@ class PlatformControlTowerSecurityTest {
 
     @Test
     void platformDashboardIsAvailableButMerchantIsDenied() throws Exception {
+        Long activeMerchants = jdbc.queryForObject("""
+                SELECT count(*) FROM merchants
+                WHERE deleted_at IS NULL AND active=true AND status='ACTIVE'
+                """, Long.class);
         mockMvc.perform(get("/api/platform/control/dashboard")
                         .with(authentication(token(platformAdmin, Role.PLATFORM_ADMIN))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.marketplace.totalCustomers").isNumber())
+                .andExpect(jsonPath("$.marketplace.activeMerchants")
+                        .value(activeMerchants == null ? 0L : activeMerchants))
                 .andExpect(jsonPath("$.finance.gmv").isNumber());
 
         Long merchantAccount = insert("Merchant", tag + "-merchant@example.test", Role.ADMIN, null);

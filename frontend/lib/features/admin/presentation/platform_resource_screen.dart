@@ -20,12 +20,24 @@ class PlatformResourceScreen extends ConsumerStatefulWidget {
     required this.title,
     required this.icon,
     this.initialQuery = '',
+    this.initialStatus,
+    this.initialMerchantId,
+    this.initialShopId,
+    this.initialPaymentStatus,
+    this.initialPaymentMethod,
+    this.initialDateRange,
   });
 
   final String resource;
   final String title;
   final IconData icon;
   final String initialQuery;
+  final String? initialStatus;
+  final int? initialMerchantId;
+  final int? initialShopId;
+  final String? initialPaymentStatus;
+  final String? initialPaymentMethod;
+  final DateTimeRange? initialDateRange;
 
   @override
   ConsumerState<PlatformResourceScreen> createState() => _PlatformResourceScreenState();
@@ -40,6 +52,8 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
   String? _status;
   String? _paymentStatus;
   String? _paymentMethod;
+  String? _category;
+  String? _stockStatus;
   int? _merchantId;
   int? _shopId;
   int? _customerId;
@@ -50,6 +64,12 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
   void initState() {
     super.initState();
     _query.text = widget.initialQuery;
+    _status = widget.initialStatus;
+    _merchantId = widget.initialMerchantId;
+    _shopId = widget.initialShopId;
+    _paymentStatus = widget.initialPaymentStatus;
+    _paymentMethod = widget.initialPaymentMethod;
+    _dateRange = widget.initialDateRange;
     _load();
   }
 
@@ -77,6 +97,8 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
             workerId: _workerId,
             paymentStatus: _paymentStatus,
             paymentMethod: _paymentMethod,
+            category: _category,
+            stockStatus: _stockStatus,
             from: _dateRange?.start,
             to: _dateRange?.end,
           );
@@ -178,6 +200,8 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
         _status,
         _paymentStatus,
         _paymentMethod,
+        _category,
+        _stockStatus,
         _merchantId,
         _shopId,
         _customerId,
@@ -189,6 +213,8 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
         if (_status != null) 'Status: $_status',
         if (_paymentStatus != null) 'Payment: $_paymentStatus',
         if (_paymentMethod != null) 'Method: $_paymentMethod',
+        if (_category != null) 'Category: $_category',
+        if (_stockStatus != null) 'Stock: $_stockStatus',
         if (_merchantId != null) 'Merchant: $_merchantId',
         if (_shopId != null) 'Shop: $_shopId',
         if (_customerId != null) 'Customer: $_customerId',
@@ -202,6 +228,8 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
       _status = null;
       _paymentStatus = null;
       _paymentMethod = null;
+      _category = null;
+      _stockStatus = null;
       _merchantId = null;
       _shopId = null;
       _customerId = null;
@@ -215,6 +243,8 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
     final status = TextEditingController(text: _status);
     final paymentStatus = TextEditingController(text: _paymentStatus);
     final paymentMethod = TextEditingController(text: _paymentMethod);
+    final category = TextEditingController(text: _category);
+    final stockStatus = TextEditingController(text: _stockStatus);
     final merchant = TextEditingController(text: _merchantId?.toString());
     final shop = TextEditingController(text: _shopId?.toString());
     final customer = TextEditingController(text: _customerId?.toString());
@@ -235,6 +265,11 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
                 if (_supportsPayment) ...[
                   _filterField(paymentStatus, 'Payment status', 'e.g. SUCCESS'),
                   _filterField(paymentMethod, 'Payment method', 'e.g. ONLINE'),
+                ],
+                if (widget.resource == 'products') ...[
+                  _filterField(category, 'Category', 'Exact category name'),
+                  _filterField(
+                      stockStatus, 'Stock status', 'IN_STOCK or OUT_OF_STOCK'),
                 ],
                 if (_supportsMerchant)
                   _filterField(merchant, 'Merchant ID', 'Numeric ID', numeric: true),
@@ -287,6 +322,8 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
         _status = _blank(status.text);
         _paymentStatus = _blank(paymentStatus.text);
         _paymentMethod = _blank(paymentMethod.text);
+        _category = _blank(category.text);
+        _stockStatus = _blank(stockStatus.text);
         _merchantId = _positiveInt(merchant.text);
         _shopId = _positiveInt(shop.text);
         _customerId = _positiveInt(customer.text);
@@ -299,6 +336,8 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
       status,
       paymentStatus,
       paymentMethod,
+      category,
+      stockStatus,
       merchant,
       shop,
       customer,
@@ -330,16 +369,18 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
       );
 
   bool get _supportsStatus => const {
-        'merchants', 'shops', 'orders', 'payments', 'refunds', 'returns'
+        'customers', 'merchants', 'shops', 'orders', 'workers', 'payments',
+        'refunds', 'returns'
       }.contains(widget.resource);
-  bool get _supportsPayment => const {'orders', 'payments'}.contains(widget.resource);
+  bool get _supportsPayment =>
+      const {'orders', 'payments', 'refunds'}.contains(widget.resource);
   bool get _supportsMerchant => const {
         'merchants', 'shops', 'orders', 'workers', 'products', 'payments',
         'refunds', 'shop-reviews', 'audit', 'security'
       }.contains(widget.resource);
   bool get _supportsShop => const {
         'shops', 'orders', 'workers', 'products', 'payments', 'refunds',
-        'returns', 'reviews', 'shop-reviews', 'audit', 'security'
+        'returns', 'shop-reviews', 'audit', 'security'
       }.contains(widget.resource);
   bool get _supportsCustomer => const {
         'customers', 'orders', 'payments', 'refunds', 'returns', 'reviews',

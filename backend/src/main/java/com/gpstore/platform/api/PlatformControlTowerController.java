@@ -28,10 +28,17 @@ public class PlatformControlTowerController {
     @GetMapping("/dashboard")
     public PlatformControlTowerService.DashboardSummary dashboard(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) Long merchantId,
+            @RequestParam(required = false) Long shopId,
+            @RequestParam(required = false) String orderStatus,
+            @RequestParam(required = false) String paymentStatus,
+            @RequestParam(required = false) String paymentMethod) {
         LocalDate end = to == null ? LocalDate.now() : to;
         LocalDate start = from == null ? end : from;
-        return service.dashboard(start.atStartOfDay(), end.plusDays(1).atStartOfDay());
+        return service.dashboard(start.atStartOfDay(), end.plusDays(1).atStartOfDay(),
+                new PlatformControlTowerService.DashboardFilters(
+                        merchantId, shopId, orderStatus, paymentStatus, paymentMethod));
     }
 
     @GetMapping("/customers/{id}")
@@ -70,13 +77,15 @@ public class PlatformControlTowerController {
             @RequestParam(required = false) Long workerId,
             @RequestParam(required = false) String paymentStatus,
             @RequestParam(required = false) String paymentMethod,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String stockStatus,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         LocalDateTimeRange range = range(from, to);
         return service.resource(resource, q, page, size,
                 new PlatformControlTowerService.ResourceFilters(
                         status, merchantId, shopId, customerId, workerId,
-                        paymentStatus, paymentMethod,
+                        paymentStatus, paymentMethod, category, stockStatus,
                         range == null ? null : range.from(),
                         range == null ? null : range.to()));
     }

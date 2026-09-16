@@ -31,6 +31,13 @@ class PlatformRepository {
   Future<PlatformDashboardSummary> controlTowerDashboard({
     required DateTime from,
     required DateTime to,
+    int? merchantId,
+    int? shopId,
+    String? orderStatus,
+    String? paymentStatus,
+    String? paymentMethod,
+    String? category,
+    String? stockStatus,
   }) async {
     String date(DateTime value) =>
         '${value.year.toString().padLeft(4, '0')}-'
@@ -38,7 +45,21 @@ class PlatformRepository {
         '${value.day.toString().padLeft(2, '0')}';
     final response = await apiClient.dio.get(
       '/api/platform/control/dashboard',
-      queryParameters: {'from': date(from), 'to': date(to)},
+      queryParameters: {
+        'from': date(from),
+        'to': date(to),
+        if (merchantId != null) 'merchantId': merchantId,
+        if (shopId != null) 'shopId': shopId,
+        if (orderStatus?.trim().isNotEmpty == true)
+          'orderStatus': orderStatus!.trim(),
+        if (paymentStatus?.trim().isNotEmpty == true)
+          'paymentStatus': paymentStatus!.trim(),
+        if (paymentMethod?.trim().isNotEmpty == true)
+          'paymentMethod': paymentMethod!.trim(),
+        if (category?.trim().isNotEmpty == true) 'category': category!.trim(),
+        if (stockStatus?.trim().isNotEmpty == true)
+          'stockStatus': stockStatus!.trim(),
+      },
     );
     return PlatformDashboardSummary.fromJson(
         Map<String, dynamic>.from(response.data as Map));

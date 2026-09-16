@@ -137,7 +137,12 @@ public class PlatformControlTowerService {
     public record ResourceFilters(String status, Long merchantId, Long shopId,
                                   Long customerId, Long workerId,
                                   String paymentStatus, String paymentMethod,
+                                  String category, String stockStatus,
                                   LocalDateTime from, LocalDateTime to) {}
+
+    public record DashboardFilters(Long merchantId, Long shopId,
+                                   String orderStatus, String paymentStatus,
+                                   String paymentMethod) {}
 
     @Transactional
     public PageEnvelope<SearchResult> search(String rawQuery, int requestedPage, int requestedSize) {
@@ -193,20 +198,25 @@ public class PlatformControlTowerService {
                        'M-' || CAST(m.id AS varchar), m.status,
                        m.contact_email, m.contact_phone
                 FROM merchants m
+                LEFT JOIN customers owner ON owner.id=m.owner_customer_id
                 WHERE m.deleted_at IS NULL AND (
                       lower(COALESCE(m.legal_name, '')) LIKE :pattern
                    OR lower(COALESCE(m.display_name, '')) LIKE :pattern
                    OR lower(COALESCE(m.contact_email, '')) LIKE :pattern
                    OR lower(COALESCE(m.contact_phone, '')) LIKE :pattern
+                   OR lower(COALESCE(owner.full_name, '')) LIKE :pattern
+                   OR lower(COALESCE(owner.email, '')) LIKE :pattern
+                   OR lower(COALESCE(owner.mobile_number, '')) LIKE :pattern
                    OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern)
                 UNION ALL
                 SELECT 'SHOP', s.id, s.display_name,
                        COALESCE(s.code, 'S-' || CAST(s.id AS varchar)),
                        'Merchant M-' || CAST(s.merchant_id AS varchar), NULL, s.support_phone
-                FROM shops s
+                FROM shops s JOIN merchants m ON m.id=s.merchant_id
                 WHERE s.deleted_at IS NULL AND (
                       lower(COALESCE(s.display_name, '')) LIKE :pattern
                    OR lower(COALESCE(s.code, '')) LIKE :pattern
+                   OR lower(COALESCE(m.display_name, m.legal_name, '')) LIKE :pattern
                    OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern
                    OR lower('M-' || CAST(s.merchant_id AS varchar)) LIKE :pattern)
                 UNION ALL
@@ -217,21 +227,31 @@ public class PlatformControlTowerService {
                 LEFT JOIN customers c ON c.id = o.customer_id
                 LEFT JOIN payments pay ON pay.order_id = o.id
                 LEFT JOIN shops s ON s.id = o.shop_id
+                LEFT JOIN merchants m ON m.id = s.merchant_id
                 WHERE lower(COALESCE(o.order_number, '')) LIKE :pattern
                    OR lower(COALESCE(c.full_name, '')) LIKE :pattern
                    OR lower(COALESCE(pay.transaction_id, '')) LIKE :pattern
                    OR lower(COALESCE(pay.provider_order_id, '')) LIKE :pattern
                    OR lower(COALESCE(pay.provider_payment_id, '')) LIKE :pattern
                    OR lower(COALESCE(s.display_name, '')) LIKE :pattern
+                   OR lower(COALESCE(m.display_name, m.legal_name, '')) LIKE :pattern
+                   OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern
+                   OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern
                 UNION ALL
                 SELECT 'WORKER', w.id, COALESCE(w.name, 'Unnamed worker'),
                        'W-' || CAST(w.id AS varchar),
                        'Shop S-' || CAST(w.shop_id AS varchar), w.login_email, w.mobile
                 FROM delivery_partners w
+                JOIN shops s ON s.id=w.shop_id
+                JOIN merchants m ON m.id=s.merchant_id
                 WHERE w.deleted_at IS NULL AND (
                       lower(COALESCE(w.name, '')) LIKE :pattern
                    OR lower(COALESCE(w.mobile, '')) LIKE :pattern
                    OR lower(COALESCE(w.login_email, '')) LIKE :pattern
+                   OR lower(COALESCE(s.display_name, '')) LIKE :pattern
+                   OR lower(COALESCE(m.display_name, m.legal_name, '')) LIKE :pattern
+                   OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern
+                   OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern
                    OR lower('W-' || CAST(w.id AS varchar)) LIKE :pattern)
                 UNION ALL
                 SELECT 'PRODUCT', p.id, p.name,
@@ -249,19 +269,28 @@ public class PlatformControlTowerService {
 
     @Transactional(readOnly = true)
     public DashboardSummary dashboard(LocalDateTime from, LocalDateTime to) {
+        return dashboard(from, to, null);
+    }
+
+    @Transactional(readOnly = true)
+    public DashboardSummary dashboard(LocalDateTime from, LocalDateTime to,
+                                      DashboardFilters filters) {
         validateRange(from, to);
         MapSqlParameterSource range = new MapSqlParameterSource().addValue("from", from).addValue("to", to);
+        String orderFilter = dashboardOrderFilter(filters, range);
 
         MarketplaceCounts counts = new MarketplaceCounts(
                 count("SELECT count(*) FROM merchants WHERE deleted_at IS NULL", Map.of()),
-                count("SELECT count(*) FROM merchants WHERE deleted_at IS NULL AND status IN ('ACTIVE','APPROVED')", Map.of()),
+                count("SELECT count(*) FROM merchants WHERE deleted_at IS NULL AND active = true AND status = 'ACTIVE'", Map.of()),
                 count("SELECT count(*) FROM merchants WHERE deleted_at IS NULL AND status IN ('APPLICATION','PENDING_REVIEW','VERIFICATION_REQUIRED')", Map.of()),
                 count("SELECT count(*) FROM merchants WHERE deleted_at IS NULL AND status = 'SUSPENDED'", Map.of()),
                 count("SELECT count(*) FROM shops WHERE deleted_at IS NULL", Map.of()),
                 count("""
                       SELECT count(*) FROM shops s
+                      JOIN merchants m ON m.id = s.merchant_id
                       LEFT JOIN store_operations_settings ops ON ops.shop_id = s.id
                       WHERE s.deleted_at IS NULL AND s.active = true AND s.status = 'ACTIVE'
+                        AND m.deleted_at IS NULL AND m.active = true AND m.status = 'ACTIVE'
                         AND (ops.id IS NULL OR ops.order_acceptance <> 'OFF'
                              OR (ops.paused_until IS NOT NULL AND ops.paused_until <= CURRENT_TIMESTAMP))
                       """, Map.of()),
@@ -275,18 +304,19 @@ public class PlatformControlTowerService {
                 count("SELECT count(*) FROM delivery_partners WHERE deleted_at IS NULL AND active = true", Map.of()));
 
         Map<String, Long> statuses = new LinkedHashMap<>();
-        jdbc.query("SELECT order_status, count(*) total FROM orders WHERE order_date >= :from AND order_date < :to GROUP BY order_status",
+        jdbc.query("SELECT o.order_status, count(*) total FROM orders o WHERE o.order_date >= :from AND o.order_date < :to"
+                        + orderFilter + " GROUP BY o.order_status",
                 range, (RowCallbackHandler) rs ->
                         statuses.put(rs.getString("order_status"), rs.getLong("total")));
         statuses.put("RETURNED", count("""
-                SELECT count(DISTINCT r.order_id) FROM order_returns r
+                SELECT count(DISTINCT r.order_id) FROM order_returns r JOIN orders o ON o.id=r.order_id
                 WHERE r.status='APPROVED' AND r.decided_at>=:from AND r.decided_at<:to
-                """, range.getValues()));
+                """ + orderFilter, range.getValues()));
         statuses.put("REFUNDED", count("""
-                SELECT count(DISTINCT p.order_id) FROM refunds r
-                JOIN payments p ON p.id=r.payment_id
+                SELECT count(DISTINCT p.order_id) FROM refunds r JOIN payments p ON p.id=r.payment_id
+                JOIN orders o ON o.id=p.order_id
                 WHERE r.status='SUCCEEDED' AND r.settled_at>=:from AND r.settled_at<:to
-                """, range.getValues()));
+                """ + orderFilter, range.getValues()));
 
         Map<String, Object> money = jdbc.queryForMap("""
                 SELECT COALESCE(SUM(o.total_amount - COALESCE(o.delivery_fee,0)), 0) gmv,
@@ -295,22 +325,23 @@ public class PlatformControlTowerService {
                 FROM orders o
                 WHERE o.order_status IN ('DELIVERED','COMPLETED')
                   AND o.order_date >= :from AND o.order_date < :to
-                """, range);
+                """ + orderFilter, range);
         BigDecimal refunds = decimal(jdbc.queryForObject("""
                 SELECT COALESCE(SUM(r.amount), 0) FROM refunds r
+                JOIN payments p ON p.id=r.payment_id JOIN orders o ON o.id=p.order_id
                 WHERE r.status = 'SUCCEEDED'
                   AND r.settled_at >= :from AND r.settled_at < :to
-                """, range, BigDecimal.class));
+                """ + orderFilter, range, BigDecimal.class));
         BigDecimal cancellation = decimal(jdbc.queryForObject("""
                 SELECT COALESCE(SUM(o.cancellation_fee), 0) FROM orders o
                 WHERE o.order_date >= :from AND o.order_date < :to
-                """, range, BigDecimal.class));
-        BigDecimal commission = ledgerTotal("COMMISSION", from, to)
-                .add(ledgerTotal("COMMISSION_REVERSAL", from, to));
-        BigDecimal fees = ledgerTotal("PLATFORM_FEE", from, to)
-                .add(ledgerTotal("FEE_REFUND_NO_ORDERS", from, to));
-        BigDecimal adjustments = ledgerTotal("ADJUSTMENT", from, to)
-                .add(ledgerTotal("INTERVENTION_RECOVERY", from, to));
+                """ + orderFilter, range, BigDecimal.class));
+        BigDecimal commission = ledgerTotal("COMMISSION", from, to, filters)
+                .add(ledgerTotal("COMMISSION_REVERSAL", from, to, filters));
+        BigDecimal fees = ledgerTotal("PLATFORM_FEE", from, to, filters)
+                .add(ledgerTotal("FEE_REFUND_NO_ORDERS", from, to, filters));
+        BigDecimal adjustments = ledgerTotal("ADJUSTMENT", from, to, filters)
+                .add(ledgerTotal("INTERVENTION_RECOVERY", from, to, filters));
         BigDecimal gmv = decimal(money.get("gmv"));
         BigDecimal completedSales = decimal(money.get("completed_sales"));
         BigDecimal delivery = decimal(money.get("delivery"));
@@ -460,7 +491,7 @@ public class PlatformControlTowerService {
         if (!query.isEmpty()) predicates.add("(" + sql.predicate() + ")");
         ResourceFilters safeFilters = filters == null
                 ? new ResourceFilters(null, null, null, null, null,
-                        null, null, null, null)
+                        null, null, null, null, null, null)
                 : filters;
         addTextFilter(predicates, params, statusColumn(resource), "status",
                 safeFilters.status());
@@ -476,6 +507,8 @@ public class PlatformControlTowerService {
                 safeFilters.paymentStatus());
         addTextFilter(predicates, params, paymentMethodColumn(resource), "paymentMethod",
                 safeFilters.paymentMethod());
+        addCategoryFilter(predicates, params, resource, safeFilters.category());
+        addStockFilter(predicates, resource, safeFilters.stockStatus());
         String dateColumn = dateColumn(resource);
         if (safeFilters.from() != null || safeFilters.to() != null) {
             if (safeFilters.from() == null || safeFilters.to() == null) {
@@ -533,9 +566,11 @@ public class PlatformControlTowerService {
 
     private static String statusColumn(String resource) {
         return switch (resource) {
+            case "customers" -> "(CASE WHEN c.enabled=true AND c.active=true THEN 'ACTIVE' WHEN c.enabled=false THEN 'DISABLED' ELSE 'INACTIVE' END)";
             case "merchants" -> "m.status";
             case "shops" -> "s.status";
             case "orders" -> "o.order_status";
+            case "workers" -> "(CASE WHEN w.active=true THEN 'ACTIVE' ELSE 'INACTIVE' END)";
             case "payments" -> "p.payment_status";
             case "refunds", "returns" -> "r.status";
             default -> null;
@@ -556,7 +591,6 @@ public class PlatformControlTowerService {
         return switch (resource) {
             case "shops", "orders", "workers", "products", "payments", "refunds",
                     "returns", "shop-reviews" -> "s.id";
-            case "reviews" -> "r.responding_shop_id";
             case "audit", "security" -> "a.shop_id";
             default -> null;
         };
@@ -582,7 +616,7 @@ public class PlatformControlTowerService {
     private static String paymentStatusColumn(String resource) {
         return switch (resource) {
             case "orders" -> "o.payment_status";
-            case "payments" -> "p.payment_status";
+            case "payments", "refunds" -> "p.payment_status";
             default -> null;
         };
     }
@@ -590,7 +624,7 @@ public class PlatformControlTowerService {
     private static String paymentMethodColumn(String resource) {
         return switch (resource) {
             case "orders" -> "(SELECT p2.payment_method FROM payments p2 WHERE p2.order_id=o.id ORDER BY p2.id DESC LIMIT 1)";
-            case "payments" -> "p.payment_method";
+            case "payments", "refunds" -> "p.payment_method";
             default -> null;
         };
     }
@@ -609,6 +643,37 @@ public class PlatformControlTowerService {
             case "audit", "security" -> "a.occurred_at";
             default -> null;
         };
+    }
+
+    private static void addCategoryFilter(List<String> predicates,
+                                          MapSqlParameterSource params,
+                                          String resource, String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) return;
+        if (!resource.equals("products")) {
+            throw new BadRequestException(
+                    "category filtering is not available for this resource");
+        }
+        String value = rawValue.trim().toUpperCase(Locale.ROOT);
+        if (value.length() > 120) throw new BadRequestException("category is too long");
+        predicates.add("upper(c.name)=:category");
+        params.addValue("category", value);
+    }
+
+    private static void addStockFilter(List<String> predicates,
+                                       String resource, String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) return;
+        if (!resource.equals("products")) {
+            throw new BadRequestException(
+                    "stockStatus filtering is not available for this resource");
+        }
+        String value = rawValue.trim().toUpperCase(Locale.ROOT);
+        if (value.equals("IN_STOCK")) {
+            predicates.add("COALESCE(i.stock,0)-COALESCE(i.reserved_stock,0)>0");
+        } else if (value.equals("OUT_OF_STOCK")) {
+            predicates.add("COALESCE(i.stock,0)-COALESCE(i.reserved_stock,0)<=0");
+        } else {
+            throw new BadRequestException("stockStatus must be IN_STOCK or OUT_OF_STOCK");
+        }
     }
 
     private static ResourceSql resourceSql(String resource) {
@@ -642,7 +707,7 @@ public class PlatformControlTowerService {
                            s.id "shopId",s.display_name shop,m.id "merchantId",
                            COALESCE(m.display_name,m.legal_name) merchant
                     """, "FROM orders o LEFT JOIN customers c ON c.id=o.customer_id JOIN shops s ON s.id=o.shop_id JOIN merchants m ON m.id=s.merchant_id",
-                    "lower(COALESCE(o.order_number,'')) LIKE :pattern OR lower(COALESCE(c.full_name,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern",
+                    "lower(COALESCE(o.order_number,'')) LIKE :pattern OR lower('O-' || CAST(o.id AS varchar)) LIKE :pattern OR lower(COALESCE(c.full_name,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR EXISTS (SELECT 1 FROM payments pay WHERE pay.order_id=o.id AND (lower(COALESCE(pay.transaction_id,'')) LIKE :pattern OR lower(COALESCE(pay.provider_order_id,'')) LIKE :pattern OR lower(COALESCE(pay.provider_payment_id,'')) LIKE :pattern))",
                     "ORDER BY o.order_date DESC");
             case "workers" -> new ResourceSql("""
                     SELECT w.id id,w.name name,w.mobile "maskedPhone",w.available available,w.active active,
@@ -652,16 +717,16 @@ public class PlatformControlTowerService {
                            (SELECT count(*) FROM orders o WHERE o.assigned_worker_partner_id=w.id AND o.order_status IN ('READY_TO_DISPATCH','OUT_FOR_DELIVERY')) "activeOrders",
                            (SELECT count(*) FROM orders o WHERE o.assigned_worker_partner_id=w.id AND o.order_status IN ('DELIVERED','COMPLETED')) "completedDeliveries"
                     """, "FROM delivery_partners w JOIN shops s ON s.id=w.shop_id JOIN merchants m ON m.id=s.merchant_id",
-                    "lower(COALESCE(w.name,'')) LIKE :pattern OR lower(COALESCE(w.mobile,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern",
+                    "lower(COALESCE(w.name,'')) LIKE :pattern OR lower(COALESCE(w.mobile,'')) LIKE :pattern OR lower('W-' || CAST(w.id AS varchar)) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern",
                     "ORDER BY w.id DESC");
             case "products" -> new ResourceSql("""
-                    SELECT spv.id id,p.id "productId",p.name product,p.brand brand,
+                    SELECT spv.id id,p.id "productId",p.name product,p.brand brand,c.name category,
                            pv.id "variantId",pv.sku sku,pv.barcode barcode,
                            spv.selling_price "sellingPrice",spv.mrp mrp,spv.available available,spv.active active,
                            COALESCE(i.stock,0) stock,COALESCE(i.reserved_stock,0) "reservedStock",
                            s.id "shopId",s.display_name shop,m.id "merchantId"
-                    """, "FROM shop_product_variants spv JOIN product_variants pv ON pv.id=spv.product_variant_id JOIN products p ON p.id=pv.product_id JOIN shops s ON s.id=spv.shop_id JOIN merchants m ON m.id=s.merchant_id LEFT JOIN inventory i ON i.shop_id=s.id AND i.product_variant_id=pv.id",
-                    "lower(COALESCE(p.name,'')) LIKE :pattern OR lower(COALESCE(p.brand,'')) LIKE :pattern OR lower(COALESCE(pv.sku,'')) LIKE :pattern OR lower(COALESCE(pv.barcode,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern",
+                    """, "FROM shop_product_variants spv JOIN product_variants pv ON pv.id=spv.product_variant_id JOIN products p ON p.id=pv.product_id LEFT JOIN categories c ON c.id=p.category_id JOIN shops s ON s.id=spv.shop_id JOIN merchants m ON m.id=s.merchant_id LEFT JOIN inventory i ON i.shop_id=s.id AND i.product_variant_id=pv.id",
+                    "lower(COALESCE(p.name,'')) LIKE :pattern OR lower(COALESCE(p.brand,'')) LIKE :pattern OR lower('P-' || CAST(p.id AS varchar)) LIKE :pattern OR lower(COALESCE(pv.sku,'')) LIKE :pattern OR lower(COALESCE(pv.barcode,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern",
                     "ORDER BY p.name,spv.id");
             case "payments" -> new ResourceSql("""
                     SELECT p.id id,o.id "orderId",o.order_number "orderNumber",p.amount amount,
@@ -808,9 +873,55 @@ public class PlatformControlTowerService {
                 params);
     }
 
-    private BigDecimal ledgerTotal(String type, LocalDateTime from, LocalDateTime to) {
-        return decimal(jdbc.queryForObject("SELECT COALESCE(sum(amount),0) FROM merchant_ledger_entry WHERE entry_type=:type AND created_at>=:from AND created_at<:to",
-                Map.of("type", type, "from", from, "to", to), BigDecimal.class));
+    private static String dashboardOrderFilter(DashboardFilters filters,
+                                               MapSqlParameterSource params) {
+        if (filters == null) return "";
+        List<String> predicates = new java.util.ArrayList<>();
+        if (filters.merchantId() != null) {
+            if (filters.merchantId() <= 0) {
+                throw new BadRequestException("merchantId must be positive");
+            }
+            predicates.add("o.shop_id IN (SELECT id FROM shops WHERE merchant_id=:financeMerchantId)");
+            params.addValue("financeMerchantId", filters.merchantId());
+        }
+        addIdFilter(predicates, params, "o.shop_id", "financeShopId", filters.shopId());
+        addTextFilter(predicates, params, "o.order_status", "financeOrderStatus",
+                filters.orderStatus());
+        addTextFilter(predicates, params, "o.payment_status", "financePaymentStatus",
+                filters.paymentStatus());
+        addTextFilter(predicates, params,
+                "(SELECT p.payment_method FROM payments p WHERE p.order_id=o.id ORDER BY p.id DESC LIMIT 1)",
+                "financePaymentMethod", filters.paymentMethod());
+        return predicates.isEmpty() ? "" : " AND " + String.join(" AND ", predicates);
+    }
+
+    private BigDecimal ledgerTotal(String type, LocalDateTime from, LocalDateTime to,
+                                   DashboardFilters filters) {
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("type", type).addValue("from", from).addValue("to", to);
+        List<String> predicates = new java.util.ArrayList<>();
+        if (filters != null && filters.merchantId() != null) {
+            addIdFilter(predicates, params, "l.merchant_id", "financeMerchantId",
+                    filters.merchantId());
+        }
+        boolean needsOrder = filters != null && (filters.shopId() != null
+                || (filters.orderStatus() != null && !filters.orderStatus().isBlank())
+                || (filters.paymentStatus() != null && !filters.paymentStatus().isBlank())
+                || (filters.paymentMethod() != null && !filters.paymentMethod().isBlank()));
+        if (needsOrder) {
+            MapSqlParameterSource orderParams = new MapSqlParameterSource();
+            DashboardFilters orderOnly = new DashboardFilters(null, filters.shopId(),
+                    filters.orderStatus(), filters.paymentStatus(), filters.paymentMethod());
+            String orderFilter = dashboardOrderFilter(orderOnly, orderParams);
+            orderParams.getValues().forEach((key, value) -> params.addValue(key, value));
+            predicates.add("EXISTS (SELECT 1 FROM orders o WHERE o.id=l.order_id"
+                    + orderFilter + ")");
+        }
+        String extra = predicates.isEmpty() ? "" : " AND " + String.join(" AND ", predicates);
+        return decimal(jdbc.queryForObject("""
+                SELECT COALESCE(sum(l.amount),0) FROM merchant_ledger_entry l
+                WHERE l.entry_type=:type AND l.created_at>=:from AND l.created_at<:to
+                """ + extra, params, BigDecimal.class));
     }
 
     private BigDecimal ledgerTotalForMerchant(Long merchantId, String type) {
