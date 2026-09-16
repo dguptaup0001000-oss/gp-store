@@ -37,6 +37,14 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
   PlatformResourcePage? _page;
   Object? _error;
   bool _loading = false;
+  String? _status;
+  String? _paymentStatus;
+  String? _paymentMethod;
+  int? _merchantId;
+  int? _shopId;
+  int? _customerId;
+  int? _workerId;
+  DateTimeRange? _dateRange;
 
   @override
   void initState() {
@@ -62,6 +70,15 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
             resource: widget.resource,
             query: _query.text,
             page: page,
+            status: _status,
+            merchantId: _merchantId,
+            shopId: _shopId,
+            customerId: _customerId,
+            workerId: _workerId,
+            paymentStatus: _paymentStatus,
+            paymentMethod: _paymentMethod,
+            from: _dateRange?.start,
+            to: _dateRange?.end,
           );
       if (!mounted) return;
       setState(() {
@@ -92,20 +109,54 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
           child: ListView(
             padding: const EdgeInsets.all(AdminSpacing.lg),
             children: [
-              TextField(
-                controller: _query,
-                onChanged: (_) {
-                  _debounce?.cancel();
-                  _debounce = Timer(const Duration(milliseconds: 350), _load);
-                },
-                decoration: InputDecoration(
-                  hintText: 'Filter ${widget.title.toLowerCase()}',
-                  prefixIcon: const Icon(Icons.search_rounded),
-                  filled: true,
-                  fillColor: AdminColors.surface,
-                  border: const OutlineInputBorder(borderRadius: AdminRadius.control),
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _query,
+                      onChanged: (_) {
+                        _debounce?.cancel();
+                        _debounce = Timer(const Duration(milliseconds: 350), _load);
+                      },
+                      decoration: InputDecoration(
+                        hintText: 'Search ${widget.title.toLowerCase()}',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        filled: true,
+                        fillColor: AdminColors.surface,
+                        border: const OutlineInputBorder(
+                          borderRadius: AdminRadius.control,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AdminSpacing.sm),
+                  IconButton.filledTonal(
+                    tooltip: 'Structured filters',
+                    onPressed: _showFilters,
+                    icon: Badge(
+                      isLabelVisible: _filterCount > 0,
+                      label: Text('${_filterCount}'),
+                      child: const Icon(Icons.tune_rounded),
+                    ),
+                  ),
+                ],
               ),
+              if (_filterCount > 0) ...[
+                const SizedBox(height: AdminSpacing.sm),
+                Wrap(
+                  spacing: AdminSpacing.sm,
+                  runSpacing: AdminSpacing.sm,
+                  children: [
+                    for (final label in _filterLabels)
+                      Chip(label: Text(label)),
+                    ActionChip(
+                      label: const Text('Clear filters'),
+                      avatar: const Icon(Icons.close_rounded, size: 17),
+                      onPressed: _clearFilters,
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: AdminSpacing.lg),
               if (_loading && _page == null)
                 const Center(child: CircularProgressIndicator(strokeWidth: 2))
@@ -122,6 +173,194 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
           ),
         ),
       );
+
+  int get _filterCount => [
+        _status,
+        _paymentStatus,
+        _paymentMethod,
+        _merchantId,
+        _shopId,
+        _customerId,
+        _workerId,
+        _dateRange,
+      ].where((value) => value != null).length;
+
+  List<String> get _filterLabels => [
+        if (_status != null) 'Status: $_status',
+        if (_paymentStatus != null) 'Payment: $_paymentStatus',
+        if (_paymentMethod != null) 'Method: $_paymentMethod',
+        if (_merchantId != null) 'Merchant: $_merchantId',
+        if (_shopId != null) 'Shop: $_shopId',
+        if (_customerId != null) 'Customer: $_customerId',
+        if (_workerId != null) 'Worker: $_workerId',
+        if (_dateRange != null)
+          '${_shortDate(_dateRange!.start)} – ${_shortDate(_dateRange!.end)}',
+      ];
+
+  void _clearFilters() {
+    setState(() {
+      _status = null;
+      _paymentStatus = null;
+      _paymentMethod = null;
+      _merchantId = null;
+      _shopId = null;
+      _customerId = null;
+      _workerId = null;
+      _dateRange = null;
+    });
+    _load();
+  }
+
+  Future<void> _showFilters() async {
+    final status = TextEditingController(text: _status);
+    final paymentStatus = TextEditingController(text: _paymentStatus);
+    final paymentMethod = TextEditingController(text: _paymentMethod);
+    final merchant = TextEditingController(text: _merchantId?.toString());
+    final shop = TextEditingController(text: _shopId?.toString());
+    final customer = TextEditingController(text: _customerId?.toString());
+    final worker = TextEditingController(text: _workerId?.toString());
+    var selectedRange = _dateRange;
+
+    final apply = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Filter ${widget.title}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_supportsStatus)
+                  _filterField(status, 'Status', 'e.g. DELIVERED'),
+                if (_supportsPayment) ...[
+                  _filterField(paymentStatus, 'Payment status', 'e.g. SUCCESS'),
+                  _filterField(paymentMethod, 'Payment method', 'e.g. ONLINE'),
+                ],
+                if (_supportsMerchant)
+                  _filterField(merchant, 'Merchant ID', 'Numeric ID', numeric: true),
+                if (_supportsShop)
+                  _filterField(shop, 'Shop ID', 'Numeric ID', numeric: true),
+                if (_supportsCustomer)
+                  _filterField(customer, 'Customer ID', 'Numeric ID', numeric: true),
+                if (_supportsWorker)
+                  _filterField(worker, 'Worker ID', 'Numeric ID', numeric: true),
+                if (_supportsDate)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.date_range_outlined),
+                      label: Text(selectedRange == null
+                          ? 'Choose date range'
+                          : '${_shortDate(selectedRange!.start)} – ${_shortDate(selectedRange!.end)}'),
+                      onPressed: () async {
+                        final picked = await showDateRangePicker(
+                          context: dialogContext,
+                          firstDate: DateTime.now().subtract(const Duration(days: 730)),
+                          lastDate: DateTime.now(),
+                          initialDateRange: selectedRange,
+                        );
+                        if (picked != null) {
+                          setDialogState(() => selectedRange = picked);
+                        }
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (apply == true && mounted) {
+      setState(() {
+        _status = _blank(status.text);
+        _paymentStatus = _blank(paymentStatus.text);
+        _paymentMethod = _blank(paymentMethod.text);
+        _merchantId = _positiveInt(merchant.text);
+        _shopId = _positiveInt(shop.text);
+        _customerId = _positiveInt(customer.text);
+        _workerId = _positiveInt(worker.text);
+        _dateRange = selectedRange;
+      });
+      _load();
+    }
+    for (final controller in [
+      status,
+      paymentStatus,
+      paymentMethod,
+      merchant,
+      shop,
+      customer,
+      worker,
+    ]) {
+      controller.dispose();
+    }
+  }
+
+  Widget _filterField(
+    TextEditingController controller,
+    String label,
+    String hint, {
+    bool numeric = false,
+  }) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: AdminSpacing.sm),
+        child: TextField(
+          controller: controller,
+          keyboardType: numeric ? TextInputType.number : TextInputType.text,
+          textCapitalization:
+              numeric ? TextCapitalization.none : TextCapitalization.characters,
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: hint,
+            border: const OutlineInputBorder(),
+          ),
+        ),
+      );
+
+  bool get _supportsStatus => const {
+        'merchants', 'shops', 'orders', 'payments', 'refunds', 'returns'
+      }.contains(widget.resource);
+  bool get _supportsPayment => const {'orders', 'payments'}.contains(widget.resource);
+  bool get _supportsMerchant => const {
+        'merchants', 'shops', 'orders', 'workers', 'products', 'payments',
+        'refunds', 'shop-reviews', 'audit', 'security'
+      }.contains(widget.resource);
+  bool get _supportsShop => const {
+        'shops', 'orders', 'workers', 'products', 'payments', 'refunds',
+        'returns', 'reviews', 'shop-reviews', 'audit', 'security'
+      }.contains(widget.resource);
+  bool get _supportsCustomer => const {
+        'customers', 'orders', 'payments', 'refunds', 'returns', 'reviews',
+        'shop-reviews'
+      }.contains(widget.resource);
+  bool get _supportsWorker => const {'workers', 'orders'}.contains(widget.resource);
+  bool get _supportsDate => !const {'workers', 'products'}.contains(widget.resource);
+
+  static String? _blank(String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  static int? _positiveInt(String value) {
+    final parsed = int.tryParse(value.trim());
+    return parsed != null && parsed > 0 ? parsed : null;
+  }
+
+  static String _shortDate(DateTime value) =>
+      '${value.day.toString().padLeft(2, '0')}/'
+      '${value.month.toString().padLeft(2, '0')}/${value.year}';
 
   Widget _list() {
     final page = _page;

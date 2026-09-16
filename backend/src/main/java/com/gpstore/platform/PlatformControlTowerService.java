@@ -134,6 +134,11 @@ public class PlatformControlTowerService {
     private record ResourceSql(String select, String from, String predicate,
                                String orderBy) {}
 
+    public record ResourceFilters(String status, Long merchantId, Long shopId,
+                                  Long customerId, Long workerId,
+                                  String paymentStatus, String paymentMethod,
+                                  LocalDateTime from, LocalDateTime to) {}
+
     @Transactional
     public PageEnvelope<SearchResult> search(String rawQuery, int requestedPage, int requestedSize) {
         String term = rawQuery == null ? "" : rawQuery.trim();
@@ -145,7 +150,7 @@ public class PlatformControlTowerService {
         }
         int page = Math.max(0, requestedPage);
         int size = pageSize(requestedSize);
-        int offset = Math.multiplyExact(page, size);
+        long offset = Math.multiplyExact((long) page, size);
         String union = searchUnion();
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("pattern", "%" + term.toLowerCase(Locale.ROOT) + "%")
@@ -429,16 +434,20 @@ public class PlatformControlTowerService {
     public PageEnvelope<Map<String, Object>> resource(String rawResource,
                                                        String rawQuery,
                                                        int requestedPage,
-                                                       int requestedSize) {
+                                                       int requestedSize,
+                                                       ResourceFilters filters) {
         String resource = rawResource == null ? "" : rawResource.toLowerCase(Locale.ROOT);
         ResourceSql sql = resourceSql(resource);
         int page = Math.max(0, requestedPage);
         int size = pageSize(requestedSize);
         String query = rawQuery == null ? "" : rawQuery.trim().toLowerCase(Locale.ROOT);
+        if (query.length() > MAX_SEARCH_LENGTH) {
+            throw new BadRequestException("Filter text is limited to 120 characters");
+        }
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("pattern", "%" + query + "%")
                 .addValue("limit", size)
-                .addValue("offset", Math.multiplyExact(page, size));
+                .addValue("offset", Math.multiplyExact((long) page, size));
         String basePredicate = switch (resource) {
             case "workers" -> "w.deleted_at IS NULL";
             case "merchants" -> "m.deleted_at IS NULL";
@@ -446,13 +455,41 @@ public class PlatformControlTowerService {
             case "security" -> "(a.action LIKE '%LOGIN%' OR a.action LIKE '%ACTIVATION%' OR a.action LIKE '%PASSWORD%' OR a.action LIKE '%SUSPEND%' OR a.action LIKE '%REACTIVAT%' OR a.action LIKE '%ROLE%' OR a.action LIKE '%PII%' OR a.action LIKE '%ACCESS%')";
             default -> "";
         };
-        String where;
-        if (query.isEmpty()) {
-            where = basePredicate.isEmpty() ? "" : " WHERE " + basePredicate;
-        } else {
-            where = " WHERE " + (basePredicate.isEmpty() ? "" : basePredicate + " AND (")
-                    + sql.predicate() + (basePredicate.isEmpty() ? "" : ")");
+        List<String> predicates = new java.util.ArrayList<>();
+        if (!basePredicate.isEmpty()) predicates.add(basePredicate);
+        if (!query.isEmpty()) predicates.add("(" + sql.predicate() + ")");
+        ResourceFilters safeFilters = filters == null
+                ? new ResourceFilters(null, null, null, null, null,
+                        null, null, null, null)
+                : filters;
+        addTextFilter(predicates, params, statusColumn(resource), "status",
+                safeFilters.status());
+        addIdFilter(predicates, params, merchantColumn(resource), "merchantId",
+                safeFilters.merchantId());
+        addIdFilter(predicates, params, shopColumn(resource), "shopId",
+                safeFilters.shopId());
+        addIdFilter(predicates, params, customerColumn(resource), "customerId",
+                safeFilters.customerId());
+        addIdFilter(predicates, params, workerColumn(resource), "workerId",
+                safeFilters.workerId());
+        addTextFilter(predicates, params, paymentStatusColumn(resource), "paymentStatus",
+                safeFilters.paymentStatus());
+        addTextFilter(predicates, params, paymentMethodColumn(resource), "paymentMethod",
+                safeFilters.paymentMethod());
+        String dateColumn = dateColumn(resource);
+        if (safeFilters.from() != null || safeFilters.to() != null) {
+            if (safeFilters.from() == null || safeFilters.to() == null) {
+                throw new BadRequestException("Both from and to dates are required");
+            }
+            validateRange(safeFilters.from(), safeFilters.to());
+            if (dateColumn == null) {
+                throw new BadRequestException("Date filtering is not available for " + resource);
+            }
+            predicates.add(dateColumn + ">=:resourceFrom AND " + dateColumn + "<:resourceTo");
+            params.addValue("resourceFrom", safeFilters.from());
+            params.addValue("resourceTo", safeFilters.to());
         }
+        String where = predicates.isEmpty() ? "" : " WHERE " + String.join(" AND ", predicates);
         List<Map<String, Object>> content = jdbc.query(
                 sql.select() + " " + sql.from() + where + " " + sql.orderBy()
                         + " LIMIT :limit OFFSET :offset",
@@ -469,6 +506,109 @@ public class PlatformControlTowerService {
         }
         Long total = jdbc.queryForObject("SELECT count(*) " + sql.from() + where, params, Long.class);
         return page(content, page, size, total == null ? 0 : total);
+    }
+
+    private static void addTextFilter(List<String> predicates, MapSqlParameterSource params,
+                                      String column, String parameter, String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) return;
+        if (column == null) {
+            throw new BadRequestException(parameter + " filtering is not available for this resource");
+        }
+        String value = rawValue.trim().toUpperCase(Locale.ROOT);
+        if (value.length() > 40) throw new BadRequestException(parameter + " is too long");
+        predicates.add(column + "=:" + parameter);
+        params.addValue(parameter, value);
+    }
+
+    private static void addIdFilter(List<String> predicates, MapSqlParameterSource params,
+                                    String column, String parameter, Long value) {
+        if (value == null) return;
+        if (value <= 0) throw new BadRequestException(parameter + " must be positive");
+        if (column == null) {
+            throw new BadRequestException(parameter + " filtering is not available for this resource");
+        }
+        predicates.add(column + "=:" + parameter);
+        params.addValue(parameter, value);
+    }
+
+    private static String statusColumn(String resource) {
+        return switch (resource) {
+            case "merchants" -> "m.status";
+            case "shops" -> "s.status";
+            case "orders" -> "o.order_status";
+            case "payments" -> "p.payment_status";
+            case "refunds", "returns" -> "r.status";
+            default -> null;
+        };
+    }
+
+    private static String merchantColumn(String resource) {
+        return switch (resource) {
+            case "merchants" -> "m.id";
+            case "shops", "orders", "workers", "products", "payments", "refunds",
+                    "shop-reviews" -> "m.id";
+            case "audit", "security" -> "a.merchant_id";
+            default -> null;
+        };
+    }
+
+    private static String shopColumn(String resource) {
+        return switch (resource) {
+            case "shops", "orders", "workers", "products", "payments", "refunds",
+                    "returns", "shop-reviews" -> "s.id";
+            case "reviews" -> "r.responding_shop_id";
+            case "audit", "security" -> "a.shop_id";
+            default -> null;
+        };
+    }
+
+    private static String customerColumn(String resource) {
+        return switch (resource) {
+            case "customers" -> "c.id";
+            case "orders", "payments", "refunds" -> "o.customer_id";
+            case "returns", "reviews", "shop-reviews" -> "r.customer_id";
+            default -> null;
+        };
+    }
+
+    private static String workerColumn(String resource) {
+        return switch (resource) {
+            case "workers" -> "w.id";
+            case "orders" -> "o.assigned_worker_partner_id";
+            default -> null;
+        };
+    }
+
+    private static String paymentStatusColumn(String resource) {
+        return switch (resource) {
+            case "orders" -> "o.payment_status";
+            case "payments" -> "p.payment_status";
+            default -> null;
+        };
+    }
+
+    private static String paymentMethodColumn(String resource) {
+        return switch (resource) {
+            case "orders" -> "(SELECT p2.payment_method FROM payments p2 WHERE p2.order_id=o.id ORDER BY p2.id DESC LIMIT 1)";
+            case "payments" -> "p.payment_method";
+            default -> null;
+        };
+    }
+
+    private static String dateColumn(String resource) {
+        return switch (resource) {
+            case "customers" -> "c.created_at";
+            case "merchants" -> "m.created_at";
+            case "shops" -> "s.created_at";
+            case "orders" -> "o.order_date";
+            case "payments" -> "p.payment_date";
+            case "refunds" -> "COALESCE(r.settled_at,r.requested_at,r.created_at)";
+            case "returns" -> "r.requested_at";
+            case "reviews" -> "r.review_date";
+            case "shop-reviews" -> "r.created_at";
+            case "audit", "security" -> "a.occurred_at";
+            default -> null;
+        };
     }
 
     private static ResourceSql resourceSql(String resource) {

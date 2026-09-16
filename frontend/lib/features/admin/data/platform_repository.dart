@@ -77,6 +77,15 @@ class PlatformRepository {
     String query = '',
     int page = 0,
     int size = 25,
+    String? status,
+    int? merchantId,
+    int? shopId,
+    int? customerId,
+    int? workerId,
+    String? paymentStatus,
+    String? paymentMethod,
+    DateTime? from,
+    DateTime? to,
   }) async {
     final response = await apiClient.dio.get(
       '/api/platform/control/$resource',
@@ -84,11 +93,27 @@ class PlatformRepository {
         if (query.trim().isNotEmpty) 'q': query.trim(),
         'page': page,
         'size': size,
+        if (status?.trim().isNotEmpty == true) 'status': status!.trim(),
+        if (merchantId != null) 'merchantId': merchantId,
+        if (shopId != null) 'shopId': shopId,
+        if (customerId != null) 'customerId': customerId,
+        if (workerId != null) 'workerId': workerId,
+        if (paymentStatus?.trim().isNotEmpty == true)
+          'paymentStatus': paymentStatus!.trim(),
+        if (paymentMethod?.trim().isNotEmpty == true)
+          'paymentMethod': paymentMethod!.trim(),
+        if (from != null) 'from': _date(from),
+        if (to != null) 'to': _date(to),
       },
     );
     return PlatformResourcePage.fromJson(
         Map<String, dynamic>.from(response.data as Map));
   }
+
+  static String _date(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
 
   Future<Map<String, dynamic>> controlTowerOrder(int orderId) async {
     final response =

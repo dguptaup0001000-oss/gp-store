@@ -71,6 +71,51 @@ void main() {
       expect(summary.money('gmv'), isNot(summary.money('platformCommission')),
           reason: 'GMV and GP-STORE commission are different money facts');
     });
+
+    test('resource filters stay server-side and preserve paging', () async {
+      final adapter = FakeHttpClientAdapter();
+      adapter.on('GET', '/api/platform/control/orders', (options) {
+        expect(options.queryParameters, containsPair('q', 'GP-42'));
+        expect(options.queryParameters, containsPair('page', 3));
+        expect(options.queryParameters, containsPair('size', 25));
+        expect(options.queryParameters, containsPair('status', 'DELIVERED'));
+        expect(options.queryParameters, containsPair('merchantId', 7));
+        expect(options.queryParameters, containsPair('shopId', 9));
+        expect(options.queryParameters, containsPair('customerId', 11));
+        expect(options.queryParameters, containsPair('workerId', 13));
+        expect(options.queryParameters, containsPair('paymentStatus', 'SUCCESS'));
+        expect(options.queryParameters, containsPair('paymentMethod', 'ONLINE'));
+        expect(options.queryParameters, containsPair('from', '2026-09-01'));
+        expect(options.queryParameters, containsPair('to', '2026-09-07'));
+        return const FakeResponse({
+          'content': [],
+          'page': 3,
+          'size': 25,
+          'totalElements': 0,
+          'totalPages': 0,
+        });
+      });
+
+      final page = await PlatformRepository(apiClient: buildTestApiClient(adapter))
+          .controlTowerResource(
+        resource: 'orders',
+        query: 'GP-42',
+        page: 3,
+        status: 'DELIVERED',
+        merchantId: 7,
+        shopId: 9,
+        customerId: 11,
+        workerId: 13,
+        paymentStatus: 'SUCCESS',
+        paymentMethod: 'ONLINE',
+        from: DateTime(2026, 9, 1),
+        to: DateTime(2026, 9, 7),
+      );
+
+      expect(page.content, isEmpty);
+      expect(page.page, 3);
+    });
+
     test('lists merchants with the status that decides whether they trade', () async {
       final adapter = FakeHttpClientAdapter();
       adapter.on('GET', '/api/platform/merchants', (_) => const FakeResponse([

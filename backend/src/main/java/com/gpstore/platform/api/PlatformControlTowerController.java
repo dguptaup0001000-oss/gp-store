@@ -62,12 +62,37 @@ public class PlatformControlTowerController {
             @PathVariable String resource,
             @RequestParam(required = false, defaultValue = "") String q,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "25") int size) {
-        return service.resource(resource, q, page, size);
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long merchantId,
+            @RequestParam(required = false) Long shopId,
+            @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) Long workerId,
+            @RequestParam(required = false) String paymentStatus,
+            @RequestParam(required = false) String paymentMethod,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        LocalDateTimeRange range = range(from, to);
+        return service.resource(resource, q, page, size,
+                new PlatformControlTowerService.ResourceFilters(
+                        status, merchantId, shopId, customerId, workerId,
+                        paymentStatus, paymentMethod,
+                        range == null ? null : range.from(),
+                        range == null ? null : range.to()));
     }
 
     @GetMapping("/orders/{id}")
     public java.util.Map<String, Object> order(@PathVariable Long id) {
         return service.orderDetail(id);
+    }
+
+    private record LocalDateTimeRange(java.time.LocalDateTime from,
+                                      java.time.LocalDateTime to) {}
+
+    private static LocalDateTimeRange range(LocalDate from, LocalDate to) {
+        if (from == null && to == null) return null;
+        LocalDate end = to == null ? from : to;
+        LocalDate start = from == null ? to : from;
+        return new LocalDateTimeRange(start.atStartOfDay(), end.plusDays(1).atStartOfDay());
     }
 }

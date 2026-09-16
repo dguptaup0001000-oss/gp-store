@@ -12,6 +12,7 @@ import java.sql.Timestamp;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SpringBootTest(properties = {
         "outbox.initial-delay-ms=3600000",
@@ -32,10 +33,11 @@ class PlatformFinanceSemanticsTest {
     private Long deliveredOrderId;
     private Long cancelledOrderId;
     private Long paymentId;
+    private Long shopId;
 
     @BeforeEach
     void insertExactMoneyFacts() {
-        Long shopId = jdbc.queryForObject("SELECT id FROM shops ORDER BY id LIMIT 1", Long.class);
+        shopId = jdbc.queryForObject("SELECT id FROM shops ORDER BY id LIMIT 1", Long.class);
         String deliveredNumber = "TOWER-MONEY-" + System.nanoTime();
         String cancelledNumber = deliveredNumber + "-C";
         Timestamp when = Timestamp.valueOf(FROM.plusHours(10));
@@ -91,5 +93,27 @@ class PlatformFinanceSemanticsTest {
         assertEquals(new BigDecimal("20.00"), money.refunds());
         assertEquals(new BigDecimal("7.00"), money.cancellationFees());
         assertEquals(1L, summary.orderStatuses().get("REFUNDED"));
+    }
+
+    @Test
+    void orderControlCenterAppliesServerSideStructuredFilters() {
+        var page = service.resource("orders", "", 0, 25,
+                new PlatformControlTowerService.ResourceFilters(
+                        "delivered", null, shopId, null, null,
+                        "success", "online", FROM, TO));
+
+        assertEquals(1L, page.totalElements());
+        assertEquals(deliveredOrderId,
+                ((Number) page.content().getFirst().get("id")).longValue());
+    }
+
+    @Test
+    void unsupportedStructuredFilterIsRejectedInsteadOfIgnored() {
+        var filters = new PlatformControlTowerService.ResourceFilters(
+                null, 1L, null, null, null,
+                null, null, null, null);
+
+        assertThrows(com.gpstore.exception.BadRequestException.class,
+                () -> service.resource("customers", "", 0, 25, filters));
     }
 }
