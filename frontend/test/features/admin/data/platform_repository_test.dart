@@ -7,6 +7,70 @@ void main() {
   setUpAll(setUpFakeSecureStorage);
 
   group('PlatformRepository', () {
+    test('global search is server-side, paged, and parses entity types', () async {
+      final adapter = FakeHttpClientAdapter();
+      adapter.on('GET', '/api/platform/control/search', (options) {
+        expect(options.queryParameters['q'], 'deepak');
+        expect(options.queryParameters['page'], 2);
+        expect(options.queryParameters['size'], 20);
+        return const FakeResponse({
+          'content': [
+            {
+              'entityType': 'CUSTOMER',
+              'entityId': 42,
+              'title': 'Deepak Kumar',
+              'reference': 'C-42',
+              'maskedEmail': 'd***@example.test'
+            }
+          ],
+          'page': 2,
+          'size': 20,
+          'totalElements': 61,
+          'totalPages': 4
+        });
+      });
+
+      final page = await PlatformRepository(apiClient: buildTestApiClient(adapter))
+          .globalSearch(query: 'deepak', page: 2);
+
+      expect(page.content.single.entityType, 'CUSTOMER');
+      expect(page.content.single.entityId, 42);
+      expect(page.hasMore, isTrue);
+    });
+
+    test('control tower sends the selected range and keeps finance meanings separate',
+        () async {
+      final adapter = FakeHttpClientAdapter();
+      adapter.on('GET', '/api/platform/control/dashboard', (options) {
+        expect(options.queryParameters['from'], '2026-09-01');
+        expect(options.queryParameters['to'], '2026-09-07');
+        return const FakeResponse({
+          'from': '2026-09-01T00:00:00',
+          'to': '2026-09-08T00:00:00',
+          'marketplace': {'totalMerchants': 3},
+          'orderStatuses': {'DELIVERED': 5},
+          'finance': {
+            'gmv': 125420.00,
+            'merchantProductSales': 117000.00,
+            'deliveryCharges': 8420.00,
+            'platformCommission': 2000.00,
+            'platformRevenueAvailable': false
+          },
+          'presenceAvailable': false
+        });
+      });
+
+      final summary = await PlatformRepository(apiClient: buildTestApiClient(adapter))
+          .controlTowerDashboard(
+        from: DateTime(2026, 9, 1),
+        to: DateTime(2026, 9, 7),
+      );
+
+      expect(summary.count('totalMerchants'), 3);
+      expect(summary.orders('DELIVERED'), 5);
+      expect(summary.money('gmv'), isNot(summary.money('platformCommission')),
+          reason: 'GMV and GP-STORE commission are different money facts');
+    });
     test('lists merchants with the status that decides whether they trade', () async {
       final adapter = FakeHttpClientAdapter();
       adapter.on('GET', '/api/platform/merchants', (_) => const FakeResponse([

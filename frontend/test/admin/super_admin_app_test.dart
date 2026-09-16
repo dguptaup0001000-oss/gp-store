@@ -45,13 +45,13 @@ void main() {
   }
 
   group('the super admin app', () {
-    testWidgets('opens on Merchants & Shops, not a shop dashboard',
+    testWidgets('opens on the Control Tower, not a shop dashboard',
         (tester) async {
       await pumpAs(tester, const SuperAdminRootScreen(), 'SUPER_ADMIN');
 
       // The app bar names the home destination, and the home destination is
       // the platform console. This is the whole reason the APK exists.
-      expect(find.widgetWithText(AppBar, 'Merchants & Shops'), findsOneWidget);
+      expect(find.widgetWithText(AppBar, 'Control Tower'), findsOneWidget);
       expect(find.widgetWithText(AppBar, 'Dashboard'), findsNothing);
     });
 
@@ -61,7 +61,7 @@ void main() {
       // platformAdmin, so the console is not a dead end for it.
       await pumpAs(tester, const SuperAdminRootScreen(), 'PLATFORM_ADMIN');
 
-      expect(find.widgetWithText(AppBar, 'Merchants & Shops'), findsOneWidget);
+      expect(find.widgetWithText(AppBar, 'Control Tower'), findsOneWidget);
     });
 
     testWidgets('a shop owner is told which app is theirs', (tester) async {
@@ -74,7 +74,7 @@ void main() {
       // them stuck.
       expect(find.textContaining('platform owner'), findsOneWidget);
       expect(find.textContaining('GP-STORE Admin'), findsOneWidget);
-      expect(find.widgetWithText(AppBar, 'Merchants & Shops'), findsNothing);
+      expect(find.widgetWithText(AppBar, 'Control Tower'), findsNothing);
     });
 
     testWidgets('a customer is refused as well', (tester) async {
