@@ -351,6 +351,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pr", type=int, default=0)
     parser.add_argument("--sha", default="")
+    parser.add_argument(
+        "--ci-already-green",
+        action="store_true",
+        help=(
+            "Compatibility marker for workflow_run callers. The helper still "
+            "verifies every REQUIRED_CHECK_NAMES entry before merging."
+        ),
+    )
     parser.add_argument("--wait-seconds", type=int, default=90)
     args = parser.parse_args()
     if "GITHUB_REPOSITORY" not in os.environ:
