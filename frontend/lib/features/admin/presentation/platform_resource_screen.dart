@@ -19,11 +19,13 @@ class PlatformResourceScreen extends ConsumerStatefulWidget {
     required this.resource,
     required this.title,
     required this.icon,
+    this.initialQuery = '',
   });
 
   final String resource;
   final String title;
   final IconData icon;
+  final String initialQuery;
 
   @override
   ConsumerState<PlatformResourceScreen> createState() => _PlatformResourceScreenState();
@@ -39,6 +41,7 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
   @override
   void initState() {
     super.initState();
+    _query.text = widget.initialQuery;
     _load();
   }
 

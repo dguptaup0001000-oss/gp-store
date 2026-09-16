@@ -8,6 +8,7 @@ import '../../../admin/design/admin_tokens.dart';
 import '../../../core/api/error_messages.dart';
 import '../domain/control_tower_models.dart';
 import 'platform_entity_360_screen.dart';
+import 'platform_resource_screen.dart';
 import 'platform_providers.dart';
 
 /// Platform-wide landing screen. All totals and search results come from
@@ -235,15 +236,33 @@ class _PlatformControlTowerScreenState
   }
 
   Future<void> _openResult(PlatformSearchResult result) async {
-    if (!const {'CUSTOMER', 'MERCHANT', 'SHOP'}.contains(result.entityType)) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('${result.entityType} control-center detail is not available in this build.'),
+    if (result.entityType == 'ORDER') {
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => PlatformOrder360Screen(orderId: result.entityId),
       ));
       return;
     }
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => PlatformEntity360Screen(result: result),
-    ));
+    if (const {'CUSTOMER', 'MERCHANT', 'SHOP'}.contains(result.entityType)) {
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => PlatformEntity360Screen(result: result),
+      ));
+      return;
+    }
+    final resource = switch (result.entityType) {
+      'WORKER' => ('workers', 'Workers', Icons.badge_outlined),
+      'PRODUCT' => ('products', 'Products', Icons.inventory_2_outlined),
+      _ => null,
+    };
+    if (resource != null) {
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => PlatformResourceScreen(
+          resource: resource.$1,
+          title: resource.$2,
+          icon: resource.$3,
+          initialQuery: result.title,
+        ),
+      ));
+    }
   }
 
   Widget _rangePicker() => Wrap(
