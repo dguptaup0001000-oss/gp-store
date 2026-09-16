@@ -7,8 +7,8 @@
 # https://api.gpstore.co.in/v1). Admin is a separate app:
 # gpstore-admin-release.apk. Worker is a third app:
 # gpstore-worker-arm64.apk and gpstore-worker-armv7.apk. Super Admin is a
-# fourth: gpstore-superadmin-release.apk / -armv7.apk, the platform owner's
-# console (in.gpstore.superadmin), APK only - no Play bundle.
+# fourth: gpstore-superadmin-release.apk / -armv7.apk and its AAB, the
+# platform owner's console (in.gpstore.superadmin).
 # Do not produce a combined customer+admin production APK.
 # GitHub UI zip size is not the APK size; the job summary prints
 # actual bytes, MiB, ABI, and SHA-256.
@@ -427,10 +427,9 @@ jobs:
         # somebody registered a new Android app in the Firebase console. It
         # needs none: every push this project sends is one shop's order.
         #
-        # NO APP BUNDLE, deliberately. Customer and Admin get one because they
-        # are the apps that could reach Play. This one is for a single person
-        # and is sideloaded; a Play listing for the platform owner's console
-        # is not something to produce by accident.
+        # The separate AAB is built below for release reproducibility and final
+        # artifact validation. This workflow uploads artifacts only; it does
+        # not publish a Play listing.
         run: |
           if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
             echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
@@ -517,6 +516,24 @@ jobs:
           mv build/app/outputs/bundle/adminRelease/app-admin-release.aab \
             build/app/outputs/bundle/admin/gpstore-admin-release.aab
 
+      - name: Build Super Admin App Bundle
+        if: steps.play_signing.outputs.enabled == 'true'
+        run: |
+          if [ -z "${API_BASE_URL:-}" ] || [[ "$API_BASE_URL" == *onrender.com* ]]; then
+            echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
+            exit 1
+          fi
+          flutter build appbundle --release \
+            --flavor superadmin \
+            -t lib/super_admin_main.dart \
+            --dart-define=GPSTORE_APP=superadmin \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+          mkdir -p build/app/outputs/bundle/superadmin
+          mv build/app/outputs/bundle/superadminRelease/app-superadmin-release.aab \
+            build/app/outputs/bundle/superadmin/gpstore-superadmin-release.aab
+
       # The bundle is what Play receives. It needs its own native ELF and
       # payload scan so a passing sideload APK cannot sit beside a Play upload
       # that contains a 4 KiB library or a forbidden desktop binary.
@@ -527,7 +544,8 @@ jobs:
           python3 tool/verify_apk_release.py --payload-only \
             build/app/outputs/bundle/worker/gpstore-worker-release.aab \
             build/app/outputs/bundle/customer/gpstore-customer-release.aab \
-            build/app/outputs/bundle/admin/gpstore-admin-release.aab
+            build/app/outputs/bundle/admin/gpstore-admin-release.aab \
+            build/app/outputs/bundle/superadmin/gpstore-superadmin-release.aab
 
       - name: Upload customer ARM64 APK
         uses: actions/upload-artifact@v4
@@ -622,6 +640,13 @@ jobs:
         with:
           name: gpstore-admin-release.aab
           path: frontend/build/app/outputs/bundle/admin/gpstore-admin-release.aab
+
+      - name: Upload Super Admin App Bundle
+        if: steps.play_signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-superadmin-release.aab
+          path: frontend/build/app/outputs/bundle/superadmin/gpstore-superadmin-release.aab
 
   automerge-after-release:
     name: Auto-merge after release validation
