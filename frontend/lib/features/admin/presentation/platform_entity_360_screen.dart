@@ -76,22 +76,12 @@ class _PlatformEntity360ScreenState extends ConsumerState<PlatformEntity360Scree
         child: Column(
           children: [
             for (final entry in map.entries)
-              if (entry.value != null && entry.value is! Map && entry.value is! List)
+              if (entry.value != null &&
+                  entry.value is! Map &&
+                  entry.value is! List &&
+                  !(entry.key == 'maskedEmail' && map.containsKey('email')) &&
+                  !(entry.key == 'maskedPhone' && map.containsKey('phone')))
                 _Fact(label: _label(entry.key), value: entry.value.toString()),
-            if (widget.result.entityType == 'CUSTOMER' && key == 'identity')
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Wrap(spacing: 8, children: [
-                  OutlinedButton(
-                    onPressed: () => _reveal('email'),
-                    child: const Text('Reveal email'),
-                  ),
-                  OutlinedButton(
-                    onPressed: () => _reveal('phone'),
-                    child: const Text('Reveal phone'),
-                  ),
-                ]),
-              ),
           ],
         ),
       );
@@ -127,63 +117,19 @@ class _PlatformEntity360ScreenState extends ConsumerState<PlatformEntity360Scree
     );
   }
 
-  Future<void> _reveal(String field) async {
-    final controller = TextEditingController();
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Reveal customer $field'),
-        content: TextField(
-          controller: controller,
-          minLines: 2,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            labelText: 'Operational reason (required)',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Reveal and audit'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (reason == null || reason.length < 5 || !mounted) return;
-    try {
-      final value = await ref.read(platformRepositoryProvider).revealCustomerPii(
-            customerId: widget.result.entityId,
-            field: field,
-            reason: reason,
-          );
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Customer $field'),
-          content: SelectableText(value ?? 'Not recorded'),
-          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-        ),
-      );
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(extractErrorMessage(error))),
-        );
-      }
-    }
+  static String _label(String value) {
+    // The server keeps these two legacy keys so older Super Admin builds do
+    // not break, but their values are complete operational contact data now.
+    if (value == 'maskedEmail') return 'Email';
+    if (value == 'maskedPhone') return 'Phone';
+    return value
+        .replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}')
+        .replaceAll('_', ' ')
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
   }
-
-  static String _label(String value) => value
-      .replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}')
-      .replaceAll('_', ' ')
-      .split(' ')
-      .where((part) => part.isNotEmpty)
-      .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
-      .join(' ');
 }
 
 class _Fact extends StatelessWidget {

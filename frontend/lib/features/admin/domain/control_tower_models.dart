@@ -5,8 +5,8 @@ class PlatformSearchResult {
     required this.title,
     required this.reference,
     this.subtitle,
-    this.maskedEmail,
-    this.maskedPhone,
+    this.email,
+    this.phone,
   });
 
   final String entityType;
@@ -14,8 +14,15 @@ class PlatformSearchResult {
   final String title;
   final String reference;
   final String? subtitle;
-  final String? maskedEmail;
-  final String? maskedPhone;
+  /// Full operational contact values for the platform owner.
+  final String? email;
+  final String? phone;
+
+  /// Source compatibility for widgets/tests built against the former model.
+  @Deprecated('Use email; Super Admin receives the operational value.')
+  String? get maskedEmail => email;
+  @Deprecated('Use phone; Super Admin receives the operational value.')
+  String? get maskedPhone => phone;
 
   factory PlatformSearchResult.fromJson(Map<String, dynamic> json) =>
       PlatformSearchResult(
@@ -24,8 +31,8 @@ class PlatformSearchResult {
         title: json['title']?.toString() ?? 'Unnamed record',
         reference: json['reference']?.toString() ?? '',
         subtitle: json['subtitle']?.toString(),
-        maskedEmail: json['maskedEmail']?.toString(),
-        maskedPhone: json['maskedPhone']?.toString(),
+        email: (json['email'] ?? json['maskedEmail'])?.toString(),
+        phone: (json['phone'] ?? json['maskedPhone'])?.toString(),
       );
 }
 

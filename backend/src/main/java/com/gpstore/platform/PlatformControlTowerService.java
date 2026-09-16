@@ -54,7 +54,13 @@ public class PlatformControlTowerService {
 
     public record SearchResult(String entityType, Long entityId, String title,
                                String reference, String subtitle,
-                               String maskedEmail, String maskedPhone) {}
+                               /* Legacy JSON field names retained for old app builds. */
+                               String maskedEmail, String maskedPhone) {
+        @com.fasterxml.jackson.annotation.JsonProperty("email")
+        public String email() { return maskedEmail; }
+        @com.fasterxml.jackson.annotation.JsonProperty("phone")
+        public String phone() { return maskedPhone; }
+    }
 
     public record MarketplaceCounts(long totalMerchants, long activeMerchants,
                                     long pendingMerchants, long suspendedMerchants,
@@ -84,7 +90,12 @@ public class PlatformControlTowerService {
     public record CustomerIdentity(Long id, String customerRef, String name,
                                    String maskedEmail, String maskedPhone,
                                    String role, Boolean enabled, Boolean active,
-                                   Boolean verified, LocalDateTime createdAt) {}
+                                   Boolean verified, LocalDateTime createdAt) {
+        @com.fasterxml.jackson.annotation.JsonProperty("email")
+        public String email() { return maskedEmail; }
+        @com.fasterxml.jackson.annotation.JsonProperty("phone")
+        public String phone() { return maskedPhone; }
+    }
 
     public record CustomerOrderSummary(long total, long completed, long active,
                                        long cancelled, long failed, long returned,
@@ -108,7 +119,12 @@ public class PlatformControlTowerService {
                                    String maskedEmail, String maskedPhone,
                                    String status, String statusReason, Boolean active,
                                    Boolean demo, String tier, LocalDateTime createdAt,
-                                   LocalDateTime updatedAt) {}
+                                   LocalDateTime updatedAt) {
+        @com.fasterxml.jackson.annotation.JsonProperty("email")
+        public String email() { return maskedEmail; }
+        @com.fasterxml.jackson.annotation.JsonProperty("phone")
+        public String phone() { return maskedPhone; }
+    }
 
     public record ShopLine(Long id, String shopRef, String code, String name,
                            String status, String statusReason, Boolean active,
@@ -169,8 +185,8 @@ public class PlatformControlTowerService {
                 params, (rs, row) -> new SearchResult(
                         rs.getString("entity_type"), rs.getLong("entity_id"),
                         rs.getString("title"), rs.getString("reference"),
-                        rs.getString("subtitle"), maskEmail(rs.getString("email")),
-                        maskPhone(rs.getString("phone"))));
+                        rs.getString("subtitle"), rs.getString("email"),
+                        rs.getString("phone")));
         Long count = jdbc.queryForObject("SELECT count(*) FROM (" + union + ") platform_search_count",
                 params, Long.class);
         long total = count == null ? 0 : count;
@@ -361,7 +377,7 @@ public class PlatformControlTowerService {
                 FROM customers WHERE id = :id
                 """, Map.of("id", id), (rs, row) -> new CustomerIdentity(
                 rs.getLong("id"), "C-" + rs.getLong("id"), rs.getString("full_name"),
-                maskEmail(rs.getString("email")), maskPhone(rs.getString("mobile_number")),
+                rs.getString("email"), rs.getString("mobile_number"),
                 rs.getString("role"), bool(rs.getObject("enabled")), bool(rs.getObject("active")),
                 bool(rs.getObject("verified")), time(rs.getObject("created_at"))));
         if (identities.isEmpty()) throw new ResourceNotFoundException("Customer not found");
@@ -422,7 +438,7 @@ public class PlatformControlTowerService {
                 """, Map.of("id", id), (rs, row) -> new MerchantIdentity(rs.getLong("id"), "M-" + rs.getLong("id"),
                 rs.getString("legal_name"), rs.getString("display_name"),
                 rs.getObject("owner_customer_id") == null ? null : "C-" + rs.getLong("owner_customer_id"),
-                maskEmail(rs.getString("contact_email")), maskPhone(rs.getString("contact_phone")),
+                rs.getString("contact_email"), rs.getString("contact_phone"),
                 rs.getString("status"), rs.getString("status_reason"), bool(rs.getObject("active")),
                 bool(rs.getObject("is_demo")), rs.getString("tier"), time(rs.getObject("created_at")),
                 time(rs.getObject("updated_at"))));
@@ -527,15 +543,18 @@ public class PlatformControlTowerService {
                 sql.select() + " " + sql.from() + where + " " + sql.orderBy()
                         + " LIMIT :limit OFFSET :offset",
                 params, (rs, row) -> safeRow(rs));
+        // Operational contact data is intentionally complete for the
+        // PLATFORM_ADMIN-only control tower. Canonical keys are additive;
+        // the legacy "maskedEmail"/"maskedPhone" keys stay in the wire shape
+        // so deployed app builds keep parsing the response, but their values
+        // are no longer masked. No query here selects credentials or secrets.
         if (resource.equals("workers")) {
-            content.forEach(row -> row.put("maskedPhone", maskPhone(string(row.get("maskedPhone")))));
+            content.forEach(row -> row.put("maskedPhone", row.get("phone")));
         } else if (resource.equals("customers") || resource.equals("merchants")) {
             content.forEach(row -> {
-                row.put("maskedPhone", maskPhone(string(row.get("maskedPhone"))));
-                row.put("maskedEmail", maskEmail(string(row.get("maskedEmail"))));
+                row.put("maskedPhone", row.get("phone"));
+                row.put("maskedEmail", row.get("email"));
             });
-        } else if (resource.equals("audit") || resource.equals("security")) {
-            content.forEach(row -> row.put("actorEmail", maskEmail(string(row.get("actorEmail")))));
         }
         Long total = jdbc.queryForObject("SELECT count(*) " + sql.from() + where, params, Long.class);
         return page(content, page, size, total == null ? 0 : total);
@@ -679,7 +698,7 @@ public class PlatformControlTowerService {
     private static ResourceSql resourceSql(String resource) {
         return switch (resource) {
             case "customers" -> new ResourceSql("""
-                    SELECT c.id id,c.full_name name,c.email "maskedEmail",c.mobile_number "maskedPhone",
+                    SELECT c.id id,c.full_name name,c.email email,c.mobile_number phone,
                            c.enabled enabled,c.active active,c.verified verified,c.created_at "createdAt",
                            (SELECT count(*) FROM orders o WHERE o.customer_id=c.id) orders
                     """, "FROM customers c",
@@ -687,7 +706,7 @@ public class PlatformControlTowerService {
                     "ORDER BY c.id DESC");
             case "merchants" -> new ResourceSql("""
                     SELECT m.id id,COALESCE(m.display_name,m.legal_name) name,m.legal_name "legalName",
-                           m.contact_email "maskedEmail",m.contact_phone "maskedPhone",m.status status,
+                           m.contact_email email,m.contact_phone phone,m.status status,
                            m.status_reason "statusReason",m.active active,m.created_at "createdAt",
                            (SELECT count(*) FROM shops s WHERE s.merchant_id=m.id AND s.deleted_at IS NULL) shops
                     """, "FROM merchants m",
@@ -710,7 +729,7 @@ public class PlatformControlTowerService {
                     "lower(COALESCE(o.order_number,'')) LIKE :pattern OR lower('O-' || CAST(o.id AS varchar)) LIKE :pattern OR lower(COALESCE(c.full_name,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR EXISTS (SELECT 1 FROM payments pay WHERE pay.order_id=o.id AND (lower(COALESCE(pay.transaction_id,'')) LIKE :pattern OR lower(COALESCE(pay.provider_order_id,'')) LIKE :pattern OR lower(COALESCE(pay.provider_payment_id,'')) LIKE :pattern))",
                     "ORDER BY o.order_date DESC");
             case "workers" -> new ResourceSql("""
-                    SELECT w.id id,w.name name,w.mobile "maskedPhone",w.available available,w.active active,
+                    SELECT w.id id,w.name name,w.mobile phone,w.available available,w.active active,
                            w.vehicle_type "vehicleType",w.vehicle_number "vehicleNumber",
                            s.id "shopId",s.display_name shop,m.id "merchantId",
                            COALESCE(m.display_name,m.legal_name) merchant,
@@ -809,8 +828,6 @@ public class PlatformControlTowerService {
                 """, Map.of("id", id), (rs, row) -> safeRow(rs));
         if (rows.isEmpty()) throw new ResourceNotFoundException("Order not found");
         Map<String, Object> detail = new LinkedHashMap<>(rows.getFirst());
-        detail.put("customerEmail", maskEmail(string(detail.get("customerEmail"))));
-        detail.put("customerPhone", maskPhone(string(detail.get("customerPhone"))));
         detail.put("items", jdbc.query("""
                 SELECT oi.id id,p.name product,pv.id "variantId",pv.sku sku,pv.barcode barcode,
                        oi.quantity quantity,oi.price price
@@ -971,16 +988,5 @@ public class PlatformControlTowerService {
         if (value == null) return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         BigDecimal result = value instanceof BigDecimal b ? b : new BigDecimal(value.toString());
         return result.setScale(2, RoundingMode.HALF_UP);
-    }
-    static String maskEmail(String value) {
-        if (value == null || value.isBlank()) return null;
-        int at = value.indexOf('@');
-        return at <= 0 ? "***" : value.substring(0, 1) + "***" + value.substring(at);
-    }
-    static String maskPhone(String value) {
-        if (value == null || value.isBlank()) return null;
-        String digits = value.replaceAll("[^0-9]", "");
-        if (digits.length() <= 4) return "****";
-        return "*".repeat(Math.min(8, digits.length() - 4)) + digits.substring(digits.length() - 4);
     }
 }
