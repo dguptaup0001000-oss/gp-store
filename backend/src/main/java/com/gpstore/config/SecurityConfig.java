@@ -255,6 +255,27 @@ public class SecurityConfig {
                 // Same ordering reason as /api/reviews above - the admin
                 // "everything including inactive" product list must come
                 // before the broad public GET /api/products/** rule below.
+                // THE PLATFORM'S ADDRESS BOOK IS THE PLATFORM'S.
+                //
+                // GET /api/addresses (the bare path - not /mine, not /{id}) was
+                // @PreAuthorize("hasRole('ADMIN')"), and Role.ADMIN is what
+                // every shop owner holds. Address is not ShopOwned and the
+                // service pages it unfiltered, so a merchant reading it got
+                // every customer on GP-STORE: full name, mobile number, house
+                // number, area, city, pincode, latitude and longitude, plus any
+                // delivery instructions. Measured before this line existed - a
+                // newly onboarded shop read another merchant's customer's home
+                // address out of it.
+                //
+                // A merchant needs the delivery address of orders placed WITH
+                // THEM, and gets it on the order. Browsing an address book is
+                // not a shopkeeper's act at all.
+                //
+                // EXACT PATH ON PURPOSE: /api/addresses/mine and
+                // /api/addresses/{id} are the customer's own and stay
+                // authenticated, gated by AddressService.getOwnedAddress.
+                .requestMatchers(HttpMethod.GET, "/api/addresses")
+                    .hasAuthority(AdminPermission.PLATFORM_ADMIN.authority())
                 .requestMatchers(HttpMethod.GET, "/api/products/admin/**").hasAuthority(AdminPermission.CATALOG_VIEW.authority())
                 // THE MERCHANT'S OWN DEPARTMENTS, and it must come before the
                 // public /api/categories/** rule below or it inherits permitAll

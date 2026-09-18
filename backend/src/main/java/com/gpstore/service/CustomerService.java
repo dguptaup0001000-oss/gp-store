@@ -23,6 +23,7 @@ import java.util.UUID;
 public class CustomerService {
 
     private final CustomerRepository customerRepository;
+    private final com.gpstore.repository.OrderRepository orderRepository;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
     private final AddressRepository addressRepository;
@@ -35,6 +36,7 @@ public class CustomerService {
 
     public CustomerService(
             CustomerRepository customerRepository,
+            com.gpstore.repository.OrderRepository orderRepository,
             PasswordEncoder passwordEncoder,
             RefreshTokenService refreshTokenService,
             AddressRepository addressRepository,
@@ -45,6 +47,7 @@ public class CustomerService {
             CustomerAccountStatusService accountStatusService,
             com.gpstore.repository.CustomerAppSessionRepository appSessionRepository) {
         this.customerRepository = customerRepository;
+        this.orderRepository = orderRepository;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
         this.pushNotificationService = pushNotificationService;
@@ -130,9 +133,33 @@ public class CustomerService {
         return customerRepository.save(customer);
     }
 
+    /**
+     * The customer list a shopkeeper works from: the people who have bought
+     * from them.
+     *
+     * <p>WAS findAll(pageable). Customer is not a {@code ShopOwned} entity -
+     * correctly, since a customer belongs to GP-STORE rather than to any one
+     * shop - so no tenant filter narrowed this, and the gate is CUSTOMERS_VIEW
+     * which every shopkeeper holds. A merchant reading it got every account on
+     * the platform with its full name, mobile number and email. Measured on a
+     * database with 926 accounts: totalElements came back 926.
+     *
+     * <p>AN ORDER IS WHAT MAKES SOMEBODY A SHOP'S CUSTOMER, which is the same
+     * definition the shop's own announcement uses - and Order IS shop-owned, so
+     * the question is already tenant-filtered and needs no new column. A
+     * merchant who has served nobody sees nobody, which is correct and is the
+     * state every shop starts in.
+     *
+     * <p>The platform keeps the whole list: running the marketplace means
+     * knowing who is on it.
+     */
     public org.springframework.data.domain.Page<Customer> getAllCustomers(
             org.springframework.data.domain.Pageable pageable) {
-        return customerRepository.findAll(pageable);
+        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+        if (scope == null || scope.isPlatform()) {
+            return customerRepository.findAll(pageable);
+        }
+        return orderRepository.findDistinctCustomersOfCurrentShop(pageable);
     }
 
     public Customer getByEmail(String email) {
