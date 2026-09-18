@@ -32,6 +32,26 @@ public interface WishlistRepository extends JpaRepository<Wishlist, Long> {
             """)
     Page<Wishlist> findAllForCurrentShopShelf(Pageable pageable);
 
+    /**
+     * One customer's saved items, limited to what this shop lists.
+     *
+     * <p>Same narrowing as {@link #findAllForCurrentShopShelf}, asked about one
+     * person - for the shopkeeper's customer screen. A shop advising a customer
+     * about a saved item needs the items it can actually sell them; the rest of
+     * the list is that customer's business with other shops.
+     */
+    @Query("""
+            SELECT w FROM Wishlist w
+            WHERE w.customer.id = :customerId
+              AND EXISTS (
+                SELECT 1 FROM ProductVariant v, ShopProductVariant l
+                WHERE v.product = w.product AND l.productVariantId = v.id
+            )
+            ORDER BY w.id DESC
+            """)
+    java.util.List<Wishlist> findByCustomerIdOnCurrentShopShelf(
+            @org.springframework.data.repository.query.Param("customerId") Long customerId);
+
 
     // Eager-fetches product (which is lazy) so WishlistResponse.from()'s
     // product.getName() call doesn't lazy-load one query per wishlist item -

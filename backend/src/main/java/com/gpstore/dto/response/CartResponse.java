@@ -80,6 +80,33 @@ public class CartResponse {
                                     Map<Long, BigDecimal> shopPriceByVariantId,
                                     java.util.Set<Long> stillListedVariantIds,
                                     Map<Long, String> shopNamesById) {
+        return from(cart, stockByVariantId, shopPriceByVariantId, stillListedVariantIds,
+                shopNamesById, null);
+    }
+
+    /**
+     * The basket as ONE shop is entitled to see it: their lines and no others.
+     *
+     * <p>FOR THE MERCHANT-FACING CART ROUTES. A basket spans shops by design,
+     * so the whole of one is a list of what a shopper is buying from every
+     * merchant on GP-STORE - rival product names, rival prices, rival shop
+     * ids. A shopkeeper's legitimate question ("is the thing they rang about
+     * still in their basket", "which of my lines are being abandoned") is
+     * answered entirely by their own lines.
+     *
+     * <p>Totals are re-derived from the visible lines by the same code that
+     * derives them for a whole basket, so a narrowed response is internally
+     * consistent rather than one shop's lines under everybody's total.
+     */
+    public static CartResponse fromLinesOfShop(Cart cart, Long shopId) {
+        return from(cart, Map.of(), Map.of(), null, Map.of(), shopId);
+    }
+
+    private static CartResponse from(Cart cart, Map<Long, Integer> stockByVariantId,
+                                    Map<Long, BigDecimal> shopPriceByVariantId,
+                                    java.util.Set<Long> stillListedVariantIds,
+                                    Map<Long, String> shopNamesById,
+                                    Long onlyShopId) {
         if (cart == null) {
             return new CartResponse(null, List.of(), BigDecimal.ZERO, 0);
         }
@@ -87,6 +114,7 @@ public class CartResponse {
         Map<Long, Integer> stock = stockByVariantId == null ? Map.of() : stockByVariantId;
         Map<Long, BigDecimal> prices = shopPriceByVariantId == null ? Map.of() : shopPriceByVariantId;
         List<CartItemResponse> items = cart.getItems().stream()
+                .filter(item -> onlyShopId == null || onlyShopId.equals(item.getShopId()))
                 .map(item -> CartItemResponse.from(item, stock, prices, stillListedVariantIds))
                 .toList();
 

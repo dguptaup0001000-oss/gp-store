@@ -31,6 +31,22 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             + "AND o.customer.active = true")
     Page<com.gpstore.entity.Customer> findDistinctCustomersOfCurrentShop(Pageable pageable);
 
+    /**
+     * Whether this person has ever ordered from the shop in scope.
+     *
+     * <p>THE SAME DEFINITION, ASKED ABOUT ONE PERSON. The list above answers
+     * "who are my customers"; this answers "is this one of mine", which is what
+     * every route that takes a customer id out of a URL has to know before it
+     * answers. Order is {@code ShopOwned}, so the tenant filter does the
+     * narrowing and the query names no shop.
+     *
+     * <p>Counts the row, not the customer's own {@code active} flag: a
+     * deactivated account is still somebody who bought from this shop, and a
+     * shopkeeper reading their record back is not reading a stranger's.
+     */
+    @Query("SELECT COUNT(o) > 0 FROM Order o WHERE o.customer.id = :customerId")
+    boolean isCustomerOfCurrentShop(@Param("customerId") Long customerId);
+
     /** How many of them there are, for the count reported back to the shop. */
     @Query("SELECT count(DISTINCT o.customer) FROM Order o WHERE o.customer IS NOT NULL "
             + "AND o.customer.active = true")

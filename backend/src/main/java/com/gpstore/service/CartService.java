@@ -36,6 +36,8 @@ public class CartService {
     private final com.gpstore.platform.ShopRepository shops;
     private final com.gpstore.platform.PlatformProperties platform;
 
+    private final com.gpstore.platform.ShopCustomers shopCustomers;
+
     public CartService(
             CartRepository cartRepository,
             CustomerRepository customerRepository,
@@ -46,7 +48,8 @@ public class CartService {
             com.gpstore.catalog.shop.ShopProductVariantRepository shopListings,
             com.gpstore.platform.ShopScopeSwitch shopScopeSwitch,
             com.gpstore.platform.ShopRepository shops,
-            com.gpstore.platform.PlatformProperties platform) {
+            com.gpstore.platform.PlatformProperties platform,
+            com.gpstore.platform.ShopCustomers shopCustomers) {
 
         this.cartRepository = cartRepository;
         this.customerRepository = customerRepository;
@@ -58,6 +61,7 @@ public class CartService {
         this.shopScopeSwitch = shopScopeSwitch;
         this.shops = shops;
         this.platform = platform;
+        this.shopCustomers = shopCustomers;
     }
 
     public Cart saveCart(Cart cart) {
@@ -101,7 +105,48 @@ public class CartService {
         // every cart in the shop is the exact unbounded query the paging was
         // added to prevent. hibernate.default_batch_fetch_size (16) makes the
         // association loads batched instead of one-per-row.
-        return cartRepository.findAll(pageable).map(com.gpstore.dto.response.CartResponse::from);
+        Long myShop = shopCustomers.actingShopId();
+        if (myShop == null) {
+            // The platform console. Running the marketplace includes seeing
+            // what is sitting in baskets across it.
+            return cartRepository.findAll(pageable)
+                    .map(com.gpstore.dto.response.CartResponse::from);
+        }
+        // A SHOPKEEPER'S ABANDONED BASKETS ARE THE ONES WITH THEIR LINES IN.
+        // See CartRepository.findAllWithALineFromShop for what this route
+        // handed out before, and CartResponse.fromLinesOfShop for why the
+        // lines are filtered again on the way out.
+        return cartRepository.findAllWithALineFromShop(myShop, pageable)
+                .map(cart -> com.gpstore.dto.response.CartResponse.fromLinesOfShop(cart, myShop));
+    }
+
+    /**
+     * One basket, read by staff, narrowed to what the caller may see.
+     *
+     * <p>REPLACES A ROUTE THAT COULD NOT WORK. {@code GET
+     * /api/cart-items/cart/{cartId}} returned raw {@code CartItem} entities,
+     * which Jackson cannot serialise through a Hibernate lazy proxy - so it
+     * answered 500 to every caller, exactly as {@code GET /api/cart-items} did
+     * before it was removed. It was also unnarrowed: any cart id, read by
+     * anybody holding CUSTOMERS_VIEW, which is every shop owner. Both are
+     * fixed here rather than by deleting the route, because the read itself is
+     * one support genuinely needs - see CartsAreNotWritableByAReadRoleTest,
+     * which exists to keep it reachable.
+     *
+     * <p>A basket with none of the caller's lines comes back empty rather than
+     * refused, which is also what a basket that does not exist comes back as -
+     * so the route cannot be used to find out which cart ids are real.
+     */
+    @Transactional(readOnly = true)
+    public com.gpstore.dto.response.CartResponse getCartForStaff(Long cartId) {
+        Cart cart = cartRepository.findByIdWithItemsFetched(cartId).orElse(null);
+        if (cart == null) {
+            return com.gpstore.dto.response.CartResponse.from(null);
+        }
+        Long myShop = shopCustomers.actingShopId();
+        return myShop == null
+                ? com.gpstore.dto.response.CartResponse.from(cart)
+                : com.gpstore.dto.response.CartResponse.fromLinesOfShop(cart, myShop);
     }
 
     public Cart getCustomerCart(Long customerId) {

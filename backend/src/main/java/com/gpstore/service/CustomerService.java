@@ -24,6 +24,7 @@ public class CustomerService {
 
     private final CustomerRepository customerRepository;
     private final com.gpstore.repository.OrderRepository orderRepository;
+    private final com.gpstore.platform.ShopCustomers shopCustomers;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
     private final AddressRepository addressRepository;
@@ -37,6 +38,7 @@ public class CustomerService {
     public CustomerService(
             CustomerRepository customerRepository,
             com.gpstore.repository.OrderRepository orderRepository,
+            com.gpstore.platform.ShopCustomers shopCustomers,
             PasswordEncoder passwordEncoder,
             RefreshTokenService refreshTokenService,
             AddressRepository addressRepository,
@@ -48,6 +50,7 @@ public class CustomerService {
             com.gpstore.repository.CustomerAppSessionRepository appSessionRepository) {
         this.customerRepository = customerRepository;
         this.orderRepository = orderRepository;
+        this.shopCustomers = shopCustomers;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
         this.pushNotificationService = pushNotificationService;
@@ -162,12 +165,38 @@ public class CustomerService {
         return orderRepository.findDistinctCustomersOfCurrentShop(pageable);
     }
 
+    /**
+     * Looks an account up by email, for a caller entitled to that account.
+     *
+     * <p>WAS AN ADDRESS BOOK OF THE WHOLE PLATFORM. The route behind this
+     * ({@code GET /api/customers/email/{email}}) is gated by CUSTOMERS_VIEW,
+     * which every shop owner's role carries, and Customer is not tenant
+     * filtered - so any merchant could type any address and read back the
+     * account's name, phone number and role. With the phone variant below it,
+     * that is a lookup service over every shopper on GP-STORE.
+     *
+     * <p>ANSWERS "NOT FOUND" RATHER THAN REFUSING, deliberately. A 403 on a
+     * stranger's address and a 200 on a customer's would let a merchant test
+     * whether any given phone number is registered - the enumeration is the
+     * attack, not the row. A shopkeeper finds the people who have bought from
+     * them and nobody else; the platform finds anybody.
+     */
     public Customer getByEmail(String email) {
-        return customerRepository.findByEmail(email).orElse(null);
+        return onlyIfTheCallerMayReadThem(
+                customerRepository.findByEmail(email).orElse(null));
     }
 
+    /** As {@link #getByEmail}, by phone number. Same rule, same reason. */
     public Customer getByMobileNumber(String mobileNumber) {
-        return customerRepository.findByMobileNumber(mobileNumber).orElse(null);
+        return onlyIfTheCallerMayReadThem(
+                customerRepository.findByMobileNumber(mobileNumber).orElse(null));
+    }
+
+    private Customer onlyIfTheCallerMayReadThem(Customer found) {
+        if (found == null || shopCustomers.isMine(found.getId())) {
+            return found;
+        }
+        return null;
     }
 
     public Customer getById(Long id) {
@@ -184,6 +213,30 @@ public class CustomerService {
     public Customer setAccountActive(Long customerId, boolean active) {
         Customer customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+
+        // A SHOPKEEPER MAY BAN THEIR OWN CUSTOMER, AND NOBODY ELSE'S.
+        //
+        // This route is gated by CUSTOMERS_MANAGE, which Role.ADMIN carries -
+        // so before these two lines, any shop owner could deactivate ANY
+        // account on GP-STORE by putting its id in the URL: another merchant's
+        // owner login, a rival shop's regulars, a platform administrator's
+        // account. Deactivating also revokes every refresh token the account
+        // holds (below), so it was a working denial of service against any
+        // named user of the platform, from a permission meant for "bar the
+        // person who keeps refusing COD deliveries".
+        //
+        // The second rule is the one that stops it being an attack on staff:
+        // an account whose role carries any permission at all is a colleague
+        // somewhere on the platform, and disabling colleagues is the platform's
+        // business. A shopkeeper acts on shoppers.
+        if (!shopCustomers.readsEveryCustomer()) {
+            shopCustomers.requireMine(customerId);
+            if (customer.getRole() != null
+                    && com.gpstore.security.RolePermissions.isStaff(customer.getRole())) {
+                throw new com.gpstore.platform.CrossShopAccessException(
+                        "That account is not a customer of this shop.");
+            }
+        }
 
         customer.setActive(active);
         Customer saved = customerRepository.save(customer);
