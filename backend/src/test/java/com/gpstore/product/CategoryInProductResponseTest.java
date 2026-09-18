@@ -40,6 +40,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * duplicate.
  */
 @SpringBootTest(properties = {
+        // ONE SHOP, DECLARED. This test builds its fixtures by POSTing to
+        // /api/products as an admin - defining the SHARED catalogue, which on a
+        // marketplace is the platform's job and is refused to a merchant
+        // (CatalogDefinitionAuthorization). The subject here is the catalogue
+        // row itself, not who may write one, so the deployment is named. See
+        // DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",
@@ -91,7 +98,16 @@ class CategoryInProductResponseTest {
     }
 
     @Test
-    @WithStaff
+    // THE PLATFORM OWNER WRITES THE SHARED CATALOGUE, in any deployment.
+    //
+    // This fixture POSTs /api/products, which is catalogue DEFINITION - and
+    // CatalogDefinitionAuthorization treats a deployment with more than one
+    // shop as a marketplace whatever the mode says, which is the fail-safe
+    // reading and is also true of any database a suite has been running
+    // against for a while. A plain ADMIN is therefore refused for a reason
+    // that has nothing to do with what this test is about. SUPER_ADMIN is
+    // the role that may define the catalogue on one shop and on a thousand.
+    @WithStaff(com.gpstore.entity.Role.SUPER_ADMIN)
     @DisplayName("create returns the category's real name, so the client can parse it")
     void createReturnsAResolvedCategory() throws Exception {
         Long categoryId = anyCategoryId();
@@ -115,7 +131,7 @@ class CategoryInProductResponseTest {
     }
 
     @Test
-    @WithStaff
+    @WithStaff(com.gpstore.entity.Role.SUPER_ADMIN)
     @DisplayName("update returns a resolved category too - Save Changes hit the same bug")
     void updateReturnsAResolvedCategory() throws Exception {
         Long categoryId = anyCategoryId();
@@ -140,7 +156,7 @@ class CategoryInProductResponseTest {
     }
 
     @Test
-    @WithStaff
+    @WithStaff(com.gpstore.entity.Role.SUPER_ADMIN)
     @DisplayName("a category that does not exist is a plain 404, not a database error")
     void unknownCategoryIsNotFound() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/products")

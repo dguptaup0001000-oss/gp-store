@@ -39,6 +39,13 @@ import org.springframework.data.domain.PageRequest;
  * That is exactly the class of failure this pins.
  */
 @SpringBootTest(properties = {
+        // ONE SHOP, DECLARED. This test builds its fixtures by POSTing to
+        // /api/products as an admin - defining the SHARED catalogue, which on a
+        // marketplace is the platform's job and is refused to a merchant
+        // (CatalogDefinitionAuthorization). The subject here is the catalogue
+        // row itself, not who may write one, so the deployment is named. See
+        // DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",

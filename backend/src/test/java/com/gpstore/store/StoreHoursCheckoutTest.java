@@ -38,6 +38,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * quietly wrote settings other tests read.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         // NO LIVE OUTBOX WORKER. This class places real orders, and a running
         // drain turns each one into an auto-assigned delivery against whichever
         // rider is available - including another test class's fixture riders,

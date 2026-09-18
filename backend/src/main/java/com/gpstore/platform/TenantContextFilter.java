@@ -90,19 +90,17 @@ public class TenantContextFilter extends OncePerRequestFilter {
             // from an error string.
             log.warn("Refusing a request whose credential resolves to no shop: {}",
                     cannotResolve.getClass().getSimpleName());
-            response.sendError(HttpServletResponse.SC_FORBIDDEN,
-                    "This account is not associated with a shop.");
+            refuse(request, response, "This account is not associated with a shop.");
             return;
         }
 
         try {
             if (!mayEnterMerchantBackOffice(request)) {
-                response.sendError(HttpServletResponse.SC_FORBIDDEN,
-                        "This account is not associated with this shop.");
+                refuse(request, response, "This account is not associated with this shop.");
                 return;
             }
             if (!mayProceed(request)) {
-                response.sendError(HttpServletResponse.SC_FORBIDDEN,
+                refuse(request, response,
                         "This shop is suspended or closed, so it cannot be changed. You can "
                                 + "still see your records, and appeal the decision.");
                 return;
@@ -111,6 +109,33 @@ public class TenantContextFilter extends OncePerRequestFilter {
         } finally {
             TenantContext.clear();
         }
+    }
+
+    /**
+     * Writes the refusal itself, rather than handing it to sendError.
+     *
+     * <p>WHY NOT sendError. {@code sendError} asks the container to run an
+     * ERROR dispatch, which re-enters the filter chain at {@code /error} with
+     * no authentication on it - so Spring Security answers that dispatch with
+     * 401 "Authentication required" and the merchant's browser sees a 401
+     * where this filter said 403. It is not a cosmetic difference: a client
+     * that treats 401 as "your session ended" signs the shopkeeper out and
+     * sends them back to the login screen, over and over, instead of showing
+     * them the sentence that says what is actually wrong. MockMvc does not run
+     * ERROR dispatches, which is why the tests that exercise this filter
+     * through a real port were the ones that saw it.
+     *
+     * <p>Writing the body here ends the request where the decision was made,
+     * in the same JSON shape as every other refusal (see ApiError).
+     */
+    private void refuse(HttpServletRequest request, HttpServletResponse response,
+                        String message) throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write("{\"status\":403,\"error\":\"Forbidden\",\"message\":\""
+                + message.replace("\"", "'") + "\",\"path\":\""
+                + com.gpstore.config.RequestPath.of(request) + "\"}");
+        response.getWriter().flush();
     }
 
     /**

@@ -383,7 +383,36 @@ public class SecurityConfig {
                 // delete every test product in the shop - so it is the
                 // narrowest possible grant, and it sits ABOVE the broader
                 // rules so nothing below can widen it by accident.
-                .requestMatchers("/api/admin/catalog/**").hasAuthority(AdminPermission.SYSTEM_ADMIN.authority())
+                //
+                // THE BULK IMPORTER IS THE SHOPKEEPER'S OWN TOOL and stays
+                // here: it lists what it imports onto the importing shop's
+                // shelf (CatalogImportService, shopCatalog.list), the admin
+                // app ships a screen for it, and the run and its problems are
+                // shop-owned rows. It must come first or the narrower rule
+                // below would take it away from every merchant on the
+                // marketplace.
+                .requestMatchers("/api/admin/catalog/import/**")
+                    .hasAuthority(AdminPermission.SYSTEM_ADMIN.authority())
+                // EVERYTHING ELSE UNDER HERE WRITES THE SHARED CATALOGUE, and
+                // SYSTEM_ADMIN is not the permission that means that.
+                //
+                // Role.ADMIN - every shop owner on GP-STORE - holds
+                // SYSTEM_ADMIN, because EVERY_SHOP_PERMISSION is written as a
+                // subtraction and SYSTEM_ADMIN is not one of the three
+                // subtracted. So a merchant could seed the platform's
+                // catalogue, start a thousand outbound image fetches, migrate
+                // every catalogue image to R2, and - with ?confirm=true -
+                // delete every product flagged is_test_data ACROSS THE WHOLE
+                // MARKETPLACE, including rows other shops have listed and
+                // priced. The confirm flag is a guard against a stray tap, not
+                // against the wrong person.
+                //
+                // CATALOG_DEFINE is the permission that means "writes the
+                // shared catalogue", and CatalogDefinitionAuthorization is
+                // already how this codebase asks the question: under one shop
+                // it is exactly CATALOG_MANAGE and the kirana owner keeps every
+                // one of these; on a marketplace it is the platform's.
+                .requestMatchers("/api/admin/catalog/**").access(catalogDefinition)
                 // TERRITORY ADMINISTRATION. Every route under here edits the
                 // permanent delivery map - a boundary, a rider's territory,
                 // which territories may lend to each other. Redrawing one

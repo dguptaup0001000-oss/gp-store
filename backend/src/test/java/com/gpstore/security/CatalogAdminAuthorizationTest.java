@@ -31,6 +31,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * the door is locked without opening it.
  */
 @SpringBootTest(properties = {
+        // ONE SHOP, DECLARED, and it matters for what this class asserts.
+        //
+        // Section D below says an admin reaches the catalogue audit and the
+        // test-data deletion. That is TRUE OF A SINGLE KIRANA, where writing
+        // the shared catalogue and running the shop are the same job -
+        // CatalogDefinitionAuthorization hands it to CATALOG_MANAGE - and it
+        // is NOT true on a marketplace, where the shared catalogue is the
+        // platform's and a merchant is refused. Both are now real rules, so
+        // this class declares which deployment it is describing and
+        // SharedCatalogueMaintenanceIsThePlatformsTest asserts the other.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         // NO LIVE OUTBOX WORKER. A running drain turns committed work into
         // auto-assigned deliveries against whichever rider is available, and
         // Spring caches this context and never closes it - so the worker

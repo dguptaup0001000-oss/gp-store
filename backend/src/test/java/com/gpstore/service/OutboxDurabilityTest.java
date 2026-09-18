@@ -47,7 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * redelivery, and a failing event retries with backoff rather than being
  * lost or spinning.
  */
-@SpringBootTest
+@SpringBootTest(properties = com.gpstore.support.DeploymentShape.SINGLE_SHOP)
 class OutboxDurabilityTest {
 
     @Autowired private OutboxWorker outboxWorker;

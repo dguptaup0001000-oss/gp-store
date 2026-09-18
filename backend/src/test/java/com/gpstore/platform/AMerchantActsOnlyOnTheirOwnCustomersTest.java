@@ -106,6 +106,13 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
         TenantDefaults.install(platform.getMode(),
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
 
+        // See EveryPublishedEndpointSweepTest: an interrupted run's polygon
+        // would overlap this one's and stop addresses being stamped.
+        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE subzone_id IN "
+                + "(SELECT id FROM delivery_subzones WHERE name LIKE 'OwnTerritory %')");
+        jdbc.update("DELETE FROM delivery_subzones WHERE name LIKE 'OwnTerritory %'");
+        jdbc.update("DELETE FROM delivery_zones WHERE name LIKE 'OwnZone %'");
+
         merchantA = newMerchant("a");
         merchantB = newMerchant("b");
         shopA = newShop(merchantA, "OWA-" + tag);
@@ -529,7 +536,7 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
 
         private long newSubzone(long shop, String code) {
             jdbc.update("INSERT INTO delivery_zones (code, name, active, shop_id) "
-                    + "VALUES (?, ?, true, ?)", "Z-" + code, "Zone " + code, shop);
+                    + "VALUES (?, ?, true, ?)", "Z-" + code, "OwnZone " + code, shop);
             Long zone = jdbc.queryForObject(
                     "SELECT id FROM delivery_zones WHERE code = ?", Long.class, "Z-" + code);
             // Both shops draw the same ground on purpose: if their maps
@@ -537,7 +544,7 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
             // maps were kept apart. Same square as TerritoryBelongsToOneShopTest.
             jdbc.update("INSERT INTO delivery_subzones (code, name, active, shop_id, zone_id, "
                     + "boundary, max_concurrent_orders) VALUES (?, ?, true, ?, ?, ?, 10)",
-                    code, "Subzone " + code, shop, zone,
+                    code, "OwnTerritory " + code, shop, zone,
                     "[[28.60,77.20],[28.60,77.22],[28.62,77.22],[28.62,77.20],[28.60,77.20]]");
             return jdbc.queryForObject(
                     "SELECT id FROM delivery_subzones WHERE code = ?", Long.class, code);

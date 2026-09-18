@@ -30,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * "everybody rated them zero".
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",

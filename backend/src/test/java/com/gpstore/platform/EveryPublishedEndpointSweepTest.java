@@ -106,6 +106,8 @@ class EveryPublishedEndpointSweepTest {
     private Long invoiceB;
     private Long paymentB;
     private Long cartItemB;
+    private Long importRunB;
+    private Long subzoneB;
     private String emailB;
     private String mobileB;
 
@@ -138,6 +140,16 @@ class EveryPublishedEndpointSweepTest {
     void twoMerchants() {
         TenantDefaults.install(platform.getMode(),
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
+
+        // A KILLED RUN LEAVES ITS MAP BEHIND, and a leftover polygon over the
+        // same square makes the next territory test ambiguous - overlapping
+        // territories are reported rather than resolved, so an address stops
+        // being stamped at all. Sweeping this class's own leftovers first
+        // keeps one interrupted run from failing the next.
+        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE subzone_id IN "
+                + "(SELECT id FROM delivery_subzones WHERE name LIKE 'SweepTerritory %')");
+        jdbc.update("DELETE FROM delivery_subzones WHERE name LIKE 'SweepTerritory %'");
+        jdbc.update("DELETE FROM delivery_zones WHERE name LIKE 'Zone B swp%'");
 
         merchantA = newMerchant("a");
         merchantB = newMerchant("b");
@@ -197,6 +209,24 @@ class EveryPublishedEndpointSweepTest {
                 "SELECT id FROM order_groups WHERE group_number = ?", Long.class,
                 "SWB-GRP-" + tag);
 
+        // A BULK IMPORT B RAN, AND THE ROWS IT REFUSED. The first version of
+        // this sweep skipped every {runId} route because it had no run to
+        // point at - and skipping is how the import-problem leak survived the
+        // first pass. The skip list is printed for exactly this reason.
+        jdbc.update("INSERT INTO catalog_import_runs (shop_id, filename, admin_email, "
+                        + "mode, status, file_sha256, total_rows, valid_rows, warning_rows, "
+                        + "error_rows, created_count, updated_count, created_at) "
+                        + "VALUES (?, ?, ?, 'IMPORT', 'COMMITTED', ?, 1, 0, 0, 1, 0, 0, now())",
+                shopB, "SWB-SHEET-" + tag + ".xlsx", tag + "-b@example.test",
+                "0".repeat(64));
+        importRunB = jdbc.queryForObject(
+                "SELECT id FROM catalog_import_runs WHERE filename = ?", Long.class,
+                "SWB-SHEET-" + tag + ".xlsx");
+        jdbc.update("INSERT INTO catalog_import_problems (run_id, row_number, field, "
+                        + "severity, problem, suggestion) VALUES (?, 1, 'Selling Price', "
+                        + "'ERROR', ?, 'Check the price')",
+                importRunB, "Sweep Product B " + tag + " costs more than its MRP");
+
         neverPublic.put("customer", "Sweep Buyer B " + tag);
         neverPublic.put("customer's street", "Sweep Lane " + tag);
         neverPublic.put("order number", "SWB-ORD-" + tag);
@@ -206,6 +236,23 @@ class EveryPublishedEndpointSweepTest {
         neverPublic.put("invoice number", "SWB-INV-" + tag);
         neverPublic.put("payment transaction id", "SWB-TXN-" + tag);
         neverPublic.put("order group number", "SWB-GRP-" + tag);
+
+        // A TERRITORY OF B'S, so the route planner route can be asked about a
+        // subzone that is not the caller's. The third and last skip.
+        String territoryCode = "SZB" + tag.substring(Math.max(0, tag.length() - 8));
+        jdbc.update("INSERT INTO delivery_zones (code, name, active, shop_id) "
+                + "VALUES (?, ?, true, ?)", "Z" + territoryCode, "Zone B " + tag, shopB);
+        Long zoneB = jdbc.queryForObject("SELECT id FROM delivery_zones WHERE code = ?",
+                Long.class, "Z" + territoryCode);
+        jdbc.update("INSERT INTO delivery_subzones (code, name, active, shop_id, zone_id, "
+                        + "boundary, max_concurrent_orders) VALUES (?, ?, true, ?, ?, ?, 10)",
+                territoryCode, "SweepTerritory " + tag, shopB, zoneB,
+                "[[28.60,77.20],[28.60,77.22],[28.62,77.22],[28.62,77.20],[28.60,77.20]]");
+        subzoneB = jdbc.queryForObject("SELECT id FROM delivery_subzones WHERE code = ?",
+                Long.class, territoryCode);
+
+        neverPublic.put("import sheet", "SWB-SHEET-" + tag);
+        neverPublic.put("territory", "SweepTerritory " + tag);
 
         publicOnBrowseRoutes.put("shop code", "SWB-" + tag);
         publicOnBrowseRoutes.put("product", "Sweep Product B " + tag);
@@ -223,6 +270,11 @@ class EveryPublishedEndpointSweepTest {
 
     @AfterEach
     void tidyUp() {
+        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE subzone_id = ?", subzoneB);
+        jdbc.update("DELETE FROM delivery_subzones WHERE shop_id IN (?, ?)", shopA, shopB);
+        jdbc.update("DELETE FROM delivery_zones WHERE shop_id IN (?, ?)", shopA, shopB);
+        jdbc.update("DELETE FROM catalog_import_problems WHERE run_id = ?", importRunB);
+        jdbc.update("DELETE FROM catalog_import_runs WHERE id = ?", importRunB);
         jdbc.update("DELETE FROM cart_items WHERE cart_id = ?", cartB);
         jdbc.update("DELETE FROM carts WHERE id = ?", cartB);
         jdbc.update("DELETE FROM invoices WHERE shop_id IN (?, ?)", shopA, shopB);
@@ -475,6 +527,12 @@ class EveryPublishedEndpointSweepTest {
         }
         if (name.startsWith("address")) {
             return String.valueOf(addressB);
+        }
+        if (name.startsWith("subzone")) {
+            return String.valueOf(subzoneB);
+        }
+        if (name.startsWith("runid")) {
+            return String.valueOf(importRunB);
         }
         if (name.startsWith("cart")) {
             return String.valueOf(cartB);

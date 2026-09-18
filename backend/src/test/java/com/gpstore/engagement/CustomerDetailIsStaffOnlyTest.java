@@ -89,6 +89,8 @@ class CustomerDetailIsStaffOnlyTest {
         // Nothing in the application grants ADMIN - registration hardcodes
         // CUSTOMER - so the role is set directly, exactly as production does.
         jdbc.update("UPDATE customers SET role = 'ADMIN' WHERE email = ?", email);
+        // A role is not a posting - see StaffPosting.
+        com.gpstore.support.StaffPosting.postToFirstShop(jdbc, email);
         ResponseEntity<java.util.Map> login = rest.postForEntity(
                 url("/api/auth/login"),
                 json("""
@@ -96,6 +98,14 @@ class CustomerDetailIsStaffOnlyTest {
                      """.formatted(email)),
                 java.util.Map.class);
         return (String) login.getBody().get("token");
+    }
+
+    /** One delivered order at this shop, which is what makes somebody its customer. */
+    private void soldSomethingTo(Long customerId, long stamp) {
+        Long shopId = com.gpstore.support.StaffPosting.firstShopId(jdbc);
+        jdbc.update("INSERT INTO orders (shop_id, customer_id, order_number, order_status, "
+                        + "total_amount, order_date) VALUES (?, ?, ?, 'DELIVERED', 100, now())",
+                shopId, customerId, "DETAIL-" + stamp);
     }
 
     @Test
@@ -165,6 +175,10 @@ class CustomerDetailIsStaffOnlyTest {
         String subjectEmail = "detail-subject-" + stamp + "@example.com";
         register(subjectEmail);
         Long subjectId = idOf(subjectEmail);
+        // THE SUBJECT IS A CUSTOMER OF THIS SHOP, which is now what the screen
+        // requires: a shopkeeper reads the file on somebody who has bought
+        // from them, not on anybody with an account. See ShopCustomers.
+        soldSomethingTo(subjectId, stamp);
 
         String admin = staffToken("detail-admin-" + stamp + "@example.com");
 
@@ -189,6 +203,7 @@ class CustomerDetailIsStaffOnlyTest {
         String subjectEmail = "detail-secrets-" + stamp + "@example.com";
         register(subjectEmail);
         Long subjectId = idOf(subjectEmail);
+        soldSomethingTo(subjectId, stamp);
 
         String admin = staffToken("detail-secadmin-" + stamp + "@example.com");
 

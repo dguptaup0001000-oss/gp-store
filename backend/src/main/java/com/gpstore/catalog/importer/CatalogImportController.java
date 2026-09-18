@@ -126,7 +126,7 @@ public class CatalogImportController {
      */
     @GetMapping("/{runId}/problems")
     public List<CatalogImportService.ProblemView> problemsOf(@PathVariable Long runId) {
-        return problems.findByRunIdOrderByRowNumberAsc(runId).stream()
+        return problems.findForRunOnThisShop(runId).stream()
                 .limit(500)
                 .map(p -> new CatalogImportService.ProblemView(
                         p.getRowNumber(), p.getField(), p.getSeverity().name(),
@@ -142,7 +142,7 @@ public class CatalogImportController {
      */
     @GetMapping("/{runId}/problems.csv")
     public ResponseEntity<byte[]> problemReport(@PathVariable Long runId) throws IOException {
-        List<CatalogImportProblem> found = problems.findByRunIdOrderByRowNumberAsc(runId);
+        List<CatalogImportProblem> found = problems.findForRunOnThisShop(runId);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (CSVPrinter printer = new CSVPrinter(
