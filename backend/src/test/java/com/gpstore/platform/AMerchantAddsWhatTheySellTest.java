@@ -358,9 +358,58 @@ class AMerchantAddsWhatTheySellTest {
             // The empty state above must not make the shop unable to start: the
             // Add Product screen picks from the platform tree, which is how the
             // first category ever gets onto a shelf.
+            //
+            // COUNTED, NOT SEARCHED FOR. The taxonomy endpoint is capped at a
+            // page of a hundred in alphabetical order, so looking for one named
+            // department passes or fails on where its name happens to sort -
+            // which is a property of the test's nonce, not of the code. What
+            // this test means is that the picking list is WIDER than the shop's
+            // own shelf, and that survives any catalogue.
             String all = body(get("/api/categories"), phoneOwner, null);
-            assertTrue(all.contains("Mobile Phones " + tag) && all.contains("Sarees " + tag),
-                    "both departments exist in the platform taxonomy: " + all);
+            String mine = body(get("/api/categories/mine"), phoneOwner, null);
+
+            assertTrue(countOf(all) > countOf(mine),
+                    "the Add Product screen offers no more departments than the shop "
+                            + "already trades in, so a shop could never enter a new one. "
+                            + "taxonomy=" + countOf(all) + " mine=" + countOf(mine));
+        }
+
+        @Test
+        @DisplayName("a shop's departments are found however the taxonomy sorts")
+        void myDepartmentsSurviveALargeTaxonomy() throws Exception {
+            // THE BUG THIS PINS. "My departments" used to be computed by taking
+            // the first hundred categories of the whole taxonomy in alphabetical
+            // order and keeping the ones on this shelf - so a shop whose
+            // department sorted after the hundredth was told it trades in
+            // nothing. The fillers below all sort BEFORE "Mobile Phones", which
+            // is exactly the arrangement that produced an empty screen.
+            body(post("/api/shop/products"), phoneOwner, """
+                    {"name":"Edge 50 Neo 5G","brand":"Motorola","categoryId":%d,
+                     "firstVariant":{"label":"8 GB + 256 GB","sellingPrice":23999,"stock":2}}
+                    """.formatted(phoneCategory));
+
+            jdbc.update("INSERT INTO categories (name, description, active) "
+                    + "SELECT 'AAA filler ' || g || ' " + tag + "', 'filler', true "
+                    + "FROM generate_series(1, 150) g");
+            try {
+                String mine = body(get("/api/categories/mine"), phoneOwner, null);
+                assertTrue(mine.contains("Mobile Phones " + tag),
+                        "a shop with 150 departments ahead of theirs in the alphabet was "
+                                + "shown an empty list: " + mine);
+            } finally {
+                jdbc.update("DELETE FROM categories WHERE name LIKE 'AAA filler %" + tag + "'");
+            }
+        }
+
+        /** How many objects a JSON array of categories holds. */
+        private int countOf(String jsonArray) {
+            int count = 0;
+            for (int i = 0; i < jsonArray.length(); i++) {
+                if (jsonArray.charAt(i) == '{') {
+                    count++;
+                }
+            }
+            return count;
         }
 
         @Test

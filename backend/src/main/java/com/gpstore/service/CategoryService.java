@@ -100,11 +100,16 @@ public class CategoryService {
         if (mine.isEmpty()) {
             return List.of();
         }
-        return categoryRepository.findByActiveTrueOrderByNameAsc(
-                        org.springframework.data.domain.PageRequest.of(0, STOREFRONT_CATEGORY_CAP))
-                .stream()
-                .filter(category -> mine.contains(category.getId()))
-                .toList();
+        // BY ID, NOT BY FILTERING A PAGE OF THE TAXONOMY.
+        //
+        // This used to read the first STOREFRONT_CATEGORY_CAP categories in
+        // alphabetical order and keep the ones on this shelf - so a shop whose
+        // departments sorted after the hundredth got an empty list and a screen
+        // saying they trade in nothing. On a platform whose taxonomy grows past
+        // a hundred departments that is every shop in the second half of the
+        // alphabet. The set is bounded by the shop's own listings, which is the
+        // right bound for this question.
+        return categoryRepository.findActiveByIdIn(mine);
     }
 
     public Category getById(Long id) {
