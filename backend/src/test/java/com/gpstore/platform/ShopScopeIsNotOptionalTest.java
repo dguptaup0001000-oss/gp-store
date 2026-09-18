@@ -168,7 +168,21 @@ class ShopScopeIsNotOptionalTest {
             // the verified token and the rows come from the database. Neither
             // returns a row, only shop ids the credential already permits.
             "ShopStaffRepository.shopIdsFor",
-            "ShopStaffRepository.defaultShopIdFor");
+            "ShopStaffRepository.defaultShopIdFor",
+
+            // DELIBERATELY CROSS-SHOP, AND THAT IS THE QUESTION IT ASKS.
+            // "Is anybody else selling this catalogue item?" is what decides
+            // whether a merchant may edit the shared description of a variant
+            // or only their own price for it (see ShopVariantEditing). Run
+            // under the filter it would narrow to the caller and always answer
+            // one, which would hand every merchant an edit box over every
+            // other merchant's product.
+            //
+            // It takes no caller input beyond a variant id the caller has
+            // already been shown, and it SELECTS count(*) - a number. No row,
+            // no price, no shop id and nothing naming another merchant can
+            // travel through it, so the cross-shop read leaks nothing.
+            "ProductVariantAttributeRepository.countShopsListing");
 
     /**
      * Bulk JPQL updates and deletes against shop-owned entities that have been read.

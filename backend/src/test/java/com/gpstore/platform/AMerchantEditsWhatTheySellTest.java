@@ -226,6 +226,38 @@ class AMerchantEditsWhatTheySellTest {
         }
 
         @Test
+        @DisplayName("the merchant's own cost price never comes back in the response")
+        void costPriceIsNotReturned() throws Exception {
+            long variant = phoneVariant();
+            body(put("/api/shop/variants/" + variant), phoneOwner, """
+                    {"mrp":35000,"sellingPrice":30000,"costPrice":29000,"available":true}
+                    """);
+
+            // WRITABLE, NEVER READABLE. What a shop paid is its private
+            // business; it is set here and it is not echoed, so a response
+            // captured anywhere - a log, a proxy, a screenshot - cannot carry
+            // the merchant's margin.
+            String read = body(get("/api/shop/variants/" + variant), phoneOwner, null);
+            assertFalse(read.contains("29000"),
+                    "cost price came back out of the merchant variant read: " + read);
+            assertFalse(read.toLowerCase(java.util.Locale.ROOT).contains("costprice"),
+                    "the field itself must not be in the response shape: " + read);
+        }
+
+        @Test
+        @DisplayName("a customer browsing the shop never sees cost price")
+        void costPriceNeverReachesTheStorefront() throws Exception {
+            long variant = phoneVariant();
+            body(put("/api/shop/variants/" + variant), phoneOwner, """
+                    {"mrp":35000,"sellingPrice":30000,"costPrice":29000,"available":true}
+                    """);
+
+            String feed = body(get("/api/products/feed?page=0&size=50"), phoneOwner, null);
+            assertFalse(feed.contains("29000"),
+                    "the wholesale margin reached a browse surface: " + feed);
+        }
+
+        @Test
         @DisplayName("selling above MRP is refused, and says so")
         void sellingAboveMrpIsRefused() throws Exception {
             long variant = phoneVariant();
