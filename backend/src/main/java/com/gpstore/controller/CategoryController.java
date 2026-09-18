@@ -22,9 +22,34 @@ public class CategoryController {
         return categoryService.saveCategory(category);
     }
 
+    /**
+     * The platform's taxonomy - every department GP-STORE knows about.
+     *
+     * <p>Stays whole on purpose. This is what the Add Product screen offers a
+     * merchant to choose from, and what the customer app browses. A merchant
+     * picking "Mobile Phones" for the first time needs to see a category their
+     * shop does not trade in yet.
+     */
     @GetMapping
     public List<Category> getAllCategories() {
         return categoryService.getAllCategories();
+    }
+
+    /**
+     * The departments the calling shop actually trades in.
+     *
+     * <p>SEPARATE FROM THE TAXONOMY ABOVE because they are different questions,
+     * and answering the second with the first is what showed a new phone shop
+     * a management list of "Atta, Rice & Dal ... for everyday kirana needs".
+     * See CategoryService.getCategoriesOnMyShelf.
+     *
+     * <p>Not a permission boundary and not authorization - a merchant's own
+     * shelf decides what is on it. Ownership is enforced where it belongs, on
+     * the listing rows.
+     */
+    @GetMapping("/mine")
+    public List<Category> getMyCategories() {
+        return categoryService.getCategoriesOnMyShelf();
     }
 
     @GetMapping("/{id}")

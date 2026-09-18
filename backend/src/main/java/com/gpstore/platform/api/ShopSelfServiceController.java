@@ -52,6 +52,7 @@ public class ShopSelfServiceController {
     private final com.gpstore.payment.collection.PaymentCollection paymentCollection;
     private final com.gpstore.repository.InventoryRepository inventory;
     private final com.gpstore.repository.ProductVariantRepository variants;
+    private final com.gpstore.service.ProductService products;
 
     public ShopSelfServiceController(ShopRepository shops, ShopLifecycleService shopLifecycle,
                                      ShopProductVariantRepository listings,
@@ -66,7 +67,9 @@ public class ShopSelfServiceController {
                                      com.gpstore.platform.ShopReliability reliabilityService,
                                      com.gpstore.payment.collection.PaymentCollection paymentCollection,
                                      com.gpstore.repository.InventoryRepository inventory,
-                                     com.gpstore.repository.ProductVariantRepository variants) {
+                                     com.gpstore.repository.ProductVariantRepository variants,
+                                     com.gpstore.service.ProductService products) {
+        this.products = products;
         this.paymentCollection = paymentCollection;
         this.inventory = inventory;
         this.variants = variants;
@@ -396,6 +399,44 @@ public class ShopSelfServiceController {
         }
         return ShopProfile.of(shopLifecycle.transitionAsMerchant(
                 currentShop().getId(), next, request.reason()));
+    }
+
+    // ------------------------------------------------- putting something new on
+
+    /**
+     * A merchant adds something they sell.
+     *
+     * <p>THE ROUTE THAT DID NOT EXIST, and its absence is the whole bug. A
+     * marketplace merchant had exactly two catalogue powers:
+     * {@code PUT /api/shop/listings/{variantId}}, which prices a variant that
+     * ALREADY exists centrally, and {@code POST /api/products}, which is the
+     * platform's catalogue and answers 403 to anyone without CATALOG_DEFINE.
+     * Neither one lets a phone shop introduce a phone nobody has sold here
+     * before. There was no third route.
+     *
+     * <p>WHY IT LOOKED LIKE IT WORKED ON A REAL DEVICE. Production still runs
+     * with {@code platform.mode} unset, which parses to SINGLE_SHOP, and in
+     * that mode CatalogDefinitionAuthorization falls back to CATALOG_MANAGE -
+     * which every shopkeeper holds. So Add Product reached
+     * {@code POST /api/products} after all, wrote a central catalogue row with
+     * no variant and no listing, and answered 200. The merchant's Products
+     * screen asks the shelf ({@code findAllListedForCurrentShop}), a catalogue
+     * row with no variant can never satisfy it, and so the product was
+     * invisible to its own creator from the moment it was written - with no
+     * error anywhere to explain it.
+     *
+     * <p>THIS IS THE SHOPKEEPER'S ACT, SO IT TAKES THE SHOPKEEPER'S PERMISSION
+     * (CATALOG_MANAGE) and is scoped to the acting shop. It writes the
+     * catalogue entry, the first variant, THIS shop's listing and THIS shop's
+     * opening stock in one transaction. Defining shared taxonomy stays a
+     * platform act on the other route; adding stock to your own shelf never was
+     * one.
+     */
+    @PostMapping("/products")
+    public com.gpstore.dto.response.ProductResponse addProduct(
+            @jakarta.validation.Valid @RequestBody
+            com.gpstore.dto.request.ProductCreateRequest request) {
+        return products.createProduct(request);
     }
 
     // --------------------------------------------------------- the price list

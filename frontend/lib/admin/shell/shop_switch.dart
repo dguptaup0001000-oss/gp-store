@@ -73,6 +73,9 @@ final List<ProviderOrFamily> shopScopedProviders = <ProviderOrFamily>[
   // Catalogue and stock
   adminAllProductsProvider,
   adminCategoriesProvider,
+  // The shop's own departments are shop-scoped data: without this line,
+  // switching shops keeps showing the previous shop's Categories screen.
+  adminMyCategoriesProvider,
   adminAllInventoryProvider,
   adminLowStockProvider,
   adminLowStockCountProvider,

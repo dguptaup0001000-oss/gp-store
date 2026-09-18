@@ -68,8 +68,22 @@ final adminAllProductsProvider = FutureProvider.autoDispose<List<Product>>((ref)
   return ref.watch(adminProductsRepositoryProvider).getAllForAdmin();
 });
 
+/// The platform's taxonomy - every department GP-STORE knows about.
+///
+/// What Add Product picks from. Deliberately NOT the merchant's Categories
+/// screen: a shop that trades in nothing yet still has to be able to choose a
+/// first category, so this list must stay whole.
 final adminCategoriesProvider = FutureProvider.autoDispose<List<Category>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getCategories();
+});
+
+/// The departments the acting shop actually trades in.
+///
+/// What the merchant's Categories screen shows. See
+/// AdminProductsRepository.getMyCategories for why these are two providers and
+/// not one.
+final adminMyCategoriesProvider = FutureProvider.autoDispose<List<Category>>((ref) {
+  return ref.watch(adminProductsRepositoryProvider).getMyCategories();
 });
 
 typedef AdminInventoryPage = ({List<InventoryItem> items, int page, int totalPages});

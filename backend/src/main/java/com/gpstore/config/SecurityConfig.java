@@ -256,6 +256,16 @@ public class SecurityConfig {
                 // "everything including inactive" product list must come
                 // before the broad public GET /api/products/** rule below.
                 .requestMatchers(HttpMethod.GET, "/api/products/admin/**").hasAuthority(AdminPermission.CATALOG_VIEW.authority())
+                // THE MERCHANT'S OWN DEPARTMENTS, and it must come before the
+                // public /api/categories/** rule below or it inherits permitAll
+                // from it. The rows themselves are derived from listings that
+                // the customer's discovery screens already publish, so this is
+                // not secrecy - it is that a shop-management surface should
+                // require the permission that means "may look at the
+                // catalogue", and never be reachable by an anonymous caller
+                // who happened to set a shop header.
+                .requestMatchers(HttpMethod.GET, "/api/categories/mine")
+                    .hasAuthority(AdminPermission.CATALOG_VIEW.authority())
                 .requestMatchers(HttpMethod.GET,
                         "/api/products/**",
                         "/api/categories/**",
@@ -299,6 +309,15 @@ public class SecurityConfig {
                 // permission again - see requirePermission there.
                 .requestMatchers("/api/shop/listings/*/stock")
                     .hasAuthority(AdminPermission.INVENTORY_MANAGE.authority())
+                // ADDING SOMETHING YOU SELL IS SHOPKEEPER'S WORK, not a
+                // platform act. It creates a catalogue row as a side effect,
+                // but the row it exists to create is this shop's listing - so
+                // it takes CATALOG_MANAGE like pricing and stocking do, and
+                // never CATALOG_DEFINE. Must precede the broad /api/shop/**
+                // CATALOG_VIEW rule below or a read permission would authorise
+                // this write.
+                .requestMatchers(HttpMethod.POST, "/api/shop/products")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
                 .requestMatchers("/api/shop/listings/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
 
                 // THE BACK OFFICE, gated on what it is about rather than on

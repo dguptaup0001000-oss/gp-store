@@ -44,16 +44,32 @@ class AdminProductsRepository {
         .toList();
   }
 
+  /// Adds something this shop sells: the catalogue entry, its first variant,
+  /// this shop's listing and its opening stock, in one server-side transaction.
+  ///
+  /// POSTS TO /api/shop/products, NOT /api/products, and the difference is the
+  /// whole bug. /api/products is the PLATFORM's catalogue - in a marketplace it
+  /// answers 403 to anyone without CATALOG_DEFINE, and where it does let a
+  /// shopkeeper through (single-shop mode, which is what production still runs)
+  /// it writes a catalogue row with no variant and no listing. The merchant's
+  /// Products list shows what THIS shop lists, so such a product was invisible
+  /// to the person who had just created it, permanently, with no error.
+  ///
+  /// [firstVariant] carries the half that makes it real. The label is free text
+  /// because a variant means something different in every trade - "12 GB +
+  /// 256 GB", "Red, pure silk", "1 kg", "Half plate".
   Future<Product> createProduct({
     required String name,
     String? brand,
     required int categoryId,
+    required AdminFirstVariant firstVariant,
   }) async {
-    final response = await apiClient.dio.post('/api/products', data: {
+    final response = await apiClient.dio.post('/api/shop/products', data: {
       'name': name,
       'brand': brand,
-      'category': {'id': categoryId},
+      'categoryId': categoryId,
       'active': true,
+      'firstVariant': firstVariant.toJson(),
     });
     return Product.fromJson(response.data as Map<String, dynamic>);
   }
@@ -241,6 +257,20 @@ class AdminProductsRepository {
         .toList(growable: false);
   }
 
+  /// The departments THIS shop actually trades in.
+  ///
+  /// SEPARATE FROM [getCategories] because they answer different questions, and
+  /// answering the second with the first is what showed a newly onboarded phone
+  /// shop a management list of "Atta, Rice & Dal ... for everyday kirana needs".
+  /// The taxonomy is the platform's; the shelf is the shop's.
+  Future<List<Category>> getMyCategories() async {
+    final response = await apiClient.dio.get('/api/categories/mine');
+    return (response.data as List)
+        .map((e) => Category.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// The whole platform taxonomy - what Add Product offers to choose from.
   Future<List<Category>> getCategories() async {
     final response = await apiClient.dio.get('/api/categories');
     return (response.data as List)
@@ -706,4 +736,32 @@ class AdminProductsRepository {
       },
     );
   }
+}
+
+/// The first sellable form of a new product, and what this shop asks for it.
+///
+/// DELIBERATELY NOT GROCERY-SHAPED. GP-STORE sells phones, sarees, medicine and
+/// atta, and "pack size" is a kirana word. [label] is whatever distinguishes one
+/// sellable thing from another in the merchant's own trade; the server stores it
+/// against the same generic variant columns every product already uses, so
+/// nothing about the existing variant architecture changes.
+class AdminFirstVariant {
+  const AdminFirstVariant({
+    required this.label,
+    required this.sellingPrice,
+    this.mrp,
+    this.stock,
+  });
+
+  final String label;
+  final double sellingPrice;
+  final double? mrp;
+  final int? stock;
+
+  Map<String, dynamic> toJson() => {
+        if (label.trim().isNotEmpty) 'label': label.trim(),
+        'sellingPrice': sellingPrice,
+        if (mrp != null) 'mrp': mrp,
+        'stock': stock ?? 0,
+      };
 }
