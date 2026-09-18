@@ -361,7 +361,9 @@ class _VariantsSection extends ConsumerWidget {
               onPressed: hapticize(() async {
                 final saved = await showDialog<bool>(
                   context: context,
-                  builder: (context) => AdminVariantFormDialog(productId: product.id),
+                  builder: (context) => AdminVariantFormDialog(
+                      productId: product.id,
+                      categoryName: product.category?.name),
                 );
                 if (saved == true) {
                   ref.invalidate(adminAllProductsProvider);
@@ -414,7 +416,10 @@ class _VariantsSection extends ConsumerWidget {
                       onPressed: hapticize(() async {
                         final saved = await showDialog<bool>(
                           context: context,
-                          builder: (context) => AdminVariantFormDialog(productId: product.id, variant: variant),
+                          builder: (context) => AdminVariantFormDialog(
+                              productId: product.id,
+                              variant: variant,
+                              categoryName: product.category?.name),
                         );
                         if (saved == true) {
                           ref.invalidate(adminAllProductsProvider);

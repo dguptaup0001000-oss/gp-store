@@ -80,6 +80,15 @@ public class ShopProductVariant implements ShopOwned {
     @Column(name = "display_order")
     private Integer displayOrder;
 
+    /**
+     * Which of THIS shop's own departments the merchant filed this listing
+     * under. Null is the normal state and means "found through the platform
+     * category of the product behind it", exactly as before shop departments
+     * existed. Merchandising belongs to the shop, so it lives on the listing.
+     */
+    @Column(name = "shop_category_id")
+    private Long shopCategoryId;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -135,6 +144,9 @@ public class ShopProductVariant implements ShopOwned {
 
     public Integer getDisplayOrder() { return displayOrder; }
     public void setDisplayOrder(Integer displayOrder) { this.displayOrder = displayOrder; }
+
+    public Long getShopCategoryId() { return shopCategoryId; }
+    public void setShopCategoryId(Long shopCategoryId) { this.shopCategoryId = shopCategoryId; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

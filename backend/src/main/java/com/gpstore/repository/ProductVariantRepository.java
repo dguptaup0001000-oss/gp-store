@@ -20,6 +20,9 @@ public interface ProductVariantRepository
      * an exception here is the correct outcome, not a silently-picked first
      * row.
      */
+    /** Every sellable form of one catalogue product. */
+    List<ProductVariant> findByProduct_IdOrderByIdAsc(Long productId);
+
     Optional<ProductVariant> findBySku(String sku);
 
     /** Barcode uniqueness, checked by the bulk importer before it writes. */

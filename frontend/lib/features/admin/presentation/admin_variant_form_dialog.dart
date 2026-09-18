@@ -6,14 +6,24 @@ import '../../auth/presentation/auth_providers.dart' show extractErrorMessage;
 import '../../products/domain/product_models.dart';
 import '../data/admin_products_repository.dart';
 import '../domain/variant_save_action.dart';
+import '../domain/variant_attribute.dart';
+import '../../../core/api/error_messages.dart' show apiStatusOf;
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
 
 class AdminVariantFormDialog extends ConsumerStatefulWidget {
   const AdminVariantFormDialog(
-      {super.key, required this.productId, this.variant});
+      {super.key,
+      required this.productId,
+      this.variant,
+      this.categoryName});
 
   final int productId;
+
+  /// Only used to choose which attribute names the form OPENS with. Never a
+  /// constraint: the merchant can rename or remove any of them, and a trade
+  /// nobody anticipated simply types its own.
+  final String? categoryName;
 
   /// Null means "add new variant" - non-null means editing this one.
   final ProductVariant? variant;
@@ -26,8 +36,19 @@ class AdminVariantFormDialog extends ConsumerStatefulWidget {
 class _AdminVariantFormDialogState
     extends ConsumerState<AdminVariantFormDialog> {
   final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _quantityController;
-  late final TextEditingController _unitController;
+
+  /// What the merchant calls this variant in one line - "8 GB + 128 GB",
+  /// "Red, pure silk", "1 kg", "Half plate". Optional.
+  late final TextEditingController _labelController;
+
+  /// The variant's details as name/value pairs. THE FIELD THAT REPLACED
+  /// "Pack size" and "Unit (kg, g, L...)", which asked every trade the
+  /// grocer's question and left a phone merchant typing "8" under "Pack size".
+  final List<_AttributeRow> _attributes = [];
+
+  /// Matches the backend's own ceiling (ShopVariantEditing.MAX_ATTRIBUTES), so
+  /// the form cannot build a request the server will refuse.
+  static const int _maxAttributes = 20;
   late final TextEditingController _mrpController;
   late final TextEditingController _sellingPriceController;
   late final TextEditingController _costPriceController;
@@ -58,9 +79,7 @@ class _AdminVariantFormDialogState
   void initState() {
     super.initState();
     final v = widget.variant;
-    _quantityController =
-        TextEditingController(text: v?.quantity?.toString() ?? '');
-    _unitController = TextEditingController(text: v?.unit ?? '');
+    _labelController = TextEditingController(text: v?.unit ?? '');
     _mrpController = TextEditingController(text: v?.mrp?.toString() ?? '');
     _sellingPriceController =
         TextEditingController(text: v?.sellingPrice?.toString() ?? '');
@@ -80,6 +99,43 @@ class _AdminVariantFormDialogState
         : const [];
     if (_isEditing) {
       _loadExistingImages();
+      _loadExistingAttributes();
+    } else {
+      _seedAttributesFromTemplate();
+    }
+  }
+
+  /// Opens the form with the names this trade usually needs, so a phone shop
+  /// is not asked to invent the word "RAM" from a blank screen. Values are
+  /// empty and every row can be renamed or removed.
+  void _seedAttributesFromTemplate() {
+    for (final name in VariantAttributeTemplates.forCategory(widget.categoryName)) {
+      _attributes.add(_AttributeRow(name: name, value: ''));
+    }
+  }
+
+  /// The attributes this variant already carries.
+  ///
+  /// Quiet on failure for the same reason the photo load is: the form is
+  /// usable without them, and an error banner over a price screen because a
+  /// details list did not load would be noise. A variant that has none - every
+  /// variant created before this feature - falls back to the trade template so
+  /// the merchant still has somewhere to type.
+  Future<void> _loadExistingAttributes() async {
+    try {
+      final loaded = await ref
+          .read(adminProductsRepositoryProvider)
+          .getVariantAttributes(widget.variant!.id);
+      if (!mounted) return;
+      setState(() {
+        _attributes
+          ..clear()
+          ..addAll(loaded.map((a) => _AttributeRow(name: a.name, value: a.value)));
+        if (_attributes.isEmpty) _seedAttributesFromTemplate();
+      });
+    } catch (_) {
+      if (!mounted) return;
+      if (_attributes.isEmpty) setState(_seedAttributesFromTemplate);
     }
   }
 
@@ -104,8 +160,10 @@ class _AdminVariantFormDialogState
 
   @override
   void dispose() {
-    _quantityController.dispose();
-    _unitController.dispose();
+    _labelController.dispose();
+    for (final row in _attributes) {
+      row.dispose();
+    }
     _mrpController.dispose();
     _sellingPriceController.dispose();
     _costPriceController.dispose();
@@ -119,7 +177,19 @@ class _AdminVariantFormDialogState
 
     try {
       final repository = ref.read(adminProductsRepositoryProvider);
-      final quantity = double.parse(_quantityController.text.trim());
+      final attributes = _collectAttributes();
+      // GROCERY COMPATIBILITY, WITHOUT GROCERY ASSUMPTIONS. A kirana still
+      // types "Pack size" and "Unit" - they are simply two attribute names
+      // among many now - and those two still fill the catalogue's numeric
+      // quantity/unit columns, which is what weighs a basket for delivery.
+      // A phone shop fills neither and nothing breaks.
+      final quantity = _numberNamed(attributes, 'pack size') ??
+          _numberNamed(attributes, 'volume') ??
+          _numberNamed(attributes, 'quantity');
+      final unit = _valueNamed(attributes, 'unit');
+      final label = _labelController.text.trim().isEmpty
+          ? VariantAttribute.describe(attributes)
+          : _labelController.text.trim();
       final mrp = double.parse(_mrpController.text.trim());
       final sellingPrice = double.parse(_sellingPriceController.text.trim());
       final costPrice = _costPriceController.text.trim().isEmpty
@@ -139,8 +209,10 @@ class _AdminVariantFormDialogState
       if (action == VariantSaveAction.update && _isEditing) {
         await repository.updateVariant(
           variantId: widget.variant!.id,
+          label: label,
           quantity: quantity,
-          unit: _unitController.text.trim(),
+          unit: unit,
+          attributes: attributes,
           imageUrl: imageUrl,
           mrp: mrp,
           sellingPrice: sellingPrice,
@@ -154,8 +226,10 @@ class _AdminVariantFormDialogState
       } else if (action == VariantSaveAction.update) {
         await repository.updateVariant(
           variantId: _createdVariantId!,
+          label: label,
           quantity: quantity,
-          unit: _unitController.text.trim(),
+          unit: unit,
+          attributes: attributes,
           imageUrl: imageUrl,
           mrp: mrp,
           sellingPrice: sellingPrice,
@@ -169,8 +243,10 @@ class _AdminVariantFormDialogState
       } else {
         final newVariantId = await repository.createVariant(
           productId: widget.productId,
+          label: label,
           quantity: quantity,
-          unit: _unitController.text.trim(),
+          unit: unit,
+          attributes: attributes,
           imageUrl: imageUrl,
           mrp: mrp,
           sellingPrice: sellingPrice,
@@ -221,14 +297,81 @@ class _AdminVariantFormDialogState
           return;
         }
       } else {
+        // THE SENTENCE THAT SENT A MERCHANT LOOKING AT HIS OWN TYPING.
+        // Every failure used to render as "check the values", including a 403
+        // that had nothing to do with values: the app was calling the
+        // platform's catalogue route, the server refused it, and the message
+        // blamed 35000/30000/29000. The backend's own words are better than
+        // anything this layer can invent, and the status decides what to add.
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  "Couldn't save variant - please check the values and try again")),
+          SnackBar(content: Text(_saveFailureMessage(e, message))),
         );
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  /// The rows the merchant actually filled in, trimmed, blanks dropped.
+  List<VariantAttribute> _collectAttributes() {
+    final out = <VariantAttribute>[];
+    final seen = <String>{};
+    for (final row in _attributes) {
+      final name = row.name.text.trim();
+      final value = row.value.text.trim();
+      if (name.isEmpty || value.isEmpty) continue;
+      if (!seen.add(name.toLowerCase())) continue;
+      out.add(VariantAttribute(name: name, value: value));
+    }
+    return out;
+  }
+
+  static String? _valueNamed(List<VariantAttribute> attributes, String name) {
+    for (final a in attributes) {
+      if (a.name.toLowerCase() == name) return a.value;
+    }
+    return null;
+  }
+
+  static double? _numberNamed(List<VariantAttribute> attributes, String name) {
+    final raw = _valueNamed(attributes, name);
+    if (raw == null) return null;
+    // "1 kg" and "1" both mean one. Takes the leading number and ignores any
+    // unit the merchant typed alongside it.
+    final match = RegExp(r'[-+]?[0-9]*\.?[0-9]+').firstMatch(raw);
+    return match == null ? null : double.tryParse(match.group(0)!);
+  }
+
+  /// What to actually tell the merchant when a save fails.
+  ///
+  /// The backend's own sentence is preferred - it knows which rule was broken.
+  /// The status only decides whether to add something the merchant can act on.
+  String _saveFailureMessage(Object error, String backendMessage) {
+    final status = apiStatusOf(error);
+    switch (status) {
+      case 401:
+        return 'Your session has expired. Please sign in again.';
+      case 403:
+        return backendMessage.isEmpty
+            ? 'This shop is not allowed to change that item.'
+            : backendMessage;
+      case 404:
+        return 'This shop no longer lists that item. Refresh and try again.';
+      case 409:
+        return backendMessage.isEmpty
+            ? 'That was already saved, or it changed while you were editing. '
+                'Refresh and check before trying again.'
+            : backendMessage;
+      case 400:
+      case 422:
+        // The one case where "check the values" is actually true - and even
+        // then the server says WHICH value.
+        return backendMessage;
+      default:
+        if (status != null && status >= 500) {
+          return 'Something went wrong at our end. Your change was not saved.';
+        }
+        return backendMessage;
     }
   }
 
@@ -292,32 +435,86 @@ class _AdminVariantFormDialogState
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // WHAT TELLS THIS VARIANT APART, in the words of whatever
+              // trade this is. Optional: a shop that sells one form of
+              // something has nothing to write here.
+              TextFormField(
+                controller: _labelController,
+                decoration: const InputDecoration(
+                  labelText: 'Variant name (optional)',
+                  hintText: '8 GB + 128 GB, Red silk, 1 kg, Half plate',
+                  helperText: 'Left blank, this is built from the details below',
+                  helperMaxLines: 2,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // THE DETAILS. This replaced "Pack size" and "Unit (kg, g, L...)",
+              // which asked a phone merchant the grocer's question and left him
+              // typing "8" under "Pack size" and "8 gb and 128 gb" under a unit
+              // box meant for kilograms. A name and a value describe a phone, a
+              // saree, a shoe, a strip of tablets and a bag of atta equally.
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _quantityController,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Pack size'),
-                      validator: (v) =>
-                          (v == null || double.tryParse(v) == null)
-                              ? 'Required'
-                              : null,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _unitController,
-                      decoration: const InputDecoration(
-                          labelText: 'Unit (kg, g, L...)'),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Required' : null,
-                    ),
+                  Text('Details',
+                      style: Theme.of(context).textTheme.titleSmall),
+                  TextButton.icon(
+                    onPressed: _attributes.length >= _maxAttributes
+                        ? null
+                        : hapticize(() => setState(() =>
+                            _attributes.add(_AttributeRow(name: '', value: '')))),
+                    icon: const Icon(Icons.add, size: 20),
+                    label: const Text('Add detail'),
                   ),
                 ],
               ),
+              if (_attributes.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    'Add details like RAM, Storage, Colour, Size, Material or '
+                    'Pack size - whatever tells your variants apart.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              for (int i = 0; i < _attributes.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 4,
+                        child: TextFormField(
+                          controller: _attributes[i].name,
+                          decoration: const InputDecoration(
+                            labelText: 'Detail',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 5,
+                        child: TextFormField(
+                          controller: _attributes[i].value,
+                          decoration: const InputDecoration(
+                            labelText: 'Value',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Remove',
+                        icon: const Icon(Icons.close, size: 20),
+                        onPressed: hapticize(() => setState(() {
+                              _attributes.removeAt(i).dispose();
+                            })),
+                      ),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -552,5 +749,20 @@ class _PhotoThumb extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// The two controllers behind one editable detail row.
+class _AttributeRow {
+  _AttributeRow({required String name, required String value})
+      : name = TextEditingController(text: name),
+        value = TextEditingController(text: value);
+
+  final TextEditingController name;
+  final TextEditingController value;
+
+  void dispose() {
+    name.dispose();
+    value.dispose();
   }
 }

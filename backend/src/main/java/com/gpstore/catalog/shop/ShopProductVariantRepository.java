@@ -46,6 +46,9 @@ public interface ShopProductVariantRepository extends JpaRepository<ShopProductV
 
     long countByAvailableTrueAndActiveTrue();
 
+    /** How many of this shop's listings are filed under one of its departments. */
+    long countByShopCategoryId(Long shopCategoryId);
+
     /**
      * Stock and this shop's price for a basket, in ONE query.
      *
