@@ -138,10 +138,10 @@ public class WorkerScanService {
     private final SubzoneBackupPartnerRepository backupRepository;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
-    private final com.gpstore.territory.TerritoryResolver territoryResolver;
+    private final com.gpstore.territory.AddressTerritory addressTerritory;
     private final com.gpstore.config.AfterCommitExecutor afterCommitExecutor;
 
-    public WorkerScanService(com.gpstore.territory.TerritoryResolver territoryResolver,
+    public WorkerScanService(com.gpstore.territory.AddressTerritory addressTerritory,
                              OrderRepository orderRepository,
                              OrderScanEventRepository scanRepository,
                              DeliveryPartnerRepository partnerRepository,
@@ -152,7 +152,7 @@ public class WorkerScanService {
                              NotificationService notificationService,
                              AuditLogService auditLogService,
                              com.gpstore.config.AfterCommitExecutor afterCommitExecutor) {
-        this.territoryResolver = territoryResolver;
+        this.addressTerritory = addressTerritory;
         this.orderRepository = orderRepository;
         this.scanRepository = scanRepository;
         this.partnerRepository = partnerRepository;
@@ -376,8 +376,8 @@ public class WorkerScanService {
         // stamp off the address would ask a different shop's map who is
         // allowed to pack this - and under a marketplace would load that
         // shop's row and fail the scan outright.
-        DeliverySubzone subzone = territoryResolver
-                .territoryForDelivery(order.getAddress()).orElse(null);
+        DeliverySubzone subzone = addressTerritory
+                .territoryFor(order.getAddress()).orElse(null);
         Authorisation auth = authorise(worker, order, subzone);
         if (!auth.allowed()) {
             return reject(order, worker, clientRequestId, "NOT_AUTHORISED", auth.reason());
@@ -544,7 +544,7 @@ public class WorkerScanService {
                               String outcome, String message) {
         DeliverySubzone subzone = order == null
                 ? null
-                : territoryResolver.territoryForDelivery(order.getAddress()).orElse(null);
+                : addressTerritory.territoryFor(order.getAddress()).orElse(null);
 
         OrderScanEvent event = newEvent(order, worker, clientRequestId, subzone);
         event.setOutcome(outcome);

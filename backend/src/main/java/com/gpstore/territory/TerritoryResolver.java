@@ -178,49 +178,19 @@ public class TerritoryResolver {
     }
 
     /**
-     * The territory THIS SHOP will dispatch an order to, for this address.
+     * WHERE "THE TERRITORY THIS SHOP DELIVERS TO" WENT.
      *
-     * THE CHAIN W4 ASKS FOR STARTS HERE: shop-scoped territory, then
-     * shop-scoped rider, then the shop's own order. Everything downstream
-     * follows from getting this one answer inside the right shop.
+     * <p>It used to live here and read the stamp off {@code addresses
+     * .subzone_id} - one column, shared by every shop, which is the bug
+     * {@link AddressTerritoryStamp} exists to fix. The question is now asked of
+     * {@link AddressTerritory#territoryFor} (read-only) or
+     * {@link AddressTerritory#territoryForDispatch} (which records this shop's
+     * answer the first time it needs one).
      *
-     * Two sources, in this order, and the order is what preserves the
-     * single-shop behaviour exactly:
-     *
-     *   1. THE STAMP ON THE ADDRESS, if it belongs to this shop. Under
-     *      SINGLE_SHOP it always does - it was written by this same resolver
-     *      from these same coordinates - so nothing about dispatch changes.
-     *      It is preferred rather than recomputed because an administrator may
-     *      have PINNED it (subzoneLocked): the block whose only gate opens
-     *      into the next territory is knowledge no polygon has, and it must
-     *      outrank the map.
-     *
-     *   2. THIS SHOP'S OWN MAP, from the coordinates, when the stamp belongs
-     *      to another shop or there is none. A pin is an instruction about the
-     *      map it was made on; it says nothing about a different shop's map,
-     *      so a second merchant resolves their own rather than inheriting a
-     *      competitor's decision.
-     *
-     * FAILS CLOSED, like resolve(): no coordinates, no drawn map, or a point
-     * in a gap all return empty, and the caller falls back to load-based
-     * assignment with the reason recorded. A rider sent to the wrong territory
-     * is worse than a rider sent without local knowledge.
+     * <p>This class went back to being what its name says: the MAP. It turns
+     * coordinates into a territory for whichever shop is asking, and knows
+     * nothing about which houses have been stamped.
      */
-    @Transactional(readOnly = true)
-    public Optional<DeliverySubzone> territoryForDelivery(com.gpstore.entity.Address address) {
-        if (address == null) {
-            return Optional.empty();
-        }
-        if (address.getId() != null) {
-            Optional<DeliverySubzone> stamped =
-                    subzoneRepository.findStampedOnAddressIfInScope(address.getId());
-            if (stamped.isPresent()) {
-                return stamped;
-            }
-        }
-        return resolveSubzoneId(address.getLatitude(), address.getLongitude())
-                .flatMap(subzoneRepository::findInScope);
-    }
 
     /** How many territories currently have a usable outline. */
     @Transactional(readOnly = true)

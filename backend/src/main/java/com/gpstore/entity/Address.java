@@ -115,83 +115,30 @@ public class Address {
     private java.time.LocalDateTime confirmedAt;
 
     /**
-     * The permanent delivery territory this address belongs to.
+     * THE TERRITORY STAMP IS NOT HERE ANY MORE, and moving it was the fix for
+     * a boundary bug rather than a tidy-up.
      *
-     * Stamped once, from the coordinates, when the address is saved - never
-     * recomputed per order. Two reasons, and both matter.
+     * <p>This row used to carry {@code subzone_id} and {@code subzone_locked}:
+     * one territory, and one hand-placed pin, on a row that belongs to the
+     * CUSTOMER. A customer who buys from two kiranas has one home and two
+     * shops' maps over it, so the two columns could only ever hold one shop's
+     * answer and the shops took it from each other - whoever saved, re-resolved
+     * or pinned last won, one merchant's pin froze the address for everybody,
+     * and a shop reading somebody else's stamp got nothing back and quietly
+     * resolved live.
      *
-     * PERMANENCE. A customer who resolved to Z7B must still be Z7B next
-     * month. If this were derived on every read, an administrator nudging a
-     * boundary would silently move existing customers between riders, and the
-     * territory knowledge the whole design is built on would quietly rot.
-     *
-     * COST. Checkout preview runs on every cart change. Keeping the
-     * point-in-polygon test off that path means the territory system adds no
-     * per-request database work at all.
-     *
-     * Null is a real and permitted state: an address saved before the
-     * territory map existed, or one whose coordinates fall outside every
-     * drawn subzone. TerritoryDispatchService treats it as "no territory
-     * information" and says so, rather than guessing a subzone.
+     * <p>The answer now lives in {@code address_territory_stamps}, one row per
+     * shop, shop-owned and therefore narrowed by the same tenant filter as the
+     * territory itself. See {@link com.gpstore.territory.AddressTerritoryStamp}
+     * and {@link com.gpstore.territory.AddressTerritory}; the columns stay on
+     * the table for one release as the rollback path and are read by nothing.
      */
-    /*
-     * @JsonIgnore, and this is about what a customer's phone should be sent
-     * as much as about serialisation.
-     *
-     * AddressController returns this entity directly, so without the
-     * annotation a DeliverySubzone travels with every address - and a
-     * DeliverySubzone carries its polygon boundary, its zone, its assigned
-     * DeliveryPartner (with that partner's name and phone number) and, one
-     * hop further, its neighbour list. None of that is the customer's, and
-     * all of it was being shipped to their phone the moment the first
-     * territory was drawn.
-     *
-     * It was also the mechanism of a 500. neighbours is a lazy collection, so
-     * with open-session-in-view off (see spring.jpa.open-in-view) Jackson
-     * reaching it during serialisation raises LazyInitializationException.
-     * Under open-session-in-view it did not throw - it ran the queries, which
-     * is worse in every way except that nobody noticed.
-     *
-     * NOTHING READS IT FROM THE RESPONSE. The Flutter AddressModel does not
-     * declare a subzone field at all, so this removes a value no client has
-     * ever used. The territory itself is unchanged and still stamped on the
-     * row - it is simply the server's business, which is where the dispatch
-     * code reads it from.
-     */
-    @com.fasterxml.jackson.annotation.JsonIgnore
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "subzone_id")
-    private DeliverySubzone subzone;
-
-    /**
-     * True when an administrator placed this address in its subzone by hand.
-     *
-     * The map cannot know that a house sits on the wrong side of a line, or
-     * that a gated colony's only gate opens into the next territory. A human
-     * can. When they say so, nothing automatic may overwrite it - not a
-     * coordinate update, not a boundary edit, not a bulk re-resolve.
-     */
-    // NOT declared nullable = false here, and that is deliberate. This column
-    // is being ADDED to a table that already holds every customer's addresses,
-    // and Postgres cannot add a NOT NULL column to a non-empty table without a
-    // default - Hibernate's ddl-auto emits exactly that ALTER, it fails, and
-    // Hibernate logs the failure and carries on, leaving the column missing
-    // entirely. V19 is what makes it NOT NULL, by the add/backfill/alter route
-    // that works on a populated table. The @PrePersist below is what actually
-    // keeps the value non-null, since Hibernate binds an explicit NULL for an
-    // unset field rather than letting the column DEFAULT apply.
-    //
-    // @JsonIgnore so a customer POST cannot lock themselves out of auto-stamp
-    // (or pick a rider). Admin pinning goes through TerritoryAdminService.
-    @JsonIgnore
-    private Boolean subzoneLocked = Boolean.FALSE;
 
     public Address() {
     }
 
     @PrePersist
     void onCreate() {
-        normaliseTerritoryFlags();
         java.time.LocalDateTime now = java.time.LocalDateTime.now();
         if (createdAt == null) {
             createdAt = now;
@@ -201,33 +148,7 @@ public class Address {
 
     @PreUpdate
     void onUpdate() {
-        normaliseTerritoryFlags();
         updatedAt = java.time.LocalDateTime.now();
-    }
-
-    void normaliseTerritoryFlags() {
-        // Hibernate binds an explicit NULL for an unset field rather than
-        // omitting the column, so a database DEFAULT never applies on insert.
-        // The column is NOT NULL; this is what actually keeps it satisfied.
-        if (subzoneLocked == null) {
-            subzoneLocked = Boolean.FALSE;
-        }
-    }
-
-    public DeliverySubzone getSubzone() {
-        return subzone;
-    }
-
-    public void setSubzone(DeliverySubzone subzone) {
-        this.subzone = subzone;
-    }
-
-    public Boolean getSubzoneLocked() {
-        return subzoneLocked;
-    }
-
-    public void setSubzoneLocked(Boolean subzoneLocked) {
-        this.subzoneLocked = subzoneLocked;
     }
 
     public Long getId() {

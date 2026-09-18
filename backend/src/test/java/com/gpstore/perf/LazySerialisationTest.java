@@ -80,6 +80,7 @@ class LazySerialisationTest {
     private static final double INSIDE_LNG = 77.210;
 
     @Autowired private AddressService addressService;
+    @Autowired private com.gpstore.territory.AddressTerritory territory;
     @Autowired private CustomerRepository customerRepository;
     @Autowired private DeliveryZoneRepository zoneRepository;
     @Autowired private DeliverySubzoneRepository subzoneRepository;
@@ -130,14 +131,16 @@ class LazySerialisationTest {
         address.setLongitude(INSIDE_LNG);
 
         Address saved = addressService.save(address);
-        assertNotNull(saved.getSubzone(),
-                "The fixture is wrong if the address was not stamped - with a null subzone this whole "
-                        + "file would pass without testing anything.");
+        assertNotNull(territory.stampFor(saved.getId())
+                        .map(com.gpstore.territory.AddressTerritoryStamp::getSubzone)
+                        .orElse(null),
+                "The fixture is wrong if the address was not stamped - with no territory this "
+                        + "whole file would pass without testing anything.");
     }
 
     @AfterEach
     void cleanUp() {
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE subzone_id IN "
+        jdbc.update("DELETE FROM address_territory_stamps WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
         jdbc.update("UPDATE deliveries SET subzone_id = NULL WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");

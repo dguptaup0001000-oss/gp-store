@@ -54,6 +54,7 @@ class TerritoryPermanenceTest {
     @Autowired private DeliverySubzoneRepository subzoneRepository;
     @Autowired private TerritoryResolver resolver;
     @Autowired private TerritoryAdminService adminService;
+    @Autowired private com.gpstore.territory.AddressTerritory territory;
     @Autowired private JdbcTemplate jdbc;
 
     private DeliverySubzone west;
@@ -83,12 +84,14 @@ class TerritoryPermanenceTest {
         // the subzone rows cannot be deleted while anything still references
         // them. Detaching by foreign key rather than by name is what makes
         // this cleanup complete instead of merely tidy.
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE subzone_id IN "
+        jdbc.update("DELETE FROM address_territory_stamps WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
         jdbc.update("UPDATE deliveries SET subzone_id = NULL WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
         jdbc.update("UPDATE delivery_batches SET subzone_id = NULL WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
+        jdbc.update("DELETE FROM address_territory_stamps WHERE address_id IN "
+                + "(SELECT id FROM addresses WHERE full_name = ?)", CUSTOMER_MARKER);
         jdbc.update("DELETE FROM addresses WHERE full_name = ?", CUSTOMER_MARKER);
         jdbc.update("DELETE FROM subzone_neighbours WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
@@ -105,6 +108,27 @@ class TerritoryPermanenceTest {
         subzone.setBoundary(boundary);
         subzone.setActive(true);
         return subzoneRepository.save(subzone);
+    }
+
+    /**
+     * The territory THIS SHOP has stamped on the address.
+     *
+     * <p>WHY THE STAMP IS NO LONGER READ OFF THE ADDRESS. It used to be
+     * {@code address.getSubzone()} - one column, shared by every shop on the
+     * platform, which is the bug AddressTerritoryStamp fixes. The assertions
+     * below are unchanged; they ask the same question of the place that can
+     * now answer it per shop.
+     */
+    private Long stampedTerritory(Long addressId) {
+        return territory.stampFor(addressId)
+                .map(stamp -> stamp.getSubzone() == null ? null : stamp.getSubzone().getId())
+                .orElse(null);
+    }
+
+    private boolean isPinned(Long addressId) {
+        return territory.stampFor(addressId)
+                .map(com.gpstore.territory.AddressTerritoryStamp::isLocked)
+                .orElse(false);
     }
 
     private Address newAddress(double lat, double lng) {
@@ -129,15 +153,16 @@ class TerritoryPermanenceTest {
     void savingStampsTheTerritory() {
         Address saved = newAddress(WEST_LAT, WEST_LNG);
 
-        assertNotNull(saved.getSubzone(), "an address inside a drawn territory must be stamped with it");
-        assertEquals(west.getId(), saved.getSubzone().getId());
+        assertNotNull(stampedTerritory(saved.getId()),
+                "an address inside a drawn territory must be stamped with it");
+        assertEquals(west.getId(), stampedTerritory(saved.getId()));
     }
 
     @Test
     @DisplayName("the stamp survives a boundary edit - customers do not move on their own")
     void redrawingABoundaryDoesNotMoveExistingCustomers() {
         Address saved = newAddress(WEST_LAT, WEST_LNG);
-        Long originallyIn = saved.getSubzone().getId();
+        Long originallyIn = stampedTerritory(saved.getId());
 
         // The administrator redraws the east territory to swallow the west one
         // entirely. Under a system that resolved on read, this customer would
@@ -147,9 +172,7 @@ class TerritoryPermanenceTest {
         subzoneRepository.save(east);
         resolver.invalidate();
 
-        Address reloaded = addressRepository.findById(saved.getId()).orElseThrow();
-
-        assertEquals(originallyIn, reloaded.getSubzone().getId(),
+        assertEquals(originallyIn, stampedTerritory(saved.getId()),
                 "a stamped address must stay where it was stamped until someone deliberately "
                         + "re-resolves it - permanence is the point of stamping at all");
     }
@@ -158,7 +181,7 @@ class TerritoryPermanenceTest {
     @DisplayName("an administrator can deliberately re-resolve, and only then does anyone move")
     void reresolveIsTheOneDeliberateWayToMoveCustomers() {
         Address saved = newAddress(WEST_LAT, WEST_LNG);
-        assertEquals(west.getId(), saved.getSubzone().getId());
+        assertEquals(west.getId(), stampedTerritory(saved.getId()));
 
         east.setBoundary("[[28.59,77.19],[28.59,77.25],[28.63,77.25],[28.63,77.19]]");
         subzoneRepository.save(east);
@@ -170,8 +193,7 @@ class TerritoryPermanenceTest {
 
         adminService.reresolveAllAddresses(200);
 
-        Address reloaded = addressRepository.findById(saved.getId()).orElseThrow();
-        assertEquals(east.getId(), reloaded.getSubzone().getId(),
+        assertEquals(east.getId(), stampedTerritory(saved.getId()),
                 "an explicit re-resolve is exactly what SHOULD move customers - that is the "
                         + "difference between a map being edited and a map drifting");
     }
@@ -188,10 +210,9 @@ class TerritoryPermanenceTest {
 
         adminService.reresolveAllAddresses(200);
 
-        Address reloaded = addressRepository.findById(saved.getId()).orElseThrow();
-        assertEquals(east.getId(), reloaded.getSubzone().getId(),
+        assertEquals(east.getId(), stampedTerritory(saved.getId()),
                 "a pinned address must keep the territory a human chose for it");
-        assertTrue(reloaded.getSubzoneLocked());
+        assertTrue(isPinned(saved.getId()));
     }
 
     @Test
@@ -199,7 +220,7 @@ class TerritoryPermanenceTest {
     void outsideTheMapIsNullNotAGuess() {
         Address saved = newAddress(1.0, 1.0);
 
-        assertNull(saved.getSubzone(),
+        assertNull(stampedTerritory(saved.getId()),
                 "pushing an unmatched address into the nearest territory would send a rider "
                         + "somewhere on no evidence; null is answerable and shows up as a FALLBACK");
     }
@@ -212,7 +233,7 @@ class TerritoryPermanenceTest {
         saved.setLongitude(null);
         Address resaved = addressService.save(saved);
 
-        assertNull(resaved.getSubzone());
+        assertNull(stampedTerritory(resaved.getId()));
     }
 
     @Test
@@ -222,13 +243,13 @@ class TerritoryPermanenceTest {
         // customer, but a customer who tells us their pin was two streets out
         // has genuinely told us something new.
         Address saved = newAddress(WEST_LAT, WEST_LNG);
-        assertEquals(west.getId(), saved.getSubzone().getId());
+        assertEquals(west.getId(), stampedTerritory(saved.getId()));
 
         saved.setLatitude(28.610);
         saved.setLongitude(77.230); // now in the east territory
         Address moved = addressService.updateAddress(saved.getId(), saved);
 
-        assertEquals(east.getId(), moved.getSubzone().getId());
+        assertEquals(east.getId(), stampedTerritory(moved.getId()));
     }
 
     @Test

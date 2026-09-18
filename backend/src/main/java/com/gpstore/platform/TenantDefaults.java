@@ -115,6 +115,32 @@ public final class TenantDefaults {
         return shopIdForNewRow(null, forWhat);
     }
 
+    /**
+     * The shop this thread's work belongs to, when something can say.
+     *
+     * <p>THE READ-SIDE TWIN OF {@link #shopIdForNewRow}, and it answers rather
+     * than throwing. A write with no shop must be refused - a row has to land
+     * somewhere. A READ with no shop is an ordinary situation: the platform
+     * console legitimately has no one shop, and a query that asks "whose
+     * answer is this" then simply has none to give and falls back to computing
+     * one. Making that case an exception would turn a normal read into an
+     * outage.
+     *
+     * <p>Same three answers, same order: the scope on the thread, then the
+     * deployment's only shop under SINGLE_SHOP, then nothing.
+     */
+    public static java.util.Optional<Long> shopIdIfKnown() {
+        TenantScope scope = TenantContext.current();
+        if (scope != null) {
+            return scope.isSingleShop()
+                    ? java.util.Optional.ofNullable(scope.shopId())
+                    : java.util.Optional.empty();
+        }
+        return mode.isMultiShop()
+                ? java.util.Optional.empty()
+                : java.util.Optional.ofNullable(singleShopId());
+    }
+
     public static Long shopIdForNewRow(Long declared, Class<?> entityType) {
         TenantScope scope = TenantContext.current();
         if (scope != null && scope.isSingleShop()) {

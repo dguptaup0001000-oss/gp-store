@@ -108,7 +108,7 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
 
         // See EveryPublishedEndpointSweepTest: an interrupted run's polygon
         // would overlap this one's and stop addresses being stamped.
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE subzone_id IN "
+        jdbc.update("DELETE FROM address_territory_stamps WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE name LIKE 'OwnTerritory %')");
         jdbc.update("DELETE FROM delivery_subzones WHERE name LIKE 'OwnTerritory %'");
         jdbc.update("DELETE FROM delivery_zones WHERE name LIKE 'OwnZone %'");
@@ -158,8 +158,8 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
 
     @AfterEach
     void tidyUp() {
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE customer_id IN (?, ?)",
-                customerA, customerB);
+        jdbc.update("DELETE FROM address_territory_stamps WHERE address_id IN "
+                + "(SELECT id FROM addresses WHERE customer_id IN (?, ?))", customerA, customerB);
         jdbc.update("DELETE FROM delivery_subzones WHERE shop_id IN (?, ?)", shopA, shopB);
         jdbc.update("DELETE FROM delivery_zones WHERE shop_id IN (?, ?)", shopA, shopB);
         jdbc.update("DELETE FROM wishlist WHERE customer_id IN (?, ?)", customerA, customerB);
@@ -491,10 +491,10 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
                             + "to one of their own AND locking it, which makes every other "
                             + "shop's re-resolve skip that address from then on. Body: "
                             + result.getResponse().getContentAsString());
-            assertEquals(Boolean.FALSE, jdbc.queryForObject(
-                    "SELECT subzone_locked FROM addresses WHERE id = ?",
-                    Boolean.class, addressOfB),
-                    "a stranger's address was locked anyway");
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT count(*) FROM address_territory_stamps WHERE address_id = ?",
+                    Integer.class, addressOfB),
+                    "a stamp was written on a stranger's address anyway");
         }
 
         @Test
@@ -506,8 +506,9 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
             newSubzone(shopA, shortCode("A2"));
             Long addressOfB = jdbc.queryForObject(
                     "SELECT id FROM addresses WHERE customer_id = ?", Long.class, customerB);
-            jdbc.update("UPDATE addresses SET subzone_id = ? WHERE id = ?",
-                    subzoneOfB, addressOfB);
+            jdbc.update("INSERT INTO address_territory_stamps (shop_id, address_id, subzone_id, "
+                    + "locked, created_at) VALUES (?, ?, ?, false, now())",
+                    shopB, addressOfB, subzoneOfB);
 
             MvcResult result = send(
                     put("/api/admin/territory/addresses/reresolve"), ownerA);
@@ -521,11 +522,17 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
                     "a merchant could not re-resolve their own customers' addresses: "
                             + result.getResponse().getContentAsString());
             assertEquals(subzoneOfB, jdbc.queryForObject(
-                    "SELECT subzone_id FROM addresses WHERE id = ?", Long.class, addressOfB),
-                    "one merchant's re-resolve re-stamped another merchant's customer's "
-                            + "address. The write walked findAll() - every address on "
-                            + "GP-STORE - while only the READ of the old stamp was "
-                            + "scope-aware.");
+                    "SELECT subzone_id FROM address_territory_stamps "
+                            + "WHERE address_id = ? AND shop_id = ?",
+                    Long.class, addressOfB, shopB),
+                    "one merchant's re-resolve moved another merchant's stamp. The write "
+                            + "walked findAll() - every address on GP-STORE - while only the "
+                            + "READ of the old stamp was scope-aware.");
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT count(*) FROM address_territory_stamps "
+                            + "WHERE address_id = ? AND shop_id = ?",
+                    Integer.class, addressOfB, shopA),
+                    "shop A stamped a house belonging to shop B's customer");
         }
 
         /** Territory codes are varchar(16), so the run's nonce is trimmed. */

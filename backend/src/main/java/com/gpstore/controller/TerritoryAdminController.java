@@ -113,9 +113,28 @@ public class TerritoryAdminController {
         return Map.of("addressesMoved", moved);
     }
 
+    /**
+     * Pins one address into one of THIS shop's territories.
+     *
+     * <p>ANSWERS THE STAMP, NOT THE ADDRESS, and the change of shape is the
+     * point: the pin is a row in {@code address_territory_stamps} belonging to
+     * one shop, not a column on the customer's address that every shop shares.
+     * The response says which territory, for which shop, and that it is
+     * locked - which is all this call decides. Nothing consumed the address
+     * body: the Flutter app does not call this route.
+     */
     @PutMapping("/addresses/{addressId}/pin")
-    public Address pin(@PathVariable Long addressId, @RequestBody Map<String, Long> body) {
-        return adminService.pinAddress(addressId, body.get("subzoneId"));
+    public Map<String, Object> pin(@PathVariable Long addressId,
+                                   @RequestBody Map<String, Long> body) {
+        com.gpstore.territory.AddressTerritoryStamp stamp =
+                adminService.pinAddress(addressId, body.get("subzoneId"));
+        Map<String, Object> answer = new java.util.LinkedHashMap<>();
+        answer.put("addressId", stamp.getAddressId());
+        answer.put("shopId", stamp.getShopId());
+        answer.put("subzoneId", stamp.getSubzone() == null ? null : stamp.getSubzone().getId());
+        answer.put("subzoneCode", stamp.getSubzone() == null ? null : stamp.getSubzone().getCode());
+        answer.put("locked", stamp.isLocked());
+        return answer;
     }
 
     // ----------------------------------------------------------- inspection

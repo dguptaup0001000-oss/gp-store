@@ -146,7 +146,7 @@ class EveryPublishedEndpointSweepTest {
         // territories are reported rather than resolved, so an address stops
         // being stamped at all. Sweeping this class's own leftovers first
         // keeps one interrupted run from failing the next.
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE subzone_id IN "
+        jdbc.update("DELETE FROM address_territory_stamps WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE name LIKE 'SweepTerritory %')");
         jdbc.update("DELETE FROM delivery_subzones WHERE name LIKE 'SweepTerritory %'");
         jdbc.update("DELETE FROM delivery_zones WHERE name LIKE 'Zone B swp%'");
@@ -270,7 +270,7 @@ class EveryPublishedEndpointSweepTest {
 
     @AfterEach
     void tidyUp() {
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE subzone_id = ?", subzoneB);
+        jdbc.update("DELETE FROM address_territory_stamps WHERE subzone_id = ?", subzoneB);
         jdbc.update("DELETE FROM delivery_subzones WHERE shop_id IN (?, ?)", shopA, shopB);
         jdbc.update("DELETE FROM delivery_zones WHERE shop_id IN (?, ?)", shopA, shopB);
         jdbc.update("DELETE FROM catalog_import_problems WHERE run_id = ?", importRunB);

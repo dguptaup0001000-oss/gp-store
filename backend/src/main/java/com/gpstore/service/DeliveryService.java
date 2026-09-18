@@ -41,7 +41,7 @@ public class DeliveryService {
     private final AuditLogService auditLogService;
     private final PaymentService paymentService;
     private final TerritoryDispatchService territoryDispatchService;
-    private final com.gpstore.territory.TerritoryResolver territoryResolver;
+    private final com.gpstore.territory.AddressTerritory addressTerritory;
     private final com.gpstore.config.AfterCommitExecutor afterCommitExecutor;
     private final int bulkOrderItemThreshold;
 
@@ -56,7 +56,7 @@ public class DeliveryService {
             AuditLogService auditLogService,
             PaymentService paymentService,
             TerritoryDispatchService territoryDispatchService,
-            com.gpstore.territory.TerritoryResolver territoryResolver,
+            com.gpstore.territory.AddressTerritory addressTerritory,
             com.gpstore.config.AfterCommitExecutor afterCommitExecutor,
             @org.springframework.beans.factory.annotation.Value("${delivery.bulk-order-item-threshold}") int bulkOrderItemThreshold) {
 
@@ -70,7 +70,7 @@ public class DeliveryService {
         this.auditLogService = auditLogService;
         this.paymentService = paymentService;
         this.territoryDispatchService = territoryDispatchService;
-        this.territoryResolver = territoryResolver;
+        this.addressTerritory = addressTerritory;
         this.afterCommitExecutor = afterCommitExecutor;
         this.bulkOrderItemThreshold = bulkOrderItemThreshold;
     }
@@ -126,16 +126,15 @@ public class DeliveryService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
-        // THE TERRITORY IS THIS SHOP'S, resolved rather than read off the
-        // address (W4). One address sits in every shop's map that covers it,
-        // but addresses.subzone_id holds one value - so under a marketplace
-        // the stamp may belong to a shop that has nothing to do with this
-        // order, and traversing it would load another shop's row and fail the
-        // whole dispatch. territoryForDelivery prefers the stamp when it is
-        // ours (which under SINGLE_SHOP it always is, so nothing changes) and
-        // otherwise reads this shop's own map.
-        DeliverySubzone subzone = territoryResolver
-                .territoryForDelivery(order.getAddress())
+        // THE TERRITORY IS THIS SHOP'S, and dispatch is where this shop
+        // COMMITS to one for this house: territoryForDispatch returns the
+        // stamp when there is one and records the resolution when there is
+        // not, so a boundary edit afterwards cannot silently move a rider's
+        // round. One address sits in every map that covers it, and each of
+        // those shops now keeps its own answer rather than taking the last
+        // writer's (see AddressTerritoryStamp).
+        DeliverySubzone subzone = addressTerritory
+                .territoryForDispatch(order.getAddress())
                 .orElse(null);
         Double lat = order.getAddress() == null ? null : order.getAddress().getLatitude();
         Double lng = order.getAddress() == null ? null : order.getAddress().getLongitude();
@@ -262,12 +261,11 @@ public class DeliveryService {
                     "That rider works for a different shop.");
         }
 
-        // The order's territory in ITS shop's map - not whatever is stamped on
-        // the address, which under a marketplace may be another shop's. Same
-        // resolution autoAssignDelivery uses, so a hand assignment and an
-        // automatic one record the same territory.
-        DeliverySubzone subzone = territoryResolver
-                .territoryForDelivery(order.getAddress())
+        // The order's territory in ITS shop's map. Same call
+        // autoAssignDelivery makes, so a hand assignment and an automatic one
+        // record the same territory - and both leave the same stamp behind.
+        DeliverySubzone subzone = addressTerritory
+                .territoryForDispatch(order.getAddress())
                 .orElse(null);
 
         // Batching key. A subzone is a row in a table; the old area string was

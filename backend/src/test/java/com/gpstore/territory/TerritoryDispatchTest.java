@@ -106,7 +106,7 @@ class TerritoryDispatchTest {
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
         // Anything else still pointing at a fixture territory has to let go
         // before the territory row can be removed.
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE subzone_id IN "
+        jdbc.update("DELETE FROM address_territory_stamps WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
         jdbc.update("UPDATE delivery_batches SET subzone_id = NULL WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");

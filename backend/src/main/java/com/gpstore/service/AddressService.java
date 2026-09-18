@@ -3,11 +3,9 @@ package com.gpstore.service;
 import com.gpstore.entity.Address;
 import com.gpstore.address.AddressValidator;
 import com.gpstore.entity.Customer;
-import com.gpstore.entity.DeliverySubzone;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.AddressRepository;
-import com.gpstore.repository.DeliverySubzoneRepository;
-import com.gpstore.territory.TerritoryResolver;
+import com.gpstore.territory.AddressTerritory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -16,15 +14,11 @@ import java.util.List;
 public class AddressService {
 
     private final AddressRepository repository;
-    private final TerritoryResolver territoryResolver;
-    private final DeliverySubzoneRepository subzoneRepository;
+    private final AddressTerritory territory;
 
-    public AddressService(AddressRepository repository,
-                          TerritoryResolver territoryResolver,
-                          DeliverySubzoneRepository subzoneRepository) {
+    public AddressService(AddressRepository repository, AddressTerritory territory) {
         this.repository = repository;
-        this.territoryResolver = territoryResolver;
-        this.subzoneRepository = subzoneRepository;
+        this.territory = territory;
     }
 
     /**
@@ -34,8 +28,6 @@ public class AddressService {
     public Address createOwned(Customer owner, Address address) {
         address.setId(null);
         address.setCustomer(owner);
-        address.setSubzoneLocked(false);
-        address.setSubzone(null);
 
         // Checked here rather than in the controller so every path that
         // creates a customer address goes through the same rule - a check
@@ -50,60 +42,30 @@ public class AddressService {
 
         Address saved = repository.save(address);
         applyDefaultExclusivity(saved);
-        stampTerritory(saved);
-        return repository.save(saved);
+        territory.stampForCurrentShop(saved);
+        return saved;
     }
 
     public Address save(Address address) {
-        // New addresses never trust a client-supplied lock or subzone.
-        // Only TerritoryAdminService.pinAddress may lock a row, and it
-        // writes through the repository, not this method.
-        if (address.getId() == null) {
-            address.setSubzoneLocked(false);
-            address.setSubzone(null);
-        }
-        stampTerritory(address);
-        return repository.save(address);
+        // A CLIENT CANNOT CARRY A TERRITORY ANY MORE, and not because this
+        // method checks: the stamp lives in its own shop-owned table, so there
+        // is no field on the request body that could name one. That is the
+        // second thing moving it off the address bought - the first being that
+        // two shops stopped overwriting each other's answer.
+        Address saved = repository.save(address);
+        territory.stampForCurrentShop(saved);
+        return saved;
     }
 
     /**
-     * Fixes this address into its permanent delivery territory.
-     *
-     * WHY AT SAVE TIME AND NOWHERE ELSE. The territory a customer belongs to
-     * has to be stable: a rider learns Z7B by delivering to the same houses
-     * week after week, and that only works if those houses stay in Z7B.
-     * Resolving on every read would mean an administrator nudging a boundary
-     * silently reshuffles existing customers between riders, with no record
-     * that it happened. Stamping the answer here makes the territory a fact
-     * about the address rather than a fact about today's map.
-     *
-     * It also keeps the point-in-polygon test off the checkout path entirely.
-     * Preview runs on every cart change; addresses are saved once.
-     *
-     * A LOCKED ADDRESS IS NEVER TOUCHED. When an administrator has placed an
-     * address by hand - the house on the wrong side of the line, the colony
-     * whose only gate opens into the next territory - that judgement outranks
-     * anything the polygons say, including after the customer edits their
-     * coordinates.
-     *
-     * NO MATCH LEAVES IT NULL, deliberately. An address outside every drawn
-     * territory keeps no subzone rather than being pushed into the nearest
-     * one. "We do not know" is answerable - it shows up as a FALLBACK
-     * assignment an administrator can go and fix - whereas a wrong territory
-     * is a rider quietly sent across a river with nothing anywhere saying so.
+     * WHERE THE STAMPING WENT. It used to be a private method here that wrote
+     * {@code addresses.subzone_id} - one shop's answer, on a row that belongs
+     * to the customer and is read by every shop. It now lives in
+     * {@link AddressTerritory}, against a table with one row per shop, and the
+     * reasons it exists at all are written there: permanence for a rider's
+     * round, a hand-placed pin outranking the map, and "no territory" being a
+     * real answer rather than a guess at the nearest one.
      */
-    private void stampTerritory(Address address) {
-        if (address == null || Boolean.TRUE.equals(address.getSubzoneLocked())) {
-            return;
-        }
-
-        DeliverySubzone resolved = territoryResolver
-                .resolveSubzoneId(address.getLatitude(), address.getLongitude())
-                .flatMap(subzoneRepository::findById)
-                .orElse(null);
-
-        address.setSubzone(resolved);
-    }
 
     /**
      * Admin listing, PAGED and sorted - never findAll().
@@ -121,7 +83,7 @@ public class AddressService {
      */
     public org.springframework.data.domain.Page<Address> getAll(
             org.springframework.data.domain.Pageable pageable) {
-        return repository.findAllWithSubzone(pageable);
+        return repository.findAllPaged(pageable);
     }
 
     public List<Address> getCustomerAddresses(Long customerId) {
@@ -129,12 +91,12 @@ public class AddressService {
     }
 
     public Address getById(Long id) {
-        return repository.findByIdWithSubzone(id).orElse(null);
+        return repository.findByIdForRead(id).orElse(null);
     }
 
     /** Throws if the address doesn't exist or doesn't belong to this customer - prevents IDOR. */
     public Address getOwnedAddress(Long id, Long customerId) {
-        Address address = repository.findByIdWithSubzone(id)
+        Address address = repository.findByIdForRead(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Address not found"));
 
         if (address.getCustomer() == null || !address.getCustomer().getId().equals(customerId)) {
@@ -182,18 +144,19 @@ public class AddressService {
     address.setPlaceId(updatedAddress.getPlaceId());
     address.setConfirmedAt(updatedAddress.getConfirmedAt());
 
-    // Re-stamped because the coordinates just changed. A customer correcting
-    // a pin that was two streets out has genuinely moved territory, and the
-    // stamp has to follow - permanence is about boundaries not moving under a
-    // customer, not about an address being stuck with a wrong answer forever.
-    // subzoneLocked and the customer's own subzone assignment are read from
-    // the stored row, never from the request body: an address edit arrives as
-    // a plain entity from the client, and letting it carry a territory would
-    // let a customer choose their own rider.
-    stampTerritory(address);
-
     Address saved = repository.save(address);
     applyDefaultExclusivity(saved);
+
+    // THIS SHOP RE-STAMPS, AND SAYS NOTHING TO ANYBODY ELSE. If the customer
+    // moved their pin, every other shop's stamp is now about somewhere else -
+    // and each of them finds that out from its own row, because a stamp
+    // records the point it was resolved from (AddressTerritoryStamp). One
+    // shop's request is not responsible for telling the others.
+    //
+    // Permanence is about boundaries not moving under a customer. It was never
+    // about an address being stuck with an answer the customer has just told
+    // us is wrong.
+    territory.stampForCurrentShop(saved);
     return saved;
 }
 
