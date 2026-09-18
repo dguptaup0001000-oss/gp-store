@@ -87,7 +87,12 @@ class CreateProductCannotOverwriteAnotherTest {
                      """.formatted(email, phone())),
                 java.util.Map.class);
         assertEquals(HttpStatus.OK, res.getStatusCode(), "registration failed: " + res.getBody());
-        jdbc.update("UPDATE customers SET role = 'ADMIN' WHERE email = ?", email);
+        // SUPER_ADMIN, because this test is about a product create OVERWRITING
+        // another product, not about who may write the shared catalogue. On a
+        // marketplace catalogue definition is the platform's
+        // (CatalogDefinitionAuthorization), so an ADMIN would be refused for a
+        // reason that has nothing to do with the bug this class pins.
+        jdbc.update("UPDATE customers SET role = 'SUPER_ADMIN' WHERE email = ?", email);
         ResponseEntity<java.util.Map> login = rest.postForEntity(
                 url("/api/auth/login"),
                 json("""

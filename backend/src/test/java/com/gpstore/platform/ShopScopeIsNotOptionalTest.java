@@ -249,7 +249,27 @@ class ShopScopeIsNotOptionalTest {
             // credential, never from the body, and a worker belongs to
             // exactly one shop - so the count is single-shop by construction.
             // It returns a number, not a row.
-            "ClientCrashReportRepository.countRecentFrom");
+            "ClientCrashReportRepository.countRecentFrom",
+
+            // THE FILTER DOES APPLY, BECAUSE ORDER IS THE SUBQUERY'S ROOT.
+            // Notification is not shop-owned - a customer's notifications
+            // span every shop they have bought from - so the merchant-facing
+            // list narrows itself by existence: it keeps a notification only
+            // when the order it is about is one this shop can see, and that
+            // EXISTS is ROOTED on Order rather than reached through an
+            // association, which is exactly the shape Hibernate's filter does
+            // rewrite.
+            //
+            // THIS ENTRY IS THE RECORD OF A BUG, NOT AN EXCUSE FOR ONE. The
+            // first version of this query said "WHERE n.order IS NOT NULL",
+            // which never makes Order a root and so was never filtered - it
+            // only LOOKED right because TenantEntityListener's @PostLoad threw
+            // on the foreign rows and the request surfaced as a 404. The
+            // rewrite is what this line is vouching for, and
+            // AMerchantReachesOnlyTheirCustomersTest reads the endpoint as one
+            // merchant while another merchant's customer holds a notification,
+            // so the narrowing is asserted rather than asserted-about.
+            "NotificationRepository.findAllForCurrentShop");
 
     @Test
     @DisplayName("every table with a shop_id has an entity that is filtered and stamped")

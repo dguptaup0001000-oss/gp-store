@@ -53,6 +53,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * under Postgres max_connections.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "spring.datasource.hikari.maximum-pool-size=20",
         "spring.datasource.hikari.minimum-idle=4",
         "spring.datasource.hikari.connection-timeout=60000",

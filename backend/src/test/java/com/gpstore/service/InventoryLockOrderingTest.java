@@ -59,6 +59,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * is exactly the invariant that has to hold and is fully deterministic.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",

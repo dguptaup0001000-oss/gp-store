@@ -90,6 +90,9 @@ class CartsAreNotWritableByAReadRoleTest {
         assertEquals(HttpStatus.OK, res.getStatusCode(), "registration failed: " + res.getBody());
 
         jdbc.update("UPDATE customers SET role = ? WHERE email = ?", role, email);
+        // A ROLE IS NOT A POSTING - see StaffPosting. This account acts as
+        // staff of a shop, so it has to be on one.
+        com.gpstore.support.StaffPosting.postToFirstShop(jdbc, email);
 
         ResponseEntity<java.util.Map> login = rest.postForEntity(
                 url("/api/auth/login"),

@@ -62,6 +62,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * figure.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         // Background schedulers OFF for this class, and this is not
         // cosmetic - it is what makes the measurement valid at all.
         //
