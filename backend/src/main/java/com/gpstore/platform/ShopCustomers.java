@@ -50,13 +50,15 @@ public class ShopCustomers {
 
     /** Whether this account has ordered from the shop in scope. */
     public boolean isMine(Long customerId) {
-        if (customerId == null) {
-            return false;
-        }
+        // THE PLATFORM CHECK COMES FIRST, deliberately. A row with no customer
+        // on it at all - an address left behind by a deleted account, say - is
+        // nobody's customer, so a shop must not touch it; but the platform
+        // console is not asking "is this mine", it may act on the lot. Asking
+        // the null question first would have refused the platform too.
         if (readsEveryCustomer()) {
             return true;
         }
-        return orders.isCustomerOfCurrentShop(customerId);
+        return customerId != null && orders.isCustomerOfCurrentShop(customerId);
     }
 
     /**

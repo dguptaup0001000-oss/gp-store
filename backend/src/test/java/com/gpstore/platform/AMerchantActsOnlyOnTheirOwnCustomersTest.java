@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 
 /**
@@ -125,8 +127,12 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
         customerB = newAccount("Own Buyer B " + tag, emailB);
         mobileB = mobileOf(customerB);
         newOrder(shopB, customerB, "OWB-ORD-" + tag);
+        // COORDINATES INSIDE THE SQUARE BOTH SHOPS DRAW BELOW. A re-resolve
+        // only rewrites a stamp when the answer changes, so an address the map
+        // cannot place would make the territory test pass for the wrong reason.
         jdbc.update("INSERT INTO addresses (customer_id, house_no, area, city, "
-                        + "default_address) VALUES (?, ?, 'Ownville', 'Bengaluru', true)",
+                        + "latitude, longitude, default_address) "
+                        + "VALUES (?, ?, 'Ownville', 'Bengaluru', 28.61, 77.21, true)",
                 customerB, "Own Lane " + tag);
 
         // A basket each, so "whose lines are these" has a real answer - and
@@ -145,6 +151,10 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
 
     @AfterEach
     void tidyUp() {
+        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE customer_id IN (?, ?)",
+                customerA, customerB);
+        jdbc.update("DELETE FROM delivery_subzones WHERE shop_id IN (?, ?)", shopA, shopB);
+        jdbc.update("DELETE FROM delivery_zones WHERE shop_id IN (?, ?)", shopA, shopB);
         jdbc.update("DELETE FROM wishlist WHERE customer_id IN (?, ?)", customerA, customerB);
         jdbc.update("DELETE FROM cart_items WHERE cart_id IN "
                 + "(SELECT id FROM carts WHERE customer_id IN (?, ?))", customerA, customerB);
@@ -450,6 +460,87 @@ class AMerchantActsOnlyOnTheirOwnCustomersTest {
                             + result.getResponse().getContentAsString());
             assertEquals(Boolean.FALSE, jdbc.queryForObject(
                     "SELECT active FROM customers WHERE id = ?", Boolean.class, customerB));
+        }
+    }
+
+    @Nested
+    @DisplayName("the territory tools, which write to addresses")
+    class TheMap {
+
+        @Test
+        @DisplayName("a merchant may not pin another shop's customer's address")
+        void cannotPinAStrangersAddress() throws Exception {
+            long subzoneOfA = newSubzone(shopA, shortCode("A1"));
+            Long addressOfB = jdbc.queryForObject(
+                    "SELECT id FROM addresses WHERE customer_id = ?", Long.class, customerB);
+
+            MvcResult result = send(put("/api/admin/territory/addresses/" + addressOfB + "/pin")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"subzoneId\": " + subzoneOfA + "}"), ownerA);
+
+            assertEquals(404, result.getResponse().getStatus(),
+                    "PUT /api/admin/territory/addresses/{id}/pin let one merchant write to "
+                            + "another shop's customer's home address - setting its territory "
+                            + "to one of their own AND locking it, which makes every other "
+                            + "shop's re-resolve skip that address from then on. Body: "
+                            + result.getResponse().getContentAsString());
+            assertEquals(Boolean.FALSE, jdbc.queryForObject(
+                    "SELECT subzone_locked FROM addresses WHERE id = ?",
+                    Boolean.class, addressOfB),
+                    "a stranger's address was locked anyway");
+        }
+
+        @Test
+        @DisplayName("re-resolving walks this shop's customers, not the platform's")
+        void reresolveStaysOnOwnCustomers() throws Exception {
+            // Stamp B's address with a subzone of B's, the way B's own
+            // re-resolve would, and give A a territory of their own.
+            long subzoneOfB = newSubzone(shopB, shortCode("B1"));
+            newSubzone(shopA, shortCode("A2"));
+            Long addressOfB = jdbc.queryForObject(
+                    "SELECT id FROM addresses WHERE customer_id = ?", Long.class, customerB);
+            jdbc.update("UPDATE addresses SET subzone_id = ? WHERE id = ?",
+                    subzoneOfB, addressOfB);
+
+            MvcResult result = send(
+                    put("/api/admin/territory/addresses/reresolve"), ownerA);
+            // The route is a POST; this test drives it through the same
+            // controller method the app does.
+            if (result.getResponse().getStatus() == 405) {
+                result = send(post("/api/admin/territory/addresses/reresolve"), ownerA);
+            }
+
+            assertTrue(result.getResponse().getStatus() < 400,
+                    "a merchant could not re-resolve their own customers' addresses: "
+                            + result.getResponse().getContentAsString());
+            assertEquals(subzoneOfB, jdbc.queryForObject(
+                    "SELECT subzone_id FROM addresses WHERE id = ?", Long.class, addressOfB),
+                    "one merchant's re-resolve re-stamped another merchant's customer's "
+                            + "address. The write walked findAll() - every address on "
+                            + "GP-STORE - while only the READ of the old stamp was "
+                            + "scope-aware.");
+        }
+
+        /** Territory codes are varchar(16), so the run's nonce is trimmed. */
+        private String shortCode(String kind) {
+            String nonce = tag.substring(Math.max(0, tag.length() - 8));
+            return kind + nonce;
+        }
+
+        private long newSubzone(long shop, String code) {
+            jdbc.update("INSERT INTO delivery_zones (code, name, active, shop_id) "
+                    + "VALUES (?, ?, true, ?)", "Z-" + code, "Zone " + code, shop);
+            Long zone = jdbc.queryForObject(
+                    "SELECT id FROM delivery_zones WHERE code = ?", Long.class, "Z-" + code);
+            // Both shops draw the same ground on purpose: if their maps
+            // covered different places, a test would pass whether or not the
+            // maps were kept apart. Same square as TerritoryBelongsToOneShopTest.
+            jdbc.update("INSERT INTO delivery_subzones (code, name, active, shop_id, zone_id, "
+                    + "boundary, max_concurrent_orders) VALUES (?, ?, true, ?, ?, ?, 10)",
+                    code, "Subzone " + code, shop, zone,
+                    "[[28.60,77.20],[28.60,77.22],[28.62,77.22],[28.62,77.20],[28.60,77.20]]");
+            return jdbc.queryForObject(
+                    "SELECT id FROM delivery_subzones WHERE code = ?", Long.class, code);
         }
     }
 

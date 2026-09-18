@@ -53,6 +53,7 @@ public class TerritoryAdminService {
     private final AddressRepository addressRepository;
     private final TerritoryResolver resolver;
     private final ObjectMapper objectMapper;
+    private final com.gpstore.platform.ShopCustomers shopCustomers;
 
     public TerritoryAdminService(DeliveryZoneRepository zoneRepository,
                                  DeliverySubzoneRepository subzoneRepository,
@@ -60,7 +61,8 @@ public class TerritoryAdminService {
                                  DeliveryPartnerRepository partnerRepository,
                                  AddressRepository addressRepository,
                                  TerritoryResolver resolver,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper,
+                                 com.gpstore.platform.ShopCustomers shopCustomers) {
         this.zoneRepository = zoneRepository;
         this.subzoneRepository = subzoneRepository;
         this.backupRepository = backupRepository;
@@ -68,6 +70,7 @@ public class TerritoryAdminService {
         this.addressRepository = addressRepository;
         this.resolver = resolver;
         this.objectMapper = objectMapper;
+        this.shopCustomers = shopCustomers;
     }
 
     // ---------------------------------------------------------------- zones
@@ -304,11 +307,21 @@ public class TerritoryAdminService {
         int moved = 0;
         int page = 0;
         int safePageSize = Math.min(Math.max(pageSize, 1), 500);
+        // WHOSE ADDRESSES THIS WALKS. The loop below WRITES: it re-stamps
+        // addresses.subzone_id with this caller's resolution. Reading the old
+        // stamp was already scope-aware (see below), but the page it read was
+        // findAll() - every address on GP-STORE - so one merchant pressing
+        // "re-resolve" re-stamped every other merchant's customers' addresses
+        // into their own map. The platform still walks the lot; a shop walks
+        // the addresses of people who have bought from it.
+        Long myShop = shopCustomers.actingShopId();
 
         while (true) {
-            var slice = addressRepository.findAll(
-                    org.springframework.data.domain.PageRequest.of(page, safePageSize,
-                            org.springframework.data.domain.Sort.by("id")));
+            var pageRequest = org.springframework.data.domain.PageRequest.of(
+                    page, safePageSize, org.springframework.data.domain.Sort.by("id"));
+            var slice = myShop == null
+                    ? addressRepository.findAll(pageRequest)
+                    : addressRepository.findAllForCurrentShopCustomers(pageRequest);
             if (slice.isEmpty()) {
                 break;
             }
@@ -355,6 +368,17 @@ public class TerritoryAdminService {
     public Address pinAddress(Long addressId, Long subzoneId) {
         Address address = addressRepository.findById(addressId)
                 .orElseThrow(() -> new ResourceNotFoundException("Address not found: " + addressId));
+
+        // A PIN IS A WRITE TO SOMEBODY'S HOME ADDRESS. The gate is
+        // DELIVERY_MANAGE, which Role.ADMIN carries, so before this check any
+        // shop owner could pin ANY address on the platform - setting its
+        // subzone to one of their own territories and, worse, setting
+        // subzone_locked, which makes every other shop's re-resolve skip that
+        // address from then on. The subzone the pin points at was already
+        // theirs to choose (requireSubzone runs against a shop-owned table);
+        // the address was not.
+        shopCustomers.requireMine(address.getCustomer() == null
+                ? null : address.getCustomer().getId());
         address.setSubzone(subzoneId == null ? null : requireSubzone(subzoneId));
         address.setSubzoneLocked(true);
         return addressRepository.save(address);

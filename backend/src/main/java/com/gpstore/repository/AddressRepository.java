@@ -34,6 +34,21 @@ public interface AddressRepository extends JpaRepository<Address, Long> {
             "select a from Address a where a.customer.id = :customerId")
     List<Address> findByCustomerId(@org.springframework.data.repository.query.Param("customerId") Long customerId);
 
+    /**
+     * Addresses belonging to the customers of the shop in scope.
+     *
+     * <p>FOR THE TERRITORY TOOLS, which write to addresses. Address is not a
+     * {@code ShopOwned} entity - a home belongs to the person living in it -
+     * so a page of {@code findAll()} in a shop-scoped operation is a page of
+     * everybody's. Order IS shop-owned, so "whose customers are these" is a
+     * question the tenant filter answers without naming a shop.
+     */
+    @org.springframework.data.jpa.repository.Query(
+            "SELECT a FROM Address a WHERE EXISTS ("
+            + "  SELECT 1 FROM Order o WHERE o.customer = a.customer)")
+    org.springframework.data.domain.Page<Address> findAllForCurrentShopCustomers(
+            org.springframework.data.domain.Pageable pageable);
+
     @org.springframework.data.jpa.repository.Query(
             "select a from Address a where a.id = :id")
     java.util.Optional<Address> findByIdWithSubzone(
