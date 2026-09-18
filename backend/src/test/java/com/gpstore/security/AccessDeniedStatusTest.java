@@ -112,6 +112,12 @@ class AccessDeniedStatusTest {
         // Nothing in the application grants ADMIN - registration hardcodes
         // CUSTOMER - so the role is set directly, exactly as production does it.
         jdbc.update("UPDATE customers SET role = 'ADMIN' WHERE email = ?", adminEmail);
+        // A ROLE IS NOT A POSTING. This fixture used to stop at the role,
+        // which worked only because the platform mode defaulted to
+        // SINGLE_SHOP and every credential fell back into Shop #1. On a
+        // marketplace an account on nobody's staff list has no shop and is
+        // refused - correctly. See com.gpstore.support.StaffPosting.
+        com.gpstore.support.StaffPosting.postToFirstShop(jdbc, adminEmail);
         ResponseEntity<java.util.Map> login = rest.postForEntity(
                 url("/api/auth/login"),
                 json("""
@@ -125,6 +131,12 @@ class AccessDeniedStatusTest {
         String ownerEmail = "authz-owner-" + stamp + "@example.com";
         register(ownerEmail, phone());
         jdbc.update("UPDATE customers SET role = 'SUPER_ADMIN' WHERE email = ?", ownerEmail);
+        // A ROLE IS NOT A POSTING. This fixture used to stop at the role,
+        // which worked only because the platform mode defaulted to
+        // SINGLE_SHOP and every credential fell back into Shop #1. On a
+        // marketplace an account on nobody's staff list has no shop and is
+        // refused - correctly. See com.gpstore.support.StaffPosting.
+        com.gpstore.support.StaffPosting.postToFirstShop(jdbc, ownerEmail);
         ResponseEntity<java.util.Map> ownerLogin = rest.postForEntity(
                 url("/api/auth/login"),
                 json("{\"email\":\"" + ownerEmail + "\",\"password\":\"Passw0rd!23\"}"),

@@ -137,14 +137,31 @@ public class NotificationService {
                     Map.of("type", "ANNOUNCEMENT"));
             int totalCustomers =
                     (int) Math.min(Integer.MAX_VALUE, customerRepository.countByActiveTrue());
-            orderSideEffectsExecutor.submit(() -> {
-                try {
-                    persistBroadcastPages(title, message);
-                } catch (Exception ex) {
-                    auditLogService.log("BROADCAST_PERSIST_FAILED", "Notification", null,
-                            ex.getMessage());
-                }
-            });
+            // PLATFORM BY DECLARATION, NOT BY OMISSION.
+            //
+            // The tenant scope is a ThreadLocal, so a bare submit() runs the
+            // continuation with NO scope - reads spanning every shop and writes
+            // that belong to nobody. That happens to be harmless here (Customer
+            // and Notification are both central, so no filter would have
+            // narrowed anything anyway), but "harmless because of what this
+            // particular method touches" is a property the next edit silently
+            // breaks. Saying platform() makes the intent checkable and makes an
+            // unscoped background thread a bug everywhere rather than a maybe -
+            // the same discipline TenantContextFilter.spansEveryShop applies to
+            // requests, and AfterCommitExecutor to after-commit work.
+            //
+            // A SHOP'S announcement is deliberately NOT here: it stays on the
+            // request thread precisely so it cannot lose its shop this way.
+            orderSideEffectsExecutor.submit(
+                    com.gpstore.platform.BackgroundWorkScope.carrying(
+                            com.gpstore.platform.TenantScope.platform(), () -> {
+                                try {
+                                    persistBroadcastPages(title, message);
+                                } catch (Exception ex) {
+                                    auditLogService.log("BROADCAST_PERSIST_FAILED",
+                                            "Notification", null, ex.getMessage());
+                                }
+                            }));
             return totalCustomers;
         }
 

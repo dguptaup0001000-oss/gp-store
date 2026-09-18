@@ -141,7 +141,16 @@ class AMerchantSeesOnlyTheirReviewsTest {
         jdbc.update("DELETE FROM merchants WHERE id in (?, ?)", phoneMerchant, sareeMerchant);
         jdbc.update("DELETE FROM customers WHERE id in (?, ?, ?)",
                 phoneOwner, sareeOwner, shopper);
-        TenantDefaults.install(PlatformMode.SINGLE_SHOP,
+        // RESTORES THE CONFIGURED MODE, NOT SINGLE_SHOP.
+        //
+        // TenantDefaults is a static global, so whatever a teardown installs is
+        // what the NEXT test class inherits until its own setup runs. Putting
+        // SINGLE_SHOP back - copied from tests written when that was the
+        // default - left the JVM in a mode the deployment no longer runs, and
+        // the next class to touch a shop-scoped route got a tenant refusal it
+        // had done nothing to deserve. Restoring what is actually configured
+        // leaves the global where the application put it.
+        TenantDefaults.install(platform.getMode(),
                 () -> shops.findByCode(platform.getFirstShopCode()).orElseThrow().getId());
     }
 

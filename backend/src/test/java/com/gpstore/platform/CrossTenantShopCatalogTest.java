@@ -45,6 +45,13 @@ import static org.junit.jupiter.api.Assertions.*;
  * sensitive part of running a kirana - and that they all live in these rows.
  */
 @SpringBootTest(properties = {
+        // SAYS THE MODE IT MEANS. This used to set no mode and rely on the
+        // default being SINGLE_SHOP - so it was asserting a one-shop property
+        // while claiming to assert a general one, and it broke the moment the
+        // default became the marketplace (which is what production runs). The
+        // assertions here are genuinely about single-shop behaviour; declaring
+        // it keeps them honest and keeps them passing for the right reason.
+        "platform.mode=SINGLE_SHOP",
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",
