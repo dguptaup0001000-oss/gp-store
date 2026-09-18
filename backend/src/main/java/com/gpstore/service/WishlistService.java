@@ -50,7 +50,14 @@ public class WishlistService {
     @Transactional(readOnly = true)
     public org.springframework.data.domain.Page<WishlistResponse> getAllWishlists(
             org.springframework.data.domain.Pageable pageable) {
-        return wishlistRepository.findAll(pageable)
+        // A shop reads saved items for what it lists; the platform reads all.
+        // See WishlistRepository.findAllForCurrentShopShelf.
+        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+        if (scope == null || scope.isPlatform()) {
+            return wishlistRepository.findAll(pageable)
+                    .map(w -> WishlistResponse.from(w, shopPricedCatalogue.termsFor(w.getProduct())));
+        }
+        return wishlistRepository.findAllForCurrentShopShelf(pageable)
                 .map(w -> WishlistResponse.from(w, shopPricedCatalogue.termsFor(w.getProduct())));
     }
 

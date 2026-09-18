@@ -17,6 +17,27 @@ import java.util.Optional;
 public interface OrderRepository extends JpaRepository<Order, Long> {
 
     /**
+     * Customers who have ordered from the shop in scope.
+     *
+     * <p>WHO A SHOP'S ANNOUNCEMENT IS FOR. Order is a {@code ShopOwned}
+     * entity, so the tenant filter narrows this to the acting shop without the
+     * query naming a shop at all - "who has bought from me" is already a
+     * tenant-scoped question and needs no new column to answer.
+     *
+     * <p>Paged because a busy kirana has thousands of them and a broadcast
+     * should not load the lot into one list.
+     */
+    @Query("SELECT DISTINCT o.customer FROM Order o WHERE o.customer IS NOT NULL "
+            + "AND o.customer.active = true")
+    Page<com.gpstore.entity.Customer> findDistinctCustomersOfCurrentShop(Pageable pageable);
+
+    /** How many of them there are, for the count reported back to the shop. */
+    @Query("SELECT count(DISTINCT o.customer) FROM Order o WHERE o.customer IS NOT NULL "
+            + "AND o.customer.active = true")
+    long countDistinctCustomersOfCurrentShop();
+
+
+    /**
      * The scan's ONLY way in.
      *
      * A worker's app sends a token, never an order id - an endpoint that

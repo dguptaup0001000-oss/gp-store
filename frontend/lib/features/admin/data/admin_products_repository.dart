@@ -703,7 +703,16 @@ class AdminProductsRepository {
 
   // --- Notifications ---
 
-  /// Store-wide announcement - one real notification per active customer.
+  /// An announcement to the shop's own customers - everyone who has ordered
+  /// from it - as one real notification each, plus a push where the device is
+  /// registered.
+  ///
+  /// NOT STORE-WIDE ANY MORE, and it should never have been. The server used
+  /// to push this to the platform's global FCM topic and write a row for every
+  /// active customer on GP-STORE whoever asked, so a shop that opened this
+  /// morning could notify the whole marketplace. The reach is now decided by
+  /// the shop in scope; a platform admin still reaches everybody.
+  ///
   /// Returns the backend's own confirmation message (e.g. "Sent to 5
   /// customers") rather than discarding it.
   Future<String> broadcastNotification(

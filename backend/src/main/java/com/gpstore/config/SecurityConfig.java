@@ -536,6 +536,26 @@ public class SecurityConfig {
                     .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
                 .requestMatchers(HttpMethod.DELETE, "/api/cart-items/**")
                     .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
+                // CART LINES: READING IS NOT WRITING - the identical mistake
+                // the order-lines block below records, left on this path.
+                //
+                // The whole prefix was CUSTOMERS_VIEW, a READ permission, while
+                // POST /api/cart-items binds a raw CartItem entity (price and
+                // totalPrice columns included) and the DELETEs remove lines
+                // from any cart by id. SUPPORT holds CUSTOMERS_VIEW and not
+                // CUSTOMERS_MANAGE, so a read-only support account could edit
+                // any customer's basket in the shop.
+                //
+                // The charged total was never at risk - OrderService re-prices
+                // every line from the shop's own listing at checkout and never
+                // reads CartItem.price - but the basket a customer is looking
+                // at was.
+                .requestMatchers(HttpMethod.POST, "/api/cart-items", "/api/cart-items/**")
+                    .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.PUT, "/api/cart-items/**")
+                    .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.DELETE, "/api/cart-items/**")
+                    .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
                 .requestMatchers("/api/cart-items/**").hasAuthority(AdminPermission.CUSTOMERS_VIEW.authority())
                 // ORDER LINES: READING IS NOT WRITING.
                 //

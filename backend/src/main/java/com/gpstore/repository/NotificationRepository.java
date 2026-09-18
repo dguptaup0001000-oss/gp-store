@@ -13,6 +13,27 @@ import java.util.List;
 public interface NotificationRepository
         extends JpaRepository<Notification, Long> {
 
+    /**
+     * Notifications about THIS shop's orders, newest first.
+     *
+     * <p>WAS findAll(). The admin notification log returned every notification
+     * ever sent to anyone on the platform, each carrying the order number and
+     * status it was about - so one merchant could read the order flow of every
+     * other merchant. No app calls it today, which is why nobody noticed.
+     *
+     * <p>Order IS a {@code ShopOwned} entity, so joining through it applies the
+     * tenant filter and the log narrows to this shop without naming a shop.
+     *
+     * <p>BROADCASTS ARE EXCLUDED FOR A SHOP, deliberately. A notification with
+     * no order is a platform announcement, not this shop's traffic; showing
+     * them here would put GP-STORE's own messages in a merchant's operational
+     * log and, worse, put other shops' announcements there too.
+     */
+    @Query("SELECT n FROM Notification n WHERE n.order IS NOT NULL "
+            + "ORDER BY n.sentAt DESC, n.id DESC")
+    Page<Notification> findAllForCurrentShop(Pageable pageable);
+
+
     List<Notification> findByCustomerId(Long customerId);
 
     List<Notification> findByCustomerIdOrderBySentAtDesc(Long customerId);

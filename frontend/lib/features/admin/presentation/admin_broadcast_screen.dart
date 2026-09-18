@@ -30,8 +30,16 @@ class _AdminBroadcastScreenState extends ConsumerState<AdminBroadcastScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Send to every customer?'),
-        content: const Text('This creates a notification for every active customer account. This cannot be undone.'),
+        // SAYS WHAT IT ACTUALLY DOES NOW. This used to read "every active
+        // customer account", and for a merchant that was true and should not
+        // have been: the broadcast reached every customer on GP-STORE,
+        // including people who had never bought from this shop. It now reaches
+        // the shop's own customers, and the dialog has to say so - a warning
+        // that overstates the reach teaches people to ignore warnings.
+        title: const Text('Send to your customers?'),
+        content: const Text(
+            'This sends a notification to everyone who has ordered from your '
+            'shop. It cannot be undone.'),
         actions: [
           TextButton(onPressed: hapticize(() => Navigator.of(context).pop(false)), child: const Text('Cancel')),
           TextButton(onPressed: hapticize(() => Navigator.of(context).pop(true)), child: const Text('Send')),

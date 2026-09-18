@@ -117,26 +117,93 @@ public class NotificationService {
             throw new BadRequestException("Title and message are required");
         }
 
-        pushNotificationService.sendToTopic(
-                PushNotificationService.ALL_CUSTOMERS_TOPIC, title, message, Map.of("type", "ANNOUNCEMENT"));
+        // THE SHOP IN SCOPE DECIDES WHO THIS REACHES.
+        //
+        // This used to be unconditional: a push to the one global FCM topic
+        // plus a notification row for every active customer on the platform.
+        // Its only gate is BROADCAST_SEND, and Role.ADMIN carries that through
+        // EVERY_SHOP_PERMISSION - so any shop owner could put a notification on
+        // the lock screen of every GP-STORE customer, including people who have
+        // never heard of them. Measured before this was fixed: one new phone
+        // shop's announcement reported "Sent to 63 customers".
+        //
+        // A push notification cannot be recalled, which is what makes this
+        // worse than a read leak.
+        boolean platformWide = announcesForTheWholePlatform();
 
-        // One executor task pages the whole customer list. Submitting one
-        // task per 200-row page used to enqueue a burst of work onto the
-        // same 4-thread/200-slot pool that also writes invoices after
-        // checkout. A 20,000-customer announcement would have been 100
-        // queued tasks, each holding a page of Customer entities, before
-        // any of them ran.
-        int totalCustomers = (int) Math.min(Integer.MAX_VALUE, customerRepository.countByActiveTrue());
-        orderSideEffectsExecutor.submit(() -> {
-            try {
-                persistBroadcastPages(title, message);
-            } catch (Exception ex) {
-                auditLogService.log("BROADCAST_PERSIST_FAILED", "Notification", null, ex.getMessage());
-            }
-        });
-        return totalCustomers;
+        if (platformWide) {
+            pushNotificationService.sendToTopic(
+                    PushNotificationService.ALL_CUSTOMERS_TOPIC, title, message,
+                    Map.of("type", "ANNOUNCEMENT"));
+            int totalCustomers =
+                    (int) Math.min(Integer.MAX_VALUE, customerRepository.countByActiveTrue());
+            orderSideEffectsExecutor.submit(() -> {
+                try {
+                    persistBroadcastPages(title, message);
+                } catch (Exception ex) {
+                    auditLogService.log("BROADCAST_PERSIST_FAILED", "Notification", null,
+                            ex.getMessage());
+                }
+            });
+            return totalCustomers;
+        }
+
+        // A SHOP'S OWN CUSTOMERS: the people who have ordered from it. There is
+        // no per-shop FCM topic, so the push goes per device token rather than
+        // to a topic - the global topic is the platform's and a shop must not
+        // borrow it.
+        //
+        // NOT SUBMITTED TO THE EXECUTOR. The tenant scope lives in a
+        // ThreadLocal, so work handed to another thread would run with no shop
+        // in scope and the filter would stop narrowing - which is how a
+        // "scoped" broadcast quietly becomes a global one again. A shop's own
+        // customer list is small enough to page through on the request thread.
+        long reached = orderRepository.countDistinctCustomersOfCurrentShop();
+        broadcastToMyCustomers(title, message);
+        return (int) Math.min(Integer.MAX_VALUE, reached);
     }
 
+    /**
+     * Whether this announcement is GP-STORE's or one shop's.
+     *
+     * <p>Platform scope is the platform console. Any shop scope is a
+     * shopkeeper, however many permissions their role happens to carry.
+     */
+    private boolean announcesForTheWholePlatform() {
+        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+        return scope == null || scope.isPlatform();
+    }
+
+    /** One page at a time through the customers this shop has actually served. */
+    private void broadcastToMyCustomers(String title, String message) {
+        int pageNumber = 0;
+        Page<Customer> page;
+        do {
+            page = orderRepository.findDistinctCustomersOfCurrentShop(
+                    PageRequest.of(pageNumber, BROADCAST_PAGE_SIZE));
+            List<Customer> customers = page.getContent();
+            if (!customers.isEmpty()) {
+                saveNotificationBatch(customers, title, message);
+                for (Customer customer : customers) {
+                    String token = customer.getFcmToken();
+                    if (token != null && !token.isBlank()) {
+                        pushNotificationService.sendPush(token, title, message,
+                                Map.of("type", "ANNOUNCEMENT"));
+                    }
+                }
+            }
+            pageNumber++;
+        } while (page.hasNext());
+    }
+
+    /**
+     * Every active customer on the platform - the PLATFORM's announcement only.
+     *
+     * <p>Reached from the platform branch of {@link #broadcastToAll} and from
+     * nowhere else. A shop's announcement goes through
+     * {@code broadcastToMyCustomers}, which pages the people that shop has
+     * actually served.
+     */
     void persistBroadcastPages(String title, String message) {
         int pageNumber = 0;
         Page<Customer> page;
@@ -441,7 +508,11 @@ public class NotificationService {
     @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public Page<com.gpstore.dto.response.NotificationResponse> getAllNotifications(
             org.springframework.data.domain.Pageable pageable) {
-        return notificationRepository.findAll(pageable)
+        if (announcesForTheWholePlatform()) {
+            return notificationRepository.findAll(pageable)
+                    .map(com.gpstore.dto.response.NotificationResponse::from);
+        }
+        return notificationRepository.findAllForCurrentShop(pageable)
                 .map(com.gpstore.dto.response.NotificationResponse::from);
     }
 
