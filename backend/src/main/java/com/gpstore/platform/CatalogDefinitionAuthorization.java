@@ -40,9 +40,11 @@ public class CatalogDefinitionAuthorization
         implements AuthorizationManager<RequestAuthorizationContext> {
 
     private final PlatformProperties platform;
+    private final ShopRepository shops;
 
-    public CatalogDefinitionAuthorization(PlatformProperties platform) {
+    public CatalogDefinitionAuthorization(PlatformProperties platform, ShopRepository shops) {
         this.platform = platform;
+        this.shops = shops;
     }
 
     @Override
@@ -59,8 +61,27 @@ public class CatalogDefinitionAuthorization
         if (holds(authentication, AdminPermission.CATALOG_DEFINE)) {
             return true;
         }
-        return !platform.getMode().isMultiShop()
-                && holds(authentication, AdminPermission.CATALOG_MANAGE);
+        return !marketplace() && holds(authentication, AdminPermission.CATALOG_MANAGE);
+    }
+
+    /**
+     * Whether more than one merchant is trading here, whatever the config says.
+     *
+     * <p>THE MODE ALONE WAS NOT ENOUGH, and a real device found it. Production
+     * runs with {@code platform.mode} unset, which parses to SINGLE_SHOP - so
+     * the CATALOG_MANAGE fallback above stayed switched on while several
+     * merchants were live. A newly onboarded phone shop holds CATALOG_MANAGE
+     * like every shopkeeper does, and could therefore rename, re-categorise or
+     * delete the categories the kirana next door sells out of: one merchant
+     * editing the whole platform's taxonomy.
+     *
+     * <p>Counting shops closes it without waiting for anyone to remember to set
+     * the flag. The moment a second shop exists, defining the catalogue becomes
+     * a platform act and needs CATALOG_DEFINE. A genuinely single-shop
+     * deployment is untouched, which is the case this fallback existed for.
+     */
+    private boolean marketplace() {
+        return platform.getMode().isMultiShop() || shops.countByDeletedAtIsNull() > 1;
     }
 
     private static boolean holds(Authentication authentication, AdminPermission permission) {

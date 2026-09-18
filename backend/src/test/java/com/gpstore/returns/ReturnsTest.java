@@ -34,6 +34,8 @@ import static org.mockito.Mockito.*;
  * shop's money.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "cashfree.webhook-secret=returns-test-secret",
         "refund.reconcile-initial-delay-ms=3600000",
         "refund.reconcile-interval-ms=3600000",

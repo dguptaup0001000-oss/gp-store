@@ -5,6 +5,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.repository.query.Param;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +40,54 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
             Long productId, Pageable pageable);
 
     Page<Review> findByReportedAtIsNotNullOrderByReportedAtDesc(Pageable pageable);
+
+    /**
+     * Reviews of products THIS shop lists, newest first.
+     *
+     * <p>THE SHELF IS THE NARROWING, and it is the same EXISTS that
+     * {@code ProductRepository.findAllListedForCurrentShop} uses. Review is not
+     * a {@code ShopOwned} entity - a review belongs to a PRODUCT, which is
+     * central and shared by every shop selling it - so no tenant filter reaches
+     * these rows on its own. {@code ShopProductVariant} IS shop-owned, so
+     * joining through it applies the filter, and a merchant's reach becomes
+     * exactly what they sell.
+     *
+     * <p>DELIBERATELY NOT FILTERED ON available/active. A merchant who has just
+     * delisted an item still has to answer the reviews it collected while they
+     * were selling it; hiding those would be a different unfairness.
+     */
+    @Query("""
+            SELECT r FROM Review r
+            WHERE EXISTS (
+                SELECT 1 FROM ProductVariant v, ShopProductVariant l
+                WHERE v.product = r.product AND l.productVariantId = v.id
+            )
+            ORDER BY r.reviewDate DESC, r.id DESC
+            """)
+    Page<Review> findAllForCurrentShopShelf(Pageable pageable);
+
+    /** The same narrowing, for the flagged-review queue. */
+    @Query("""
+            SELECT r FROM Review r
+            WHERE r.reportedAt IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM ProductVariant v, ShopProductVariant l
+                WHERE v.product = r.product AND l.productVariantId = v.id
+            )
+            ORDER BY r.reportedAt DESC, r.id DESC
+            """)
+    Page<Review> findReportedForCurrentShopShelf(Pageable pageable);
+
+    /** Whether the product a review is on sits on the calling shop's shelf. */
+    @Query("""
+            SELECT count(r) > 0 FROM Review r
+            WHERE r.id = :reviewId
+              AND EXISTS (
+                SELECT 1 FROM ProductVariant v, ShopProductVariant l
+                WHERE v.product = r.product AND l.productVariantId = v.id
+            )
+            """)
+    boolean isOnCurrentShopShelf(@Param("reviewId") Long reviewId);
 
     /**
      * A product's stars, counted in the database (§19).

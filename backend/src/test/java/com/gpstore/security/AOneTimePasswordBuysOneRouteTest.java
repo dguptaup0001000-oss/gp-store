@@ -142,11 +142,23 @@ class AOneTimePasswordBuysOneRouteTest {
                                 """.formatted(merchant.account().oneTimePassword())))
                 .andExpect(status().isOk());
 
-        // The same token, now on an account that owes nothing. A customer
-        // surface rather than a shop one: this account has no shop_staff row,
-        // so /api/shop/** would refuse it for a legitimate second reason and
-        // prove nothing about the password gate being lifted.
-        mockMvc.perform(get("/api/orders/my-orders")
+        // The same token, now on an account that owes nothing.
+        //
+        // THE PROBE MOVED, AND THE REASON IS THE SAME ONE IT WAS CHOSEN FOR.
+        // It used to be /api/orders/my-orders, picked because /api/shop/**
+        // "would refuse it for a legitimate second reason and prove nothing".
+        // That second reason grew: Order is a ShopOwned entity, so my-orders
+        // needs a tenant scope, and an account on nobody's staff list has no
+        // shop to resolve to once the platform mode is the marketplace. It was
+        // only ever 200 here because SINGLE_SHOP resolved every credential into
+        // Shop #1.
+        //
+        // /api/addresses/mine has neither confound: it is in
+        // TenantContextFilter.spansEveryShop, so it needs no shop, and Address
+        // is keyed on the customer id rather than being shop-owned. It is
+        // blocked by the password gate above like everything else and opens the
+        // moment the gate lifts - which is the only thing this test is about.
+        mockMvc.perform(get("/api/addresses/mine")
                         .header("Authorization", "Bearer " + merchant.token()))
                 .andExpect(status().isOk());
     }
@@ -298,7 +310,8 @@ class AOneTimePasswordBuysOneRouteTest {
 
         String after = jwtService.generateToken(
                 merchant.account().customerId(), merchant.account().email(), Role.ADMIN);
-        mockMvc.perform(get("/api/orders/my-orders")
+        // Same probe, same reason - see theChangeIsAllowedAndOpensTheApp.
+        mockMvc.perform(get("/api/addresses/mine")
                         .header("Authorization", "Bearer " + after))
                 .andExpect(status().isOk());
 

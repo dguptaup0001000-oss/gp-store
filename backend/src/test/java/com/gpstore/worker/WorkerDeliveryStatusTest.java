@@ -55,6 +55,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * told it had arrived, and the COD payment closed for cash nobody collected.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",
@@ -161,7 +163,8 @@ class WorkerDeliveryStatusTest {
         jdbc.update("DELETE FROM notifications WHERE order_id IN "
                 + "(SELECT id FROM orders WHERE order_number LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM orders WHERE order_number LIKE ?", PREFIX + "%");
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE full_name LIKE ?", MARKER + "%");
+        jdbc.update("DELETE FROM address_territory_stamps WHERE address_id IN "
+                + "(SELECT id FROM addresses WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM addresses WHERE full_name LIKE ?", MARKER + "%");
         jdbc.update("DELETE FROM deliveries WHERE batch_id IN "
                 + "(SELECT id FROM delivery_batches WHERE delivery_partner_id IN "

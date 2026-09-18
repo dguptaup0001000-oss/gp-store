@@ -110,7 +110,10 @@ class IdentitySequenceDriftTest {
     }
 
     @Test
-    @WithStaff
+    // The platform owner defines the shared catalogue in any deployment;
+    // this test is about an identity sequence, not about who may write a
+    // product. See CatalogDefinitionAuthorization.
+    @WithStaff(com.gpstore.entity.Role.SUPER_ADMIN)
     @DisplayName("a sequence behind its table makes every Add Product fail - and it is not the admin's fault")
     void driftBreaksProductCreation() throws Exception {
         ensureAProductExists();
@@ -138,7 +141,10 @@ class IdentitySequenceDriftTest {
     }
 
     @Test
-    @WithStaff
+    // The platform owner defines the shared catalogue in any deployment;
+    // this test is about an identity sequence, not about who may write a
+    // product. See CatalogDefinitionAuthorization.
+    @WithStaff(com.gpstore.entity.Role.SUPER_ADMIN)
     @DisplayName("the guard repairs the drift, and the same request then succeeds")
     void guardRepairsDriftAndCreationWorks() throws Exception {
         ensureAProductExists();

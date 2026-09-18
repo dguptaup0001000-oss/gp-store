@@ -51,6 +51,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *    still returning a perfectly valid 200.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         // NO LIVE OUTBOX WORKER. A running drain turns committed work into
         // auto-assigned deliveries against whichever rider is available, and
         // Spring caches this context and never closes it - so the worker

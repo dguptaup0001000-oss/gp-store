@@ -63,6 +63,8 @@ import static org.mockito.Mockito.*;
  * the same refund rather than sending the money twice.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "cashfree.webhook-secret=cancel-refund-test-secret",
         // The outbox worker must not drain in the background here: these
         // tests drive the handler themselves so they can assert on what it

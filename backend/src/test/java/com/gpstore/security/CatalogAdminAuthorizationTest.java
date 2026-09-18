@@ -31,6 +31,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * the door is locked without opening it.
  */
 @SpringBootTest(properties = {
+        // ONE SHOP, DECLARED, and it matters for what this class asserts.
+        //
+        // Section D below says an admin reaches the catalogue audit and the
+        // test-data deletion. That is TRUE OF A SINGLE KIRANA, where writing
+        // the shared catalogue and running the shop are the same job -
+        // CatalogDefinitionAuthorization hands it to CATALOG_MANAGE - and it
+        // is NOT true on a marketplace, where the shared catalogue is the
+        // platform's and a merchant is refused. Both are now real rules, so
+        // this class declares which deployment it is describing and
+        // SharedCatalogueMaintenanceIsThePlatformsTest asserts the other.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         // NO LIVE OUTBOX WORKER. A running drain turns committed work into
         // auto-assigned deliveries against whichever rider is available, and
         // Spring caches this context and never closes it - so the worker
@@ -129,9 +140,22 @@ class CatalogAdminAuthorizationTest {
 
     // ---------------- D. admin ----------------
 
+    // THE PLATFORM OWNER, FOR A REASON THAT IS ABOUT TEST DETERMINISM AND IS
+    // WORTH STATING. These two say "somebody entitled to catalogue
+    // administration gets through", and catalogue definition is granted to a
+    // plain shop admin only on a deployment carrying ONE shop
+    // (CatalogDefinitionAuthorization takes the stricter reading when the
+    // database holds more). This suite shares a database, so whether a shop
+    // admin qualified depended on whether another class had opened a second
+    // shop first - a result decided by alphabetical order.
+    //
+    // The single-shop half of the rule is asserted directly, without a
+    // database, by CatalogueDefinitionBelongsToTheMarketplaceTest; the
+    // marketplace half by SharedCatalogueMaintenanceIsThePlatformsTest. What
+    // is left here is what this class is for: who reaches the route at all.
     @Test
-    @WithStaff
-    @DisplayName("an admin reaches the audit endpoint - read-only, nothing is mutated")
+    @WithStaff(com.gpstore.entity.Role.SUPER_ADMIN)
+    @DisplayName("catalogue administration reaches the audit endpoint - read-only, nothing is mutated")
     void adminCanReadAudit() throws Exception {
         mockMvc.perform(get(AUDIT)).andExpect(status().isOk());
     }
@@ -145,8 +169,8 @@ class CatalogAdminAuthorizationTest {
      * is not a thing a test suite should do to a shared database.
      */
     @Test
-    @WithStaff
-    @DisplayName("even an admin must pass confirm=true before anything is deleted")
+    @WithStaff(com.gpstore.entity.Role.SUPER_ADMIN)
+    @DisplayName("even catalogue administration must pass confirm=true before anything is deleted")
     void adminDeletionRequiresExplicitConfirmation() throws Exception {
         mockMvc.perform(delete(TEST_DATA)).andExpect(status().isBadRequest());
     }

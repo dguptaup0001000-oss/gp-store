@@ -255,7 +255,38 @@ public class SecurityConfig {
                 // Same ordering reason as /api/reviews above - the admin
                 // "everything including inactive" product list must come
                 // before the broad public GET /api/products/** rule below.
+                // THE PLATFORM'S ADDRESS BOOK IS THE PLATFORM'S.
+                //
+                // GET /api/addresses (the bare path - not /mine, not /{id}) was
+                // @PreAuthorize("hasRole('ADMIN')"), and Role.ADMIN is what
+                // every shop owner holds. Address is not ShopOwned and the
+                // service pages it unfiltered, so a merchant reading it got
+                // every customer on GP-STORE: full name, mobile number, house
+                // number, area, city, pincode, latitude and longitude, plus any
+                // delivery instructions. Measured before this line existed - a
+                // newly onboarded shop read another merchant's customer's home
+                // address out of it.
+                //
+                // A merchant needs the delivery address of orders placed WITH
+                // THEM, and gets it on the order. Browsing an address book is
+                // not a shopkeeper's act at all.
+                //
+                // EXACT PATH ON PURPOSE: /api/addresses/mine and
+                // /api/addresses/{id} are the customer's own and stay
+                // authenticated, gated by AddressService.getOwnedAddress.
+                .requestMatchers(HttpMethod.GET, "/api/addresses")
+                    .hasAuthority(AdminPermission.PLATFORM_ADMIN.authority())
                 .requestMatchers(HttpMethod.GET, "/api/products/admin/**").hasAuthority(AdminPermission.CATALOG_VIEW.authority())
+                // THE MERCHANT'S OWN DEPARTMENTS, and it must come before the
+                // public /api/categories/** rule below or it inherits permitAll
+                // from it. The rows themselves are derived from listings that
+                // the customer's discovery screens already publish, so this is
+                // not secrecy - it is that a shop-management surface should
+                // require the permission that means "may look at the
+                // catalogue", and never be reachable by an anonymous caller
+                // who happened to set a shop header.
+                .requestMatchers(HttpMethod.GET, "/api/categories/mine")
+                    .hasAuthority(AdminPermission.CATALOG_VIEW.authority())
                 .requestMatchers(HttpMethod.GET,
                         "/api/products/**",
                         "/api/categories/**",
@@ -299,6 +330,15 @@ public class SecurityConfig {
                 // permission again - see requirePermission there.
                 .requestMatchers("/api/shop/listings/*/stock")
                     .hasAuthority(AdminPermission.INVENTORY_MANAGE.authority())
+                // ADDING SOMETHING YOU SELL IS SHOPKEEPER'S WORK, not a
+                // platform act. It creates a catalogue row as a side effect,
+                // but the row it exists to create is this shop's listing - so
+                // it takes CATALOG_MANAGE like pricing and stocking do, and
+                // never CATALOG_DEFINE. Must precede the broad /api/shop/**
+                // CATALOG_VIEW rule below or a read permission would authorise
+                // this write.
+                .requestMatchers(HttpMethod.POST, "/api/shop/products")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
                 .requestMatchers("/api/shop/listings/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
 
                 // THE BACK OFFICE, gated on what it is about rather than on
@@ -343,7 +383,36 @@ public class SecurityConfig {
                 // delete every test product in the shop - so it is the
                 // narrowest possible grant, and it sits ABOVE the broader
                 // rules so nothing below can widen it by accident.
-                .requestMatchers("/api/admin/catalog/**").hasAuthority(AdminPermission.SYSTEM_ADMIN.authority())
+                //
+                // THE BULK IMPORTER IS THE SHOPKEEPER'S OWN TOOL and stays
+                // here: it lists what it imports onto the importing shop's
+                // shelf (CatalogImportService, shopCatalog.list), the admin
+                // app ships a screen for it, and the run and its problems are
+                // shop-owned rows. It must come first or the narrower rule
+                // below would take it away from every merchant on the
+                // marketplace.
+                .requestMatchers("/api/admin/catalog/import/**")
+                    .hasAuthority(AdminPermission.SYSTEM_ADMIN.authority())
+                // EVERYTHING ELSE UNDER HERE WRITES THE SHARED CATALOGUE, and
+                // SYSTEM_ADMIN is not the permission that means that.
+                //
+                // Role.ADMIN - every shop owner on GP-STORE - holds
+                // SYSTEM_ADMIN, because EVERY_SHOP_PERMISSION is written as a
+                // subtraction and SYSTEM_ADMIN is not one of the three
+                // subtracted. So a merchant could seed the platform's
+                // catalogue, start a thousand outbound image fetches, migrate
+                // every catalogue image to R2, and - with ?confirm=true -
+                // delete every product flagged is_test_data ACROSS THE WHOLE
+                // MARKETPLACE, including rows other shops have listed and
+                // priced. The confirm flag is a guard against a stray tap, not
+                // against the wrong person.
+                //
+                // CATALOG_DEFINE is the permission that means "writes the
+                // shared catalogue", and CatalogDefinitionAuthorization is
+                // already how this codebase asks the question: under one shop
+                // it is exactly CATALOG_MANAGE and the kirana owner keeps every
+                // one of these; on a marketplace it is the platform's.
+                .requestMatchers("/api/admin/catalog/**").access(catalogDefinition)
                 // TERRITORY ADMINISTRATION. Every route under here edits the
                 // permanent delivery map - a boundary, a rider's territory,
                 // which territories may lend to each other. Redrawing one
@@ -514,6 +583,26 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.PUT, "/api/cart-items/**")
                     .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
                 .requestMatchers(HttpMethod.PATCH, "/api/cart-items/**")
+                    .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.DELETE, "/api/cart-items/**")
+                    .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
+                // CART LINES: READING IS NOT WRITING - the identical mistake
+                // the order-lines block below records, left on this path.
+                //
+                // The whole prefix was CUSTOMERS_VIEW, a READ permission, while
+                // POST /api/cart-items binds a raw CartItem entity (price and
+                // totalPrice columns included) and the DELETEs remove lines
+                // from any cart by id. SUPPORT holds CUSTOMERS_VIEW and not
+                // CUSTOMERS_MANAGE, so a read-only support account could edit
+                // any customer's basket in the shop.
+                //
+                // The charged total was never at risk - OrderService re-prices
+                // every line from the shop's own listing at checkout and never
+                // reads CartItem.price - but the basket a customer is looking
+                // at was.
+                .requestMatchers(HttpMethod.POST, "/api/cart-items", "/api/cart-items/**")
+                    .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
+                .requestMatchers(HttpMethod.PUT, "/api/cart-items/**")
                     .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())
                 .requestMatchers(HttpMethod.DELETE, "/api/cart-items/**")
                     .hasAuthority(AdminPermission.CUSTOMERS_MANAGE.authority())

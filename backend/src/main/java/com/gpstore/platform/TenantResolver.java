@@ -1,6 +1,8 @@
 package com.gpstore.platform;
 
 import com.gpstore.security.AdminPermission;
+import com.gpstore.security.AuthenticatedUser;
+import com.gpstore.security.RolePermissions;
 import com.gpstore.security.CurrentUser;
 
 import java.util.Optional;
@@ -172,11 +174,87 @@ public class TenantResolver {
             return TenantScope.ofShop(browsing.get());
         }
 
+        // A SHOPPER WHO HAS NOT PICKED A SHOP YET IS STILL A SHOPPER.
+        //
+        // THE TRAP THIS CLOSES, and it is the reason the mode default could not
+        // simply be flipped. Everything above resolves a caller who HAS a shop:
+        // a platform admin, a rider on a roster, staff on a list, a customer
+        // whose address reaches one. Below that sat a throw, which
+        // TenantContextFilter turns into 403 - so under multi-shop an anonymous
+        // browser, or a customer who signed up ten seconds ago and has not
+        // added an address, got 403 on the public catalogue. Measured:
+        // GET /api/products/feed returned 403 for both.
+        //
+        // Under SINGLE_SHOP that was unreachable, because the branch at the top
+        // of this method answered everybody. So "turn the marketplace on" and
+        // "take the catalogue off the internet" were the same change, and the
+        // mode flag was hiding it.
+        //
+        // WHY THIS IS NOT THE OLD FALLBACK COMING BACK. The SINGLE_SHOP branch
+        // answered EVERY credential with Shop #1, including a merchant's, which
+        // is what let the second merchant land in the first one's business.
+        // This is reached only after every credential that has a shop of its
+        // own has been given it, so the only callers here are ones with no shop
+        // at all: anonymous, or a customer who has not chosen. Browsing is all
+        // it can buy them - a scope is not a membership, and every merchant
+        // route separately requires a live shop_staff row (see
+        // TenantContextFilter.mayEnterMerchantBackOffice). It grants nothing
+        // that SINGLE_SHOP did not already grant them, and it is now
+        // independent of the mode, which is the point: authorization must not
+        // change because a deployment flag changed.
+        // ONLY FOR CREDENTIALS THAT COULD NOT ACT AS A SHOP IF THEY TRIED.
+        //
+        // The first version of this fallback covered everyone who reached here,
+        // and MarketplaceIdentityTest caught it being wrong within the hour: an
+        // account with a STAFF-SHAPED ROLE whose shop_staff row had been revoked
+        // stopped throwing and started resolving to Shop #1. Their customers
+        // row still says ADMIN - revoking a membership does not demote the
+        // account - so they would have arrived in the first shop's inventory
+        // and orders holding a shopkeeper's permissions. That is the exact
+        // escalation this fallback is sitting next to, and widening browse was
+        // no reason to reopen it.
+        //
+        // So the test is the role, not the absence of a membership. A plain
+        // customer and an anonymous caller have no merchant permissions to
+        // misuse and lose nothing by browsing a shelf; anyone whose role could
+        // administer a shop must still name a shop they are on the roster of,
+        // or be refused. Same question TenantContextFilter asks before letting
+        // anybody into the merchant back office, asked one layer earlier.
+        if (!couldActAsAShop()) {
+            Long shopToBrowse = firstShopId();
+            if (shopToBrowse != null) {
+                return TenantScope.ofShop(shopToBrowse);
+            }
+        }
+
         throw new IllegalStateException(
-                "Multi-shop mode is on and this request names no shop. A staff account with no "
-                        + "membership, or a customer with no serviceable address, cannot be "
-                        + "resolved to one - and picking a shop for them would be inventing an "
-                        + "authorization nobody granted.");
+                "This request names no shop and the credential belongs to none. A staff "
+                        + "account with no membership cannot be resolved to one, and picking a "
+                        + "shop for them would be inventing an authorization nobody granted.");
+    }
+
+    /**
+     * Whether this credential's ROLE could administer a shop.
+     *
+     * <p>Not "does it have a shop" - that question is already answered above
+     * and the answer was no. This asks whether letting it browse one would hand
+     * it anything more than a shelf. A role carrying merchant permissions
+     * would; a customer's role would not.
+     *
+     * <p>Anonymous callers have no principal at all and are the clearest case
+     * of "cannot act as a shop".
+     */
+    private boolean couldActAsAShop() {
+        AuthenticatedUser principal;
+        try {
+            principal = currentUser.get();
+        } catch (RuntimeException anonymous) {
+            return false;
+        }
+        if (principal == null || principal.getRole() == null) {
+            return false;
+        }
+        return !RolePermissions.forRoleName(principal.getRole()).isEmpty();
     }
 
     /**

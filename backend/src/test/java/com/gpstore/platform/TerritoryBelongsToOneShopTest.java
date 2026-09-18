@@ -69,6 +69,7 @@ class TerritoryBelongsToOneShopTest {
     @Autowired private DeliveryZoneRepository zones;
     @Autowired private DeliverySubzoneRepository subzones;
     @Autowired private TerritoryResolver resolver;
+    @Autowired private com.gpstore.territory.AddressTerritory territory;
     @Autowired private TerritoryAdminService territoryAdmin;
     @Autowired private com.gpstore.repository.DeliveryPartnerRepository partners;
     @Autowired private com.gpstore.repository.AddressRepository addresses;
@@ -141,15 +142,23 @@ class TerritoryBelongsToOneShopTest {
         customerId = jdbc.queryForObject(
                 "SELECT id FROM customers WHERE email = ?", Long.class, tag + "@example.test");
 
-        // The customer's address is stamped in SHOP A's territory - which is
-        // how it would really be, having been saved while shopping there.
         jdbc.update("""
                 INSERT INTO addresses (customer_id, house_no, street, city, state, pincode,
-                                       latitude, longitude, subzone_id, subzone_locked)
-                VALUES (?, '1', 'Test Lane', 'Testville', 'TS', '110001', ?, ?, ?, false)
-                """, customerId, INSIDE_LAT, INSIDE_LNG, subzoneAId);
+                                       latitude, longitude)
+                VALUES (?, '1', 'Test Lane', 'Testville', 'TS', '110001', ?, ?)
+                """, customerId, INSIDE_LAT, INSIDE_LNG);
         addressId = jdbc.queryForObject(
                 "SELECT id FROM addresses WHERE customer_id = ?", Long.class, customerId);
+
+        // SHOP A HAS STAMPED THIS HOUSE, which is how it would really be,
+        // having dispatched there while the customer shopped with them. Shop B
+        // has not - and that is now a row that does not exist rather than a
+        // column belonging to somebody else.
+        jdbc.update("""
+                INSERT INTO address_territory_stamps (shop_id, address_id, subzone_id, locked,
+                                                     created_at)
+                VALUES (?, ?, ?, false, now())
+                """, shopA, addressId, subzoneAId);
 
         resolver.invalidate();
     }
@@ -159,6 +168,7 @@ class TerritoryBelongsToOneShopTest {
         SecurityContextHolder.clearContext();
         TenantContext.clear();
         resolver.invalidate();
+        jdbc.update("DELETE FROM address_territory_stamps WHERE address_id = ?", addressId);
         jdbc.update("DELETE FROM addresses WHERE id = ?", addressId);
         jdbc.update("DELETE FROM subzone_backup_partners WHERE subzone_id in (?, ?)",
                 subzoneAId, subzoneBId);
@@ -304,17 +314,18 @@ class TerritoryBelongsToOneShopTest {
                 () -> addresses.findById(addressId).orElseThrow());
 
         Long forA = TenantContext.runWithin(TenantScope.ofShop(shopA),
-                () -> resolver.territoryForDelivery(address).map(DeliverySubzone::getId).orElse(null));
+                () -> territory.territoryFor(address).map(DeliverySubzone::getId).orElse(null));
         Long forB = TenantContext.runWithin(TenantScope.ofShop(shopB),
-                () -> resolver.territoryForDelivery(address).map(DeliverySubzone::getId).orElse(null));
+                () -> territory.territoryFor(address).map(DeliverySubzone::getId).orElse(null));
 
         assertEquals(subzoneAId, forA,
                 "Shop A must use the territory stamped on the address - it is Shop A's, and an "
                         + "administrator may have pinned it");
         assertEquals(subzoneBId, forB,
-                "Shop B got " + forB + ". The address carries ONE subzone_id and it is Shop A's; "
-                        + "Shop B must resolve its own map rather than inherit a competitor's "
-                        + "decision about which territory this house is in");
+                "Shop B got " + forB + ". The stamp on this house is Shop A's, and Shop B cannot "
+                        + "see it, inherit it or overwrite it - it resolves its own map. Before "
+                        + "address_territory_stamps there was one subzone_id for both shops and "
+                        + "whoever wrote last took it from the other");
     }
 
     @Test
@@ -326,10 +337,11 @@ class TerritoryBelongsToOneShopTest {
         // Before this slice the territory of an order was whatever
         // addresses.subzone_id held, and an address saved before the map was
         // drawn - or before anyone ran a re-resolve - had none, so the order
-        // dispatched as FALLBACK for ever. That could not survive W4: under a
-        // marketplace the stamp belongs to ONE shop, so a second shop would
-        // have no territory for any address and every one of its orders would
-        // fall back.
+        // dispatched as FALLBACK for ever. That could not survive W4: the
+        // stamp belonged to ONE shop, so a second shop had no territory for
+        // any address and every one of its orders fell back. (The stamp is now
+        // per shop, so "no stamp" means only that THIS shop has not dispatched
+        // here yet - and it resolves, then records its own answer.)
         //
         // So the resolver now falls through to this shop's own map. The effect
         // on Shop #1 is that an unstamped address inside a drawn outline is
@@ -337,13 +349,13 @@ class TerritoryBelongsToOneShopTest {
         // loaded - a rider who knows the streets rather than one who does not.
         // Strictly better, but different, and §12 says a change like that gets
         // named.
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE id = ?", addressId);
+        jdbc.update("DELETE FROM address_territory_stamps WHERE address_id = ?", addressId);
 
         com.gpstore.entity.Address address = TenantContext.runWithin(TenantScope.platform(),
                 () -> addresses.findById(addressId).orElseThrow());
 
         Long forA = TenantContext.runWithin(TenantScope.ofShop(shopA),
-                () -> resolver.territoryForDelivery(address).map(DeliverySubzone::getId).orElse(null));
+                () -> territory.territoryFor(address).map(DeliverySubzone::getId).orElse(null));
 
         assertEquals(subzoneAId, forA,
                 "an unstamped address inside a drawn territory must resolve into it");
@@ -352,14 +364,15 @@ class TerritoryBelongsToOneShopTest {
     @Test
     @DisplayName("an address outside every outline still resolves to nothing, so it fails closed")
     void anAddressInNoTerritoryStillResolvesToNothing() {
-        jdbc.update("UPDATE addresses SET subzone_id = NULL, latitude = 20.0, longitude = 70.0 "
-                + "WHERE id = ?", addressId);
+        jdbc.update("DELETE FROM address_territory_stamps WHERE address_id = ?", addressId);
+        jdbc.update("UPDATE addresses SET latitude = 20.0, longitude = 70.0 WHERE id = ?",
+                addressId);
 
         com.gpstore.entity.Address address = TenantContext.runWithin(TenantScope.platform(),
                 () -> addresses.findById(addressId).orElseThrow());
 
         Long forA = TenantContext.runWithin(TenantScope.ofShop(shopA),
-                () -> resolver.territoryForDelivery(address).map(DeliverySubzone::getId).orElse(null));
+                () -> territory.territoryFor(address).map(DeliverySubzone::getId).orElse(null));
 
         assertNull(forA,
                 "a point in no drawn territory must stay unknown. Pushing it into the nearest "

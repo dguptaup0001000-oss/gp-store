@@ -58,23 +58,15 @@ public interface DeliverySubzoneRepository extends JpaRepository<DeliverySubzone
     List<DeliverySubzone> findNeighbours(Long subzoneId);
 
     /**
-     * The subzone stamped on an address, but only if it belongs to THIS shop.
+     * THE "STAMPED ON THIS ADDRESS" QUERY IS GONE, with the column it read.
      *
-     * ROOTED ON DeliverySubzone, WHICH IS NOW SHOP-OWNED, so the filter
-     * applies and another shop's territory comes back as empty rather than as
-     * a row. The Address subquery is just how the id is reached; nothing about
-     * the address is returned.
-     *
-     * WHY NOT address.getSubzone(). One address, one subzone_id - but under a
-     * marketplace one address genuinely sits in several shops' maps, so the
-     * stamped one may belong to a shop this request has nothing to do with.
-     * Traversing the association would load a row belonging to that shop, and
-     * TenantEntityListener's @PostLoad would refuse it and fail the whole
-     * dispatch. "Not mine" has to be an answer, not an exception.
+     * <p>It selected the subzone whose id equalled {@code addresses.subzone_id}
+     * - one stamp for every shop - and its own comment explained that a shop
+     * reading another shop's stamp had to come back empty. That workaround is
+     * unnecessary now the stamp is per shop and shop-owned: see
+     * {@link com.gpstore.territory.AddressTerritoryStampRepository}, whose
+     * every query is narrowed by the ordinary tenant filter.
      */
-    @Query("select s from DeliverySubzone s "
-            + "where s.id = (select a.subzone.id from Address a where a.id = :addressId)")
-    Optional<DeliverySubzone> findStampedOnAddressIfInScope(@Param("addressId") Long addressId);
 
     /** One subzone by id, filtered - empty when it is another shop's. */
     @Query("select s from DeliverySubzone s where s.id = :id")

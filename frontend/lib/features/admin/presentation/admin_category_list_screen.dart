@@ -13,7 +13,7 @@ class AdminCategoryListScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final categoriesAsync = ref.watch(adminCategoriesProvider);
+    final categoriesAsync = ref.watch(adminMyCategoriesProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Categories')),
@@ -23,14 +23,20 @@ class AdminCategoryListScreen extends ConsumerWidget {
           // Shows the real failure reason rather than one static
           // string - an admin who can read the cause can act on it.
           message: "Couldn't load categories: ${extractErrorMessage(error)}",
-          onRetry: hapticize(() => ref.invalidate(adminCategoriesProvider)),
+          onRetry: hapticize(() => ref.invalidate(adminMyCategoriesProvider)),
         ),
         data: (categories) {
           if (categories.isEmpty) {
+            // THE HONEST EMPTY STATE. This list is derived from what the shop
+            // lists, so a new shop has nothing here - and the old message sent
+            // them to the + button, which creates a PLATFORM category and is
+            // refused for merchants once a second shop exists. Adding a product
+            // is the thing that actually puts a department on this screen.
             return const AdminEmptyState(
               icon: Icons.category_outlined,
-              title: 'No categories yet',
-              message: 'Tap the + button to create your first category.',
+              title: 'No departments yet',
+              message: 'Your departments appear here once you add products. '
+                  'Add a product and pick its category to get started.',
             );
           }
 
@@ -48,7 +54,7 @@ class AdminCategoryListScreen extends ConsumerWidget {
             context: context,
             builder: (context) => const _CategoryFormDialog(),
           );
-          if (saved == true) ref.invalidate(adminCategoriesProvider);
+          if (saved == true) ref.invalidate(adminMyCategoriesProvider);
         }),
         icon: const Icon(Icons.add),
         label: const Text('Add Category'),
@@ -71,7 +77,7 @@ class _CategoryTile extends ConsumerWidget {
           context: context,
           builder: (context) => _CategoryFormDialog(category: category),
         );
-        if (saved == true) ref.invalidate(adminCategoriesProvider);
+        if (saved == true) ref.invalidate(adminMyCategoriesProvider);
       }),
       child: Container(
         padding: const EdgeInsets.all(14),

@@ -88,6 +88,12 @@ class CreateCustomerCannotEscalateTest {
                 java.util.Map.class);
         assertEquals(HttpStatus.OK, res.getStatusCode(), "registration failed: " + res.getBody());
         jdbc.update("UPDATE customers SET role = ? WHERE email = ?", role, email);
+        // A ROLE IS NOT A POSTING. This fixture used to stop at the role,
+        // which worked only because the platform mode defaulted to
+        // SINGLE_SHOP and every credential fell back into Shop #1. On a
+        // marketplace an account on nobody's staff list has no shop and is
+        // refused - correctly. See com.gpstore.support.StaffPosting.
+        com.gpstore.support.StaffPosting.postToFirstShop(jdbc, email);
 
         ResponseEntity<java.util.Map> login = rest.postForEntity(
                 url("/api/auth/login"),

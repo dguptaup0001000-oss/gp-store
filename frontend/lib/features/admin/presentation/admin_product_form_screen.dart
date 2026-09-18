@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
+import '../data/admin_products_repository.dart';
 import 'admin_providers.dart';
 import 'admin_variant_form_dialog.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -22,6 +23,13 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _brandController;
+  // THE FIRST VARIANT, COLLECTED ON THE SAME SCREEN. A product with no variant
+  // is not on any shelf, so a two-step flow left the merchant with something
+  // they had created and could not see. See AdminProductsRepository.createProduct.
+  late final TextEditingController _variantLabelController;
+  late final TextEditingController _priceController;
+  late final TextEditingController _mrpController;
+  late final TextEditingController _stockController;
   int? _selectedCategoryId;
   late bool _isActive;
   bool _isSaving = false;
@@ -39,6 +47,10 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
     super.initState();
     _nameController = TextEditingController(text: widget.product?.name ?? '');
     _brandController = TextEditingController(text: widget.product?.brand ?? '');
+    _variantLabelController = TextEditingController();
+    _priceController = TextEditingController();
+    _mrpController = TextEditingController();
+    _stockController = TextEditingController();
     _selectedCategoryId = widget.product?.category?.id;
     _isActive = widget.product?.active ?? true;
     _currentProduct = widget.product;
@@ -68,7 +80,44 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
   void dispose() {
     _nameController.dispose();
     _brandController.dispose();
+    _variantLabelController.dispose();
+    _priceController.dispose();
+    _mrpController.dispose();
+    _stockController.dispose();
     super.dispose();
+  }
+
+  /// A price is what turns a variant into a listing, so it is required rather
+  /// than optional: ShopCatalog.list() declines to shelve anything priced at
+  /// zero or null, which would put the merchant right back where they started -
+  /// a product they made and cannot see.
+  String? _validatePrice(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return 'Set a selling price';
+    final parsed = double.tryParse(text);
+    if (parsed == null) return 'Enter a number';
+    if (parsed <= 0) return 'Must be more than 0';
+    return null;
+  }
+
+  String? _validateOptionalMrp(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return null;
+    final parsed = double.tryParse(text);
+    if (parsed == null) return 'Enter a number';
+    if (parsed < 0) return 'Cannot be negative';
+    return null;
+  }
+
+  String? _validateStock(String? value) {
+    final text = (value ?? '').trim();
+    // Blank is "not counted yet" and becomes zero. A shop that has not counted
+    // is not a shop with one of everything.
+    if (text.isEmpty) return null;
+    final parsed = int.tryParse(text);
+    if (parsed == null) return 'Enter a whole number';
+    if (parsed < 0) return 'Cannot be negative';
+    return null;
   }
 
   Future<void> _save() async {
@@ -96,10 +145,23 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
           name: _nameController.text.trim(),
           brand: _brandController.text.trim().isEmpty ? null : _brandController.text.trim(),
           categoryId: _selectedCategoryId!,
+          firstVariant: AdminFirstVariant(
+            label: _variantLabelController.text.trim(),
+            sellingPrice: double.parse(_priceController.text.trim()),
+            mrp: _mrpController.text.trim().isEmpty
+                ? null
+                : double.tryParse(_mrpController.text.trim()),
+            stock: _stockController.text.trim().isEmpty
+                ? 0
+                : int.tryParse(_stockController.text.trim()) ?? 0,
+          ),
         );
       }
 
       if (!mounted) return;
+      // POPS ONLY AFTER THE SERVER SAID YES. The await above throws on any
+      // non-2xx, so this line is unreachable on failure - which is what stops
+      // the screen reporting a success the shelf does not have.
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
@@ -187,6 +249,68 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
                     value: _isActive,
                     onChanged: hapticizeValue((value) => setState(() => _isActive = value)),
                   ),
+
+                // THE FIRST VARIANT, ON THE SAME SCREEN, ONLY WHEN CREATING.
+                // Editing an existing product leaves its variants alone - they
+                // have their own section below.
+                if (!_isEditing) ...[
+                  const SizedBox(height: 24),
+                  const Text('What you are selling',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Every product needs one sellable form before it can go on '
+                    'your shelf. You can add more later.',
+                    style: TextStyle(fontSize: 12.5, color: AdminColors.textMuted),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _variantLabelController,
+                    decoration: const InputDecoration(
+                      labelText: 'Variant (optional)',
+                      // Four trades in one hint, on purpose: this screen is not
+                      // a kirana form.
+                      hintText: 'e.g. 12 GB + 256 GB, Red silk, 1 kg, Half',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _priceController,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                              labelText: 'Selling price', prefixText: '₹ '),
+                          validator: _validatePrice,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _mrpController,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                              labelText: 'MRP (optional)', prefixText: '₹ '),
+                          validator: _validateOptionalMrp,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _stockController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Opening stock',
+                      hintText: 'How many you have right now',
+                    ),
+                    validator: _validateStock,
+                  ),
+                ],
                 const SizedBox(height: 20),
                 FilledButton(
                   onPressed: _isSaving ? null : _save,
@@ -204,7 +328,7 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
                 ] else ...[
                   const SizedBox(height: 16),
                   const Text(
-                    'Save the product first, then add its variants (pack sizes, prices, stock).',
+                    'Add more variants, prices and stock once this one is saved.',
                     style: TextStyle(color: AdminColors.textSecondary, fontSize: 12),
                     textAlign: TextAlign.center,
                   ),

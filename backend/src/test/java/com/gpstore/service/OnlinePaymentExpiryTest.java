@@ -35,6 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * inventory stays reserved forever when the customer closes the gateway.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "outbox.purge-interval-ms=3600000",

@@ -231,22 +231,12 @@ class MerchantShopLifecycleTest {
 
     // ----------------------- 10-12. what a single shop must keep being able to do
 
-    @Test
-    @WithStaff
-    @DisplayName("under one shop, the shopkeeper still edits the catalogue")
-    void singleShopCatalogueEditingIsUnchanged() throws Exception {
-        // THE HALF OF THIS SLICE THAT MUST CHANGE NOTHING. With one merchant
-        // the shopkeeper IS the platform; taking catalogue editing away from
-        // them would break the shop that is actually trading today.
-        int status = mockMvc.perform(post("/api/categories")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Lifecycle category " + tag + "\",\"active\":true,\"gstRate\":5}"))
-                .andReturn().getResponse().getStatus();
-
-        assertNotEquals(403, status,
-                "the trading shop's own admin was refused a catalogue write they have always had");
-        jdbc.update("DELETE FROM categories WHERE name = ?", "Lifecycle category " + tag);
-    }
+    // "under one shop, the shopkeeper still edits the catalogue" NOW LIVES IN
+    // SingleShopCatalogueEditingTest. It is an assertion about a ONE-SHOP
+    // deployment, and this class declares no platform.mode - so since the
+    // default became the marketplace it was asking the wrong deployment a
+    // question whose answer differs between them. The new home says which one
+    // it means; nothing about the assertion changed.
 
     @Test
     @WithStaff

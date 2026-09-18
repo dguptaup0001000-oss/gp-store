@@ -83,6 +83,8 @@ import static org.mockito.Mockito.verify;
  *    locks at all - again asserting nothing, but silently.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         // Test-only value. Not a credential, not used anywhere else, and the
         // real one never appears in this repository.
         "cashfree.webhook-secret=lock-ordering-test-secret",

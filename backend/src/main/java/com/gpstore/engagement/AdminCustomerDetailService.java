@@ -43,6 +43,7 @@ public class AdminCustomerDetailService {
     private final OrderRepository orderRepository;
     private final CustomerAppSessionRepository sessionRepository;
     private final CustomerDeliveryRatingRepository ratingRepository;
+    private final com.gpstore.platform.ShopCustomers shopCustomers;
 
     public AdminCustomerDetailService(CustomerRepository customerRepository,
                                       AddressRepository addressRepository,
@@ -50,7 +51,8 @@ public class AdminCustomerDetailService {
                                       WishlistRepository wishlistRepository,
                                       OrderRepository orderRepository,
                                       CustomerAppSessionRepository sessionRepository,
-                                      CustomerDeliveryRatingRepository ratingRepository) {
+                                      CustomerDeliveryRatingRepository ratingRepository,
+                                      com.gpstore.platform.ShopCustomers shopCustomers) {
         this.customerRepository = customerRepository;
         this.addressRepository = addressRepository;
         this.cartRepository = cartRepository;
@@ -58,10 +60,28 @@ public class AdminCustomerDetailService {
         this.orderRepository = orderRepository;
         this.sessionRepository = sessionRepository;
         this.ratingRepository = ratingRepository;
+        this.shopCustomers = shopCustomers;
     }
 
+    /**
+     * The file on one person, for the shop that person buys from.
+     *
+     * <p>WHOSE FILE IT WAS BEFORE THIS LINE. The route is pinned to
+     * CUSTOMERS_VIEW, which stopped a shopper reading another shopper's record
+     * and was the whole point at the time. It did not stop a MERCHANT reading
+     * anybody's: every shop owner holds CUSTOMERS_VIEW, Customer is not
+     * tenant-filtered, and the id comes out of the URL - so one merchant could
+     * pull a rival's customer's name, phone number, every saved address and the
+     * contents of their basket by counting upwards. Measured in the endpoint
+     * sweep: a newly onboarded shop read the lot.
+     *
+     * <p>Refused as a not-found, so the route cannot be used to discover which
+     * account ids exist. See ShopCustomers for why 404 rather than 403.
+     */
     @Transactional(readOnly = true)
     public AdminCustomerDetailResponse of(Long customerId) {
+        shopCustomers.requireMine(customerId);
+
         Customer customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer not found: " + customerId));
 
@@ -151,8 +171,27 @@ public class AdminCustomerDetailService {
             return new CartSummary(0, BigDecimal.ZERO, List.of());
         }
 
-        List<CartLine> lines = new ArrayList<>();
+        // THE LINES OFF THIS SHOP'S SHELF, not the whole basket.
+        //
+        // A basket spans shops by design - checkout splits it into one order
+        // per shop - so the raw cart is a list of what this customer is buying
+        // from EVERYBODY, complete with the rival's product names and prices.
+        // The shopkeeper's question is "is the thing they rang about still in
+        // their basket", and that is answered by their own lines. The platform
+        // console, which has no shop in scope, still sees the basket whole.
+        Long myShop = shopCustomers.actingShopId();
+        List<CartItem> visible = new ArrayList<>();
         for (CartItem item : cart.getItems()) {
+            if (myShop == null || myShop.equals(item.getShopId())) {
+                visible.add(item);
+            }
+        }
+        if (visible.isEmpty()) {
+            return new CartSummary(0, BigDecimal.ZERO, List.of());
+        }
+
+        List<CartLine> lines = new ArrayList<>();
+        for (CartItem item : visible) {
             if (lines.size() >= MAX_CART_LINES_SHOWN) {
                 break;
             }
@@ -165,17 +204,35 @@ public class AdminCustomerDetailService {
                     photoOf(variant)));
         }
 
-        return new CartSummary(
-                cart.getTotalItems(),
-                cart.getTotalAmount() == null ? BigDecimal.ZERO : cart.getTotalAmount(),
-                lines);
+        // COUNTED OVER THE VISIBLE LINES, not read off the cart row. The
+        // stored totals are the whole basket's, and printing them beside one
+        // shop's lines would both leak the size of the rest of the basket and
+        // tell the shopkeeper a total that does not match what they can see.
+        // Summed over every visible line, including any past the display cap.
+        int totalItems = 0;
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        for (CartItem item : visible) {
+            totalItems += item.getQuantity() == null ? 0 : item.getQuantity();
+            if (item.getTotalPrice() != null) {
+                totalAmount = totalAmount.add(item.getTotalPrice());
+            }
+        }
+
+        return new CartSummary(totalItems, totalAmount, lines);
     }
 
     // ------------------------------------------------------------ wishlist
 
     private List<WishlistLine> wishlistOf(Long customerId) {
         List<WishlistLine> lines = new ArrayList<>();
-        for (Wishlist entry : wishlistRepository.findByCustomerId(customerId)) {
+        // ON THIS SHOP'S SHELF ONLY, for the reason WishlistRepository gives:
+        // a customer's saved items across the marketplace are the demand
+        // signal for every competitor's catalogue. The platform console has no
+        // shop in scope and still reads the list whole.
+        List<Wishlist> saved = shopCustomers.actingShopId() == null
+                ? wishlistRepository.findByCustomerId(customerId)
+                : wishlistRepository.findByCustomerIdOnCurrentShopShelf(customerId);
+        for (Wishlist entry : saved) {
             if (lines.size() >= MAX_WISHLIST_SHOWN) {
                 break;
             }

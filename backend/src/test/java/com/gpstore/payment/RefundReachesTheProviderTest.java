@@ -52,6 +52,8 @@ import static org.mockito.Mockito.*;
  * happily against the broken version.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         // Test-only value. Not a credential, and the real one is never here.
         "cashfree.webhook-secret=refund-test-secret",
         "outbox.initial-delay-ms=3600000",

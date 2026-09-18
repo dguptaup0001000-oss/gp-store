@@ -29,6 +29,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * different serialisation problem from three.
  */
 @SpringBootTest(properties = {
+        // ONE SHOP: this class seeds the catalogue through CatalogSeedService,
+        // which lists what it creates onto a shelf and stocks it - shop-owned
+        // rows, written outside any request. See DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",

@@ -65,7 +65,13 @@ class UnknownPathStatusTest {
     }
 
     @Test
-    @WithStaff
+    // THE PLATFORM OWNER, because this test is about ROUTING and the path it
+    // probes now sits behind catalogue definition: on a marketplace a shop
+    // admin is refused /api/admin/catalog/** before routing is reached, so
+    // asking as one would assert 403-vs-404 about authorization rather than
+    // about the near miss. SUPER_ADMIN passes the gate on any deployment,
+    // which leaves only the question this test exists to ask.
+    @WithStaff(com.gpstore.entity.Role.SUPER_ADMIN)
     @DisplayName("a near-miss of a real path is also 404")
     void nearMissIsNotFound() throws Exception {
         // /api/admin/catalog/audit exists; /api/admin/catalog/auditz does not.

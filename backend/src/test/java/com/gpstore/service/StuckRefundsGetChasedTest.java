@@ -52,6 +52,8 @@ import static org.mockito.Mockito.*;
  * method body that never ran.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "cashfree.webhook-secret=stuck-refund-test-secret",
         // The sweep must not fire on its own here - these tests call it
         // directly so they can assert on what one run did. A scheduled run

@@ -41,6 +41,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * the constraints up itself, and puts them back afterwards.
  */
 @SpringBootTest(properties = {
+        // ONE SHOP, DECLARED. This test builds its fixtures by POSTing to
+        // /api/products as an admin - defining the SHARED catalogue, which on a
+        // marketplace is the platform's job and is refused to a merchant
+        // (CatalogDefinitionAuthorization). The subject here is the catalogue
+        // row itself, not who may write one, so the deployment is named. See
+        // DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",
@@ -108,7 +115,16 @@ class ProductFlagColumnsTest {
     }
 
     @Test
-    @WithStaff
+    // THE PLATFORM OWNER WRITES THE SHARED CATALOGUE, in any deployment.
+    //
+    // This fixture POSTs /api/products, which is catalogue DEFINITION - and
+    // CatalogDefinitionAuthorization treats a deployment with more than one
+    // shop as a marketplace whatever the mode says, which is the fail-safe
+    // reading and is also true of any database a suite has been running
+    // against for a while. A plain ADMIN is therefore refused for a reason
+    // that has nothing to do with what this test is about. SUPER_ADMIN is
+    // the role that may define the catalogue on one shop and on a thousand.
+    @WithStaff(com.gpstore.entity.Role.SUPER_ADMIN)
     @DisplayName("Add Product works when the flag columns are NOT NULL, as they are in production")
     void addProductSucceedsAgainstNotNullFlagColumns() throws Exception {
         MvcResult result = createProduct();
@@ -120,7 +136,7 @@ class ProductFlagColumnsTest {
     }
 
     @Test
-    @WithStaff
+    @WithStaff(com.gpstore.entity.Role.SUPER_ADMIN)
     @DisplayName("the flags are stored as false, not left to the column default")
     void flagsArePersistedAsFalse() throws Exception {
         assertEquals(200, createProduct().getResponse().getStatus());

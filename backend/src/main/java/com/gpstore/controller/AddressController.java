@@ -71,7 +71,13 @@ public class AddressController {
      * a client asking for size=1000000 gets 100, because a cap the caller
      * chooses is not a cap. Same convention as OrderController.
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    // PLATFORM ONLY, and the route rule in SecurityConfig says so too.
+    //
+    // This used to read hasRole('ADMIN') - the role every shop owner has -
+    // over a query that is not tenant-filtered, because Address belongs to a
+    // customer rather than to a shop. See the rule in SecurityConfig for what
+    // that handed out.
+    @PreAuthorize("hasAuthority('PERM_PLATFORM_ADMIN')")
     @GetMapping
     public org.springframework.data.domain.Page<Address> getAllAddresses(
             @RequestParam(defaultValue = "0") int page,

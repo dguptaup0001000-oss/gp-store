@@ -85,6 +85,10 @@ class WorkerLifecycleEndToEndTest {
         admin.setActive(true);
         admin.setVerified(true);
         admin = customers.save(admin);
+        // A ROLE IS NOT A POSTING. This account hires riders for a shop, so it
+        // has to be ON one - see StaffPosting for why the fixture used to get
+        // away without it and no longer does.
+        com.gpstore.support.StaffPosting.postToFirstShop(jdbc, admin.getEmail());
         adminAuth = "Bearer " + jwt.generateToken(admin.getId(), admin.getEmail(), admin.getRole());
     }
 

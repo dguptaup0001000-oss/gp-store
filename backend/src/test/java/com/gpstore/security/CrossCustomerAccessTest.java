@@ -44,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class CrossCustomerAccessTest {
 
     @Autowired private AddressService addressService;
+    @Autowired private com.gpstore.territory.AddressTerritory territory;
     @Autowired private AddressRepository addressRepository;
     @Autowired private CustomerRepository customerRepository;
 
@@ -187,11 +188,22 @@ class CrossCustomerAccessTest {
         incoming.setCountry("India");
         incoming.setLatitude(28.6139);
         incoming.setLongitude(77.2090);
-        incoming.setSubzoneLocked(true);
 
+        // A CUSTOMER CANNOT FREEZE THEIR OWN TERRITORY, and the reason is now
+        // structural rather than defensive. This used to post
+        // "subzoneLocked": true on the address body and assert the server
+        // cleared it. The flag is no longer a column on the address at all -
+        // it is a row in address_territory_stamps, which belongs to a SHOP and
+        // which no customer request can name - so there is nothing left for a
+        // client to send. The outcome is asserted rather than the clearing:
+        // after a customer creates an address, no shop's stamp is pinned.
         Address saved = addressService.createOwned(alice, incoming);
-        assertNotEquals(Boolean.TRUE, saved.getSubzoneLocked(),
-                "a customer must not be able to freeze territory by posting subzoneLocked");
+        assertNotEquals(Boolean.TRUE,
+                territory.stampFor(saved.getId())
+                        .map(com.gpstore.territory.AddressTerritoryStamp::isLocked)
+                        .orElse(false),
+                "a customer must not be able to freeze the territory their orders are "
+                        + "dispatched in - that is a shopkeeper's judgement about a house");
     }
 
     @Test

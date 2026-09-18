@@ -92,6 +92,7 @@ class ReturnDecisionsAreStaffOnlyTest {
         // Nothing in the application grants ADMIN - registration hardcodes
         // CUSTOMER - so the role is set directly, exactly as production does.
         jdbc.update("UPDATE customers SET role = 'ADMIN' WHERE email = ?", email);
+        com.gpstore.support.StaffPosting.postToFirstShop(jdbc, email);
         ResponseEntity<java.util.Map> login = rest.postForEntity(
                 url("/api/auth/login"),
                 json("""

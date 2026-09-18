@@ -158,7 +158,9 @@ class SecondMerchantOnboardingTest {
             jdbc.update("DELETE FROM cart_items WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM subzone_backup_partners WHERE shop_id = ?", shopId);
             jdbc.update("UPDATE delivery_subzones SET primary_partner_id = NULL WHERE shop_id = ?", shopId);
-            jdbc.update("DELETE FROM delivery_subzones WHERE shop_id = ?", shopId);
+            jdbc.update("DELETE FROM address_territory_stamps WHERE subzone_id IN "
+                + "(SELECT id FROM delivery_subzones WHERE shop_id = ?)", shopId);
+        jdbc.update("DELETE FROM delivery_subzones WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM delivery_zones WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM delivery_partners WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM inventory WHERE shop_id = ?", shopId);

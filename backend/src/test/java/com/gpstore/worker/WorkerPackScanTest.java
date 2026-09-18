@@ -39,6 +39,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * auto-assignment.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",
@@ -77,6 +79,7 @@ class WorkerPackScanTest {
     @Autowired private OrderScanEventRepository scanRepository;
     @Autowired private CustomerRepository customerRepository;
     @Autowired private AddressRepository addressRepository;
+    @Autowired private com.gpstore.territory.AddressTerritoryStampRepository stampRepository;
     @Autowired private DeliveryPartnerRepository partnerRepository;
     @Autowired private DeliveryZoneRepository zoneRepository;
     @Autowired private DeliverySubzoneRepository subzoneRepository;
@@ -161,7 +164,8 @@ class WorkerPackScanTest {
         jdbc.update("DELETE FROM deliveries WHERE order_id IN "
                 + "(SELECT id FROM orders WHERE order_number LIKE ?)", PREFIX + "%");
         jdbc.update("DELETE FROM orders WHERE order_number LIKE ?", PREFIX + "%");
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE full_name LIKE ?", MARKER + "%");
+        jdbc.update("DELETE FROM address_territory_stamps WHERE address_id IN "
+                + "(SELECT id FROM addresses WHERE full_name LIKE ?)", MARKER + "%");
         jdbc.update("DELETE FROM addresses WHERE full_name LIKE ?", MARKER + "%");
         jdbc.update("UPDATE delivery_subzones SET primary_partner_id = NULL WHERE code LIKE ?", PREFIX + "%");
         jdbc.update("DELETE FROM subzone_backup_partners WHERE subzone_id IN "
@@ -239,8 +243,12 @@ class WorkerPackScanTest {
         address.setLatitude(latitude);
         address.setLongitude(longitude);
         address.setCustomer(customer);
-        address.setSubzone(subzone);
         address = addressRepository.save(address);
+        // THE TERRITORY IS A STAMP THIS SHOP MADE, not a column on the
+        // customer's address - see AddressTerritoryStamp. The fixture records
+        // it the way dispatch would.
+        stampRepository.save(new com.gpstore.territory.AddressTerritoryStamp(
+                address.getId(), subzone, false));
 
         Order o = new Order();
         o.setOrderNumber(PREFIX + System.nanoTime());

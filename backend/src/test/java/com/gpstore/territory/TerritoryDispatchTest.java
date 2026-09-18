@@ -36,6 +36,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * inside this file.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",
         "payment.expiry-initial-delay-ms=3600000",
@@ -104,7 +106,7 @@ class TerritoryDispatchTest {
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
         // Anything else still pointing at a fixture territory has to let go
         // before the territory row can be removed.
-        jdbc.update("UPDATE addresses SET subzone_id = NULL WHERE subzone_id IN "
+        jdbc.update("DELETE FROM address_territory_stamps WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");
         jdbc.update("UPDATE delivery_batches SET subzone_id = NULL WHERE subzone_id IN "
                 + "(SELECT id FROM delivery_subzones WHERE code LIKE ?)", PREFIX + "%");

@@ -35,6 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         "cashfree.webhook-secret=webhook-dedup-test-secret",
         "outbox.initial-delay-ms=3600000",
         "outbox.drain-interval-ms=3600000",

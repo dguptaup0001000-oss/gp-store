@@ -13,6 +13,38 @@ import java.util.List;
 public interface NotificationRepository
         extends JpaRepository<Notification, Long> {
 
+    /**
+     * Notifications about THIS shop's orders, newest first.
+     *
+     * <p>WAS findAll(). The admin notification log returned every notification
+     * ever sent to anyone on the platform, each carrying the order number and
+     * status it was about - so one merchant could read the order flow of every
+     * other merchant. No app calls it today, which is why nobody noticed.
+     *
+     * <p>Order IS a {@code ShopOwned} entity, so making it the root of an EXISTS
+     * subquery is what applies the tenant filter and narrows the log to this
+     * shop without the query naming a shop.
+     *
+     * <p>THE SUBQUERY IS LOad-BEARING, and the first version of this got it
+     * wrong. It read {@code WHERE n.order IS NOT NULL}, which mentions the
+     * association but never makes Order a query root - so Hibernate's filter
+     * had nothing to attach to and the query returned notifications about every
+     * shop's orders. It LOOKED correct because the rows then blew up on load:
+     * TenantEntityListener's @PostLoad check saw a foreign shop_id and threw,
+     * which surfaced as a 404 rather than a leak. A guard catching a query that
+     * should never have asked is not the query being right.
+     *
+     * <p>BROADCASTS ARE EXCLUDED FOR A SHOP, deliberately. A notification with
+     * no order is a platform announcement, not this shop's traffic; showing
+     * them here would put GP-STORE's own messages in a merchant's operational
+     * log and, worse, put other shops' announcements there too.
+     */
+    @Query("SELECT n FROM Notification n WHERE EXISTS ("
+            + "  SELECT 1 FROM Order o WHERE o = n.order) "
+            + "ORDER BY n.sentAt DESC, n.id DESC")
+    Page<Notification> findAllForCurrentShop(Pageable pageable);
+
+
     List<Notification> findByCustomerId(Long customerId);
 
     List<Notification> findByCustomerIdOrderBySentAtDesc(Long customerId);

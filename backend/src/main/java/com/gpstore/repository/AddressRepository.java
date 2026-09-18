@@ -8,41 +8,51 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface AddressRepository extends JpaRepository<Address, Long> {
 
     /**
-     * THE SUBZONE IS NO LONGER FETCHED HERE, and removing it fixed an outage
-     * rather than saving a join.
+     * A customer's own addresses. No territory travels with them.
      *
-     * These three queries used to carry "left join fetch a.subzone" so
-     * server-side callers could read address.getSubzone() outside a
-     * transaction, with open-session-in-view off. Slice 9 made
-     * delivery_subzones shop-owned, and that turned the same fetch into a
-     * trap: an address is a CUSTOMER's row and spans every shop they buy
-     * from, but addresses.subzone_id holds one value. So a customer whose
-     * address was stamped in Shop A's map, listing their addresses while
-     * shopping at Shop B, would have had a shop-owned row from Shop A loaded
-     * into Shop B's scope - and TenantEntityListener's @PostLoad would refuse
-     * it and fail the request. The customer could not read their own address
-     * list.
+     * <p>THIS QUERY ONCE FETCHED THE SUBZONE, and removing that fixed an
+     * outage: an address is the CUSTOMER's row and spans every shop they buy
+     * from, while {@code addresses.subzone_id} held one shop's answer - so a
+     * customer whose address was stamped in Shop A's map, listing their
+     * addresses while shopping at Shop B, had a shop-owned row from Shop A
+     * loaded into Shop B's scope and the request was refused. They could not
+     * read their own address list.
      *
-     * NOTHING NEEDS THE EAGER SUBZONE ANY MORE. The one question dispatch and
-     * the worker app actually ask is "which of THIS SHOP's territories is this
-     * address in", and TerritoryResolver.territoryForDelivery answers it
-     * through a filtered query rather than by traversing this association.
-     * Address.subzone stays as the stamp it always was - and stays LAZY, so
-     * merely loading an address never touches another shop's map.
+     * <p>That column is gone (see Address, and the V70 migration). The stamp
+     * lives in {@code address_territory_stamps}, one row per shop, and the
+     * only people who ask for it are the ones dispatching an order - through
+     * {@link com.gpstore.territory.AddressTerritory}, whose reads are narrowed
+     * by the ordinary tenant filter. Loading an address can no longer reach
+     * anybody's map.
      */
     @org.springframework.data.jpa.repository.Query(
             "select a from Address a where a.customer.id = :customerId")
     List<Address> findByCustomerId(@org.springframework.data.repository.query.Param("customerId") Long customerId);
 
+    /**
+     * Addresses belonging to the customers of the shop in scope.
+     *
+     * <p>FOR THE TERRITORY TOOLS, which write to addresses. Address is not a
+     * {@code ShopOwned} entity - a home belongs to the person living in it -
+     * so a page of {@code findAll()} in a shop-scoped operation is a page of
+     * everybody's. Order IS shop-owned, so "whose customers are these" is a
+     * question the tenant filter answers without naming a shop.
+     */
+    @org.springframework.data.jpa.repository.Query(
+            "SELECT a FROM Address a WHERE EXISTS ("
+            + "  SELECT 1 FROM Order o WHERE o.customer = a.customer)")
+    org.springframework.data.domain.Page<Address> findAllForCurrentShopCustomers(
+            org.springframework.data.domain.Pageable pageable);
+
     @org.springframework.data.jpa.repository.Query(
             "select a from Address a where a.id = :id")
-    java.util.Optional<Address> findByIdWithSubzone(
+    java.util.Optional<Address> findByIdForRead(
             @org.springframework.data.repository.query.Param("id") Long id);
 
     @org.springframework.data.jpa.repository.Query(
             value = "select a from Address a",
             countQuery = "select count(a) from Address a")
-    org.springframework.data.domain.Page<Address> findAllWithSubzone(
+    org.springframework.data.domain.Page<Address> findAllPaged(
             org.springframework.data.domain.Pageable pageable);
 
 

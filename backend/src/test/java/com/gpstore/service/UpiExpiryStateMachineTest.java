@@ -55,6 +55,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * happened.
  */
 @SpringBootTest(properties = {
+        // The deployment this test describes - see DeploymentShape.
+        com.gpstore.support.DeploymentShape.SINGLE_SHOP,
         // Timers pushed out, not disabled: the beans stay exactly as they
         // are in production, but nothing fires on its own schedule while
         // these tests inspect stored state. Without this the outbox worker

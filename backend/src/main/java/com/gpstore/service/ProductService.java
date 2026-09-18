@@ -35,6 +35,23 @@ public class ProductService {
     private final com.gpstore.catalog.shop.ShopStock shopStock;
     private final com.gpstore.platform.PlatformProperties platform;
     private final com.gpstore.platform.ShopRepository shops;
+    private final com.gpstore.repository.ProductVariantRepository productVariants;
+    private final com.gpstore.catalog.shop.ShopCatalog shopCatalog;
+    private final InventoryService inventory;
+
+    /**
+     * WHY THIS CLASS GAINED A LOGGER. A merchant tapped Create Product, got a
+     * 200, and found an empty list - and there was nothing in any log to say
+     * what had happened, because from the server's point of view nothing had
+     * gone wrong. Shelf creation now says what it wrote and what it refused, so
+     * the next report of "I added it and it is not there" can be answered from
+     * the logs instead of a device.
+     *
+     * NAMES AND IDS ONLY. No prices beyond the fact one was set, no customer
+     * data, nothing from a token.
+     */
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(ProductService.class);
 
     public ProductService(
             ProductRepository productRepository,
@@ -44,7 +61,13 @@ public class ProductService {
             com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue,
             com.gpstore.catalog.shop.ShopStock shopStock,
             com.gpstore.platform.PlatformProperties platform,
-            com.gpstore.platform.ShopRepository shops) {
+            com.gpstore.platform.ShopRepository shops,
+            com.gpstore.repository.ProductVariantRepository productVariants,
+            com.gpstore.catalog.shop.ShopCatalog shopCatalog,
+            InventoryService inventory) {
+        this.productVariants = productVariants;
+        this.shopCatalog = shopCatalog;
+        this.inventory = inventory;
         this.shopStock = shopStock;
         this.shops = shops;
         this.productRepository = productRepository;
@@ -66,6 +89,27 @@ public class ProductService {
      */
     private boolean requireListing() {
         return platform.getMode().isMultiShop();
+    }
+
+    /**
+     * Whether the caller is one merchant among several, so their Products
+     * screen shows their shelf rather than the whole catalogue.
+     *
+     * <p>EXTRACTED SO CREATE AND LIST CANNOT DISAGREE, which is the shape the
+     * bug had. getAllForAdmin already asked this question before filtering by
+     * shelf; createProduct did not ask it at all, so it happily wrote a
+     * catalogue row the very next list call would hide. One predicate, both
+     * callers.
+     *
+     * <p>THE SHOP COUNT IS PART OF IT, not just the configured mode. Production
+     * still runs with {@code platform.mode} unset - SINGLE_SHOP - while more
+     * than one merchant is trading, so a mode-only test would call today's real
+     * marketplace a single shop and hide nothing.
+     */
+    private boolean sellsAsOneOfManyShops(com.gpstore.platform.TenantScope scope) {
+        return scope != null
+                && scope.isSingleShop()
+                && (platform.getMode().isMultiShop() || shops.countByDeletedAtIsNull() > 1);
     }
 
     /**
@@ -130,6 +174,189 @@ public class ProductService {
         return ProductResponse.forAdmin(savedProduct, shopPricedCatalogue.termsFor(savedProduct));
     }
 
+    /**
+     * Puts something new on the shelf of the shop making the request.
+     *
+     * <p>WHAT WAS BROKEN, AND IT WAS NOT THE SCREEN. Creating a product wrote
+     * one row - the central catalogue entry - and nothing else. The merchant's
+     * Products list asks a different question: {@code
+     * ProductRepository.findAllListedForCurrentShop} returns products that have
+     * a variant this shop has a {@code shop_product_variants} row for. A
+     * catalogue row with no variant can never satisfy that EXISTS, so the
+     * product was invisible to the merchant the instant it was written, on
+     * every refresh, forever - and because it was invisible they could not open
+     * it to add the variant that would have made it visible. Create Product
+     * answered 200 and the list answered "No products yet", and both were
+     * telling the truth about different things.
+     *
+     * <p>THE FIX IS THE UNIT OF WORK, NOT A CACHE FLUSH. What a merchant means
+     * by "I sell this" is four rows, and they are written here in one
+     * transaction or not at all:
+     *
+     * <ol>
+     *   <li>{@code products} - the central catalogue entry, shared by every
+     *       shop that ever sells it;</li>
+     *   <li>{@code product_variants} - its first sellable form, also central;</li>
+     *   <li>{@code shop_product_variants} - THIS shop's listing and price, which
+     *       is the row the merchant's list and the customer's storefront both
+     *       read, and the one that carries the tenant boundary;</li>
+     *   <li>{@code inventory} - this shop's opening stock for it.</li>
+     * </ol>
+     *
+     * <p>THE CENTRAL ROWS STAY CENTRAL ON PURPOSE. Two shops selling the
+     * Motorola Edge 50 Pro point at one catalogue row and keep their own
+     * listing, price and stock. Making the product itself shop-owned would fork
+     * the catalogue per merchant and break the marketplace's whole premise -
+     * and it is not needed for isolation, because the listing is what
+     * ownership is read from.
+     *
+     * <p>WHY THE FIRST VARIANT IS REQUIRED IN A SHOP'S SCOPE. Without it this
+     * method can only produce the orphan described above. Refusing is the
+     * honest answer, and the message says what to type. A platform-scope
+     * request (Super Admin seeding the central catalogue with no shop in
+     * scope) has no shelf to land on, so there it stays optional.
+     */
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts", "productDetail", "productSearch", "productFeed", "bestsellerTiles", "trending", "frequentlyBought"}, allEntries = true)
+    @Transactional
+    public ProductResponse createProduct(com.gpstore.dto.request.ProductCreateRequest request) {
+        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+        boolean insideAShop = scope != null && scope.isSingleShop();
+        // Required exactly when its absence would hide the product, and not a
+        // moment before: the one-shop deployment's catalogue IS its shelf, so
+        // demanding a price there would break a flow that works today for no
+        // gain. See sellsAsOneOfManyShops.
+        boolean shelfDecidesVisibility = sellsAsOneOfManyShops(scope);
+
+        com.gpstore.dto.request.ProductCreateRequest.FirstVariant first = request.getFirstVariant();
+        if (shelfDecidesVisibility && first == null) {
+            log.warn("Refused a product create with no variant for shop {} - name={}",
+                    scope == null ? null : scope.shopId(), request.getName());
+            throw new BadRequestException(
+                    "Add the first variant - its price and stock - so this product goes on "
+                            + "your shelf. A product with no variant cannot be sold, and your "
+                            + "Products list would not show it.");
+        }
+
+        Long categoryId = request.resolveCategoryId();
+        if (categoryId == null) {
+            throw new BadRequestException("Choose a category for this product.");
+        }
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Category not found with id " + categoryId));
+
+        // ALREADY ON THIS SHELF? A merchant double-tapping Create, or retrying
+        // after a timeout that actually succeeded, must not end up with two
+        // listings of one thing - which is how the live kirana catalogue ended
+        // up with two "machar bati" rows (see resolveCategory). Matched on what
+        // a person would call the same product rather than on a client-supplied
+        // key, so a retry from a fresh app install is caught too.
+        if (shelfDecidesVisibility) {
+            productRepository.findAllListedForCurrentShop(
+                            org.springframework.data.domain.PageRequest.of(0, ADMIN_UNPAGINATED_CAP))
+                    .stream()
+                    .filter(existing -> sameProduct(existing, request))
+                    .findFirst()
+                    .ifPresent(existing -> {
+                        throw new com.gpstore.exception.ConflictException(
+                                "You already sell \"" + existing.getName()
+                                        + "\". Open it to add another variant instead.");
+                    });
+        }
+
+        Product product = new Product();
+        product.setName(request.getName().trim());
+        product.setBrand(request.getBrand() == null || request.getBrand().isBlank()
+                ? null : request.getBrand().trim());
+        product.setDescription(request.getDescription());
+        product.setCategory(category);
+        product.setActive(request.getActive() == null ? Boolean.TRUE : request.getActive());
+        applyModel3dUrl(product, request.getModel3dUrl(), true);
+        Product saved = productRepository.save(product);
+
+        if (first != null) {
+            listFirstVariant(saved, first, insideAShop);
+        }
+
+        log.info("Shop {} added product {} (id={}) with {} first variant",
+                scope == null ? null : scope.shopId(), saved.getName(), saved.getId(),
+                first == null ? "no" : "a");
+        return ProductResponse.forAdmin(saved, shopPricedCatalogue.termsFor(saved));
+    }
+
+    /**
+     * The variant, the listing and the opening stock - the half of a create
+     * that makes the product real to the shop that made it.
+     *
+     * <p>The listing is checked rather than assumed: {@link
+     * com.gpstore.catalog.shop.ShopCatalog#list} returns null when there is no
+     * shop in scope or no usable price, and letting that pass silently would
+     * re-create the invisible product this whole method exists to prevent.
+     */
+    private void listFirstVariant(Product product,
+                                  com.gpstore.dto.request.ProductCreateRequest.FirstVariant first,
+                                  boolean insideAShop) {
+        com.gpstore.entity.ProductVariant variant = new com.gpstore.entity.ProductVariant();
+        variant.setProduct(product);
+        variant.setQuantity(first.getQuantity());
+        // The label is what a merchant typed to tell two variants apart, and it
+        // is stored in `unit` because that is the free-text half of the pair -
+        // "12 GB + 256 GB" for a phone, "kg" for atta. Nothing here assumes a
+        // pack size.
+        String described = first.describe();
+        variant.setUnit(first.getUnit() != null && !first.getUnit().isBlank()
+                ? first.getUnit().trim()
+                : described);
+        variant.setSku(blankToNull(first.getSku()));
+        variant.setBarcode(blankToNull(first.getBarcode()));
+        variant.setImageUrl(blankToNull(first.getImageUrl()));
+        variant.setSellingPrice(first.getSellingPrice());
+        variant.setMrp(first.getMrp());
+        variant.setCostPrice(first.getCostPrice());
+        variant.setAvailable(first.getAvailable() == null ? Boolean.TRUE : first.getAvailable());
+        variant.setActive(Boolean.TRUE);
+
+        com.gpstore.entity.ProductVariant savedVariant = productVariants.save(variant);
+
+        com.gpstore.catalog.shop.ShopProductVariant listing = shopCatalog.list(savedVariant);
+        if (insideAShop && listing == null) {
+            // Should be unreachable: the request validation already requires a
+            // positive selling price and we know a shop is in scope. Loud
+            // rather than silent, because the silent version is the bug.
+            log.error("Variant {} was created but ShopCatalog declined to list it - "
+                    + "the transaction is being rolled back", savedVariant.getId());
+            throw new IllegalStateException(
+                    "Variant " + savedVariant.getId() + " was created but not listed for shop "
+                            + com.gpstore.platform.TenantContext.require().shopId());
+        }
+
+        com.gpstore.entity.Inventory stock = new com.gpstore.entity.Inventory();
+        stock.setProductVariant(savedVariant);
+        stock.setStock(first.getStock() == null ? 0 : first.getStock());
+        stock.setReservedStock(0);
+        inventory.save(stock);
+    }
+
+    /**
+     * Whether these are the same thing to a shopkeeper: same name and same
+     * brand, ignoring case and surrounding spaces.
+     */
+    private static boolean sameProduct(Product existing,
+                                       com.gpstore.dto.request.ProductCreateRequest request) {
+        return equalsLoosely(existing.getName(), request.getName())
+                && equalsLoosely(existing.getBrand(), request.getBrand());
+    }
+
+    private static boolean equalsLoosely(String a, String b) {
+        String left = a == null ? "" : a.trim();
+        String right = b == null ? "" : b.trim();
+        return left.equalsIgnoreCase(right);
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
     // A public, unauthenticated GET endpoint backs each of the three methods
     // below (see ProductController) - none of them may ever run an unbounded
     // findAll()/findByX() again. Real clients use the paginated/ranked
@@ -162,8 +389,7 @@ public class ProductService {
                 org.springframework.data.domain.PageRequest.of(0, ADMIN_UNPAGINATED_CAP);
         com.gpstore.platform.TenantScope scope =
                 com.gpstore.platform.TenantContext.require();
-        boolean marketplaceMerchant = scope.isSingleShop()
-                && (platform.getMode().isMultiShop() || shops.countByDeletedAtIsNull() > 1);
+        boolean marketplaceMerchant = sellsAsOneOfManyShops(scope);
 
         if (scope.isPlatform()) {
             // There is no single shop price in a platform scope. Passing all

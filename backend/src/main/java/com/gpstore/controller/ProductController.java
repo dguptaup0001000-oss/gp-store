@@ -28,7 +28,14 @@ public class ProductController {
         this.productService = productService;
     }
 
-    // Create Product
+    // Create Product - THE PLATFORM'S CATALOGUE, not a merchant's shelf.
+    //
+    // Guarded by CatalogDefinitionAuthorization: in a marketplace only
+    // CATALOG_DEFINE reaches this, because renaming or re-categorising a row
+    // changes it for every shop selling it. A merchant adding something THEY
+    // sell goes to POST /api/shop/products instead, which creates the
+    // catalogue row, their listing and their stock together - see
+    // ShopSelfServiceController.addProduct.
     @PostMapping
     public ProductResponse createProduct(@RequestBody Product product) {
         return productService.saveProduct(product);

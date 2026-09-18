@@ -18,13 +18,16 @@ public class CategoryService {
     private final CategoryRepository categoryRepository;
     private final ProductRepository productRepository;
     private final CatalogImageCleanup imageCleanup;
+    private final com.gpstore.discovery.ShopCategoryPresence shelves;
 
     public CategoryService(CategoryRepository categoryRepository,
                            ProductRepository productRepository,
-                           CatalogImageCleanup imageCleanup) {
+                           CatalogImageCleanup imageCleanup,
+                           com.gpstore.discovery.ShopCategoryPresence shelves) {
         this.categoryRepository = categoryRepository;
         this.productRepository = productRepository;
         this.imageCleanup = imageCleanup;
+        this.shelves = shelves;
     }
 
     // bestsellerTiles too: the collage carries each category's name and is
@@ -56,6 +59,57 @@ public class CategoryService {
     public List<Category> getAllCategories() {
         return categoryRepository.findByActiveTrueOrderByNameAsc(
                 org.springframework.data.domain.PageRequest.of(0, STOREFRONT_CATEGORY_CAP));
+    }
+
+    /**
+     * The categories THIS shop actually trades in.
+     *
+     * <p>WHY A NEWLY ONBOARDED PHONE SHOP WAS SHOWN "Atta, Rice & Dal". The
+     * merchant's Categories screen read {@link #getAllCategories()}, which is
+     * the platform's whole taxonomy - every department every merchant on
+     * GP-STORE sells, descriptions and all ("for everyday kirana needs"). For
+     * the one shop that existed when this was written, the taxonomy and that
+     * shop's departments were the same list. With several merchants trading
+     * they are not, and a phone shop was handed a kirana's shelf plan to
+     * manage.
+     *
+     * <p>DERIVED FROM THE SHELF, NOT A NEW TABLE. A shop trades in a category
+     * when it lists something orderable in it - which
+     * {@code shop_product_variants} already records, and which
+     * {@link com.gpstore.discovery.ShopCategoryPresence} already reads for the
+     * customer's discovery screens. Giving merchants a declared list instead
+     * would be a second, staler answer to a question the data already answers:
+     * a merchant who stops stocking phone cases would keep "Cases & Covers"
+     * forever.
+     *
+     * <p>EMPTY IS A REAL ANSWER. A shop that has listed nothing yet trades in
+     * nothing yet, and gets an empty list rather than somebody else's
+     * departments. The Add Product screen still offers the full taxonomy to
+     * choose from - see {@link #getAllCategories()} - which is how the first
+     * category gets onto the shelf.
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public List<Category> getCategoriesOnMyShelf() {
+        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+        if (scope == null || scope.isPlatform()) {
+            // No shop in scope: the platform console is asking, and the whole
+            // taxonomy IS its subject.
+            return getAllCategories();
+        }
+        java.util.Set<Long> mine = shelves.categoriesSoldByAnyOf(List.of(scope.requireShopId()));
+        if (mine.isEmpty()) {
+            return List.of();
+        }
+        // BY ID, NOT BY FILTERING A PAGE OF THE TAXONOMY.
+        //
+        // This used to read the first STOREFRONT_CATEGORY_CAP categories in
+        // alphabetical order and keep the ones on this shelf - so a shop whose
+        // departments sorted after the hundredth got an empty list and a screen
+        // saying they trade in nothing. On a platform whose taxonomy grows past
+        // a hundred departments that is every shop in the second half of the
+        // alphabet. The set is bounded by the shop's own listings, which is the
+        // right bound for this question.
+        return categoryRepository.findActiveByIdIn(mine);
     }
 
     public Category getById(Long id) {

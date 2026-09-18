@@ -82,8 +82,57 @@ public class ReviewService {
     }
 
     @Transactional(readOnly = true)
+    /**
+     * The review list a shopkeeper works from.
+     *
+     * <p>WAS findAll(). Every product review on GP-STORE, for every product, by
+     * every customer of every merchant - and AdminReviewResponse carries the
+     * reviewer's name AND email. Review is not a ShopOwned entity (a review
+     * belongs to a PRODUCT, which is central and shared), so no tenant filter
+     * narrowed it, and the only gate was REVIEWS_MODERATE - which every shop
+     * owner holds through Role.ADMIN's EVERY_SHOP_PERMISSION. A merchant
+     * onboarded an hour ago, selling nothing, could page through the name and
+     * email address of everyone who had ever reviewed anything here.
+     *
+     * <p>A merchant now reads reviews of what they list, without the email. The
+     * platform keeps the whole picture, unmasked - see AdminReviewResponse.
+     */
     public Page<AdminReviewResponse> getAllReviews(Pageable pageable) {
-        return reviewRepository.findAll(pageable).map(AdminReviewResponse::from);
+        if (readsAcrossShops()) {
+            return reviewRepository.findAll(pageable).map(AdminReviewResponse::from);
+        }
+        return reviewRepository.findAllForCurrentShopShelf(pageable)
+                .map(review -> AdminReviewResponse.from(review, false));
+    }
+
+    /**
+     * Whether the caller reads the whole platform or one shop's shelf.
+     *
+     * <p>Platform scope is the platform owner's console. A shop scope is a
+     * shopkeeper, however many permissions their role carries.
+     */
+    private boolean readsAcrossShops() {
+        com.gpstore.platform.TenantScope scope = com.gpstore.platform.TenantContext.current();
+        return scope == null || scope.isPlatform();
+    }
+
+    /**
+     * Refuses a merchant acting on a review of something they do not sell.
+     *
+     * <p>A review is attached to a PRODUCT, and a product is shared by every
+     * shop selling it - so one merchant hiding a review takes it off every
+     * other merchant's storefront too, and one merchant answering it puts a
+     * stranger's words under another shop's item. The platform may do both;
+     * a shopkeeper may do them on their own shelf.
+     */
+    private void requireOnMyShelf(Long reviewId) {
+        if (readsAcrossShops()) {
+            return;
+        }
+        if (!reviewRepository.isOnCurrentShopShelf(reviewId)) {
+            throw new com.gpstore.platform.CrossShopAccessException(
+                    "That review is on a product this shop does not sell.");
+        }
     }
 
     @Transactional(readOnly = true)
@@ -135,6 +184,7 @@ public class ReviewService {
      */
     @Transactional
     public ReviewResponse hideReview(Long id, HideReason reason, String actor) {
+        requireOnMyShelf(id);
         if (reason == null) {
             throw new BadRequestException(
                     "Hiding a review needs a reason, and it has to be one of: "
@@ -156,6 +206,7 @@ public class ReviewService {
     /** Puts one back. An un-hide is a decision too, so it is recorded too. */
     @Transactional
     public ReviewResponse unhideReview(Long id, String actor) {
+        requireOnMyShelf(id);
         Review review = reviewRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Review not found"));
         review.setHiddenAt(null);
@@ -180,6 +231,7 @@ public class ReviewService {
      */
     @Transactional
     public ReviewResponse merchantRespond(Long id, String text, Long shopId, String actor) {
+        requireOnMyShelf(id);
         String response = trimmedOrNull(text);
         if (response == null) {
             throw new BadRequestException("Write something for the customer to read.");
@@ -244,8 +296,14 @@ public class ReviewService {
 
     @Transactional(readOnly = true)
     public Page<AdminReviewResponse> reported(Pageable pageable) {
-        return reviewRepository.findByReportedAtIsNotNullOrderByReportedAtDesc(pageable)
-                .map(AdminReviewResponse::from);
+        // A second listing endpoint over the same rows is a second leak, so it
+        // is narrowed identically rather than left as the one that got away.
+        if (readsAcrossShops()) {
+            return reviewRepository.findByReportedAtIsNotNullOrderByReportedAtDesc(pageable)
+                    .map(AdminReviewResponse::from);
+        }
+        return reviewRepository.findReportedForCurrentShopShelf(pageable)
+                .map(review -> AdminReviewResponse.from(review, false));
     }
 
     /** A product's stars as a page shows them (§19). */

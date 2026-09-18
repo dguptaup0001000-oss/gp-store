@@ -104,6 +104,26 @@ class AdminIsNotJustTheRoleNamedAdminTest {
         // the live row on every request, so minting first would be rejected.
         jdbc.update("UPDATE customers SET role = ? WHERE email = ?", role, email);
 
+        // AND PUT THEM ON A SHOP'S ROSTER, because a role is not a posting.
+        //
+        // This fixture used to give an account a staff ROLE and stop there. It
+        // worked while the platform mode defaulted to SINGLE_SHOP, where
+        // TenantResolver answered every credential with Shop #1 - so a SUPPORT
+        // agent nobody had hired still resolved into the shop. With the default
+        // now the marketplace that is refused, and rightly: an account on
+        // nobody's staff list has no shop, and picking one for them would
+        // invent an authorization nobody granted. MarketplaceIdentityTest
+        // asserts exactly that.
+        //
+        // The subject of THIS file is which ROLES may open somebody else's
+        // order, not whether an unposted account can. So the fixture now
+        // describes a real staff member: posted to the shop whose order they
+        // are about to open. SUPER_ADMIN is unaffected either way - the
+        // resolver answers platform scope before it ever looks at a roster.
+        jdbc.update("INSERT INTO shop_staff (shop_id, customer_id, is_default, active) "
+                        + "SELECT ?, id, true, true FROM customers WHERE email = ?",
+                firstShopId(), email);
+
         ResponseEntity<java.util.Map> login = rest.postForEntity(
                 url("/api/auth/login"),
                 json("""
@@ -114,6 +134,13 @@ class AdminIsNotJustTheRoleNamedAdminTest {
     }
 
     /** An order belonging to somebody else entirely. */
+    /** The shop this deployment started with - the one the fixtures act in. */
+    private Long firstShopId() {
+        return jdbc.queryForObject(
+                "SELECT id FROM shops WHERE deleted_at IS NULL ORDER BY id ASC LIMIT 1",
+                Long.class);
+    }
+
     private Long someoneElsesOrder() {
         Customer shopper = new Customer();
         shopper.setFullName("A Customer");
@@ -132,7 +159,24 @@ class AdminIsNotJustTheRoleNamedAdminTest {
         order.setOrderStatus(OrderStatus.DELIVERED);
         order.setOrderDate(LocalDateTime.now().minusDays(1));
         order.setActive(true);
-        return orders.save(order).getId();
+
+        // AN ORDER BELONGS TO A SHOP, so the fixture has to say which one.
+        //
+        // This used to call orders.save() straight from the test thread with no
+        // tenant scope at all, and it worked because the platform mode
+        // defaulted to SINGLE_SHOP and the stamping listener fell back to Shop
+        // #1. With the default now the marketplace, that fallback is gone and
+        // the listener refuses - correctly: "no tenant scope on this thread, no
+        // shop on the row, and no single shop to fall back to". The fixture was
+        // relying on a fallback that only existed because the deployment had
+        // not been told it was a marketplace.
+        //
+        // Naming the shop is what a real order always does. The test's subject
+        // is unchanged: which ROLES may open somebody else's order.
+        Long shopId = firstShopId();
+        return com.gpstore.platform.TenantContext.runWithin(
+                com.gpstore.platform.TenantScope.ofShop(shopId),
+                () -> orders.save(order).getId());
     }
 
     @Test
