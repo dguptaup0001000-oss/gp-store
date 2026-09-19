@@ -1,5 +1,6 @@
 package com.gpstore.catalog.shop;
 
+import com.gpstore.exception.ConflictException;
 import com.gpstore.entity.ProductVariant;
 import com.gpstore.platform.PlatformProperties;
 import org.slf4j.Logger;
@@ -94,6 +95,60 @@ public class ShopCatalog {
      * owner never stocked. Note that the fallback reads the CENTRAL catalogue
      * either way; it can never reach another shop's price.
      */
+    /**
+     * Refuses anything this shop does not actually sell over the internet.
+     *
+     * <h2>Why this is in the backend and not in the app</h2>
+     *
+     * <p>A Visit-to-Buy listing has no ADD button and a service card has no
+     * cart, but a button is a suggestion. The only thing that decides whether
+     * a ring can be put in a basket is the server, because the request that
+     * matters is the one somebody makes with curl after reading the network
+     * tab. A UI-only rule is not a rule; it is a preference the client is
+     * free to ignore.
+     *
+     * <p>ASKED WHERE THE PRICE IS ASKED FOR, which is the one road every
+     * purchase already travels. Add-to-cart, checkout and re-pricing all have
+     * to learn what a shop charges before they can proceed, so a refusal here
+     * cannot be walked around by finding a different entry point - there is
+     * not one.
+     *
+     * <p>THE MESSAGE SAYS WHICH THING HAPPENED. "Unavailable" would be a lie
+     * of the most annoying kind: the item is there, the shop has it, and the
+     * customer is perfectly able to buy it - just not like this. A customer
+     * told to visit the shop can act on that. A customer told "unavailable"
+     * goes and buys it somewhere else.
+     *
+     * @throws ConflictException if the listing exists but is not sold online
+     */
+    @Transactional(readOnly = true)
+    public void refuseIfNotBuyableOnline(ProductVariant variant) {
+        if (variant == null) {
+            return;
+        }
+        listingFor(variant.getId()).ifPresent(listing -> refuseListingIfNotBuyableOnline(variant, listing));
+    }
+
+    /** The same refusal for a listing already loaded - checkout prices in bulk. */
+    public void refuseListingIfNotBuyableOnline(ProductVariant variant, ShopProductVariant listing) {
+        if (listing == null) {
+            return;
+        }
+        CommerceMode mode = listing.getCommerceMode();
+        if (mode == null || mode.isBuyableOnline()) {
+            return;
+        }
+        String what = variant != null && variant.getProduct() != null
+                ? variant.getProduct().getName() : "This item";
+        if (mode == CommerceMode.SERVICE_AT_SHOP) {
+            throw new ConflictException(what
+                    + " is a service carried out at the shop, so it cannot be added to a basket. "
+                    + "Visit the shop to have it done.");
+        }
+        throw new ConflictException(what
+                + " is sold at the shop rather than online. Visit the shop to buy it.");
+    }
+
     @Transactional(readOnly = true)
     public Optional<BigDecimal> priceOf(ProductVariant variant) {
         if (variant == null) {
