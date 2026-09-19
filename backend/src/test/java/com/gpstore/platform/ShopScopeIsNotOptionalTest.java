@@ -167,11 +167,21 @@ class ShopScopeIsNotOptionalTest {
      *
      * @Query(nativeQuery = true) goes to the database without Hibernate's
      * filters, so each of these is a place where the shop predicate has to be
-     * written by hand. The daily revenue chart is the one that still owes one:
-     * under a marketplace it would total every shop's takings into one line.
-     * It is listed rather than fixed here because the fix is a signature
-     * change on a reporting query, which belongs with the reporting slice -
-     * and under SINGLE_SHOP the number it returns today is correct.
+     * written by hand.
+     *
+     * <p>THE DAILY REVENUE CHART NO LONGER OWES ONE. This comment used to say
+     * it did - that under a marketplace it would total every shop's takings
+     * into one line, and that the fix belonged with the reporting slice. The
+     * fix has since landed: revenueByDayBetween takes a shopId and carries
+     * "and (cast(:shopId as bigint) is null or o.shop_id = :shopId)", and its
+     * only caller reads that id from TenantContext.reportingShopId() - the
+     * scope on the thread, never the request - with null reserved for a
+     * platform administrator who is entitled to the whole marketplace.
+     *
+     * <p>Left listed, because it is still a native query against a shop-owned
+     * table and that is what this list is for. A stale warning is worse than
+     * no warning, though: somebody reading it would go looking for a leak that
+     * is not there and might miss one that is.
      */
     private static final Set<String> REVIEWED_NATIVE_QUERIES = Set.of(
             "OrderRepository.revenueByDayBetween",
