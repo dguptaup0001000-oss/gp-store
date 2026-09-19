@@ -273,7 +273,14 @@
                          The default verify job still uses FLYWAY_ENABLED=false, so
                          those tests are excluded here and selected by the
                          schema-bootstrap profile (see .github/workflows/ci.yml). -->
-                    <excludedGroups>schema-bootstrap</excludedGroups>
+                    <!-- large-marketplace builds two thousand shops and three
+                         hundred thousand listings. That is a capacity
+                         experiment, not a regression test: running it on every
+                         push would add minutes to every build and prove nothing
+                         a smaller dataset does not already prove. It is
+                         selected by the large-marketplace workflow instead, and
+                         the lightweight isolation coverage still runs here. -->
+                    <excludedGroups>schema-bootstrap,large-marketplace</excludedGroups>
                     <systemPropertyVariables>
                         <!-- A SMALL POOL FOR TESTS, and this is not the test
                              environment being special for its own sake - it is
@@ -395,6 +402,28 @@
                             <!-- Override the default exclusion so this profile
                                  is the only way these tests run. -->
                             <excludedGroups combine.self="override"/>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <!-- The two-thousand-shop capacity experiment. Selected by name,
+                 never by a normal build, for the reason given beside the
+                 default excludedGroups above. -->
+            <id>large-marketplace</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <groups>large-marketplace</groups>
+                            <excludedGroups combine.self="override"/>
+                            <!-- Building hundreds of thousands of rows in one
+                                 JVM needs more than the default test heap. -->
+                            <argLine>-XX:+EnableDynamicAgentLoading -Xmx2g</argLine>
                         </configuration>
                     </plugin>
                 </plugins>

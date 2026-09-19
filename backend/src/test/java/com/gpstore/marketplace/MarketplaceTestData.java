@@ -79,6 +79,13 @@ public class MarketplaceTestData {
     /** Phone numbers live in a block that cannot be a real Indian mobile. */
     private static final String PHONE_PREFIX = "9999";
 
+    /**
+     * Hands out phone numbers in order. Reset at the start of every
+     * {@link #create}, so one seed produces one dataset however many times it
+     * is run against a freshly cleaned database.
+     */
+    private int phoneCounter;
+
     private final AppBuildInfo buildInfo;
     private final DataSource dataSource;
     private final JdbcTemplate jdbc;
@@ -255,6 +262,7 @@ public class MarketplaceTestData {
     public Marketplace create(long seed, Scale scale) {
         refuseUnlessDisposable();
         Random random = new Random(seed);
+        phoneCounter = 0;
         long started = System.currentTimeMillis();
 
         List<Business> businesses = new ArrayList<>();
@@ -739,12 +747,37 @@ public class MarketplaceTestData {
      * which is the only property that makes it safe to run against a database
      * that also holds somebody's hand-made fixtures.
      */
-    @Transactional
+    /**
+     * Removes exactly what this generator made, and nothing else.
+     *
+     * <h2>By tag, and by the indexes that actually exist</h2>
+     *
+     * <p>No TRUNCATE, no date window, no "id greater than". If a row was not
+     * created here it is not matched here, which is the only property that
+     * makes this safe to run against a database that also holds somebody's
+     * hand-made fixtures.
+     *
+     * <p>SHOP-OWNED ROWS GO BY {@code shop_id}, NOT BY A VARIANT SUBQUERY, and
+     * that is a fix rather than a style. At two thousand shops the subquery
+     * form timed out: {@code inventory} is indexed on {@code (shop_id,
+     * product_variant_id)}, whose leading column is the shop, so a lookup by
+     * variant alone cannot use it and degrades to a sequential scan. Deleting
+     * by shop uses {@code idx_inventory_shop_id} and finishes.
+     *
+     * <p>NOT TRANSACTIONAL ANY MORE, deliberately. Three hundred thousand
+     * deletes in one transaction is a long-held lock and a large amount of WAL
+     * for a teardown that nothing else is waiting on. Each statement stands on
+     * its own, and a half-finished cleanup is recoverable by running it again -
+     * every delete is idempotent because it matches on the tag.
+     */
     public void cleanUp() {
         refuseUnlessDisposable();
         String like = TAG + "%";
         String emailLike = TAG.toLowerCase(Locale.ROOT) + "-%";
+        String codeLike = TAG.toLowerCase(Locale.ROOT) + "-%";
+        String ourShops = "SELECT id FROM shops WHERE code LIKE '" + codeLike + "'";
 
+        // Orders and what hangs off them.
         jdbc.update("DELETE FROM shop_ratings WHERE comment LIKE ?", like);
         jdbc.update("DELETE FROM order_alerts_sent WHERE order_id IN "
                 + "(SELECT id FROM orders WHERE order_number LIKE ?)", like);
@@ -753,36 +786,87 @@ public class MarketplaceTestData {
         jdbc.update("DELETE FROM orders WHERE order_number LIKE ?", like);
         jdbc.update("DELETE FROM coupons WHERE coupon_code LIKE ?", like);
 
-        jdbc.update("DELETE FROM inventory WHERE product_variant_id IN "
-                + "(SELECT v.id FROM product_variants v JOIN products p ON p.id = v.product_id "
-                + "WHERE p.name LIKE ?)", like);
-        jdbc.update("DELETE FROM shop_product_variants WHERE product_variant_id IN "
-                + "(SELECT v.id FROM product_variants v JOIN products p ON p.id = v.product_id "
-                + "WHERE p.name LIKE ?)", like);
+        // Shop-owned rows, by shop. These are the big ones.
+        jdbc.update("DELETE FROM inventory WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM shop_product_variants WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM shop_categories WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM shop_staff WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM shop_business_hours WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM store_operations_settings WHERE shop_id IN (" + ourShops + ")");
+
+        // The central catalogue this generator added. Attributes first: that
+        // foreign key IS indexed (idx_variant_attribute_variant), so it is
+        // cheap; the variants themselves go in chunks because several tables
+        // reference them without a leading-column index, and every parent row
+        // deleted costs a scan of each of those.
         jdbc.update("DELETE FROM product_variant_attributes WHERE product_variant_id IN "
                 + "(SELECT v.id FROM product_variants v JOIN products p ON p.id = v.product_id "
                 + "WHERE p.name LIKE ?)", like);
-        jdbc.update("DELETE FROM product_variants WHERE product_id IN "
-                + "(SELECT id FROM products WHERE name LIKE ?)", like);
+        deleteInChunks("product_variants",
+                "SELECT v.id FROM product_variants v JOIN products p ON p.id = v.product_id "
+                        + "WHERE p.name LIKE ?", like);
         jdbc.update("DELETE FROM products WHERE name LIKE ?", like);
-        jdbc.update("DELETE FROM shop_categories WHERE name LIKE ?", like);
         jdbc.update("DELETE FROM categories WHERE name LIKE ?", like);
 
+        // Accounts and the shops themselves.
         jdbc.update("DELETE FROM push_registrations WHERE customer_id IN "
                 + "(SELECT id FROM customers WHERE email LIKE ?)", emailLike);
-        jdbc.update("DELETE FROM shop_staff WHERE shop_id IN "
-                + "(SELECT id FROM shops WHERE code LIKE ?)", TAG.toLowerCase(Locale.ROOT) + "-%");
         jdbc.update("DELETE FROM shop_staff WHERE customer_id IN "
                 + "(SELECT id FROM customers WHERE email LIKE ?)", emailLike);
-        jdbc.update("DELETE FROM shop_business_hours WHERE shop_id IN "
-                + "(SELECT id FROM shops WHERE code LIKE ?)", TAG.toLowerCase(Locale.ROOT) + "-%");
-        jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id IN "
-                + "(SELECT id FROM shops WHERE code LIKE ?)", TAG.toLowerCase(Locale.ROOT) + "-%");
-        jdbc.update("DELETE FROM store_operations_settings WHERE shop_id IN "
-                + "(SELECT id FROM shops WHERE code LIKE ?)", TAG.toLowerCase(Locale.ROOT) + "-%");
-        jdbc.update("DELETE FROM shops WHERE code LIKE ?", TAG.toLowerCase(Locale.ROOT) + "-%");
+        jdbc.update("DELETE FROM shops WHERE code LIKE ?", codeLike);
         jdbc.update("DELETE FROM merchants WHERE legal_name LIKE ?", like);
-        jdbc.update("DELETE FROM customers WHERE email LIKE ?", emailLike);
+        deleteInChunks("customers", "SELECT id FROM customers WHERE email LIKE ?", emailLike);
+    }
+
+    /** Rows per teardown statement. Small enough to finish inside the thirty-second
+     * {@code statement_timeout} the application sets on every connection. */
+    private static final int DELETE_CHUNK = 2000;
+
+    /**
+     * Deletes a few thousand rows at a time until none are left.
+     *
+     * <p>WHY CHUNKED, AND WHY IT IS NOT A STYLE CHOICE. A row cannot be deleted
+     * until PostgreSQL has proved that nothing references it, and it proves
+     * that by looking in every table with a foreign key to it. Where that
+     * foreign key has no index with it as the leading column, the look is a
+     * sequential scan - once per deleted row. Two of this generator's parents
+     * are in that position at scale:
+     *
+     * <ul>
+     *   <li>{@code product_variants} is referenced by {@code inventory},
+     *       {@code cart_items}, {@code order_items} and {@code product_images}.
+     *       {@code inventory}'s only variant index is
+     *       {@code uk_inventory_shop_variant (shop_id, product_variant_id)},
+     *       whose leading column is the shop.</li>
+     *   <li>{@code customers} is referenced by {@code invoices.customer_id},
+     *       {@code order_returns.decided_by} and {@code wishlist.customer_id},
+     *       none of which is indexed.</li>
+     * </ul>
+     *
+     * <p>Fifty thousand customers against a few thousand invoices is a hundred
+     * million row comparisons in one statement, and the thirty-second
+     * {@code statement_timeout} that {@code application.properties} sets on
+     * every connection cancels it - correctly. Chunking does not make the work
+     * smaller; it makes each statement finish, and makes a half-done teardown
+     * resumable, because every chunk matches on the tag and can simply be run
+     * again.
+     *
+     * <p>THE TIMEOUT IS NOT THE BUG AND IS NOT WEAKENED HERE. Thirty seconds is
+     * a production safety limit on a runaway query, and a teardown is not a
+     * reason to raise it.
+     *
+     * <p>Nor are the missing indexes added. This is a note about the SHAPE OF
+     * THE SCHEMA under an operation the application never performs: production
+     * does not bulk-delete catalogue variants or customer accounts, which is
+     * why these have never cost anything there. An index earns its place on a
+     * measured application query, and a test's teardown is not one.
+     */
+    private void deleteInChunks(String table, String selectIds, Object... args) {
+        while (jdbc.update("DELETE FROM " + table + " WHERE id IN ("
+                + selectIds + " LIMIT " + DELETE_CHUNK + ")", args) > 0) {
+            // Until the select finds nothing left to hand over.
+        }
     }
 
     // ============================================================ small bits
@@ -801,9 +885,23 @@ public class MarketplaceTestData {
         return TAG.toLowerCase(Locale.ROOT) + "-" + who + "@example.test";
     }
 
-    /** 9999xxxxxx is not an allocated Indian mobile block. */
-    private static String phone(Random random) {
-        return PHONE_PREFIX + String.format("%06d", random.nextInt(1_000_000));
+    /**
+     * 9999xxxxxx - not an allocated Indian mobile block, and unique by
+     * construction.
+     *
+     * <p>COUNTED, NOT ROLLED, and that is a fix rather than a preference.
+     * {@code customers.mobile_number} is UNIQUE, and six random digits give a
+     * million values: at fifty thousand customers the birthday paradox makes a
+     * collision essentially certain - about six hundred expected - and the
+     * insert fails. Thirty shops never reached the numbers where that shows,
+     * which is exactly the kind of thing generating a real-sized marketplace is
+     * for.
+     *
+     * <p>A counter is also more deterministic than a roll: the same seed now
+     * produces the same phone numbers as well as the same everything else.
+     */
+    private String phone(Random random) {
+        return PHONE_PREFIX + String.format("%06d", phoneCounter++ % 1_000_000);
     }
 
     private static String placeholders(int count) {
