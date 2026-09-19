@@ -33,6 +33,19 @@ public class ShopDiscovery {
 
     private static final double EARTH_RADIUS_KM = 6371.0;
 
+    /**
+     * How much latitude a kilometre is worth, ROUNDED THE SAFE WAY.
+     *
+     * <p>A degree of latitude is between 110.574 km at the equator and 111.694
+     * at the poles. Dividing by the smaller figure makes the search box
+     * slightly too big rather than slightly too small, and that direction
+     * matters: too big costs a handful of extra rows the exact distance check
+     * then discards, too small silently hides a shop that would have
+     * delivered. A customer never sees an over-wide box; they would see a
+     * missing shop.
+     */
+    private static final double LAT_DEGREES_PER_KM = 1.0 / 110.0;
+
     private final ShopRepository shops;
     private final SearchRadiusLadder ladder;
 
@@ -72,7 +85,8 @@ public class ShopDiscovery {
             return List.of();
         }
         List<NearbyShop> serving = new ArrayList<>();
-        for (Shop shop : shops.findAll()) {
+        for (Shop shop : shops.findWithinOwnRadiusBox(latitude, longitude,
+                LAT_DEGREES_PER_KM, lngDegreesPerKm(latitude))) {
             if (!isOpenToCustomers(shop) || shop.getLatitude() == null || shop.getLongitude() == null) {
                 continue;
             }
@@ -118,7 +132,8 @@ public class ShopDiscovery {
             return List.of();
         }
         List<NearbyShop> nearby = new ArrayList<>();
-        for (Shop shop : shops.findAll()) {
+        for (Shop shop : shops.findWithinBox(latitude, longitude,
+                LAT_DEGREES_PER_KM * limit, lngDegreesPerKm(latitude) * limit)) {
             if (!isOpenToCustomers(shop) || shop.getLatitude() == null || shop.getLongitude() == null) {
                 continue;
             }
@@ -244,6 +259,26 @@ public class ShopDiscovery {
             }
             at = next.get();
         }
+    }
+
+    /**
+     * How much longitude a kilometre is worth AT THIS LATITUDE.
+     *
+     * <p>Lines of longitude converge towards the poles, so a kilometre east is
+     * a larger number of degrees the further north you are. Using a fixed
+     * figure would draw a box too narrow in the north - which is the direction
+     * that loses shops - so it is computed from the customer's own latitude,
+     * again against 110.0 rather than 111.32 so the error runs towards a
+     * larger box.
+     *
+     * <p>The floor is arithmetic rather than geographic: the cosine reaches
+     * zero at the poles and a division by it would not. GP-STORE has no shops
+     * within a thousand kilometres of either pole, but a guard that only holds
+     * for the data we happen to have is not a guard.
+     */
+    private static double lngDegreesPerKm(double latitude) {
+        double shrink = Math.max(Math.cos(Math.toRadians(latitude)), 0.01);
+        return 1.0 / (110.0 * shrink);
     }
 
     /** This shop's own promise, which the search radius never overrides. */

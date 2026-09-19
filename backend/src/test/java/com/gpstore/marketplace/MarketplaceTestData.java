@@ -648,29 +648,81 @@ public class MarketplaceTestData {
                 Long.class, TAG.toLowerCase(Locale.ROOT) + "-cust%");
     }
 
-    /** Uneven staffing, including shops with nobody but the owner. */
+    /**
+     * Uneven staffing, including shops with nobody but the owner.
+     *
+     * <h2>EVERY SHOP, NOT EVERY BUSINESS</h2>
+     *
+     * <p>This used to loop over businesses and staff {@code business.shopId()},
+     * which is the FIRST of that business's shops. A chain with ten branches
+     * got riders at one of them and nine empty rosters, and the marketplace
+     * came out with about a fifth of the workers it should have had. A branch
+     * with no way to deliver is not a branch.
+     *
+     * <h2>A SHOP'S RIDERS ARE ITS OWN PEOPLE</h2>
+     *
+     * <p>The worker's account used to be named {@code <trade>-worker<i>}, and
+     * {@link #account} finds an existing row by email rather than failing on
+     * it. With nine kirana businesses in the marketplace, every one of them
+     * asked for {@code kirana-worker0} and every one of them got THE SAME
+     * PERSON, who was then inserted onto all nine staff lists.
+     *
+     * <p>That is not merely a miscount. An account on more than one shop's
+     * roster with no default is a state {@code TenantResolver} refuses to
+     * resolve - it throws rather than choose one merchant's data over
+     * another's - so the fixture was manufacturing precisely the ambiguity the
+     * isolation tests exist to prove cannot happen, and calling it staffing.
+     * The shop id in the name makes each rider one shop's employee, which is
+     * what a rider is.
+     */
     private int seedWorkers(List<Business> businesses, Random random) {
         int made = 0;
         for (Business business : businesses) {
-            int howMany = switch (business.trade()) {
-                case KIRANA -> 10;
-                case RESTAURANT -> 15;
-                case BIRYANI -> 3;
-                case JEWELLERY, GIFTS -> 0;
-                default -> 1;
-            };
-            for (int i = 0; i < howMany; i++) {
-                long workerId = account(
-                        business.trade().name().toLowerCase(Locale.ROOT) + "-worker" + i,
-                        "DELIVERY_BOY", random);
-                jdbc.update("""
-                        INSERT INTO shop_staff (shop_id, customer_id, is_default, active)
-                        VALUES (?, ?, false, true) ON CONFLICT DO NOTHING
-                        """, business.shopId(), workerId);
-                made++;
+            int branch = 0;
+            for (Long shopId : business.shopIds()) {
+                int howMany = ridersFor(business.trade(), branch++);
+                for (int i = 0; i < howMany; i++) {
+                    long workerId = account("worker-s" + shopId + "-" + i,
+                            "DELIVERY_BOY", random);
+                    jdbc.update("""
+                            INSERT INTO shop_staff (shop_id, customer_id, is_default, active)
+                            VALUES (?, ?, false, true) ON CONFLICT DO NOTHING
+                            """, shopId, workerId);
+                    made++;
+                }
             }
         }
         return made;
+    }
+
+    /**
+     * How many riders one branch runs.
+     *
+     * <p>BY TRADE, BECAUSE DELIVERY LOAD IS BY TRADE. A kirana and a biryani
+     * counter send somebody out all day; a jeweller does not run a fleet at
+     * all, and a shop with nobody but the owner is a real shop worth having in
+     * the dataset. The per-branch variation is deterministic rather than
+     * rolled, so the same seed staffs the same shops - a busy branch and a
+     * quiet one, which is what a chain actually looks like.
+     */
+    private static int ridersFor(Trade trade, int branch) {
+        int base = switch (trade) {
+            case KIRANA, VEGETABLES, FRUITS, DAIRY -> 6;
+            case RESTAURANT, BIRYANI, PIZZA -> 8;
+            case PHARMACY -> 4;
+            case JEWELLERY -> 0;
+            case GIFTS -> 1;
+            default -> 2;
+        };
+        if (base == 0) {
+            return 0;
+        }
+        return switch (branch % 4) {
+            case 0 -> base + 2;
+            case 1 -> base;
+            case 2 -> Math.max(1, base - 1);
+            default -> base + 1;
+        };
     }
 
     /**

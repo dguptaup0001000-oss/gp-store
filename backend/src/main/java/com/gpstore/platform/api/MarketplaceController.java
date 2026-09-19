@@ -39,6 +39,9 @@ import java.util.List;
 @RequestMapping("/api/marketplace")
 public class MarketplaceController {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(MarketplaceController.class);
+
     private final ShopDiscovery discovery;
     private final ShopRepository shops;
     private final PlatformProperties platform;
@@ -50,6 +53,8 @@ public class MarketplaceController {
     private final com.gpstore.discovery.ShopCategoryPresence shelves;
     private final com.gpstore.discovery.PublicShopStars stars;
     private final com.gpstore.repository.CategoryRepository categories;
+    private final com.gpstore.repository.StoreOperationsSettingsRepository storeSettings;
+    private final com.gpstore.repository.StoreClosureRepository closures;
 
     public MarketplaceController(ShopDiscovery discovery, ShopRepository shops,
                                  PlatformProperties platform, ShopScopeSwitch shopScope,
@@ -59,7 +64,9 @@ public class MarketplaceController {
                                  com.gpstore.rating.ShopRatingService ratings,
                                  com.gpstore.discovery.ShopCategoryPresence shelves,
                                  com.gpstore.discovery.PublicShopStars stars,
-                                 com.gpstore.repository.CategoryRepository categories) {
+                                 com.gpstore.repository.CategoryRepository categories,
+                                 com.gpstore.repository.StoreOperationsSettingsRepository storeSettings,
+                                 com.gpstore.repository.StoreClosureRepository closures) {
         this.shelves = shelves;
         this.stars = stars;
         this.categories = categories;
@@ -71,6 +78,8 @@ public class MarketplaceController {
         this.platform = platform;
         this.shopScope = shopScope;
         this.schedule = schedule;
+        this.storeSettings = storeSettings;
+        this.closures = closures;
     }
 
     /**
@@ -398,23 +407,86 @@ public class MarketplaceController {
                 "multiShop", platform.getMode().isMultiShop());
     }
 
-    private StorefrontView view(ShopDiscovery.NearbyShop nearby,
-                                java.util.Map<Long, com.gpstore.discovery.PublicShopStars.Stars> stars) {
-        return view(nearby.shop(), nearby.distanceKm(), nearby.deliversHere(),
-                stars.get(nearby.shop().getId()));
+    /**
+     * Everything a list of storefronts needs, read once for the whole list.
+     *
+     * <p>Three maps, three queries, however many shops. Holding them together
+     * in one object is what stops a fourth per-shop read being added later
+     * without anyone noticing it is per-shop.
+     */
+    private record ListReads(
+            java.util.Map<Long, com.gpstore.discovery.PublicShopStars.Stars> stars,
+            java.util.Map<Long, com.gpstore.entity.StoreOperationsSettings> settings,
+            java.util.Map<Long, java.util.Set<java.time.LocalDate>> closedDates,
+            java.time.Instant at) {}
+
+    private StorefrontView view(ShopDiscovery.NearbyShop nearby, ListReads reads) {
+        return view(nearby.shop(), nearby.distanceKm(), nearby.deliversHere(), reads);
     }
 
     /**
-     * The same list, with every shop's stars read in one query rather than one
-     * each.
+     * The same list, with every shop's stars, settings and closures read in
+     * one query each rather than one per shop.
      *
-     * ONE PLACE, so a list endpoint cannot be added later that draws shops
+     * <p>ONE PLACE, so a list endpoint cannot be added later that draws shops
      * without their ratings - or worse, draws them by asking per shop.
+     *
+     * <p>WHAT THIS REPLACED, AND WHY IT HAD TO. Stars were already batched
+     * here; open/closed was not. Each storefront cost a settings read and a
+     * closures query inside its own scope switch, which the old comment on
+     * {@code view} called affordable "because a discovery list is a handful of
+     * shops in one town, not a catalogue", and said plainly that "if it ever
+     * stops being, this is the line to batch". A run against two thousand
+     * shops is where it stopped being: a pin with 238 shops in range issued
+     * 476 extra round trips, every one of them holding the request's pooled
+     * connection, and twenty connections were enough to stall the application
+     * while Postgres sat at four concurrent statements and the CPU at 60%.
+     *
+     * <p>FAILS OPEN, LIKE THE READ IT REPLACED. DeliveryScheduleService's own
+     * closure read treats an unreadable closures table as "nothing is closed",
+     * on the grounds that a shop wrongly shut takes no orders at all while a
+     * shop wrongly open at worst promises a delivery a human can fix. Batching
+     * must not quietly turn that into a 500 for the whole marketplace screen,
+     * so the same direction is kept here.
      */
     private List<StorefrontView> viewAll(List<ShopDiscovery.NearbyShop> nearby) {
-        java.util.Map<Long, com.gpstore.discovery.PublicShopStars.Stars> theirStars =
-                stars.forShops(nearby.stream().map(near -> near.shop().getId()).toList());
-        return nearby.stream().map(near -> view(near, theirStars)).toList();
+        List<Long> shopIds = nearby.stream().map(near -> near.shop().getId()).toList();
+        // READ ONCE, OUTSIDE THE STREAM. Calling this inside map() would be
+        // three queries per shop instead of three in total - the same defect
+        // in a new costume.
+        ListReads reads = readOnceFor(shopIds);
+        return nearby.stream().map(near -> view(near, reads)).toList();
+    }
+
+    private ListReads readOnceFor(List<Long> shopIds) {
+        if (shopIds.isEmpty()) {
+            return new ListReads(java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
+                    schedule.clockNow());
+        }
+        java.util.Map<Long, com.gpstore.entity.StoreOperationsSettings> settings =
+                new java.util.HashMap<>();
+        java.util.Map<Long, java.util.Set<java.time.LocalDate>> closedDates =
+                new java.util.HashMap<>();
+        try {
+            for (com.gpstore.entity.StoreOperationsSettings row
+                    : storeSettings.findForShops(shopIds)) {
+                // KEYED BY THE ROW'S OWN shop_id, never by position in the
+                // list. A batch is only as safe as the key it is grouped by.
+                settings.put(row.getShopId(), row);
+            }
+            java.time.LocalDate[] window = schedule.closureWindow();
+            for (com.gpstore.entity.StoreClosure row
+                    : closures.findBetweenForShops(shopIds, window[0], window[1])) {
+                closedDates.computeIfAbsent(row.getShopId(), id -> new java.util.HashSet<>())
+                        .add(row.getClosedOn());
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Could not read storefront hours for this list; showing every shop as "
+                    + "trading normally: {}", ex.toString());
+            settings.clear();
+            closedDates.clear();
+        }
+        return new ListReads(stars.forShops(shopIds), settings, closedDates, schedule.clockNow());
     }
 
     /**
@@ -437,13 +509,47 @@ public class MarketplaceController {
      * something worth drawing, and a shop that simply is not taking orders
      * has not.
      *
-     * ONE SETTINGS READ AND ONE CLOSURES QUERY PER SHOP IN THE LIST. That is
-     * affordable because a discovery list is a handful of shops in one town,
-     * not a catalogue; if it ever stops being, this is the line to batch.
+     * ONE SETTINGS READ AND ONE CLOSURES QUERY, FOR ONE SHOP. This overload
+     * serves the single-storefront endpoint, where per-shop reads are what
+     * per-shop means. The LIST path does not come through here any more -
+     * see {@link #viewAll}, which loads both tables once for the whole list
+     * because at two thousand shops the per-shop form was the ceiling of the
+     * application.
      */
     private StorefrontView view(Shop shop, Double distanceKm, Boolean deliversHere,
                                 com.gpstore.discovery.PublicShopStars.Stars theirStars) {
         StoreStatus status = shopScope.within(shop.getId(), schedule::getStoreStatus);
+        return storefront(shop, distanceKm, deliversHere, status, theirStars);
+    }
+
+    /**
+     * The same storefront, from rows the list already loaded.
+     *
+     * <p>STILL INSIDE THE SHOP'S SCOPE, and that is not ceremony. The hours
+     * and the zone still come from {@code ShopHoursService.forCurrentShop},
+     * which reads whichever shop the thread is in; only the settings row and
+     * the closure dates are handed in. Dropping the scope switch would give
+     * every shop in the list the first one's opening times.
+     *
+     * <p>A SHOP WITH NO ROW IN EITHER MAP IS NOT A BUG. Most shops have never
+     * declared a closure and many have never touched their operations
+     * settings; absent means "nothing special", which is exactly what the
+     * per-shop path got from an empty query and an empty Optional.
+     */
+    private StorefrontView view(Shop shop, Double distanceKm, Boolean deliversHere,
+                                ListReads reads) {
+        StoreStatus status = shopScope.within(shop.getId(),
+                () -> schedule.getStoreStatusAt(reads.at(),
+                        reads.settings().get(shop.getId()),
+                        reads.closedDates().get(shop.getId())));
+        return storefront(shop, distanceKm, deliversHere, status,
+                reads.stars().get(shop.getId()));
+    }
+
+    /** The view itself, so the two paths above cannot drift in what they draw. */
+    private StorefrontView storefront(Shop shop, Double distanceKm, Boolean deliversHere,
+                                      StoreStatus status,
+                                      com.gpstore.discovery.PublicShopStars.Stars theirStars) {
         return new StorefrontView(shop.getId(), shop.getCode(), shop.getDisplayName(),
                 shop.getLatitude(), shop.getLongitude(),
                 shop.getLogoUrl(),

@@ -359,76 +359,145 @@ the application and the database shared four cores, so above the ceiling the
 numbers describe a contended box, not a server under clean load. Nothing here
 is a statement about production, which runs different hardware behind a proxy.
 
-### The ladder
+### The ladder, before and after the fix
 
 Gates: p95 < 2 s and p99 < 4 s on discovery and shelf reads, and zero 502,
 zero 503-without-Retry-After, zero 500, zero unexpected 4xx, zero network
 errors, **zero tenant leaks**. 429 and shed 503 are counted separately and do
 not fail a stage; they are the application correctly refusing work.
 
-| VUs | requests | served | refused on purpose | answered 4xx | faults | discovery p95 | pool idle-in-txn |
-|---|---|---|---|---|---|---|---|
-| 100 | 3,924 | 73.0% | 364 × 429, 90 shed | 602 | none | **1,808 ms - passed** | 20 / 20 |
-| 250 | 5,767 | 43.2% | 33 × 429, 2,730 shed | 505 | none | 5,109 ms | 20 / 20 |
-| 500 | 6,200 | 44.8% | 60 × 429, 3,106 shed | 245 | none | 9,521 ms | 20 / 20 |
-| 1,000 | 6,325 | 44.2% | 64 × 429, 3,283 shed | 160 | none | 24,358 ms | 20 / 20 |
-| 2,000 | 7,158 | 25.8% | 97 × 429, 1,498 shed | 40 | 3,668 timeouts | 30,001 ms | 20 / 20 |
-| 3,000 | 8,727 | 9.6% | 88 shed | 0 | 7,612 timeouts, 170 network | 30,001 ms | 20 / 20 |
-| 4,000 | 11,871 | 6.6% | 33 shed | 0 | 9,545 timeouts, 1,500 network | 30,001 ms | 20 / 20 |
-| 4,000 soak, 5 min | 45,902 | 2.3% | 364 shed | 0 | 37,563 timeouts, 6,877 network | 30,001 ms | 20 / 20 |
+The run was done twice on the same box against the same dataset: once against
+the code as it was, and once after the discovery endpoint was fixed (see
+below). Both columns are measured; neither is projected.
 
-**The ceiling is 100 VUs, and it is marginal there.** 100 passed at a discovery
-p95 of 1,808 ms against a 2,000 ms gate; an earlier run of the same ladder on
-the same box failed the same rung at 2,306 ms. Call it "about a hundred
-concurrent browsers, on a good run". 250 broke it decisively and everything
-above is a saturated service with clients queueing behind it.
+| VUs | discovery p95 before | discovery p95 after | served before | served after |
+|---|---|---|---|---|
+| 100 | 1,808 ms (passed, barely) | **70 ms** | 73.0% | **93.8%** |
+| 250 | 5,109 ms | **33 ms** | 43.2% | **90.8%** |
+| 500 | 9,521 ms | **42 ms** | 44.8% | **89.4%** |
+| 1,000 | 24,358 ms | **502 ms** | 44.2% | **83.6%** |
+| 2,000 | 30,001 ms (timeout) | 3,579 ms | 25.8% | **66.0%** |
+| 3,000 | 30,001 ms (timeout) | 7,265 ms | 9.6% | **64.1%** |
+| 4,000 | 30,001 ms (timeout) | 10,807 ms | 6.6% | **62.0%** |
+| 4,000 soak, 5 min | 30,001 ms (timeout) | 7,771 ms | 2.3% | **59.1%** |
 
-Two notes on reading that table honestly:
+**The ceiling moved from about 100 concurrent browsers to 1,000.** 100, 250,
+500 and 1,000 VUs all pass the gates now; every one of them broke before. 2,000
+is the first rung that fails, on latency alone.
 
-- The `503_unexpected` column is absent because the ladder ran with a
-  classifier that was itself wrong: it recognised the saturation filters' shed
-  responses but not `GlobalExceptionHandler.handlePoolExhausted`'s, so it filed
-  4 to 21 correct backpressure answers per stage under "unexpected". Both paths
-  set `Retry-After`; the script now keys on that, and a re-run at 500 VUs with
-  the corrected classifier reports **`status_503_unexpected: 0`**. No 503 in
-  any stage was anything other than the application deciding to refuse.
-- The `answered 4xx` column falls to zero as load rises, which is not an
-  improvement. Those are the signed-in shopper scenario's 401/404/409s; above
-  the ceiling that scenario stops completing iterations at all.
+The soak is the clearest single comparison, because it is the longest window
+and the same five minutes in both runs:
 
-### Why: one endpoint, three compounding problems
+| 5 minutes at 4,000 VUs | before | after |
+|---|---|---|
+| requests attempted | 45,902 | **192,292** |
+| requests served | 1,075 | **113,542** |
+| timeouts | 37,563 | **0** |
+| network errors | 6,877 | **6** |
+| 500 / 502 / unexpected 503 | 0 | **0** |
+| tenant leaks | 0 | **0** |
+| pool idle-in-transaction | 20 / 20 | 20 / 20 |
 
-`GET /api/marketplace/shops` - the first screen a customer sees.
+A hundred times more customers served in the same five minutes, and not one
+request timed out. The pool still fills at the top of the ladder - it is a
+twenty-connection pool on a four-core box shared with the load generator - but
+it now fills while doing a hundred times as much work, which is the difference
+between a bottleneck and a limit.
 
-1. **It loads every shop in the marketplace.** `ShopDiscovery.shopsServing`
-   calls `shops.findAll()` and filters by distance in Java. Over the run that
-   one query returned **62,288,692 rows across 29,437 calls** - about 2,116
-   hydrated `Shop` entities per request, to answer a question about a radius.
-2. **It then asks two questions per shop in range.**
-   `MarketplaceController.view` reads `store_operations_settings` and
-   `shop_closures` inside a per-shop scope switch. `pg_stat_statements` counted
-   **7,019,112 calls of each** for those 29,437 requests - roughly 476 extra
-   round trips per request at a pin with ~238 shops in range.
-3. **All of it runs inside one `@Transactional(readOnly = true)`**, so one
-   pooled connection is held for the whole sequence. Twenty connections
+Two notes on reading the "before" column honestly:
+
+- Its `503_unexpected` counts are absent from this table because the
+  classifier was itself wrong at the time: it recognised the saturation
+  filters' shed responses but not
+  `GlobalExceptionHandler.handlePoolExhausted`'s, so it filed 4 to 21 correct
+  backpressure answers per stage under "unexpected". Both paths set
+  `Retry-After`; the script keys on that now, and every stage of the "after"
+  run reports `status_503_unexpected: 0`.
+- The 429s in both runs are the per-source rate limiter doing its job. All
+  4,000 virtual users come from one IP address, which is not what 4,000 real
+  customers look like. They are reported separately and never counted as
+  served.
+
+### Why: one endpoint, three compounding problems - and what was done
+
+`GET /api/marketplace/shops` - the first screen a customer sees. Before the
+fix, at every rung from 100 VUs upwards the connection pool sat at **20 of 20
+idle in transaction** while Postgres never had more than five statements
+executing and application CPU never passed 240% of 400%. Neither the database
+nor the CPU ran out. Connections did, because each request held one far longer
+than it needed it.
+
+1. **It loaded every shop in the marketplace.** `ShopDiscovery.shopsServing`
+   called `shops.findAll()` and filtered by distance in Java - **62,288,692
+   rows across 29,437 calls**, about 2,116 hydrated entities per request, to
+   answer a question about a few streets.
+   *Fixed*: a bounding-box query narrows first and the same haversine still
+   decides. A square drawn around a circle always contains the circle, so the
+   box is a superset and the answer is unchanged; the degrees-per-kilometre
+   constants are rounded so the box comes out slightly too large rather than
+   too small, because too large costs a few extra rows and too small silently
+   hides a shop that would have delivered. The same query now returns **291
+   rows per call instead of 2,116**.
+2. **It then asked two questions per shop in range.**
+   `MarketplaceController.view` read `store_operations_settings` and
+   `store_closures` inside a per-shop scope switch: `pg_stat_statements`
+   counted **7,019,112 calls of each** across those 29,437 requests, roughly
+   476 extra round trips per request.
+   *Fixed*: both tables are read once for the whole list. Across the entire
+   "after" run those batched queries were called **about 1,600 times in
+   total**. The 18,589 remaining per-shop reads belong to the single-storefront
+   endpoint, where one shop is the whole question.
+3. **All of it ran inside one `@Transactional(readOnly = true)`**, so one
+   pooled connection was held for the whole sequence. Twenty connections
    against ~500 ms of holding is a ceiling near 40 discovery requests a second,
    whatever else is idle.
+   *Unchanged, and deliberately*: the transaction is still there, but it now
+   holds the connection for a handful of queries instead of several hundred.
 
-The code predicted this. `MarketplaceController.view` carries the comment
-*"ONE SETTINGS READ AND ONE CLOSURES QUERY PER SHOP IN THE LIST. That is
-affordable because a discovery list is a handful of shops in one town, not a
-catalogue; if it ever stops being, this is the line to batch."* At two thousand
-shops it has stopped being.
+The code predicted all of this. `MarketplaceController.view` carried the
+comment *"ONE SETTINGS READ AND ONE CLOSURES QUERY PER SHOP IN THE LIST. That
+is affordable because a discovery list is a handful of shops in one town, not a
+catalogue; if it ever stops being, this is the line to batch."* Two thousand
+shops is where it stopped being.
 
-**No index is proposed.** That would be the wrong reading of this. Total
-Postgres execution time for all 14 million of those queries was about 152
-seconds spread over a half-hour run, at 8-14 microseconds each; they are
-already index lookups. The cost is 476 sequential round trips and 2,116 entity
-hydrations per request, and an index makes neither of those smaller. The fix is
-to batch the two per-shop reads and to ask the database for shops in a radius
-instead of for all of them - deliberately left to its own change, because
-reading a `ShopOwned` entity across shops touches the tenant filter, which is
-the one boundary that should never be adjusted in passing.
+**No index was added.** That would have been the wrong reading. Total Postgres
+execution time for all 14 million of those queries was about 152 seconds spread
+over a half-hour run, at 8-14 microseconds each; they were already index
+lookups. The cost was 476 sequential round trips and 2,116 entity hydrations
+per request, and an index makes neither of those smaller.
+
+**A single measured request**, at a pin with 342 shops in range:
+
+| | before | after |
+|---|---|---|
+| `store_operations_settings` queries | 342 | **1** |
+| `store_closures` queries | 342 | **1** |
+| rows returned by the shop query | 2,116 | **447** |
+| wall time, warm | 632 ms | **104 ms** |
+
+#### The part of this worth reviewing carefully
+
+The two batched queries are **native**, and that is a deliberate, narrow
+decision. JPQL against a `ShopOwned` entity has the shop filter ANDed into it,
+so an `in (:shopIds)` would silently return at most one row - the screen would
+be quietly wrong rather than slow. A native query is not filtered, so the
+narrowing has to be written down, and it is: `shop_id IN (:shopIds)`, visible
+in the query text with no scope it can inherit.
+
+This does not widen what any caller may see. The ids come from
+`ShopDiscovery`, which returns only the storefronts a customer is allowed to
+see, and the rows are storefront facts - open now, paused until four, today's
+closure message - already shown to anyone who opens that shop. Nothing a
+merchant owns privately is reachable this way.
+
+A batch has a failure mode the per-shop form did not: rows arrive for many
+shops together, so a grouping slip shows one shopkeeper's "back at four" on
+another's storefront, and nothing throws. `MarketplaceBatchedStatusTest` puts
+three shops into three genuinely different states - open, paused, closed today
+- and asserts the batched answer equals that shop's own scoped read field by
+field, then asserts the list costs a fixed number of queries rather than one
+per shop. Restoring the per-shop read makes that last assertion fail at four
+reads for three shops, which is how we know it measures anything.
 
 ### What did NOT break
 
@@ -440,11 +509,14 @@ the one boundary that should never be adjusted in passing.
 - **Every 503 was deliberate.** All of them carried `Retry-After` - either a
   saturation filter shedding or the pool-exhaustion handler answering. Verified
   with the corrected classifier at 500 VUs: `status_503_unexpected: 0`.
-- **Zero 500s** - after the fix below. Before it there were some; see the next
-  section.
-- **No memory or GC problem.** 1,252 young collections, **no full GC**, heap
-  settling at ~340 MB of a 2 GB committed heap, worst pause 122 ms. The JVM was
-  not struggling; it was waiting.
+- **Zero 500s** - after the exception-handler fix below. Before it there were
+  some; see that section.
+- **Zero timeouts in the whole "after" run**, at any rung, including five
+  minutes at 4,000 VUs. The "before" run's soak alone had 37,563.
+- **No memory or GC problem, in either run.** Before: 1,252 young collections,
+  no full GC, heap settling at ~340 MB of a 2 GB committed heap. After: 884
+  young collections, **still no full GC**, heap settling at ~361 MB while
+  serving a hundred times the traffic. The JVM was never the constraint.
 
 ### A bug this found: a full pool reported as a broken application
 
@@ -460,11 +532,17 @@ against the old one.
 
 ### Reading the numbers honestly
 
-**4,000 VUs were started. About a hundred concurrent customers were served.**
-A stage that reports 6.6% served is not "4,000 users supported": it is 4,000
-clients of whom 778 got an answer over the whole minute and the rest waited out
-a 30-second timeout. The honest capacity sentence for this box is the ceiling
-rung, not the top one. The table above separates served, refused-on-purpose and broken for
+**4,000 VUs is still not "4,000 users supported", even now.** The 4,000-VU
+stage serves 62% of what it attempts; the other 38% is deliberately refused,
+and a refused customer is not a served one. The honest capacity sentence for
+this box is the ceiling rung - about a thousand concurrent browsers within the
+latency gates - not the top one.
+
+What changed is worth stating precisely, because "we fixed the N+1 and now it
+scales" would be the wrong summary. The application is still limited by the
+same twenty connections on the same four cores. What the fix removed was work
+that never needed doing, so the same pool now serves a hundred times as many
+customers before it fills. The table above separates served, refused-on-purpose and broken for
 exactly that reason, and the shed and 429 counts belong in any sentence about
 how many people the shop served.
 
