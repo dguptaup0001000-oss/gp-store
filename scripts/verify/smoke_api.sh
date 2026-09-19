@@ -45,6 +45,13 @@ READ_ONLY="${SMOKE_READ_ONLY:-0}"
 EXPECT_SHA="${EXPECT_SHA:-}"
 
 pass=0; fail=0
+unreachable=0        # total requests that produced no HTTP response at all
+unreachable_run=0    # consecutive ones, reset by any real answer
+
+# THREE, NOT ONE. A single dropped connection is a bad second on a network,
+# not a dead API, and stopping the whole smoke test over one would trade a
+# useful failure mode for a flaky one. Three in a row is not weather.
+UNREACHABLE_LIMIT="${SMOKE_UNREACHABLE_LIMIT:-3}"
 RED=$'\033[31m'; GREEN=$'\033[32m'; OFF=$'\033[0m'
 
 BODY="$(mktemp -t smoke_body.XXXXXX)"
@@ -60,7 +67,74 @@ trap 'rm -f "$BODY"' EXIT
 # do either, so: truncate the body first, and take curl's exit separately.
 request() {
   : > "$BODY"
-  curl -sS -o "$BODY" -w '%{http_code}' --max-time 25 "$@" 2>/dev/null || true
+  local status
+  status=$(curl -sS -o "$BODY" -w '%{http_code}' \
+             --connect-timeout 10 --max-time 25 "$@" 2>/dev/null || true)
+  printf '%s' "${status:-000}"
+}
+
+# COUNTED HERE, NOT IN request(). request runs inside $( ), which is a
+# subshell: anything it increments dies with it and the caller sees zero. The
+# first version of this counted there and the tripwire below never fired once.
+#
+# 000 IS NOT A STATUS, IT IS THE ABSENCE OF ONE. curl writes it when the
+# request produced no HTTP response at all - connection refused, handshake
+# unanswered, or the whole thing timed out. That is a different fact from "the
+# API answered 500", and the difference is the whole point of this counter.
+note_reachability() {
+  if [ "$1" = "000" ]; then
+    unreachable=$((unreachable+1))
+    unreachable_run=$((unreachable_run+1))
+  else
+    unreachable_run=0
+  fi
+}
+
+# WHY THIS EXISTS: A CANCELLED RUN TELLS NOBODY ANYTHING.
+#
+# Every check below is independent, and a check against a host that will not
+# answer costs the full 25-second timeout. Forty of them is about eighteen
+# minutes, which is longer than the workflow's fifteen-minute budget - so when
+# production was unreachable the job was KILLED PART-WAY rather than failing,
+# and the deploy reported "cancelled". A cancelled run reads like a CI hiccup.
+# It looked like nothing had gone wrong, while in fact the release had shipped
+# with its verification silently skipped. That happened on 2026-09-19.
+#
+# The first request already knows. If the API did not answer at all, checks 2
+# to 40 cannot tell anyone anything new; they can only burn the clock until
+# the evidence is thrown away. So stop, and say plainly which of the two
+# things happened - because they need different people to fix them.
+give_up_if_unreachable() {
+  if [ "$unreachable_run" -lt "$UNREACHABLE_LIMIT" ]; then
+    return 0
+  fi
+  printf '\n  %sUNREACHABLE%s  %s did not answer %d consecutive requests.\n' \
+    "$RED" "$OFF" "$BASE" "$unreachable_run"
+  cat <<'WHY'
+
+  No HTTP response came back at all - not a 500, not a 503, nothing. So this
+  is NOT a verdict on the deployed code; the smoke test never got far enough
+  to have an opinion about it.
+
+  Two things produce this, and they are fixed by different people:
+
+    * the API is down, or its port is not open. Check the service on the VPS.
+
+    * this machine cannot reach the API, although it is up. A per-source
+      firewall or fail2ban ban does exactly this: the connection hangs rather
+      than being refused, from one address, while everybody else is served
+      normally. load-tests/README.md records the same symptom hitting load-test
+      runners. It matters beyond CI - Indian mobile carriers put very large
+      numbers of subscribers behind one NAT address, and a ban that cannot
+      tell a busy gateway from an attacker takes real customers off the app.
+
+  Re-run this from a different runner. If that one passes, it is the second
+  case, and the ban list is what to look at.
+
+WHY
+  printf '== %d passed, %d failed, stopped early: the API was unreachable ==\n' \
+    "$pass" "$fail"
+  exit 2
 }
 
 # check <name> <expected-status> <curl args...>
@@ -69,6 +143,8 @@ check() {
   local got
   got=$(request "$@")
   got="${got:-000}"
+  note_reachability "$got"
+  give_up_if_unreachable
   if [ "$got" = "$want" ]; then
     printf '  %sPASS%s  %-58s %s\n' "$GREEN" "$OFF" "$name" "$got"
     pass=$((pass+1))
@@ -87,6 +163,8 @@ checkAny() {
   local got
   got=$(request "$@")
   got="${got:-000}"
+  note_reachability "$got"
+  give_up_if_unreachable
   if [ "$got" = "$a" ] || [ "$got" = "$b" ]; then
     printf '  %sPASS%s  %-58s %s\n' "$GREEN" "$OFF" "$name" "$got"
     pass=$((pass+1))

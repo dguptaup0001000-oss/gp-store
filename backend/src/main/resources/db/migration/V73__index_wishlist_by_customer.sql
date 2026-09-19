@@ -1,0 +1,29 @@
+-- A customer opening their wishlist should not read every other customer's.
+--
+-- WHY THIS INDEX AND NOT THE OTHER THIRTEEN. A survey of every foreign key in
+-- the schema found fourteen without an index on the referencing column. Most
+-- of them are never filtered on by the application - they exist so the
+-- database can prove referential integrity, and that proof only runs when the
+-- PARENT row is deleted, which production does not do to customers, variants
+-- or addresses. An index earns its place on a query the application actually
+-- runs, and those do not have one.
+--
+-- wishlist.customer_id does. Three of them, all customer-facing:
+--
+--   WishlistRepository.findByCustomerId                  - the wishlist screen
+--   WishlistRepository.findByCustomerIdOnCurrentShopShelf - the shopkeeper's
+--                                                           view of one
+--                                                           customer's saved
+--                                                           items
+--   WishlistRepository.findByIdAndCustomerId             - opening one item
+--
+-- Every one of them filters on customer_id and nothing else, so every one of
+-- them is a sequential scan of the whole wishlist table. That is invisible
+-- today because the table is small; it grows with the product of customers and
+-- items they save, so it is exactly the kind of cost that stays free until the
+-- marketplace works and then stops being free all at once.
+--
+-- NOT UNIQUE. A customer may save many products, and the pair (customer_id,
+-- product_id) is not constrained here either - that is the application's rule
+-- and changing it is a different migration with a different argument.
+CREATE INDEX IF NOT EXISTS idx_wishlist_customer_id ON wishlist (customer_id);

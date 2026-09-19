@@ -168,7 +168,15 @@ jobs:
       - name: What a failure here means
         if: failure()
         run: |
-          echo "::error::The production smoke test failed. Read the job summary above."
-          echo "A 200 where a 403 was expected is a tenant-boundary defect and is"
-          echo "release-stopping. A 000 everywhere usually means the API is down -"
-          echo "check the Uptime alert workflow before assuming this is a code fault."
+          if [ "${{ steps.smoke.outputs.status }}" = "2" ]; then
+            echo "::error::The API could not be reached at all - this is NOT a verdict on the deployed code."
+            echo "The smoke test stopped after three unanswered requests rather than"
+            echo "spending its whole budget discovering the same thing forty times."
+            echo "Either the service is down, or THIS RUNNER cannot reach it while"
+            echo "others can - which is what a per-source firewall or fail2ban ban"
+            echo "looks like. Re-run from a different runner to tell the two apart."
+          else
+            echo "::error::The production smoke test failed. Read the job summary above."
+            echo "A 200 where a 403 was expected is a tenant-boundary defect and is"
+            echo "release-stopping."
+          fi

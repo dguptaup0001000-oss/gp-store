@@ -390,6 +390,53 @@
     </build>
 
     <profiles>
+        <!--
+            COVERAGE, ON REQUEST RATHER THAN ON EVERY PUSH.
+
+            This project has 2,100+ tests and no measurement of what they
+            reach, which is a blind spot rather than a failing: a suite this
+            size almost certainly covers the paths that matter, but "almost
+            certainly" is the kind of phrase this codebase does not otherwise
+            accept about its own behaviour.
+
+            IT IS A PROFILE, NOT A DEFAULT, deliberately. The JaCoCo agent adds
+            time to every test run, and the repository's standing position -
+            visible in the surefire configuration and in the large-marketplace
+            workflow - is that ordinary commits should not pay for work that
+            only matters occasionally. Run it when you want the number:
+
+                ./mvnw verify -Pcoverage
+                open target/site/jacoco/index.html
+
+            NO THRESHOLD IS ENFORCED. A coverage gate turns a measurement into
+            a target, and the usual response to a failing target is a test that
+            executes a line without asserting anything about it. The report is
+            here to be read by a person deciding where to look next.
+        -->
+        <profile>
+            <id>coverage</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>jacoco-maven-plugin</artifactId>
+                        <version>0.8.12</version>
+                        <executions>
+                            <execution>
+                                <id>prepare-agent</id>
+                                <goals><goal>prepare-agent</goal></goals>
+                            </execution>
+                            <execution>
+                                <id>report</id>
+                                <phase>verify</phase>
+                                <goals><goal>report</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
         <profile>
             <id>schema-bootstrap</id>
             <build>
