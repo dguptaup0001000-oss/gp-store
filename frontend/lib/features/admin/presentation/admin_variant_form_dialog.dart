@@ -7,7 +7,8 @@ import '../../products/domain/product_models.dart';
 import '../data/admin_products_repository.dart';
 import '../domain/variant_save_action.dart';
 import '../domain/variant_attribute.dart';
-import '../../../core/api/error_messages.dart' show apiStatusOf;
+import '../../../core/api/error_messages.dart'
+    show apiStatusOf, meansEndpointMissing;
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
 
@@ -347,6 +348,11 @@ class _AdminVariantFormDialogState
   /// The backend's own sentence is preferred - it knows which rule was broken.
   /// The status only decides whether to add something the merchant can act on.
   String _saveFailureMessage(Object error, String backendMessage) {
+    // A ROUTE THAT DOES NOT EXIST IS NOT A MISSING LISTING. Checked before the
+    // status switch, because the 404 branch below reads a 404 as "this shop no
+    // longer lists that item" - which is exactly the false alarm a
+    // newer-app-than-server deployment produced on a real device.
+    if (meansEndpointMissing(error)) return backendMessage;
     final status = apiStatusOf(error);
     switch (status) {
       case 401:

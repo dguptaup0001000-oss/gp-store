@@ -76,20 +76,28 @@ class AdminProductsRepository {
     return Product.fromJson(response.data as Map<String, dynamic>);
   }
 
-  Future<Product> updateProduct({
+  /// SAVES TO THE SHOP'S OWN ROUTE, not the platform catalogue.
+  ///
+  /// `PUT /api/products/{id}` is the marketplace's shared catalogue and needs
+  /// CATALOG_DEFINE once a second shop trades, so a merchant editing a product
+  /// his own shop sells got 403 "You don't have permission to do that" - on a
+  /// screen that had just rendered the product, because his shelf really does
+  /// list it. Active applies to this shop's listings; name, brand and category
+  /// are catalogue-wide and the server accepts them only while this shop is
+  /// the only one selling the product.
+  Future<void> updateProduct({
     required int productId,
     required String name,
     String? brand,
     required int categoryId,
     required bool active,
   }) async {
-    final response = await apiClient.dio.put('/api/products/$productId', data: {
+    await apiClient.dio.put('/api/shop/products/$productId', data: {
       'name': name,
       'brand': brand,
-      'category': {'id': categoryId},
+      'categoryId': categoryId,
       'active': active,
     });
-    return Product.fromJson(response.data as Map<String, dynamic>);
   }
 
   Future<void> deactivateProduct(int productId) async {

@@ -356,6 +356,14 @@ public class SecurityConfig {
                 // an EXACT match, so without this line the path would fall
                 // through to the CATALOG_VIEW fallback and a read permission
                 // would authorise a write.
+                // Editing a product THIS shop sells. Named explicitly for the
+                // same reason as the nested variant create below: the POST
+                // "/api/shop/products" rule above is an EXACT match, so
+                // without this the path would fall through to the
+                // CATALOG_VIEW fallback and a read permission would authorise
+                // a write.
+                .requestMatchers(HttpMethod.PUT, "/api/shop/products/*")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
                 .requestMatchers(HttpMethod.POST, "/api/shop/products/*/variants")
                     .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
                 .requestMatchers(HttpMethod.PUT, "/api/shop/variants/**")

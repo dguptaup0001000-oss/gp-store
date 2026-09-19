@@ -54,6 +54,7 @@ public class ShopSelfServiceController {
     private final com.gpstore.repository.ProductVariantRepository variants;
     private final com.gpstore.service.ProductService products;
     private final com.gpstore.catalog.shop.ShopVariantEditing variantEditing;
+    private final com.gpstore.catalog.shop.ShopProductEditing productEditing;
     private final com.gpstore.catalog.shop.ShopCategoryService shopCategories;
     private final com.gpstore.service.VariantImageService variantImages;
 
@@ -73,9 +74,11 @@ public class ShopSelfServiceController {
                                      com.gpstore.repository.ProductVariantRepository variants,
                                      com.gpstore.service.ProductService products,
                                      com.gpstore.catalog.shop.ShopVariantEditing variantEditing,
+                                     com.gpstore.catalog.shop.ShopProductEditing productEditing,
                                      com.gpstore.catalog.shop.ShopCategoryService shopCategories,
                                      com.gpstore.service.VariantImageService variantImages) {
         this.variantEditing = variantEditing;
+        this.productEditing = productEditing;
         this.shopCategories = shopCategories;
         this.variantImages = variantImages;
         this.products = products;
@@ -485,6 +488,37 @@ public class ShopSelfServiceController {
         // reach the storefront is decoration.
         shelfCache.changed();
         return saved;
+    }
+
+    // ------------------------------------------------- the shopkeeper's product
+
+    /**
+     * Edit Product → Save Changes, for a product THIS shop sells.
+     *
+     * <p>THE LAST ROUTE STILL POINTING AT THE PLATFORM. Variants, photos and
+     * departments moved to the merchant's own surface; the product screen did
+     * not, so Save Changes went to {@code PUT /api/products/{id}} and answered
+     * 403 - while the very same screen had just rendered the product, because
+     * the merchant's shelf genuinely lists it.
+     *
+     * <p>Active applies to this shop's listings. Name, brand and category are
+     * catalogue-wide and are accepted only while this shop is the only one
+     * selling the product - see ShopProductEditing.
+     */
+    @PutMapping("/products/{productId}")
+    public com.gpstore.catalog.shop.ShopProductEditing.ProductView saveProduct(
+            @PathVariable Long productId,
+            @RequestBody com.gpstore.catalog.shop.ShopProductEditing.ProductEdit edit) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        return productEditing.update(productId, edit);
+    }
+
+    /** One product as THIS shop sells it, and whether its catalogue half is editable. */
+    @GetMapping("/products/{productId}")
+    public com.gpstore.catalog.shop.ShopProductEditing.ProductView readProduct(
+            @PathVariable Long productId) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        return productEditing.view(productId);
     }
 
     // ------------------------------------------------- the shopkeeper's variant

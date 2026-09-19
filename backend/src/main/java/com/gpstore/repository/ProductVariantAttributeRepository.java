@@ -41,4 +41,19 @@ public interface ProductVariantAttributeRepository
     @Query(value = "SELECT count(*) FROM shop_product_variants WHERE product_variant_id = :variantId",
             nativeQuery = true)
     long countShopsListing(@Param("variantId") Long variantId);
+
+    /**
+     * How many DISTINCT shops list any variant of this product, ignoring the
+     * tenant filter.
+     *
+     * <p>Same deliberate cross-shop question as {@link #countShopsListing},
+     * one level up: it decides whether a merchant may rename or re-categorise
+     * the product itself, which is shared with every shop selling it. Returns
+     * a number and nothing else.
+     */
+    @Query(value = "SELECT count(DISTINCT s.shop_id) FROM shop_product_variants s "
+            + "JOIN product_variants v ON v.id = s.product_variant_id "
+            + "WHERE v.product_id = :productId",
+            nativeQuery = true)
+    long countShopsListingProduct(@Param("productId") Long productId);
 }
