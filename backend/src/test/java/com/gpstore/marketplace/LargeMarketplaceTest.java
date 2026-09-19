@@ -127,6 +127,51 @@ class LargeMarketplaceTest {
         assertTrue(market.customerIds().size() >= 50_000,
                 "fifty thousand customers: " + market.customerIds().size());
         assertTrue(market.orders() >= 20_000, "twenty thousand orders: " + market.orders());
+
+        // WORKERS ARE COUNTED FROM THE ROSTERS, not from the generator's own
+        // tally, because the generator's tally was the thing that was wrong.
+        // It counted insert attempts while naming riders after their trade, so
+        // nine kirana businesses shared one man and the number looked like
+        // staffing that did not exist.
+        long ridersInDb = jdbc.queryForObject(
+                "SELECT count(DISTINCT ss.customer_id) FROM shop_staff ss "
+                        + "JOIN shops s ON s.id = ss.shop_id "
+                        + "WHERE s.code LIKE 'gptest-%'", Long.class);
+        assertTrue(ridersInDb >= 5_000, "five thousand distinct workers: " + ridersInDb);
+    }
+
+    @Test
+    @DisplayName("a rider works for one shop, and nobody works for two merchants")
+    void nobodyIsOnTwoRosters() {
+        // A RIDER BELONGS TO A SHOP. The generator used to name riders
+        // <trade>-worker<i>, and account() returns an existing row rather than
+        // failing on a duplicate email, so all nine kirana businesses asked
+        // for kirana-worker0 and all nine got the same man - who was then put
+        // on nine different merchants' staff lists.
+        List<Long> riderOnTwoShops = jdbc.queryForList(
+                "SELECT ss.customer_id FROM shop_staff ss "
+                        + "JOIN shops s ON s.id = ss.shop_id "
+                        + "JOIN customers c ON c.id = ss.customer_id "
+                        + "WHERE s.code LIKE 'gptest-%' AND c.role = 'DELIVERY_BOY' "
+                        + "GROUP BY ss.customer_id HAVING count(DISTINCT ss.shop_id) > 1 "
+                        + "LIMIT 5", Long.class);
+        assertTrue(riderOnTwoShops.isEmpty(),
+                "these riders are on more than one shop's roster: " + riderOnTwoShops);
+
+        // AN OWNER MAY SPAN THEIR OWN SHOPS - that is what a chain is, and
+        // ShopLifecycleService puts the merchant's owner on every shop it
+        // opens for them. What nobody may do is work for two MERCHANTS:
+        // TenantResolver refuses to resolve such an account at all, because
+        // choosing one would be choosing one business's data over another's.
+        List<Long> servesTwoMerchants = jdbc.queryForList(
+                "SELECT ss.customer_id FROM shop_staff ss "
+                        + "JOIN shops s ON s.id = ss.shop_id "
+                        + "WHERE s.code LIKE 'gptest-%' "
+                        + "GROUP BY ss.customer_id HAVING count(DISTINCT s.merchant_id) > 1 "
+                        + "LIMIT 5", Long.class);
+        assertTrue(servesTwoMerchants.isEmpty(),
+                "these accounts are on the rosters of two different merchants: "
+                        + servesTwoMerchants);
     }
 
     @Test

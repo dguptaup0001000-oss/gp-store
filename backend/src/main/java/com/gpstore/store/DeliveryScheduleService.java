@@ -170,6 +170,70 @@ public class DeliveryScheduleService {
                 settings.getClosureMessage(), settings.pauseEndsAt(local));
     }
 
+    /**
+     * The same snapshot, from rows a caller has ALREADY LOADED.
+     *
+     * <p>WHY A CALLER WOULD HAVE THEM. The marketplace screen answers
+     * open/closed for every storefront near a customer. Asking this class per
+     * shop is two round trips per shop, taken while a pooled connection is
+     * held - which is what made the discovery endpoint the ceiling of the
+     * whole application long before the database was busy. A caller that is
+     * about to ask the same question of two hundred shops can load both
+     * tables once and hand the answers in.
+     *
+     * <p>WHAT THIS DOES NOT CHANGE. The shop's hours still come from
+     * {@code shopHours.forCurrentShop}, in whatever scope the caller is in,
+     * and the status is still computed by the same
+     * {@link DeliverySchedule#status} as the single-shop path. This is the
+     * same answer with the reading moved out, not a second opinion - and
+     * MarketplaceBatchedStatusTest pins the two to agree shop by shop.
+     *
+     * @param settings    that shop's settings row, or a default when it has
+     *                    none - never another shop's
+     * @param closedDates the days that shop has declared closed, within at
+     *                    least the window {@link #closureWindow} describes
+     */
+    public StoreStatus getStoreStatusAt(Instant at, StoreOperationsSettings settings,
+                                        java.util.Set<LocalDate> closedDates) {
+        StoreOperationsSettings theirs = settings == null ? new StoreOperationsSettings() : settings;
+        java.util.Set<LocalDate> closed = closedDates == null ? java.util.Set.of() : closedDates;
+        DeliverySchedule schedule = scheduleWithClosures(closed);
+        java.time.LocalDateTime local = at.atZone(schedule.zone()).toLocalDateTime();
+        return schedule.status(at, theirs.effectiveAcceptance(local),
+                theirs.getClosureMessage(), theirs.pauseEndsAt(local));
+    }
+
+    /** Now, for a caller batching {@link #getStoreStatusAt(Instant, StoreOperationsSettings, java.util.Set)}. */
+    public Instant clockNow() {
+        return now();
+    }
+
+    /**
+     * The range of closure dates a batched caller must load.
+     *
+     * <p>WIDER THAN ANY ONE SHOP NEEDS, ON PURPOSE. The single-shop path
+     * computes its window in that shop's own time zone; a batch covers shops
+     * in several, and a window computed in one zone can be a day out in
+     * another. Two extra days on each end costs a handful of rows and makes
+     * the batch a superset of what every shop in it would have read alone,
+     * which is what lets the two paths give the same answer.
+     */
+    public java.time.LocalDate[] closureWindow() {
+        LocalDate probe = now().atZone(properties.getZone()).toLocalDate();
+        return new java.time.LocalDate[] {
+                probe.minusDays(2),
+                probe.plusDays(properties.getMaxClosureLookaheadDays() + 2L)
+        };
+    }
+
+    private DeliverySchedule scheduleWithClosures(java.util.Set<LocalDate> closed) {
+        LocalDate probe = now().atZone(properties.getZone()).toLocalDate();
+        LocalDate from = probe.minusDays(1);
+        LocalDate to = probe.plusDays(properties.getMaxClosureLookaheadDays() + 1L);
+        ShopHours hours = shopHours.forCurrentShop(from, to);
+        return new DeliverySchedule(properties, hours, closed::contains);
+    }
+
     /** The zone this shop keeps its clock in. */
     public java.time.ZoneId shopZone() {
         return schedule().zone();

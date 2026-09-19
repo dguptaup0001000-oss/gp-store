@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,4 +34,24 @@ public interface StoreClosureRepository extends JpaRepository<StoreClosure, Long
      */
     @Query("select c from StoreClosure c where c.closedOn >= :from order by c.closedOn asc")
     List<StoreClosure> findUpcoming(@Param("from") LocalDate from);
+
+    /**
+     * The same range, for many shops at once.
+     *
+     * <p>Native for the reason spelled out on
+     * {@link StoreOperationsSettingsRepository#findForShops}: JPQL here carries
+     * the shop filter, which would narrow a batch to a single shop and make
+     * the marketplace screen quietly wrong. The narrowing is therefore
+     * written into the query - {@code shop_id IN (:shopIds)} - where it can be
+     * read.
+     *
+     * <p>Ordered by shop and then date so a caller grouping the result does
+     * not depend on the database's natural order, which is not a promise.
+     */
+    @Query(value = "SELECT * FROM store_closures WHERE shop_id IN (:shopIds) "
+            + "AND closed_on >= :from AND closed_on <= :to "
+            + "ORDER BY shop_id, closed_on", nativeQuery = true)
+    List<StoreClosure> findBetweenForShops(@Param("shopIds") Collection<Long> shopIds,
+                                           @Param("from") LocalDate from,
+                                           @Param("to") LocalDate to);
 }
