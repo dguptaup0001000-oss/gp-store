@@ -390,9 +390,23 @@ public class MarketplaceTestData {
                         order++});
             }
         }
+        // TIMESTAMPS STATED, NOT LEFT TO A DEFAULT.
+        //
+        // V71 declares these NOT NULL DEFAULT CURRENT_TIMESTAMP, and omitting
+        // them worked locally for exactly that reason - but CI refused the
+        // same insert with "null value in column created_at violates not-null
+        // constraint". On a fresh database Hibernate's ddl-auto=update creates
+        // this table from the entity first (NOT NULL, no DB default), and
+        // V71's CREATE TABLE IF NOT EXISTS then silently no-ops, so the
+        // default the migration intended is simply not there.
+        //
+        // The entity never notices because @PrePersist fills both. Raw JDBC
+        // has no @PrePersist, so it says so itself rather than depending on
+        // which of the two paths happened to create the table.
         jdbc.batchUpdate(
                 "INSERT INTO product_variant_attributes "
-                        + "(product_variant_id, name, value, display_order) VALUES (?, ?, ?, ?)",
+                        + "(product_variant_id, name, value, display_order, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 attributeRows);
 
         // The listings. Every shop of this business lists this business's own
@@ -412,8 +426,10 @@ public class MarketplaceTestData {
             }
             jdbc.batchUpdate(
                     "INSERT INTO shop_product_variants "
-                            + "(shop_id, product_variant_id, selling_price, mrp, available, active) "
-                            + "VALUES (?, ?, ?, ?, ?, ?)", listingRows);
+                            + "(shop_id, product_variant_id, selling_price, mrp, available, active, "
+                            + " created_at, updated_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    listingRows);
             jdbc.batchUpdate(
                     "INSERT INTO inventory (shop_id, product_variant_id, stock) "
                             + "VALUES (?, ?, ?)", stockRows);
@@ -446,8 +462,10 @@ public class MarketplaceTestData {
                 continue;
             }
             jdbc.update("""
-                    INSERT INTO shop_business_hours (shop_id, day_of_week, opens_at, closes_at)
-                    VALUES (?, ?, CAST(? AS time), CAST(? AS time))
+                    INSERT INTO shop_business_hours (shop_id, day_of_week, opens_at, closes_at,
+                                                     created_at, updated_at)
+                    VALUES (?, ?, CAST(? AS time), CAST(? AS time),
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     ON CONFLICT DO NOTHING
                     """, shopId, day, open, close);
         }
