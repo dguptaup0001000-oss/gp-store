@@ -240,6 +240,13 @@ public class CartService {
                             + " is currently unavailable");
         }
 
+        // A RING IS NOT UNAVAILABLE, IT IS NOT SOLD THIS WAY. Asked before
+        // pricing, because the answer is about the offer rather than the
+        // money, and because the customer deserves to be told which of the
+        // two things is true - "visit the shop" is actionable, "unavailable"
+        // sends them to a competitor.
+        shopCatalog.refuseIfNotBuyableOnline(variant);
+
         // WHAT THIS SHOP CHARGES, not what the catalogue suggests. The
         // catalogue row is the price a shop starts from; the shop's own
         // listing is the price a customer pays, and a shop that does not list

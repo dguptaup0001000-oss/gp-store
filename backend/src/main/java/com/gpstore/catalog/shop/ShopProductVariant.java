@@ -89,6 +89,47 @@ public class ShopProductVariant implements ShopOwned {
     @Column(name = "shop_category_id")
     private Long shopCategoryId;
 
+    /**
+     * How this offer ends: online, in person, or as work done at the shop.
+     *
+     * <p>NEVER NULL IN PRACTICE, and defaulted in the field as well as in the
+     * migration. A listing that forgot to say what it is would be read as
+     * "not buyable online" by the guard and vanish from the shop's shelf, so
+     * the safe default is the one every existing row already had.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "commerce_mode", length = 24)
+    private CommerceMode commerceMode = CommerceMode.ONLINE_PURCHASE;
+
+    /** Whether sellingPrice is a promise, a floor, the bottom of a band, or nothing. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "price_mode", length = 24)
+    private ListingPriceMode priceMode = ListingPriceMode.EXACT_PRICE;
+
+    /** The top of a PRICE_RANGE. Meaningless, and left null, in every other price mode. */
+    @Column(name = "price_max")
+    private BigDecimal priceMax;
+
+    /**
+     * What a customer walking in would find, for listings that are not sold
+     * online. Null on ONLINE_PURCHASE listings, where real stock answers the
+     * same question properly.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "offline_availability", length = 24)
+    private OfflineAvailability offlineAvailability;
+
+    /**
+     * Roughly how long the work takes, for SERVICE_AT_SHOP.
+     *
+     * <p>Minutes rather than a duration type because it is displayed, never
+     * computed with, and "about 40 minutes" is the most precision a barber
+     * would stand behind. Null when it is not a service, or when the merchant
+     * would rather not say.
+     */
+    @Column(name = "service_duration_minutes")
+    private Integer serviceDurationMinutes;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -153,4 +194,46 @@ public class ShopProductVariant implements ShopOwned {
 
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+
+    /**
+     * NEVER NULL TO A CALLER, whatever the row says.
+     *
+     * <p>Rows written before this column existed read back as null through
+     * any path that bypassed the migration's backfill, and a null here would
+     * be read by the purchase guard as "not sold online" - which would take a
+     * working shelf off the internet. The field defaults, the migration
+     * backfills, and this returns the same answer a third time, because the
+     * failure mode of getting it wrong is a merchant losing sales silently.
+     */
+    public CommerceMode getCommerceMode() {
+        return commerceMode == null ? CommerceMode.ONLINE_PURCHASE : commerceMode;
+    }
+
+    public void setCommerceMode(CommerceMode commerceMode) { this.commerceMode = commerceMode; }
+
+    /** Defaults for the same reason getCommerceMode does. */
+    public ListingPriceMode getPriceMode() {
+        return priceMode == null ? ListingPriceMode.EXACT_PRICE : priceMode;
+    }
+
+    public void setPriceMode(ListingPriceMode priceMode) { this.priceMode = priceMode; }
+
+    public BigDecimal getPriceMax() { return priceMax; }
+    public void setPriceMax(BigDecimal priceMax) { this.priceMax = priceMax; }
+
+    /** Null is meaningful here: an online listing answers stock with real stock. */
+    public OfflineAvailability getOfflineAvailability() { return offlineAvailability; }
+    public void setOfflineAvailability(OfflineAvailability offlineAvailability) {
+        this.offlineAvailability = offlineAvailability;
+    }
+
+    public Integer getServiceDurationMinutes() { return serviceDurationMinutes; }
+    public void setServiceDurationMinutes(Integer serviceDurationMinutes) {
+        this.serviceDurationMinutes = serviceDurationMinutes;
+    }
+
+    /** Convenience for the guard and for clients, so neither repeats the enum test. */
+    public boolean isBuyableOnline() {
+        return getCommerceMode().isBuyableOnline();
+    }
 }
