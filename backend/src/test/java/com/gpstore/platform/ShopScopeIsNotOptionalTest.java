@@ -190,6 +190,42 @@ class ShopScopeIsNotOptionalTest {
             "ShopStaffRepository.shopIdsFor",
             "ShopStaffRepository.defaultShopIdFor",
 
+            // A LIST SCREEN ASKING ABOUT MANY SHOPS AT ONCE, which is a
+            // different shape from everything else on this list and so worth
+            // stating carefully.
+            //
+            // The marketplace's discovery screen answers open/closed for every
+            // storefront that will deliver to a customer. Read one shop at a
+            // time that was two queries per shop inside a scope switch, which
+            // is correct and does not scale: a run against two thousand shops
+            // counted 7,019,112 executions of each, every one a round trip
+            // taken while holding the request's pooled connection, and twenty
+            // connections were enough to stall the application while Postgres
+            // sat at four concurrent statements.
+            //
+            // FILTERED, THESE WOULD BE WRONG RATHER THAN SLOW. The filter
+            // narrows to the ONE shop in scope, so an "in (:shopIds)" under it
+            // returns at most one row and the screen quietly shows every shop
+            // the first one's hours. Native is what makes the predicate
+            // explicit: shop_id IN (:shopIds), in the query text, with no
+            // scope to inherit.
+            //
+            // WHAT BOUNDS THEM. The ids are not client input - they come from
+            // ShopDiscovery, which returns only storefronts a customer may
+            // see. The rows are storefront facts already shown to anyone who
+            // opens that shop: open now, paused until four, today's closure
+            // message. Neither query can reach an order, a price, a takings
+            // figure or anything else a merchant owns privately, and neither
+            // should ever be widened to.
+            //
+            // The remaining risk is a grouping slip - rows for many shops
+            // arriving together and being attached to the wrong one, which
+            // throws nothing. MarketplaceBatchedStatusTest is the guard: three
+            // shops in three different states, each shop's batched answer
+            // asserted equal to its own scoped read.
+            "StoreOperationsSettingsRepository.findForShops",
+            "StoreClosureRepository.findBetweenForShops",
+
             // THE OTHER DIRECTION, AND THE SAME REASON IT CANNOT BE FILTERED.
             // "Who works in this shop" is asked by the new-order dispatcher,
             // which runs AFTER the order's transaction has committed, on a
