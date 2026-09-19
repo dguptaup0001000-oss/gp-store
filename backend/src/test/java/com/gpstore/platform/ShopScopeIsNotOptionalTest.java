@@ -182,7 +182,19 @@ class ShopScopeIsNotOptionalTest {
             // already been shown, and it SELECTS count(*) - a number. No row,
             // no price, no shop id and nothing naming another merchant can
             // travel through it, so the cross-shop read leaks nothing.
-            "ProductVariantAttributeRepository.countShopsListing");
+            "ProductVariantAttributeRepository.countShopsListing",
+
+            // THE SAME QUESTION ONE LEVEL UP, and cross-shop for the same
+            // reason: "does any other shop sell this product?" decides whether
+            // a merchant may rename or re-categorise it, and the name is what
+            // every shop selling it displays. Under the filter it would count
+            // only the caller and always answer one, which would let any
+            // merchant rename a product out of every other merchant's shop.
+            //
+            // Also a bare count(DISTINCT shop_id) taking a product id the
+            // caller has already been shown: a number, never a row, a price or
+            // a shop id.
+            "ProductVariantAttributeRepository.countShopsListingProduct");
 
     /**
      * Bulk JPQL updates and deletes against shop-owned entities that have been read.
