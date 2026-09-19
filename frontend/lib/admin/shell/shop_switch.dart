@@ -76,6 +76,10 @@ final List<ProviderOrFamily> shopScopedProviders = <ProviderOrFamily>[
   // The shop's own departments are shop-scoped data: without this line,
   // switching shops keeps showing the previous shop's Categories screen.
   adminMyCategoriesProvider,
+  // The departments the merchant created themselves. Same reasoning, and the
+  // one the guard test caught: a phone shop's "charger" must not still be on
+  // screen after switching to the saree shop.
+  adminShopCategoriesProvider,
   adminAllInventoryProvider,
   adminLowStockProvider,
   adminLowStockCountProvider,

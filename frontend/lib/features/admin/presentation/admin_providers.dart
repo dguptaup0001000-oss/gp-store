@@ -20,6 +20,7 @@ import '../domain/delivery_breach_model.dart';
 import '../domain/delivery_partner_models.dart';
 import '../domain/delivery_pricing_models.dart';
 import '../domain/inventory_models.dart';
+import '../domain/shop_category.dart';
 import '../domain/territory_models.dart';
 import '../data/admin_workers_repository.dart';
 import '../domain/worker_models.dart';
@@ -84,6 +85,17 @@ final adminCategoriesProvider = FutureProvider.autoDispose<List<Category>>((ref)
 /// not one.
 final adminMyCategoriesProvider = FutureProvider.autoDispose<List<Category>>((ref) {
   return ref.watch(adminProductsRepositoryProvider).getMyCategories();
+});
+
+/// THIS SHOP'S OWN DEPARTMENTS - a different table from the platform taxonomy.
+///
+/// [adminMyCategoriesProvider] derives platform departments from what the shop
+/// lists; this one returns the departments the merchant created themselves.
+/// The Categories screen shows both, because to a shopkeeper they are one
+/// question ("what are my departments?") answered from two places.
+final adminShopCategoriesProvider =
+    FutureProvider.autoDispose<List<ShopCategory>>((ref) {
+  return ref.watch(adminProductsRepositoryProvider).getShopCategories();
 });
 
 typedef AdminInventoryPage = ({List<InventoryItem> items, int page, int totalPages});

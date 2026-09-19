@@ -53,6 +53,10 @@ public class ShopSelfServiceController {
     private final com.gpstore.repository.InventoryRepository inventory;
     private final com.gpstore.repository.ProductVariantRepository variants;
     private final com.gpstore.service.ProductService products;
+    private final com.gpstore.catalog.shop.ShopVariantEditing variantEditing;
+    private final com.gpstore.catalog.shop.ShopProductEditing productEditing;
+    private final com.gpstore.catalog.shop.ShopCategoryService shopCategories;
+    private final com.gpstore.service.VariantImageService variantImages;
 
     public ShopSelfServiceController(ShopRepository shops, ShopLifecycleService shopLifecycle,
                                      ShopProductVariantRepository listings,
@@ -68,7 +72,15 @@ public class ShopSelfServiceController {
                                      com.gpstore.payment.collection.PaymentCollection paymentCollection,
                                      com.gpstore.repository.InventoryRepository inventory,
                                      com.gpstore.repository.ProductVariantRepository variants,
-                                     com.gpstore.service.ProductService products) {
+                                     com.gpstore.service.ProductService products,
+                                     com.gpstore.catalog.shop.ShopVariantEditing variantEditing,
+                                     com.gpstore.catalog.shop.ShopProductEditing productEditing,
+                                     com.gpstore.catalog.shop.ShopCategoryService shopCategories,
+                                     com.gpstore.service.VariantImageService variantImages) {
+        this.variantEditing = variantEditing;
+        this.productEditing = productEditing;
+        this.shopCategories = shopCategories;
+        this.variantImages = variantImages;
         this.products = products;
         this.paymentCollection = paymentCollection;
         this.inventory = inventory;
@@ -476,6 +488,157 @@ public class ShopSelfServiceController {
         // reach the storefront is decoration.
         shelfCache.changed();
         return saved;
+    }
+
+    // ------------------------------------------------- the shopkeeper's product
+
+    /**
+     * Edit Product → Save Changes, for a product THIS shop sells.
+     *
+     * <p>THE LAST ROUTE STILL POINTING AT THE PLATFORM. Variants, photos and
+     * departments moved to the merchant's own surface; the product screen did
+     * not, so Save Changes went to {@code PUT /api/products/{id}} and answered
+     * 403 - while the very same screen had just rendered the product, because
+     * the merchant's shelf genuinely lists it.
+     *
+     * <p>Active applies to this shop's listings. Name, brand and category are
+     * catalogue-wide and are accepted only while this shop is the only one
+     * selling the product - see ShopProductEditing.
+     */
+    @PutMapping("/products/{productId}")
+    public com.gpstore.catalog.shop.ShopProductEditing.ProductView saveProduct(
+            @PathVariable Long productId,
+            @RequestBody com.gpstore.catalog.shop.ShopProductEditing.ProductEdit edit) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        return productEditing.update(productId, edit);
+    }
+
+    /** One product as THIS shop sells it, and whether its catalogue half is editable. */
+    @GetMapping("/products/{productId}")
+    public com.gpstore.catalog.shop.ShopProductEditing.ProductView readProduct(
+            @PathVariable Long productId) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        return productEditing.view(productId);
+    }
+
+    // ------------------------------------------------- the shopkeeper's variant
+
+    /**
+     * Saves an item on THIS shop's shelf.
+     *
+     * <p>THE ROUTE A REAL DEVICE NEEDED AND DID NOT HAVE. The merchant admin
+     * app saved variants through {@code PUT /api/product-variants/{id}} - the
+     * platform catalogue route, which needs CATALOG_DEFINE once a second shop
+     * exists. A merchant repricing his own phone got 403 and the app turned it
+     * into "Couldn't save variant - please check the values and try again".
+     * Nothing was ever wrong with 35000/30000/29000.
+     *
+     * <p>THE SHOP IS NOT A PARAMETER. The listing is read through the
+     * shop-scoped repository, so naming another shop's variant finds nothing -
+     * 404, not 403, so the ids other shops use stay undiscoverable.
+     */
+    @PutMapping("/variants/{productVariantId}")
+    public com.gpstore.catalog.shop.ShopVariantEditing.VariantView saveVariant(
+            @PathVariable Long productVariantId,
+            @RequestBody com.gpstore.catalog.shop.ShopVariantEditing.VariantEdit edit) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        return variantEditing.update(productVariantId, edit);
+    }
+
+    /**
+     * A SECOND variant of something this shop already sells.
+     *
+     * <p>8/128 and 12/256 of the same phone; red and green of the same saree.
+     * The merchant had no route to the second one at all - the only create was
+     * the platform's catalogue, which a shopkeeper cannot reach once a second
+     * merchant is trading.
+     */
+    @PostMapping("/products/{productId}/variants")
+    public com.gpstore.catalog.shop.ShopVariantEditing.VariantView addVariant(
+            @PathVariable Long productId,
+            @RequestBody com.gpstore.catalog.shop.ShopVariantEditing.VariantEdit edit) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        return variantEditing.create(productId, edit);
+    }
+
+    /** One of this shop's variants, with its attributes and this shop's price. */
+    @GetMapping("/variants/{productVariantId}")
+    public com.gpstore.catalog.shop.ShopVariantEditing.VariantView readVariant(
+            @PathVariable Long productVariantId) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        return variantEditing.view(productVariantId);
+    }
+
+    /**
+     * This variant's photos, replaced with exactly this list in this order.
+     *
+     * <p>The same whole-list contract as the platform route, and the same
+     * five-photo limit - but reachable by the shopkeeper whose shelf it is,
+     * and only for a variant THIS shop lists. Photo saving failed on a real
+     * device for exactly the reason the price save did: the only route was the
+     * platform's.
+     */
+    @PutMapping("/variants/{productVariantId}/images")
+    public List<String> saveVariantImages(
+            @PathVariable Long productVariantId,
+            @RequestBody VariantImagesRequest request) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        // Ownership first: the listing read is shop-scoped, so a variant this
+        // shop does not sell is a 404 before any photo row is touched.
+        variantEditing.listingFor(productVariantId).orElseThrow(
+                () -> new ResourceNotFoundException("This shop does not list that item."));
+        return variantImages.replaceImages(productVariantId, request.imageUrls()).stream()
+                .map(com.gpstore.upload.CatalogImageDelivery::forClient)
+                .toList();
+    }
+
+    /** This variant's photos, read, for a variant this shop lists. */
+    @GetMapping("/variants/{productVariantId}/images")
+    public List<String> readVariantImages(@PathVariable Long productVariantId) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        variantEditing.listingFor(productVariantId).orElseThrow(
+                () -> new ResourceNotFoundException("This shop does not list that item."));
+        return variantImages.imagesFor(productVariantId).stream()
+                .map(com.gpstore.upload.CatalogImageDelivery::forClient)
+                .toList();
+    }
+
+    public record VariantImagesRequest(List<String> imageUrls) {
+    }
+
+    // ------------------------------------------------ the shop's own departments
+
+    /**
+     * The departments belonging to this shop.
+     *
+     * <p>NOT the platform taxonomy. Creating one here adds a row this shop
+     * owns; no other merchant sees it and no customer's category tree grows.
+     */
+    @GetMapping("/categories")
+    public List<com.gpstore.catalog.shop.ShopCategoryService.ShopCategoryView> myCategories() {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        return shopCategories.mine();
+    }
+
+    @PostMapping("/categories")
+    public com.gpstore.catalog.shop.ShopCategoryService.ShopCategoryView addCategory(
+            @RequestBody com.gpstore.catalog.shop.ShopCategoryService.ShopCategoryRequest request) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        return shopCategories.create(request);
+    }
+
+    @PutMapping("/categories/{id}")
+    public com.gpstore.catalog.shop.ShopCategoryService.ShopCategoryView renameCategory(
+            @PathVariable Long id,
+            @RequestBody com.gpstore.catalog.shop.ShopCategoryService.ShopCategoryRequest request) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        return shopCategories.update(id, request);
+    }
+
+    @DeleteMapping("/categories/{id}")
+    public void removeCategory(@PathVariable Long id) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        shopCategories.remove(id);
     }
 
     @DeleteMapping("/listings/{productVariantId}")

@@ -15,6 +15,8 @@ import '../domain/delivery_breach_model.dart';
 import '../domain/delivery_partner_models.dart';
 import '../../orders/domain/order_models.dart';
 import '../domain/inventory_models.dart';
+import '../domain/variant_attribute.dart';
+import '../domain/shop_category.dart';
 
 class AdminProductsRepository {
   AdminProductsRepository({required this.apiClient})
@@ -74,20 +76,28 @@ class AdminProductsRepository {
     return Product.fromJson(response.data as Map<String, dynamic>);
   }
 
-  Future<Product> updateProduct({
+  /// SAVES TO THE SHOP'S OWN ROUTE, not the platform catalogue.
+  ///
+  /// `PUT /api/products/{id}` is the marketplace's shared catalogue and needs
+  /// CATALOG_DEFINE once a second shop trades, so a merchant editing a product
+  /// his own shop sells got 403 "You don't have permission to do that" - on a
+  /// screen that had just rendered the product, because his shelf really does
+  /// list it. Active applies to this shop's listings; name, brand and category
+  /// are catalogue-wide and the server accepts them only while this shop is
+  /// the only one selling the product.
+  Future<void> updateProduct({
     required int productId,
     required String name,
     String? brand,
     required int categoryId,
     required bool active,
   }) async {
-    final response = await apiClient.dio.put('/api/products/$productId', data: {
+    await apiClient.dio.put('/api/shop/products/$productId', data: {
       'name': name,
       'brand': brand,
-      'category': {'id': categoryId},
+      'categoryId': categoryId,
       'active': active,
     });
-    return Product.fromJson(response.data as Map<String, dynamic>);
   }
 
   Future<void> deactivateProduct(int productId) async {
@@ -107,19 +117,20 @@ class AdminProductsRepository {
   /// variant the photos it just uploaded belonged to.
   Future<int> createVariant({
     required int productId,
-    required double quantity,
-    required String unit,
+    String? label,
+    double? quantity,
+    String? unit,
     String? imageUrl,
     required double mrp,
     required double sellingPrice,
     double? costPrice,
+    List<VariantAttribute> attributes = const [],
     bool allowBelowCost = false,
   }) async {
     final response = await apiClient.dio.post(
-      '/api/product-variants',
-      queryParameters: {'allowBelowCost': allowBelowCost},
+      '/api/shop/products/$productId/variants',
       data: {
-        'product': {'id': productId},
+        'label': label,
         'quantity': quantity,
         'unit': unit,
         'imageUrl': imageUrl,
@@ -128,26 +139,29 @@ class AdminProductsRepository {
         'costPrice': costPrice,
         'available': true,
         'active': true,
+        'attributes': attributes.map((a) => a.toJson()).toList(),
       },
     );
-    return ((response.data as Map)['id'] as num).toInt();
+    return ((response.data as Map)['productVariantId'] as num).toInt();
   }
 
   Future<void> updateVariant({
     required int variantId,
-    required double quantity,
-    required String unit,
+    String? label,
+    double? quantity,
+    String? unit,
     String? imageUrl,
     required double mrp,
     required double sellingPrice,
     double? costPrice,
     required bool available,
+    List<VariantAttribute> attributes = const [],
     bool allowBelowCost = false,
   }) async {
     await apiClient.dio.put(
-      '/api/product-variants/$variantId',
-      queryParameters: {'allowBelowCost': allowBelowCost},
+      '/api/shop/variants/$variantId',
       data: {
+        'label': label,
         'quantity': quantity,
         'unit': unit,
         'imageUrl': imageUrl,
@@ -156,8 +170,19 @@ class AdminProductsRepository {
         'costPrice': costPrice,
         'available': available,
         'active': true,
+        'attributes': attributes.map((a) => a.toJson()).toList(),
       },
     );
+  }
+
+  /// One of this shop's variants, with the attributes it already carries.
+  Future<List<VariantAttribute>> getVariantAttributes(int variantId) async {
+    final response = await apiClient.dio.get('/api/shop/variants/$variantId');
+    final data = response.data as Map<String, dynamic>;
+    final raw = (data['attributes'] as List?) ?? const [];
+    return raw
+        .map((e) => VariantAttribute.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// Lets the admin pick a photo from their gallery. Bytes go to object
@@ -235,7 +260,7 @@ class AdminProductsRepository {
   /// This variant's photos, in order.
   Future<List<String>> getVariantImages(int variantId) async {
     final response =
-        await apiClient.dio.get('/api/product-variants/$variantId/images');
+        await apiClient.dio.get('/api/shop/variants/$variantId/images');
     return ((response.data as List?) ?? const [])
         .map((e) => e.toString())
         .toList(growable: false);
@@ -249,7 +274,7 @@ class AdminProductsRepository {
   Future<List<String>> setVariantImages(
       int variantId, List<String> urls) async {
     final response = await apiClient.dio.put(
-      '/api/product-variants/$variantId/images',
+      '/api/shop/variants/$variantId/images',
       data: {'imageUrls': urls},
     );
     return ((response.data as List?) ?? const [])
@@ -278,14 +303,46 @@ class AdminProductsRepository {
         .toList();
   }
 
-  Future<void> createCategory(
+  /// THIS SHOP'S OWN DEPARTMENTS, which is a different table from the
+  /// platform taxonomy [getCategories] returns.
+  ///
+  /// The Add Category button used to post to the platform tree, which needs
+  /// CATALOG_DEFINE once a second merchant is trading - so on a real phone it
+  /// always answered 403 and the screen said "You don't have permission to do
+  /// that". A merchant organising their own shelf is not editing the
+  /// marketplace's taxonomy, and now has somewhere of their own to do it.
+  Future<List<ShopCategory>> getShopCategories() async {
+    final response = await apiClient.dio.get('/api/shop/categories');
+    return ((response.data as List?) ?? const [])
+        .map((e) => ShopCategory.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<ShopCategory> createCategory(
       {required String name, String? description, double? gstRate}) async {
-    await apiClient.dio.post('/api/categories', data: {
+    final response = await apiClient.dio.post('/api/shop/categories', data: {
       'name': name,
       'description': description,
-      'gstRate': gstRate,
       'active': true,
     });
+    return ShopCategory.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  Future<void> renameShopCategory({
+    required int shopCategoryId,
+    required String name,
+    String? description,
+    bool? active,
+  }) async {
+    await apiClient.dio.put('/api/shop/categories/$shopCategoryId', data: {
+      'name': name,
+      'description': description,
+      'active': active,
+    });
+  }
+
+  Future<void> removeShopCategory(int shopCategoryId) async {
+    await apiClient.dio.delete('/api/shop/categories/$shopCategoryId');
   }
 
   /// imageUrl is omitted on purpose. The backend keeps the existing photo

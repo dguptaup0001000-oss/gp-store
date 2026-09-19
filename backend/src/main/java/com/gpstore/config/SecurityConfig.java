@@ -341,6 +341,48 @@ public class SecurityConfig {
                     .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
                 .requestMatchers("/api/shop/listings/**").hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
 
+                // EDITING AND PHOTOGRAPHING WHAT YOU SELL, same reasoning as
+                // Add Product directly above. These routes act on the caller's
+                // OWN listing - the shop is never in the path, it comes from
+                // the credential - so they take the shopkeeper's permission.
+                // CATALOG_DEFINE stays what it was: the shared taxonomy under
+                // /api/products, /api/categories and /api/product-variants.
+                //
+                // Writes are named explicitly and must precede the broad
+                // "/api/shop/**" CATALOG_VIEW fallback below, or a read
+                // permission would authorise a write.
+                // Adding a second variant to a product this shop already sells.
+                // Named explicitly: the POST "/api/shop/products" rule above is
+                // an EXACT match, so without this line the path would fall
+                // through to the CATALOG_VIEW fallback and a read permission
+                // would authorise a write.
+                // Editing a product THIS shop sells. Named explicitly for the
+                // same reason as the nested variant create below: the POST
+                // "/api/shop/products" rule above is an EXACT match, so
+                // without this the path would fall through to the
+                // CATALOG_VIEW fallback and a read permission would authorise
+                // a write.
+                .requestMatchers(HttpMethod.PUT, "/api/shop/products/*")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers(HttpMethod.POST, "/api/shop/products/*/variants")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers(HttpMethod.PUT, "/api/shop/variants/**")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers(HttpMethod.POST, "/api/shop/variants/**")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers(HttpMethod.DELETE, "/api/shop/variants/**")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                // A SHOP'S OWN DEPARTMENTS. Organising your own shelf is the
+                // shopkeeper's daily work; the row created belongs to one shop
+                // and is invisible to every other. The platform taxonomy is a
+                // different table and keeps its own rule.
+                .requestMatchers(HttpMethod.POST, "/api/shop/categories/**")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers(HttpMethod.PUT, "/api/shop/categories/**")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers(HttpMethod.DELETE, "/api/shop/categories/**")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+
                 // THE BACK OFFICE, gated on what it is about rather than on
                 // CATALOG_VIEW below. A delivery manager holds ORDERS_VIEW and
                 // no catalogue permission at all; without these two lines the

@@ -21,6 +21,20 @@ import 'api_client.dart';
 /// knows things this layer cannot, like which coupon expired or which item
 /// went out of stock.
 String extractErrorMessage(Object error) {
+  // THE ROUTE IS NOT THERE AT ALL, which is not a fact about the caller's
+  // data. Checked before the backend's own words because its words for this
+  // case name a URL, and every screen that then re-maps 404 by meaning turns
+  // it into a sentence about the thing the screen was showing.
+  //
+  // THIS EXACT MISTAKE COST A REAL INVESTIGATION. A merchant admin build that
+  // was newer than the deployed backend called PUT /api/shop/variants/{id};
+  // the server had no such route and answered 404 "No endpoint exists at
+  // ...", and the app rendered "This shop no longer lists that item. Refresh
+  // and try again." on a screen that was at that moment displaying the item,
+  // its price and "In stock". Hours went into looking for corrupt ownership
+  // rows. The data was perfect; the app was talking to last week's server.
+  if (meansEndpointMissing(error)) return _endpointMissing;
+
   // The backend spoke. It knows more than we do - use its words.
   if (error is ApiException) return error.message;
   if (error is DioException && error.error is ApiException) {
@@ -52,6 +66,38 @@ String extractErrorMessage(Object error) {
 }
 
 const _unknown = 'Something went wrong. Please try again.';
+
+const _endpointMissing =
+    'This app is newer than the server it is talking to, so this action does '
+    'not exist yet. Your data is fine - update the app or ask support to '
+    'finish the server update.';
+
+/// True when the server answered "there is no such route here".
+///
+/// NOT the same as "the thing you named is gone", which is the other 404 and
+/// the one every screen maps by meaning. Telling them apart is what stops a
+/// half-finished deployment from being reported as missing or corrupted data.
+///
+/// Matched on the backend's own wording, which
+/// GlobalExceptionHandler.handleNoHandler produces for every unmapped path; a
+/// backend test pins that prefix so it cannot drift silently.
+bool meansEndpointMissing(Object error) {
+  if (apiStatusOf(error) != 404) return false;
+  final message = _rawBackendMessage(error);
+  return message != null && message.startsWith('No endpoint exists at');
+}
+
+/// The backend's own message, before any of this file's re-wording.
+String? _rawBackendMessage(Object error) {
+  if (error is ApiException) return error.message;
+  if (error is DioException) {
+    final inner = error.error;
+    if (inner is ApiException) return inner.message;
+    final body = error.response?.data;
+    if (body is Map && body['message'] is String) return body['message'] as String;
+  }
+  return null;
+}
 
 String _describeDioFailure(DioException error) {
   switch (error.type) {
