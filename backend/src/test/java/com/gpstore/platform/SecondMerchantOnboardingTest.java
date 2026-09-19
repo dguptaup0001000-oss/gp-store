@@ -441,9 +441,23 @@ class SecondMerchantOnboardingTest {
                         + earningsAfter);
     }
 
-    /** Waits for the post-commit assignment, or fails saying it never happened. */
+    /**
+     * Waits for the post-commit assignment, or fails saying it never happened.
+     *
+     * <p>THIRTY SECONDS, NOT TEN, AND THE ASSERTION IS UNCHANGED. Dispatch runs
+     * after the order's transaction commits, on a shared executor, so how long
+     * it takes is a property of the machine rather than of the code. At ten
+     * seconds this passed alone and failed inside the full suite - on this
+     * branch and, checked in a clean worktree, on main as well - which is a
+     * measurement of the runner, not of whether dispatch works.
+     *
+     * <p>What is still required is exactly what was required before: a delivery
+     * row for this shop. Waiting longer for an answer is not the same as
+     * accepting a worse one, and a shop whose dispatch genuinely cannot work
+     * still fails here.
+     */
     private void awaitDeliveryFor(Long shop) throws InterruptedException {
-        for (int attempt = 0; attempt < 100; attempt++) {
+        for (int attempt = 0; attempt < 300; attempt++) {
             Long deliveries = jdbc.queryForObject(
                     "SELECT count(*) FROM deliveries WHERE shop_id = ?", Long.class, shop);
             if (deliveries != null && deliveries > 0) {
