@@ -2285,6 +2285,16 @@ public class OrderService {
      */
     private BigDecimal shopPriceOf(com.gpstore.entity.ProductVariant variant,
                                    java.util.Map<Long, com.gpstore.catalog.shop.ShopProductVariant> listings) {
+        // AND REFUSES WHAT THIS SHOP DOES NOT SELL ONLINE AT ALL. Both the
+        // preview and the order itself price every line through here, so one
+        // check covers both - and a cart line that somehow carries a
+        // Visit-to-Buy or a service cannot be charged for, however it got
+        // there. add-to-cart already refuses it; this is the second door,
+        // because a basket can outlive the listing it was filled from and a
+        // merchant may reasonably move a product offline while it sits there.
+        if (variant != null && listings != null) {
+            shopCatalog.refuseListingIfNotBuyableOnline(variant, listings.get(variant.getId()));
+        }
         return shopCatalog.priceOf(variant, listings).orElseThrow(() -> new ConflictException(
                 (variant != null && variant.getProduct() != null ? variant.getProduct().getName() : "An item")
                         + " is no longer available - please remove it from your cart."));
