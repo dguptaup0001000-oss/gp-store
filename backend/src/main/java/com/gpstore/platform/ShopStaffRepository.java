@@ -39,4 +39,24 @@ public interface ShopStaffRepository extends JpaRepository<ShopStaff, Long> {
     List<ShopStaff> findByCustomerId(Long customerId);
 
     Optional<ShopStaff> findByShopIdAndCustomerId(Long shopId, Long customerId);
+
+    /**
+     * Every account that may work in one shop, NATIVELY so the shop filter
+     * cannot narrow it.
+     *
+     * <p>WHO A NEW ORDER IS FOR. The dispatcher runs after the order's
+     * transaction has committed, on a thread with no shop scope of its own -
+     * there is no request and no credential behind it - so a filtered query
+     * would return nothing at all and the shop would never be told. The shop id
+     * is not taken from a client: it is {@code order.shopId}, written by the
+     * server when the order was created.
+     *
+     * <p>It selects ONE COLUMN of account ids for a shop the caller has already
+     * established, so nothing about any other shop can travel through it.
+     */
+    @Query(value = "SELECT customer_id FROM shop_staff "
+            + "WHERE shop_id = :shopId AND active = true "
+            + "ORDER BY is_default DESC, customer_id ASC",
+            nativeQuery = true)
+    List<Long> staffIdsFor(@Param("shopId") Long shopId);
 }

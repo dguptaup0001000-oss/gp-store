@@ -100,6 +100,30 @@ void main() {
     // password change", the console would be replaced by a form asking a
     // merchant to change a password that is already their own, and the real
     // reason would never be shown.
+    //
+    // THE EXAMPLE USED TO BE THE ZERO-SHOP MESSAGE. It is now a cross-shop
+    // refusal instead, because the zero-shop one is no longer passed through
+    // verbatim - it is re-worded into an explanation, which is asserted in its
+    // own case below. What this case is actually about is the 403 not being
+    // mistaken for a password demand, and that is unchanged.
+    await tester.pumpWidget(app(
+        ApiException(
+            statusCode: 403,
+            message: 'This account is not associated with this shop.')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ChangePasswordScreen), findsNothing);
+    expect(find.text('This account is not associated with this shop.'),
+        findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+  });
+
+  testWidgets('a business with no shop is explained, and is not a password problem',
+      (tester) async {
+    // A REAL MERCHANT'S SCREEN. GUPT SAREE's owner signed in with a one-time
+    // password against a business that had no shop, so BOTH readings were
+    // available and both were wrong: it is not a password demand, and it is
+    // not a refusal either.
     await tester.pumpWidget(app(
         ApiException(
             statusCode: 403,
@@ -107,9 +131,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(ChangePasswordScreen), findsNothing);
-    expect(find.text('This account is not associated with a shop.'),
-        findsOneWidget);
+    expect(find.textContaining('No shop has been set up'), findsOneWidget);
+    expect(find.text('This account is not associated with a shop.'), findsNothing,
+        reason: 'the backend sentence reads as a refusal and this is not one');
+    // Still not a dead end.
     expect(find.text('Retry'), findsOneWidget);
+    expect(find.text('Sign out'), findsOneWidget);
   });
 
   group('the ordinary error screen is not a dead end', () {

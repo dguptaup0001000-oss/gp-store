@@ -34,12 +34,15 @@ public class NotificationService {
     private final PushNotificationService pushNotificationService;
     private final ExecutorService orderSideEffectsExecutor;
 
+    private final com.gpstore.notify.NewOrderAlerts newOrderAlerts;
+
     public NotificationService(
             NotificationRepository notificationRepository,
             CustomerRepository customerRepository,
             OrderRepository orderRepository,
             AuditLogService auditLogService,
             PushNotificationService pushNotificationService,
+            com.gpstore.notify.NewOrderAlerts newOrderAlerts,
             ExecutorService orderSideEffectsExecutor) {
 
         this.notificationRepository = notificationRepository;
@@ -47,6 +50,7 @@ public class NotificationService {
         this.orderRepository = orderRepository;
         this.auditLogService = auditLogService;
         this.pushNotificationService = pushNotificationService;
+        this.newOrderAlerts = newOrderAlerts;
         this.orderSideEffectsExecutor = orderSideEffectsExecutor;
     }
 
@@ -371,45 +375,20 @@ public class NotificationService {
      */
     public void notifyAdminsOfNewOrder(Order order) {
         try {
-            if (order == null) return;
-            if (order.getOrderStatus() == com.gpstore.enums.OrderStatus.PENDING_CONFIRMATION) {
-                return;
-            }
-
-            List<Customer> admins = customerRepository.findByRole(com.gpstore.entity.Role.ADMIN);
-            if (admins.isEmpty()) return;
-
-            // The shop counter cares about two things when an order lands:
-            // who it is for, and how much. Order number and status were what
-            // this used to lead with, and neither is what someone glancing at
-            // a phone across a counter needs.
-            String customerName = displayNameOf(order);
-            String amount = plainAmountOf(order);
-
-            String title = "New order received from " + customerName;
-            String message = "Order amount ₹" + amount;
-
-            // customerName and orderAmount are sent as their own data fields,
-            // NOT parsed back out of the title and body above. The shop app
-            // speaks this order aloud (see VoiceAnnouncementService), and
-            // recovering a name from a display string is exactly the kind of
-            // thing that breaks the day someone's name contains the word the
-            // parser splits on. The backend is the source of truth for both,
-            // so it states both.
+            // DELEGATED, AND THE DELEGATION IS THE FIX.
             //
-            // orderAmount carries no currency symbol and no grouping - it is
-            // a number for a machine to read, and the app is what turns it
-            // into "520 rupees". A ₹ in this field would be spoken literally.
-            Map<String, String> data = Map.of(
-                    "type", "NEW_ORDER",
-                    "orderId", String.valueOf(order.getId()),
-                    "customerName", customerName,
-                    "orderAmount", amount);
-
-            for (Customer admin : admins) {
-                if (admin.getFcmToken() == null || admin.getFcmToken().isBlank()) continue;
-                pushNotificationService.sendPush(admin.getFcmToken(), title, message, data);
-            }
+            // This method used to read `customerRepository.findByRole(ADMIN)`
+            // and push to every one of them. In a single-shop deployment that
+            // was the shop. In a marketplace every merchant holds ADMIN, so an
+            // order placed at one shop announced the customer's name and the
+            // order total to every other merchant on the platform - including
+            // merchants onboarded long after this line was written.
+            //
+            // The replacement asks who works in THIS ORDER'S SHOP, reads that
+            // from live shop_staff rows, and sends only to MERCHANT_ADMIN
+            // installs. The name stays because two call sites and a body of
+            // tests use it; what it does underneath is now correct.
+            newOrderAlerts.announce(order);
         } catch (Exception ex) {
             auditLogService.log("ADMIN_NEW_ORDER_PUSH_FAILED", "Order", order != null ? order.getId() : null,
                     "Failed to notify admins of new order: " + ex.getMessage());

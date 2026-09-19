@@ -133,6 +133,65 @@ public class PushNotificationService {
         }
     }
 
+    /** What became of one send, for a caller that can act on the answer. */
+    public enum PushOutcome {
+        /** Handed to FCM. */
+        SENT,
+        /** Push is switched off or unconfigured, or there was no token. Not a fault. */
+        SKIPPED,
+        /** FCM says this token is dead - the install is gone or the token was replaced. */
+        INVALID_TOKEN,
+        /** Something else went wrong. Worth retrying later; not worth deleting anything over. */
+        FAILED
+    }
+
+    /**
+     * The same send as {@link #sendPush}, but it says what happened.
+     *
+     * <p>WHY BOTH EXIST. {@code sendPush} deliberately swallows everything, and
+     * for the customer-facing paths that is right: nobody's order should fail
+     * because a notification did. But a merchant device registry has to be able
+     * to retire dead tokens, and it cannot do that if the only signal is void.
+     * A shop that has replaced its counter phone would otherwise keep a
+     * permanently failing registration on file forever, and every new order
+     * would spend a network round trip on it.
+     *
+     * <p>Still never throws.
+     */
+    public PushOutcome sendPushTo(String fcmToken, String title, String body, Map<String, String> data) {
+        if (!initialized) {
+            log.debug("Push not sent (Firebase not configured): title={}", title);
+            return PushOutcome.SKIPPED;
+        }
+        if (fcmToken == null || fcmToken.isBlank()) {
+            return PushOutcome.SKIPPED;
+        }
+        try {
+            Message.Builder messageBuilder = Message.builder()
+                    .setToken(fcmToken)
+                    .setNotification(Notification.builder().setTitle(title).setBody(body).build())
+                    .setAndroidConfig(androidOrderAlertConfig());
+            if (data != null) {
+                messageBuilder.putAllData(data);
+            }
+            FirebaseMessaging.getInstance().send(messageBuilder.build());
+            return PushOutcome.SENT;
+        } catch (FirebaseMessagingException ex) {
+            // UNREGISTERED is the token being dead rather than the send being
+            // broken, and it is the one case where the right response is to
+            // stop using this row. Everything else may well work next time.
+            if (ex.getMessagingErrorCode() == com.google.firebase.messaging.MessagingErrorCode.UNREGISTERED
+                    || ex.getMessagingErrorCode() == com.google.firebase.messaging.MessagingErrorCode.INVALID_ARGUMENT) {
+                return PushOutcome.INVALID_TOKEN;
+            }
+            log.warn("FCM send failed ({}): {}", ex.getMessagingErrorCode(), ex.getMessage());
+            return PushOutcome.FAILED;
+        } catch (Exception ex) {
+            log.error("Unexpected error sending push notification", ex);
+            return PushOutcome.FAILED;
+        }
+    }
+
     // The topic every customer device is subscribed to on registration (see
     // CustomerService.updateMyFcmToken) - what makes broadcastToAll's actual
     // push a single FCM call instead of one per customer. "all_customers" is

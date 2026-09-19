@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -91,7 +92,10 @@ class GpstoreApp extends ConsumerWidget {
               onNotificationTap: (message) => onNotificationTap(ref, message),
             );
       } else if (!isAuthenticated && wasAuthenticated) {
-        ref.read(pushNotificationServiceProvider).stop();
+        // Deliberately not awaited: signing out must not wait on a network
+        // call, and the registration is retired anyway the moment anyone
+        // signs in on this device again.
+        unawaited(ref.read(pushNotificationServiceProvider).stop());
         onAdminSession?.call(ref, null);
       }
     });

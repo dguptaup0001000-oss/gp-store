@@ -82,14 +82,32 @@ class PlatformMerchantDetailScreen extends ConsumerWidget {
               const SizedBox(height: 16),
               _ShopsHeading(count: detail.shopCount),
               const SizedBox(height: 8),
+              // THE BUTTON THAT WAS MISSING. Saying a merchant has nothing to
+              // sell from is true and was, until now, the end of the
+              // conversation: a business registered without a shop could only
+              // be fixed by deleting it and starting again. A real one -
+              // GUPT SAREE - sat in exactly this state while its owner was
+              // told their account was not associated with a shop.
               if (detail.shops.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Text(
-                    'No shops under this business yet. A merchant with no shop '
-                    'has nothing to sell from.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'No shops under this business yet. A merchant with no '
+                        'shop has nothing to sell from, and their sign-in has '
+                        'nowhere to go.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 13),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        onPressed: hapticize(
+                            () => _addFirstShop(context, ref, detail.merchant)),
+                        icon: const Icon(Icons.add_business_outlined),
+                        label: const Text('Add the first shop'),
+                      ),
+                    ],
                   ),
                 ),
               for (final shop in detail.shops)
@@ -234,4 +252,37 @@ class _TheBusiness extends ConsumerWidget {
       if (context.mounted) platformSay(context, extractErrorMessage(error));
     }
   }
+}
+
+
+/// Opens the first-shop dialog and says what came back.
+///
+/// TOP-LEVEL RATHER THAN A METHOD because this screen is a ConsumerWidget with
+/// no state of its own, and giving it one just to hold a dialog call would be
+/// the wrong trade.
+Future<void> _addFirstShop(
+    BuildContext context, WidgetRef ref, MerchantView merchant) async {
+  final made = await showDialog<AddedFirstShop>(
+    context: context,
+    builder: (_) => PlatformAddFirstShopDialog(
+      merchantId: merchant.id,
+      businessName:
+          merchant.displayName ?? merchant.legalName ?? 'This business',
+      merchantStatus: merchant.status,
+    ),
+  );
+  if (made == null || !context.mounted) return;
+  ref.invalidate(platformMerchantDetailProvider(merchant.id));
+
+  // SAYS WHAT HAPPENS NEXT. The shop exists and the owner can now sign in,
+  // but it is a draft with empty shelves - so the operator is told the one
+  // remaining step rather than left wondering why customers cannot see it.
+  final approved = made.merchantStatusBefore != made.merchantStatusAfter;
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content: Text(
+      'Shop "${made.shopCode ?? made.shopId}" is open as a draft'
+      '${approved ? ' and the business is now ${made.merchantStatusAfter}' : ''}. '
+      'The owner can sign in. Once they have put stock up, press Let them trade.',
+    ),
+  ));
 }

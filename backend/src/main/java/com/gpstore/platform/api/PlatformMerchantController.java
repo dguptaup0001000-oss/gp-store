@@ -167,6 +167,40 @@ public class PlatformMerchantController {
                 Boolean.TRUE.equals(request.demo())));
     }
 
+    public record FirstShopRequest(String shopCode,
+                                   String displayName,
+                                   Double latitude,
+                                   Double longitude,
+                                   java.math.BigDecimal maxDeliveryRadiusKm,
+                                   String timeZone) {}
+
+    /**
+     * Opens the first shop for a business that has none.
+     *
+     * <p>WHY THIS IS ON THE MERCHANT AND NOT ON /shops. {@code POST /shops}
+     * already opens a shop under a merchant, and it refuses anything that is
+     * not already APPROVED - which is exactly the wall an operator hits after
+     * registering a business. This route is the whole operation: approve if
+     * that is what is in the way, open the shop, make the owner its first
+     * member, and say what it did to the business on the way past.
+     *
+     * <p>It is deliberately first-shop-only. A business that already trades
+     * somewhere gets a 409 pointing at the ordinary route, because the second
+     * shop is a different decision with different questions.
+     */
+    @PostMapping("/merchants/{merchantId}/first-shop")
+    public PlatformOnboardingService.OnboardedShop addFirstShop(
+            @PathVariable Long merchantId, @RequestBody FirstShopRequest request) {
+        return onboardingService.addFirstShop(
+                merchantId,
+                request.shopCode(),
+                request.displayName(),
+                request.latitude(),
+                request.longitude(),
+                request.maxDeliveryRadiusKm(),
+                request.timeZone());
+    }
+
     @PutMapping("/merchants/{id}/status")
     public MerchantView moveMerchant(@PathVariable Long id, @RequestBody StatusChangeRequest request) {
         return MerchantView.of(merchantLifecycle.transition(
