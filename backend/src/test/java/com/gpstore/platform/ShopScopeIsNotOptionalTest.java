@@ -102,7 +102,7 @@ class ShopScopeIsNotOptionalTest {
      * All three are asserted by MultiShopCheckoutTest.
      */
     private static final Set<String> SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY =
-            Set.of("audit_logs", "cart_items", "outbox_events");
+            Set.of("audit_logs", "cart_items", "outbox_events", "order_alerts_sent");
 
     /*
      * audit_logs is the third deliberate context column. The stream contains
@@ -114,6 +114,26 @@ class ShopScopeIsNotOptionalTest {
      * PlatformControlTowerSecurityTest and the audit isolation regression test
      * pin both sides; this exemption is therefore an explicit alternate
      * boundary, not an unowned tenant column.
+     */
+
+    /*
+     * order_alerts_sent is the newest, and the closest in spirit to
+     * outbox_events.
+     *
+     * NOBODY READS IT PER-TENANT. Its whole job is a unique index on
+     * (order_id, kind) that makes a new-order announcement happen exactly once
+     * however many times the order arrives at the dispatcher - a retried
+     * checkout, a replayed payment webhook, an outbox retry, a redelivered
+     * push. The dispatcher runs after commit on a platform-scoped thread with
+     * no credential behind it, so a filter would have nothing to narrow to and
+     * the claim would silently stop being unique - which is the one property
+     * the table exists for.
+     *
+     * The column records WHICH SHOP WAS TOLD, for the operator reading the
+     * table afterwards. It is not a boundary and nothing authorises anything
+     * from it: who may be told is decided at dispatch from live shop_staff
+     * rows, and EachShopHearsOnlyItsOwnOrdersTest asserts that shop A's order
+     * selects shop A's devices and no other merchant's.
      */
 
     /*
@@ -169,6 +189,22 @@ class ShopScopeIsNotOptionalTest {
             // returns a row, only shop ids the credential already permits.
             "ShopStaffRepository.shopIdsFor",
             "ShopStaffRepository.defaultShopIdFor",
+
+            // THE OTHER DIRECTION, AND THE SAME REASON IT CANNOT BE FILTERED.
+            // "Who works in this shop" is asked by the new-order dispatcher,
+            // which runs AFTER the order's transaction has committed, on a
+            // thread with no request and no credential behind it - so there is
+            // no shop scope for the filter to narrow to, and a filtered query
+            // would return nothing at all and the shop would never be told its
+            // order had arrived.
+            //
+            // The shop id is not caller input: it is orders.shop_id, written by
+            // the server when the order was created. It SELECTS one column of
+            // account ids for a shop already established by the order itself,
+            // so nothing about any other shop can travel through it - which is
+            // precisely the leak it replaced, where every ADMIN on the platform
+            // was notified of every shop's orders.
+            "ShopStaffRepository.staffIdsFor",
 
             // DELIBERATELY CROSS-SHOP, AND THAT IS THE QUESTION IT ASKS.
             // "Is anybody else selling this catalogue item?" is what decides

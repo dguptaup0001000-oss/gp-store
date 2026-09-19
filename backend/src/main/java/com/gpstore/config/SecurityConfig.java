@@ -765,6 +765,20 @@ public class SecurityConfig {
                 // this line can expose one app's crashes to another.
                 .requestMatchers(HttpMethod.POST, "/api/client/crash-reports").authenticated()
 
+                // REGISTERING THE DEVICE YOU ARE HOLDING. All four apps sign in
+                // through the same endpoints and all four need to say where
+                // they can be reached, so this is any authenticated session -
+                // stated explicitly for the same reason as the line above
+                // rather than left to anyRequest().
+                //
+                // IT GRANTS NOTHING. The account comes from the verified token
+                // and is not a field in the body, and the `app` the caller
+                // names decides only which alerts this install is interested
+                // in. What an install is actually TOLD is decided at dispatch
+                // from live shop membership, so naming MERCHANT_ADMIN here
+                // cannot subscribe a customer to a shop's orders.
+                .requestMatchers("/api/push/registrations").authenticated()
+
                 // Everything else requires a valid, authenticated customer
                 .anyRequest().authenticated()
             )

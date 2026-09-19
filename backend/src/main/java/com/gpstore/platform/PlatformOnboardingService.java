@@ -2,6 +2,7 @@ package com.gpstore.platform;
 
 import com.gpstore.entity.Role;
 import com.gpstore.exception.BadRequestException;
+import com.gpstore.exception.ConflictException;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -146,6 +147,128 @@ public class PlatformOnboardingService {
                 account.customerId(), account.email(), account.oneTimePassword(),
                 account.activationCode());
     }
+
+    /**
+     * Gives a business that has none its first shop.
+     *
+     * <h2>The state this repairs, and how a real merchant reached it</h2>
+     *
+     * <p>GUPT SAREE (merchant 2) was created through the console's "Register a
+     * business only" action, which opens an ADMIN login and registers the
+     * business and - exactly as designed - opens no shop. The operator was then
+     * handed a one-time password, used it to sign in to Merchant Admin, and hit
+     * {@code "This account is not associated with a shop."} That is not a bug in
+     * the login: there was genuinely nothing to sign in to. The gap is that a
+     * business registered this way had no way BACK to a working merchant short
+     * of deleting it and starting again.
+     *
+     * <p>This is that way back, and it is an ordinary business operation rather
+     * than a repair script: the same call opens the first shop for a business
+     * whose paperwork arrived before its shopkeeper did.
+     *
+     * <h2>Why it may move the merchant's status</h2>
+     *
+     * <p>{@link ShopLifecycleService#open} refuses any merchant that is not
+     * APPROVED, so a business sitting in APPLICATION cannot hold a shop at all.
+     * Rather than fail and leave the operator stuck, this walks the same
+     * lifecycle {@link #onboard} walks - PENDING_REVIEW, then APPROVED - with
+     * the same recorded reason, so the audit log says who vouched and why.
+     *
+     * <p>THAT IS NOT PERMISSION TO TRADE, and the distinction is the whole
+     * reason it is safe. The shop arrives in DRAFT with empty shelves;
+     * ShopReadiness still counts listings and stock as blocking, the shop still
+     * has to be moved to ACTIVE, and the trade switches are still the platform
+     * owner's to throw. An APPROVED merchant with a DRAFT shop is invisible to
+     * every customer.
+     *
+     * <h2>What it does not bring with it</h2>
+     *
+     * <p>Nothing. The shop is opened by the same path every other shop uses, so
+     * it gets its own operating settings and its own delivery pricing and
+     * nothing else - no products, no categories, no listings, no orders and no
+     * staff from Shop #1 or from any other merchant. A brand-new shelf is empty
+     * on purpose.
+     */
+    @Transactional
+    public OnboardedShop addFirstShop(Long merchantId,
+                                      String shopCode,
+                                      String displayName,
+                                      Double latitude,
+                                      Double longitude,
+                                      BigDecimal maxDeliveryRadiusKm,
+                                      String timeZone) {
+        if (merchantId == null) {
+            throw new BadRequestException("Which business?");
+        }
+        Merchant merchant = merchants.byId(merchantId);
+
+        // FIRST shop, and only first. A business that already trades somewhere
+        // opens further shops through the ordinary "open a shop" route, which
+        // asks the questions this one assumes.
+        if (!shops.forMerchant(merchantId).isEmpty()) {
+            throw new ConflictException(
+                    "This business already has a shop. Open further shops from the Shops tab.");
+        }
+
+        // THE OWNER IS THE POINT. A shop whose owner cannot sign in to it is
+        // the state this method exists to end, so it refuses to create another
+        // one rather than producing a shop nobody can reach.
+        if (merchant.getOwnerCustomerId() == null) {
+            throw new BadRequestException(
+                    "This business has no owner account, so nobody could sign in to the shop. "
+                            + "Give it an owner first.");
+        }
+
+        if (latitude == null || longitude == null) {
+            throw new BadRequestException(
+                    "Where is the shop? The marketplace matches customers to shops by "
+                            + "distance, so a shop with no location is offered to nobody.");
+        }
+        if (maxDeliveryRadiusKm == null || maxDeliveryRadiusKm.signum() <= 0) {
+            throw new BadRequestException(
+                    "How far will this shop deliver? A shop that has not said is offered "
+                            + "to nobody.");
+        }
+
+        MerchantStatus before = merchant.getStatus();
+        if (before == MerchantStatus.APPLICATION) {
+            merchants.transition(merchantId, MerchantStatus.PENDING_REVIEW, REASON);
+            merchants.transition(merchantId, MerchantStatus.APPROVED, REASON);
+        } else if (before == MerchantStatus.PENDING_REVIEW) {
+            merchants.transition(merchantId, MerchantStatus.APPROVED, REASON);
+        }
+        // Anything else - APPROVED, ACTIVE, PAUSED - is left exactly as it is.
+        // A REJECTED or REMOVED business falls through to ShopLifecycleService,
+        // which refuses it and says so; re-approving a rejected merchant is a
+        // decision, not a side effect of opening a shop.
+
+        String code = (shopCode == null || shopCode.isBlank())
+                ? availableCodeFor(merchant.getDisplayName() == null
+                        ? "shop" : merchant.getDisplayName())
+                : shopCode.trim();
+
+        Shop shop = shops.open(merchantId, code, blankToNull(displayName),
+                latitude, longitude, maxDeliveryRadiusKm, blankToNull(timeZone));
+
+        return new OnboardedShop(merchant.getId(), merchant.getDisplayName(),
+                shop.getId(), shop.getCode(), shop.getDisplayName(),
+                merchant.getOwnerCustomerId(), before.name(),
+                merchants.byId(merchantId).getStatus().name());
+    }
+
+    /**
+     * @param merchantStatusBefore so the console can say "and I approved the
+     *                             business to do it" rather than leaving the
+     *                             operator to notice the status moved.
+     */
+    public record OnboardedShop(Long merchantId,
+                                String businessName,
+                                Long shopId,
+                                String shopCode,
+                                String shopName,
+                                Long ownerCustomerId,
+                                String merchantStatusBefore,
+                                String merchantStatusAfter) {}
 
     /**
      * A code derived from the business name, and free.
