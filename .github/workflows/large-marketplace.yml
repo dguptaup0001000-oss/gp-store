@@ -1,0 +1,135 @@
+# Two thousand shops across a hundred trades, built for real and then checked.
+#
+# WHY IT IS NOT PART OF CI. LargeMarketplaceTest generates around 2,100 shops,
+# 260,000 shop listings and 20,000 orders. That takes a couple of minutes and
+# a real Postgres, and it proves nothing on every push that
+# ThirtyShopsInOneMarketplaceTest does not already prove on a fourteen-trade
+# dataset in seconds. Making every ordinary commit build a quarter of a
+# million rows would slow every build for a result that changes only when the
+# generator or the tenant filter changes. So it is tagged large-marketplace,
+# excluded by the default surefire configuration, and run here instead:
+# weekly, on demand, and automatically when the files it is actually about
+# change.
+#
+# It seeds and tears down a DISPOSABLE database on the runner. It never
+# touches production, and MarketplaceTestData refuses to run at all unless the
+# application says it is not production, the database is on loopback, and the
+# opt-in property is set - see refuseUnlessDisposable.
+name: Large marketplace
+
+on:
+  schedule:
+    # Sunday 03:00 UTC. Nothing is waiting on the answer, so it runs when
+    # nothing else does.
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      # The generator, the trades, the tests that use them, and the tenant
+      # machinery they exist to hold to account.
+      - 'backend/src/test/java/com/gpstore/marketplace/**'
+      - 'backend/src/main/java/com/gpstore/platform/**'
+      - 'backend/src/main/resources/db/migration/**'
+      - '.github/workflows/large-marketplace.yml'
+
+jobs:
+  two-thousand-shops:
+    runs-on: ubuntu-latest
+    # The dataset takes a few minutes to build and a few more to check. Twenty
+    # five is generous enough that a slow runner is not a red build and tight
+    # enough that a hang does not hold a runner for six hours.
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: gpstore_test
+          POSTGRES_USER: gpstore
+          POSTGRES_PASSWORD: gpstore_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DB_URL: jdbc:postgresql://localhost:5432/gpstore_test
+      DB_USERNAME: gpstore
+      DB_PASSWORD: gpstore_test_password
+      JWT_SECRET: ci-test-secret-not-for-real-use-1234567890123456789012345
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      # The same bootstrap CI uses, and for the same reason: versioned scripts
+      # start at V2 and assume domain tables exist, so Hibernate creates them
+      # first and Flyway follows.
+      - name: Bootstrap schema
+        env:
+          DDL_AUTO: update
+          FLYWAY_ENABLED: 'true'
+        run: ./mvnw -B test -Pschema-bootstrap -Dtest=EmptyDatabaseBootstrapTest -DexcludedGroups=
+
+      - name: Build two thousand shops and check them
+        env:
+          DDL_AUTO: validate
+          FLYWAY_ENABLED: 'true'
+          ALLOW_TEST_DATA: 'true'
+        run: ./mvnw -B test -Plarge-marketplace -Dtest=LargeMarketplaceTest -DfailIfNoTests=false
+
+      # THE TEARDOWN IS PART OF THE RESULT. A generator that cannot put a
+      # quarter of a million rows away again is a generator nobody can run
+      # twice, and the leftovers would quietly change whatever ran next. This
+      # asks the database directly rather than trusting the test's own
+      # @AfterAll to have finished.
+      - name: Prove nothing was left behind
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          left=$(docker run --rm --network=host -e PGPASSWORD=gpstore_test_password postgres:17 \
+            psql -h localhost -U gpstore -d gpstore_test -tA -c "
+              SELECT (SELECT count(*) FROM shops WHERE code LIKE 'gptest-%')
+                   + (SELECT count(*) FROM products WHERE name LIKE 'GPTEST%')
+                   + (SELECT count(*) FROM customers WHERE email LIKE 'gptest-%')
+                   + (SELECT count(*) FROM orders WHERE order_number LIKE 'GPTEST%')")
+          echo "synthetic rows still in the database: $left"
+          if [ "$left" != "0" ]; then
+            echo "::error::The marketplace generator left $left rows behind."
+            exit 1
+          fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: large-marketplace-surefire
+          path: backend/target/surefire-reports/
+          retention-days: 7
