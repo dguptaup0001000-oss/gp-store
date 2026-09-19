@@ -6,6 +6,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.cache.Cache;
+import org.springframework.cache.interceptor.CacheOperationInvoker;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.sql.SQLTransientConnectionException;
@@ -84,6 +86,64 @@ class LoadSheddingResponseTest {
             assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode(),
                     ex.getClass().getSimpleName() + " must be shed the same way as the raw JDBC form.");
         }
+    }
+
+    @Test
+    @DisplayName("a cached endpoint sheds like every other endpoint")
+    void poolExhaustionInsideACacheLoaderIsAlsoA503() {
+        // THE SHAPE THE LOAD RUN ACTUALLY PRODUCED. Spring's cache
+        // interceptor puts a ThrowableWrapper between the
+        // ValueRetrievalException and the failure, so a handler that peels
+        // one layer finds plumbing and falls through to 500. That is what
+        // /api/products/feed and /api/products/search/instant did at two
+        // thousand shops while every uncached endpoint in the same second
+        // answered an honest 503.
+        Throwable real = new org.springframework.transaction.CannotCreateTransactionException(
+                "Could not open JPA EntityManager for transaction",
+                new SQLTransientConnectionException("HikariPool-1 - Connection is not available"));
+        Cache.ValueRetrievalException ex = new Cache.ValueRetrievalException(
+                "shop:920", () -> null,
+                new CacheOperationInvoker.ThrowableWrapper(real));
+
+        ResponseEntity<?> response = handler.handleCacheLoadFailure(ex, request());
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode(),
+                "A cached read that could not get a connection is full, not broken - "
+                        + "500 tells a client retrying is pointless, which is not true.");
+        assertNotNull(response.getHeaders().getFirst("Retry-After"),
+                "The shed answer keeps its Retry-After no matter which layer produced it.");
+    }
+
+    @Test
+    @DisplayName("a genuine loader failure is still a 500")
+    void anythingElseInsideACacheLoaderStaysA500() {
+        // The widening must not swallow real faults. Only "no connection"
+        // becomes backpressure; a NullPointerException in a loader is a bug
+        // and has to keep saying so.
+        Cache.ValueRetrievalException ex = new Cache.ValueRetrievalException(
+                "shop:920", () -> null,
+                new CacheOperationInvoker.ThrowableWrapper(new IllegalStateException("bug")));
+
+        ResponseEntity<?> response = handler.handleCacheLoadFailure(ex, request());
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode(),
+                "Reporting a broken loader as backpressure would hide it behind a retry.");
+    }
+
+    @Test
+    @DisplayName("the domain exceptions keep their own status through the wrapper")
+    void domainFailuresSurviveTheWrapper() {
+        // These three were the reason handleCacheLoadFailure exists. They were
+        // being checked one layer above where they actually sit, so they only
+        // worked when no wrapper was in the way.
+        Cache.ValueRetrievalException badRequest = new Cache.ValueRetrievalException(
+                "k", () -> null,
+                new CacheOperationInvoker.ThrowableWrapper(
+                        new com.gpstore.exception.BadRequestException("Search keyword is required")));
+
+        assertEquals(HttpStatus.BAD_REQUEST,
+                handler.handleCacheLoadFailure(badRequest, request()).getStatusCode(),
+                "A blank keyword is the caller's mistake at any nesting depth.");
     }
 
     @Test

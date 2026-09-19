@@ -79,6 +79,13 @@ public class MarketplaceTestData {
     /** Phone numbers live in a block that cannot be a real Indian mobile. */
     private static final String PHONE_PREFIX = "9999";
 
+    /**
+     * Hands out phone numbers in order. Reset at the start of every
+     * {@link #create}, so one seed produces one dataset however many times it
+     * is run against a freshly cleaned database.
+     */
+    private int phoneCounter;
+
     private final AppBuildInfo buildInfo;
     private final DataSource dataSource;
     private final JdbcTemplate jdbc;
@@ -202,9 +209,60 @@ public class MarketplaceTestData {
      *
      * @param seed the same seed rebuilds the same dataset, row for row.
      */
+    /**
+     * How big a marketplace to build.
+     *
+     * <h2>One generator, two very different jobs</h2>
+     *
+     * <p>A test that runs on every push needs a handful of trades and a few
+     * thousand rows. A capacity experiment needs a hundred trades and two
+     * thousand shops. Those are the same generator with different numbers, not
+     * two generators - so the shape is a parameter rather than a fork, and a
+     * bug found at scale is a bug in the code CI exercises.
+     *
+     * @param trades            which trades take part. The light scale names a
+     *                          dozen explicitly so the assertions about them
+     *                          stay meaningful; the large scale takes all 100.
+     * @param shopsTarget       total shops to open across those trades.
+     * @param maxListingsPerShop caps a trade's natural size. The kirana wants
+     *                          ~500 lines, which is right for one shop and
+     *                          ruinous for two thousand.
+     */
+    public record Scale(List<Trade> trades, int shopsTarget, int customers,
+                        int orders, int maxListingsPerShop) {
+
+        /**
+         * Small enough for every push, varied enough to still mean something.
+         *
+         * <p>THE TRADES ARE NAMED RATHER THAN SLICED. An earlier version took
+         * "the first N", which quietly changed which trades existed the moment
+         * the enum was reordered - and the assertions are about phones not
+         * being asked for a pack size, which needs phones to be present.
+         */
+        public static Scale light() {
+            return new Scale(List.of(
+                    Trade.KIRANA, Trade.PHONES, Trade.PHONE_ACCESSORIES, Trade.SAREE,
+                    Trade.FOOTWEAR, Trade.PHARMACY, Trade.RESTAURANT, Trade.BIRYANI,
+                    Trade.HARDWARE, Trade.TRACTOR_PARTS, Trade.JEWELLERY, Trade.BOOKS,
+                    Trade.TOYS, Trade.GIFTS),
+                    22, 600, 2200, 520);
+        }
+
+        /** A hundred trades and two thousand shops. Not for ordinary CI. */
+        public static Scale large(int shops, int customers, int orders, int maxListings) {
+            return new Scale(List.of(Trade.values()), shops, customers, orders, maxListings);
+        }
+    }
+
+    /** The light marketplace. Kept so existing callers read unchanged. */
     public Marketplace create(long seed) {
+        return create(seed, Scale.light());
+    }
+
+    public Marketplace create(long seed, Scale scale) {
         refuseUnlessDisposable();
         Random random = new Random(seed);
+        phoneCounter = 0;
         long started = System.currentTimeMillis();
 
         List<Business> businesses = new ArrayList<>();
@@ -213,31 +271,60 @@ public class MarketplaceTestData {
         int listings = 0;
         int offers = 0;
 
-        for (Trade trade : Trade.values()) {
-            Business business = openBusiness(trade, random);
-            businesses.add(business);
+        // SHOPS ARE SPREAD OVER THE TRADES, not one per trade. Two thousand
+        // shops across a hundred trades means roughly twenty businesses in
+        // each - which is what makes "two phone shops cannot see each other" a
+        // real question rather than a hypothetical one.
+        //
+        // EVERY TRADE GETS AT LEAST ONE BUSINESS, and shopsTarget is a floor
+        // rather than a ceiling. An earlier version treated it as a budget and
+        // stopped early, which let the first few trades - one of which runs ten
+        // shops - swallow the whole allowance and leave eighty trades absent
+        // from a dataset whose entire point is that they are present.
+        //
+        // The pattern below averages about 2.35 shops per business, which is
+        // how many businesses each trade needs to reach its share.
+        final double averageShopsPerBusiness = 2.35;
+        int perTrade = Math.max(1, (int) Math.round(
+                scale.shopsTarget() / (double) Math.max(1, scale.trades().size())
+                        / averageShopsPerBusiness));
+        int businessOrdinal = 0;
 
-            Counts made = stockTheShelves(business, random);
-            products += made.products;
-            variants += made.variants;
-            listings += made.listings;
-            offers += seedOffers(business, trade, random);
+        for (Trade trade : scale.trades()) {
+            // The central catalogue for this trade is built ONCE and shared by
+            // every shop of that trade - which is how a marketplace actually
+            // works, and a far harder isolation test than a private catalogue
+            // per shop: the rows are genuinely shared, so only the listing can
+            // keep the shops apart.
+            TradeCatalogue catalogue = buildCatalogue(trade, random, scale);
+            products += catalogue.productIds().size();
+            variants += catalogue.variantIds().size();
+
+            for (int n = 0; n < perTrade; n++) {
+                Business business = openBusiness(trade, random, n, businessOrdinal++);
+                businesses.add(business);
+                listings += listShelves(business, catalogue, random, scale);
+                offers += seedOffers(business, trade, random);
+            }
         }
 
-        List<Long> customers = seedCustomers(random);
+        List<Long> customers = seedCustomers(random, scale.customers());
         int workers = seedWorkers(businesses, random);
-        int orders = seedOrders(businesses, customers, random);
+        int orders = seedOrders(businesses, customers, random, scale.orders());
         int reviews = seedReviews(businesses, customers, random);
 
-        log.info("{} marketplace: {} businesses, {} shops, {} products, {} listings, "
+        log.info("{} marketplace: {} businesses, {} shops, {} trades, {} products, {} listings, "
                         + "{} customers, {} workers, {} orders in {} ms",
                 TAG, businesses.size(), businesses.stream().mapToInt(b -> b.shopIds().size()).sum(),
-                products, listings, customers.size(), workers, orders,
+                scale.trades().size(), products, listings, customers.size(), workers, orders,
                 System.currentTimeMillis() - started);
 
         return new Marketplace(businesses, customers, products, variants, listings,
                 workers, orders, reviews, offers);
     }
+
+    /** One trade's shared central catalogue. */
+    private record TradeCatalogue(List<Long> productIds, List<Long> variantIds) {}
 
     private record Counts(int products, int variants, int listings) {}
 
@@ -249,36 +336,59 @@ public class MarketplaceTestData {
      * 2, 3 and 5 shops so that one-shop, few-shop and many-shop merchants all
      * exist in the same database at the same time.
      */
-    private Business openBusiness(Trade trade, Random random) {
-        String name = TAG + " " + trade.label + " (seeded)";
+    /**
+     * One business of this trade, and the shops under it.
+     *
+     * <p>THE SHOP COUNT IS NOT UNIFORM, because the shop switcher only has
+     * anything to do when a merchant has more than one. The distribution below
+     * gives one-shop, two-shop, three-shop, five-shop and ten-shop merchants so
+     * that every branch of the switching and authorisation logic has a real
+     * subject in the same database.
+     *
+     * @param n       which business of this trade - part of the shop code, so
+     *                two phone shops never collide on {@code ux_shops_code}.
+     * @param ordinal its position across the whole marketplace, which decides
+     *                how many shops it runs.
+     */
+    private Business openBusiness(Trade trade, Random random, int n, int ordinal) {
+        String name = TAG + " " + trade.label + " " + (n + 1) + " (seeded)";
         Long merchantId = merchants.register(
-                name, name, phone(random), email(trade.name().toLowerCase(Locale.ROOT)),
+                name, name, phone(random), email(trade.name().toLowerCase(Locale.ROOT) + n),
                 null, true).getId();
         merchants.transition(merchantId, MerchantStatus.PENDING_REVIEW, TAG + " seeded");
         merchants.transition(merchantId, MerchantStatus.APPROVED, TAG + " seeded");
         merchants.transition(merchantId, MerchantStatus.ACTIVE, TAG + " seeded");
 
-        long ownerId = account(trade.name().toLowerCase(Locale.ROOT) + "-owner", "ADMIN", random);
+        long ownerId = account(trade.name().toLowerCase(Locale.ROOT) + n + "-owner", "ADMIN", random);
         jdbc.update("UPDATE merchants SET owner_customer_id = ? WHERE id = ?", ownerId, merchantId);
 
-        int shopCount = switch (trade) {
-            case KIRANA -> 5;
-            case PHARMACY -> 3;
-            case RESTAURANT -> 2;
-            case HARDWARE -> 2;
+        // A REALISTIC SPREAD, AND A DETERMINISTIC ONE. Most merchants have one
+        // shop, some two or three, a few five, and one in twenty runs ten -
+        // which is the case the shop switcher is least often exercised on.
+        //
+        // DERIVED FROM THE ORDINAL RATHER THAN ROLLED. A random shop count
+        // makes the dataset unreproducible in exactly the dimension the
+        // authorisation tests care about: "is there a merchant with five shops
+        // in this run" must not be a coin toss.
+        int shopCount = switch (ordinal % 20) {
+            case 0 -> 10;
+            case 5, 11 -> 5;
+            case 3, 8, 14 -> 3;
+            case 1, 6, 9, 16 -> 2;
             default -> 1;
         };
 
         List<Long> shopIds = new ArrayList<>();
         for (int i = 0; i < shopCount; i++) {
-            String code = (TAG + "-" + trade.name() + (i == 0 ? "" : "-" + (i + 1)))
+            String code = (TAG + "-" + trade.name() + "-" + n + "-" + i)
                     .toLowerCase(Locale.ROOT);
             // Spread the pins so distance-based discovery has something to sort.
-            double lat = 26.70 + random.nextDouble() * 0.20;
-            double lng = 83.30 + random.nextDouble() * 0.20;
-            BigDecimal radius = BigDecimal.valueOf(new int[]{1, 5, 10, 20, 40}[random.nextInt(5)]);
+            double lat = 26.40 + random.nextDouble() * 0.80;
+            double lng = 83.00 + random.nextDouble() * 0.80;
+            BigDecimal radius = BigDecimal.valueOf(new int[]{1, 3, 5, 10, 20, 40}[random.nextInt(6)]);
 
-            long shopId = shops.open(merchantId, code, TAG + " " + trade.label + (i == 0 ? "" : " #" + (i + 1)),
+            long shopId = shops.open(merchantId, code,
+                    TAG + " " + trade.label + " " + (n + 1) + (i == 0 ? "" : " #" + (i + 1)),
                     lat, lng, radius, "Asia/Kolkata").getId();
             shops.transitionAsPlatform(shopId, ShopStatus.ACTIVE, TAG + " seeded");
             shopIds.add(shopId);
@@ -286,23 +396,21 @@ public class MarketplaceTestData {
             seedDeliveryPricing(shopId, random);
         }
 
-        List<Long> categoryIds = seedCategories(trade);
-        return new Business(trade, merchantId, ownerId, shopIds, categoryIds);
+        return new Business(trade, merchantId, ownerId, shopIds, seedCategories(trade));
     }
 
     /**
-     * The platform taxonomy rows this trade needs.
+     * The platform taxonomy rows this trade needs, created once.
      *
      * <p>THE CENTRAL TAXONOMY IS SHARED ON PURPOSE - it is the marketplace's
      * own list of what things are, and two shops selling shoes should agree
-     * about the word "Shoes". What must NOT be shared is a merchant's own
-     * departments and, far more importantly, their listings. That distinction
-     * is exactly what {@code CategoriesDoNotLeakTest} goes after.
+     * about the word "Footwear". What must NOT be shared is a merchant's own
+     * departments and, far more importantly, their listings.
      */
     private List<Long> seedCategories(Trade trade) {
         List<Long> ids = new ArrayList<>();
         for (String category : trade.categories) {
-            String name = TAG + " " + category;
+            String name = TAG + " " + trade.name() + " " + category;
             Long existing = jdbc.query(
                     "SELECT id FROM categories WHERE name = ? LIMIT 1",
                     rs -> rs.next() ? rs.getLong(1) : null, name);
@@ -318,69 +426,61 @@ public class MarketplaceTestData {
     }
 
     /**
-     * Products, variants, listings and stock for one business.
+     * One trade's central catalogue - products, variants and their generic
+     * attributes - built once and shared by every shop of that trade.
      *
-     * <p>THE CENTRAL PRODUCT AND THE SHOP LISTING ARE WRITTEN SEPARATELY, which
-     * is the point rather than an implementation detail: a row in
-     * {@code products} is the marketplace saying an item exists, and a row in
-     * {@code shop_product_variants} is one merchant saying they sell it. Any
-     * test that wants to prove a phone shop does not own rice needs those two
-     * to have been created independently, and here they are.
+     * <p>THIS IS THE HARD VERSION OF THE ISOLATION QUESTION. If each shop had
+     * its own private products, keeping shops apart would be trivial and the
+     * test would prove nothing. Here twenty phone shops genuinely share the
+     * same {@code products} and {@code product_variants} rows, so the ONLY
+     * thing standing between one shop's price, stock and shelf and another's
+     * is {@code shop_product_variants} and the tenant filter over it.
      */
-    private Counts stockTheShelves(Business business, Random random) {
-        Trade trade = business.trade();
-        int target = trade.size.min + random.nextInt(Math.max(1, trade.size.max - trade.size.min));
+    private TradeCatalogue buildCatalogue(Trade trade, Random random, Scale scale) {
+        List<Long> categoryIds = seedCategories(trade);
+        int howMany = Math.min(scale.maxListingsPerShop(),
+                trade.size.min + random.nextInt(Math.max(1, trade.size.max - trade.size.min)));
 
         List<Object[]> productRows = new ArrayList<>();
-        for (int i = 0; i < target; i++) {
+        for (int i = 0; i < howMany; i++) {
             String stem = trade.productStems.get(i % trade.productStems.size());
-            // THE TRADE IS IN THE NAME, and that is not decoration. Selecting
-            // these products back by their CATEGORY looked right until two
-            // trades turned out to share a category word - the later business
-            // then re-read the earlier one's products and tried to give them a
-            // second set of attributes, which V71's unique index refused. The
-            // product's own business is the only unambiguous handle.
-            String name = TAG + "-" + trade.name() + " " + stem + " " + (i + 1);
-            Long categoryId = business.categoryIds().get(i % business.categoryIds().size());
-            productRows.add(new Object[]{name, TAG + " brand", categoryId});
+            // THE TRADE IS IN THE NAME. Selecting products back by CATEGORY
+            // looked right until two trades turned out to share a category
+            // word; the product's own trade is the only unambiguous handle.
+            productRows.add(new Object[]{
+                    TAG + "-" + trade.name() + " " + stem + " " + (i + 1),
+                    TAG + " " + trade.label,
+                    categoryIds.get(i % categoryIds.size())});
         }
-        jdbc.batchUpdate(
-                "INSERT INTO products (name, brand, category_id, active) VALUES (?, ?, ?, true)",
+        batched("INSERT INTO products (name, brand, category_id, active) VALUES (?, ?, ?, true)",
                 productRows);
 
         List<Long> productIds = jdbc.queryForList(
                 "SELECT id FROM products WHERE name LIKE ? ORDER BY id",
                 Long.class, TAG + "-" + trade.name() + " %");
 
-        // One or two variants each, so multi-variant products exist without
-        // every product being multi-variant.
         List<Object[]> variantRows = new ArrayList<>();
-        Map<Long, Integer> variantsPerProduct = new LinkedHashMap<>();
         for (Long productId : productIds) {
-            int howMany = random.nextInt(100) < 40 ? 2 : 1;
-            variantsPerProduct.put(productId, howMany);
-            for (int v = 0; v < howMany; v++) {
-                // quantity/unit remain what they always were - they weigh a
-                // basket. What tells a phone from a phone is the generic
-                // attributes below, not these.
+            int variants = random.nextInt(100) < 40 ? 2 : 1;
+            for (int v = 0; v < variants; v++) {
                 BigDecimal selling = BigDecimal.valueOf(50 + random.nextInt(30000));
                 variantRows.add(new Object[]{productId, 1.0d, "piece", selling,
                         selling.add(BigDecimal.valueOf(random.nextInt(500)))});
             }
         }
-        jdbc.batchUpdate(
-                "INSERT INTO product_variants "
-                        + "(product_id, quantity, unit, selling_price, mrp, active, available) "
-                        + "VALUES (?, ?, ?, ?, ?, true, true)", variantRows);
+        batched("INSERT INTO product_variants "
+                + "(product_id, quantity, unit, selling_price, mrp, active, available) "
+                + "VALUES (?, ?, ?, ?, ?, true, true)", variantRows);
 
         List<Long> variantIds = jdbc.queryForList(
-                "SELECT v.id FROM product_variants v WHERE v.product_id IN ("
-                        + placeholders(productIds.size()) + ") ORDER BY v.id",
-                Long.class, productIds.toArray());
+                "SELECT v.id FROM product_variants v JOIN products p ON p.id = v.product_id "
+                        + "WHERE p.name LIKE ? ORDER BY v.id",
+                Long.class, TAG + "-" + trade.name() + " %");
 
-        // GENERIC ATTRIBUTES (V71). A phone gets RAM and Storage; a saree gets
-        // Material and Design. If any of this had to become "pack size", the
-        // model would still be grocery-shaped.
+        // GENERIC ATTRIBUTES (V71). A phone gets Brand, Model, RAM, Storage and
+        // Colour; a saree gets Material, Colour, Design, Length and Occasion; a
+        // car part gets Manufacturer, Compatible model and Part number. None of
+        // it is a column, and the next trade needs no migration.
         List<Object[]> attributeRows = new ArrayList<>();
         for (Long variantId : variantIds) {
             int order = 0;
@@ -390,56 +490,79 @@ public class MarketplaceTestData {
                         order++});
             }
         }
-        // TIMESTAMPS STATED, NOT LEFT TO A DEFAULT.
-        //
-        // V71 declares these NOT NULL DEFAULT CURRENT_TIMESTAMP, and omitting
-        // them worked locally for exactly that reason - but CI refused the
-        // same insert with "null value in column created_at violates not-null
-        // constraint". On a fresh database Hibernate's ddl-auto=update creates
-        // this table from the entity first (NOT NULL, no DB default), and
-        // V71's CREATE TABLE IF NOT EXISTS then silently no-ops, so the
-        // default the migration intended is simply not there.
-        //
-        // The entity never notices because @PrePersist fills both. Raw JDBC
-        // has no @PrePersist, so it says so itself rather than depending on
-        // which of the two paths happened to create the table.
-        jdbc.batchUpdate(
-                "INSERT INTO product_variant_attributes "
-                        + "(product_variant_id, name, value, display_order, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                attributeRows);
+        // Timestamps stated, not left to a default - see the note on the
+        // listing insert below.
+        batched("INSERT INTO product_variant_attributes "
+                + "(product_variant_id, name, value, display_order, created_at, updated_at) "
+                + "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)", attributeRows);
 
-        // The listings. Every shop of this business lists this business's own
-        // variants and nothing else.
+        return new TradeCatalogue(productIds, variantIds);
+    }
+
+    /**
+     * What this business's shops actually sell, drawn from their trade's shared
+     * catalogue.
+     *
+     * <p>EACH SHOP LISTS ITS OWN SUBSET AT ITS OWN PRICES. Two shops of the
+     * same trade overlap heavily and agree about nothing commercial - which is
+     * the property {@code (shop_id, product_variant_id)} exists to provide.
+     */
+    private int listShelves(Business business, TradeCatalogue catalogue,
+                            Random random, Scale scale) {
+        if (catalogue.variantIds().isEmpty()) {
+            return 0;
+        }
         int listings = 0;
         for (Long shopId : business.shopIds()) {
-            List<Object[]> listingRows = new ArrayList<>();
-            List<Object[]> stockRows = new ArrayList<>();
-            for (Long variantId : variantIds) {
+            // A shop carries most of its trade's catalogue, not all of it.
+            int carry = Math.min(catalogue.variantIds().size(),
+                    Math.max(1, (int) (catalogue.variantIds().size()
+                            * (0.55 + random.nextDouble() * 0.45))));
+
+            List<Object[]> listingRows = new ArrayList<>(carry);
+            List<Object[]> stockRows = new ArrayList<>(carry);
+            for (int i = 0; i < carry; i++) {
+                Long variantId = catalogue.variantIds().get(i);
                 BigDecimal selling = BigDecimal.valueOf(50 + random.nextInt(30000));
                 listingRows.add(new Object[]{shopId, variantId, selling,
                         selling.add(BigDecimal.valueOf(random.nextInt(500))), true, true});
                 // Some shelves are empty on purpose - out of stock is a state
                 // the storefront has rules about.
-                int stock = random.nextInt(100) < 12 ? 0 : 1 + random.nextInt(50);
-                stockRows.add(new Object[]{shopId, variantId, stock});
+                stockRows.add(new Object[]{shopId, variantId,
+                        random.nextInt(100) < 12 ? 0 : 1 + random.nextInt(50)});
             }
-            jdbc.batchUpdate(
-                    "INSERT INTO shop_product_variants "
-                            + "(shop_id, product_variant_id, selling_price, mrp, available, active, "
-                            + " created_at, updated_at) "
-                            + "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+
+            // TIMESTAMPS STATED, NOT LEFT TO A DEFAULT. CI refused an insert
+            // this machine accepted: on a database where Hibernate created the
+            // table first, the migration's DEFAULT CURRENT_TIMESTAMP is simply
+            // not there, and validate does not check defaults. @PrePersist
+            // covers the entity; raw JDBC has to say it itself.
+            batched("INSERT INTO shop_product_variants "
+                    + "(shop_id, product_variant_id, selling_price, mrp, available, active, "
+                    + " created_at, updated_at) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     listingRows);
-            jdbc.batchUpdate(
-                    "INSERT INTO inventory (shop_id, product_variant_id, stock) "
-                            + "VALUES (?, ?, ?)", stockRows);
+            batched("INSERT INTO inventory (shop_id, product_variant_id, stock) VALUES (?, ?, ?)",
+                    stockRows);
             listings += listingRows.size();
         }
-
-        return new Counts(productIds.size(), variantIds.size(), listings);
+        return listings;
     }
 
-    // ------------------------------------------------------------- the rest
+    /**
+     * Inserts in chunks.
+     *
+     * <p>Three hundred thousand rows handed to one batchUpdate is a heap
+     * problem rather than a test. Ten thousand at a time keeps the driver's
+     * buffers bounded and costs nothing measurable.
+     */
+    private void batched(String sql, List<Object[]> rows) {
+        final int chunk = 10_000;
+        for (int from = 0; from < rows.size(); from += chunk) {
+            jdbc.batchUpdate(sql, rows.subList(from, Math.min(rows.size(), from + chunk)));
+        }
+    }
+
 
     private void seedHours(long shopId, Trade trade, Random random) {
         // A 24-hour biryani place, a 10-6 jeweller, and a 9-9 kirana all exist.
@@ -512,16 +635,14 @@ public class MarketplaceTestData {
      * customer list merely by being a merchant, so the dataset needs a large
      * population that no shop has served.
      */
-    private List<Long> seedCustomers(Random random) {
-        int howMany = 600;
+    private List<Long> seedCustomers(Random random, int howMany) {
         List<Object[]> rows = new ArrayList<>();
         for (int i = 0; i < howMany; i++) {
             rows.add(new Object[]{TAG + " Customer " + i, email("cust" + i), phone(random)});
         }
-        jdbc.batchUpdate("""
-                INSERT INTO customers (full_name, email, mobile_number, password, role, active)
-                VALUES (?, ?, ?, 'not-a-real-hash', 'CUSTOMER', true)
-                """, rows);
+        batched("INSERT INTO customers "
+                + "(full_name, email, mobile_number, password, role, active) "
+                + "VALUES (?, ?, ?, 'not-a-real-hash', 'CUSTOMER', true)", rows);
         return jdbc.queryForList(
                 "SELECT id FROM customers WHERE email LIKE ? ORDER BY id",
                 Long.class, TAG.toLowerCase(Locale.ROOT) + "-cust%");
@@ -560,7 +681,8 @@ public class MarketplaceTestData {
      * assertion meaningless - the dataset would be testing itself rather than
      * GP-STORE.
      */
-    private int seedOrders(List<Business> businesses, List<Long> customers, Random random) {
+    private int seedOrders(List<Business> businesses, List<Long> customers,
+                           Random random, int target) {
         // THE SCHEMA'S OWN VOCABULARY, not an invented one. An earlier draft
         // used "PREPARING" and orders_order_status_check refused it - which is
         // the database declining to hold a state the application could never
@@ -569,7 +691,6 @@ public class MarketplaceTestData {
                 "OUT_FOR_DELIVERY", "DELIVERED", "DELIVERED", "DELIVERED",
                 "CANCELLED", "REJECTED", "DELIVERY_FAILED", "COMPLETED"};
         List<Object[]> rows = new ArrayList<>();
-        int target = 2200;
         for (int i = 0; i < target; i++) {
             Business business = businesses.get(random.nextInt(businesses.size()));
             long shopId = business.shopIds().get(random.nextInt(business.shopIds().size()));
@@ -581,11 +702,8 @@ public class MarketplaceTestData {
             rows.add(new Object[]{TAG + "-ORD-" + i, shopId, customerId,
                     BigDecimal.valueOf(50 + random.nextInt(4000)), state, payment});
         }
-        jdbc.batchUpdate("""
-                INSERT INTO orders (order_number, shop_id, customer_id, total_amount,
-                                    order_status, payment_status)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, rows);
+        batched("INSERT INTO orders (order_number, shop_id, customer_id, total_amount, "
+                + "order_status, payment_status) VALUES (?, ?, ?, ?, ?, ?)", rows);
         return target;
     }
 
@@ -613,12 +731,9 @@ public class MarketplaceTestData {
                 }
             }
         }
-        jdbc.batchUpdate("""
-                INSERT INTO shop_ratings (shop_id, customer_id, order_id, rating, comment,
-                                          created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                ON CONFLICT DO NOTHING
-                """, rows);
+        batched("INSERT INTO shop_ratings "
+                + "(shop_id, customer_id, order_id, rating, comment, created_at, updated_at) "
+                + "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)", rows);
         return rows.size();
     }
 
@@ -632,12 +747,37 @@ public class MarketplaceTestData {
      * which is the only property that makes it safe to run against a database
      * that also holds somebody's hand-made fixtures.
      */
-    @Transactional
+    /**
+     * Removes exactly what this generator made, and nothing else.
+     *
+     * <h2>By tag, and by the indexes that actually exist</h2>
+     *
+     * <p>No TRUNCATE, no date window, no "id greater than". If a row was not
+     * created here it is not matched here, which is the only property that
+     * makes this safe to run against a database that also holds somebody's
+     * hand-made fixtures.
+     *
+     * <p>SHOP-OWNED ROWS GO BY {@code shop_id}, NOT BY A VARIANT SUBQUERY, and
+     * that is a fix rather than a style. At two thousand shops the subquery
+     * form timed out: {@code inventory} is indexed on {@code (shop_id,
+     * product_variant_id)}, whose leading column is the shop, so a lookup by
+     * variant alone cannot use it and degrades to a sequential scan. Deleting
+     * by shop uses {@code idx_inventory_shop_id} and finishes.
+     *
+     * <p>NOT TRANSACTIONAL ANY MORE, deliberately. Three hundred thousand
+     * deletes in one transaction is a long-held lock and a large amount of WAL
+     * for a teardown that nothing else is waiting on. Each statement stands on
+     * its own, and a half-finished cleanup is recoverable by running it again -
+     * every delete is idempotent because it matches on the tag.
+     */
     public void cleanUp() {
         refuseUnlessDisposable();
         String like = TAG + "%";
         String emailLike = TAG.toLowerCase(Locale.ROOT) + "-%";
+        String codeLike = TAG.toLowerCase(Locale.ROOT) + "-%";
+        String ourShops = "SELECT id FROM shops WHERE code LIKE '" + codeLike + "'";
 
+        // Orders and what hangs off them.
         jdbc.update("DELETE FROM shop_ratings WHERE comment LIKE ?", like);
         jdbc.update("DELETE FROM order_alerts_sent WHERE order_id IN "
                 + "(SELECT id FROM orders WHERE order_number LIKE ?)", like);
@@ -646,36 +786,87 @@ public class MarketplaceTestData {
         jdbc.update("DELETE FROM orders WHERE order_number LIKE ?", like);
         jdbc.update("DELETE FROM coupons WHERE coupon_code LIKE ?", like);
 
-        jdbc.update("DELETE FROM inventory WHERE product_variant_id IN "
-                + "(SELECT v.id FROM product_variants v JOIN products p ON p.id = v.product_id "
-                + "WHERE p.name LIKE ?)", like);
-        jdbc.update("DELETE FROM shop_product_variants WHERE product_variant_id IN "
-                + "(SELECT v.id FROM product_variants v JOIN products p ON p.id = v.product_id "
-                + "WHERE p.name LIKE ?)", like);
+        // Shop-owned rows, by shop. These are the big ones.
+        jdbc.update("DELETE FROM inventory WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM shop_product_variants WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM shop_categories WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM shop_staff WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM shop_business_hours WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id IN (" + ourShops + ")");
+        jdbc.update("DELETE FROM store_operations_settings WHERE shop_id IN (" + ourShops + ")");
+
+        // The central catalogue this generator added. Attributes first: that
+        // foreign key IS indexed (idx_variant_attribute_variant), so it is
+        // cheap; the variants themselves go in chunks because several tables
+        // reference them without a leading-column index, and every parent row
+        // deleted costs a scan of each of those.
         jdbc.update("DELETE FROM product_variant_attributes WHERE product_variant_id IN "
                 + "(SELECT v.id FROM product_variants v JOIN products p ON p.id = v.product_id "
                 + "WHERE p.name LIKE ?)", like);
-        jdbc.update("DELETE FROM product_variants WHERE product_id IN "
-                + "(SELECT id FROM products WHERE name LIKE ?)", like);
+        deleteInChunks("product_variants",
+                "SELECT v.id FROM product_variants v JOIN products p ON p.id = v.product_id "
+                        + "WHERE p.name LIKE ?", like);
         jdbc.update("DELETE FROM products WHERE name LIKE ?", like);
-        jdbc.update("DELETE FROM shop_categories WHERE name LIKE ?", like);
         jdbc.update("DELETE FROM categories WHERE name LIKE ?", like);
 
+        // Accounts and the shops themselves.
         jdbc.update("DELETE FROM push_registrations WHERE customer_id IN "
                 + "(SELECT id FROM customers WHERE email LIKE ?)", emailLike);
-        jdbc.update("DELETE FROM shop_staff WHERE shop_id IN "
-                + "(SELECT id FROM shops WHERE code LIKE ?)", TAG.toLowerCase(Locale.ROOT) + "-%");
         jdbc.update("DELETE FROM shop_staff WHERE customer_id IN "
                 + "(SELECT id FROM customers WHERE email LIKE ?)", emailLike);
-        jdbc.update("DELETE FROM shop_business_hours WHERE shop_id IN "
-                + "(SELECT id FROM shops WHERE code LIKE ?)", TAG.toLowerCase(Locale.ROOT) + "-%");
-        jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id IN "
-                + "(SELECT id FROM shops WHERE code LIKE ?)", TAG.toLowerCase(Locale.ROOT) + "-%");
-        jdbc.update("DELETE FROM store_operations_settings WHERE shop_id IN "
-                + "(SELECT id FROM shops WHERE code LIKE ?)", TAG.toLowerCase(Locale.ROOT) + "-%");
-        jdbc.update("DELETE FROM shops WHERE code LIKE ?", TAG.toLowerCase(Locale.ROOT) + "-%");
+        jdbc.update("DELETE FROM shops WHERE code LIKE ?", codeLike);
         jdbc.update("DELETE FROM merchants WHERE legal_name LIKE ?", like);
-        jdbc.update("DELETE FROM customers WHERE email LIKE ?", emailLike);
+        deleteInChunks("customers", "SELECT id FROM customers WHERE email LIKE ?", emailLike);
+    }
+
+    /** Rows per teardown statement. Small enough to finish inside the thirty-second
+     * {@code statement_timeout} the application sets on every connection. */
+    private static final int DELETE_CHUNK = 2000;
+
+    /**
+     * Deletes a few thousand rows at a time until none are left.
+     *
+     * <p>WHY CHUNKED, AND WHY IT IS NOT A STYLE CHOICE. A row cannot be deleted
+     * until PostgreSQL has proved that nothing references it, and it proves
+     * that by looking in every table with a foreign key to it. Where that
+     * foreign key has no index with it as the leading column, the look is a
+     * sequential scan - once per deleted row. Two of this generator's parents
+     * are in that position at scale:
+     *
+     * <ul>
+     *   <li>{@code product_variants} is referenced by {@code inventory},
+     *       {@code cart_items}, {@code order_items} and {@code product_images}.
+     *       {@code inventory}'s only variant index is
+     *       {@code uk_inventory_shop_variant (shop_id, product_variant_id)},
+     *       whose leading column is the shop.</li>
+     *   <li>{@code customers} is referenced by {@code invoices.customer_id},
+     *       {@code order_returns.decided_by} and {@code wishlist.customer_id},
+     *       none of which is indexed.</li>
+     * </ul>
+     *
+     * <p>Fifty thousand customers against a few thousand invoices is a hundred
+     * million row comparisons in one statement, and the thirty-second
+     * {@code statement_timeout} that {@code application.properties} sets on
+     * every connection cancels it - correctly. Chunking does not make the work
+     * smaller; it makes each statement finish, and makes a half-done teardown
+     * resumable, because every chunk matches on the tag and can simply be run
+     * again.
+     *
+     * <p>THE TIMEOUT IS NOT THE BUG AND IS NOT WEAKENED HERE. Thirty seconds is
+     * a production safety limit on a runaway query, and a teardown is not a
+     * reason to raise it.
+     *
+     * <p>Nor are the missing indexes added. This is a note about the SHAPE OF
+     * THE SCHEMA under an operation the application never performs: production
+     * does not bulk-delete catalogue variants or customer accounts, which is
+     * why these have never cost anything there. An index earns its place on a
+     * measured application query, and a test's teardown is not one.
+     */
+    private void deleteInChunks(String table, String selectIds, Object... args) {
+        while (jdbc.update("DELETE FROM " + table + " WHERE id IN ("
+                + selectIds + " LIMIT " + DELETE_CHUNK + ")", args) > 0) {
+            // Until the select finds nothing left to hand over.
+        }
     }
 
     // ============================================================ small bits
@@ -694,9 +885,23 @@ public class MarketplaceTestData {
         return TAG.toLowerCase(Locale.ROOT) + "-" + who + "@example.test";
     }
 
-    /** 9999xxxxxx is not an allocated Indian mobile block. */
-    private static String phone(Random random) {
-        return PHONE_PREFIX + String.format("%06d", random.nextInt(1_000_000));
+    /**
+     * 9999xxxxxx - not an allocated Indian mobile block, and unique by
+     * construction.
+     *
+     * <p>COUNTED, NOT ROLLED, and that is a fix rather than a preference.
+     * {@code customers.mobile_number} is UNIQUE, and six random digits give a
+     * million values: at fifty thousand customers the birthday paradox makes a
+     * collision essentially certain - about six hundred expected - and the
+     * insert fails. Thirty shops never reached the numbers where that shows,
+     * which is exactly the kind of thing generating a real-sized marketplace is
+     * for.
+     *
+     * <p>A counter is also more deterministic than a roll: the same seed now
+     * produces the same phone numbers as well as the same everything else.
+     */
+    private String phone(Random random) {
+        return PHONE_PREFIX + String.format("%06d", phoneCounter++ % 1_000_000);
     }
 
     private static String placeholders(int count) {

@@ -336,12 +336,31 @@ public class GlobalExceptionHandler {
      * this handler a blank search keyword becomes HTTP 500 instead of 400,
      * which is exactly the "hide a 400 behind a 500" failure the shop had
      * on {@code /search/instant}.
+     *
+     * <p>A CACHED ENDPOINT MUST SHED THE SAME WAY AN UNCACHED ONE DOES, and
+     * until a two-thousand-shop load run it did not. When the pool is empty
+     * the loader cannot open a transaction, and the resulting
+     * {@code CannotCreateTransactionException} arrived here as HTTP 500 - the
+     * same "hide the real answer behind a 500" fault this handler was written
+     * to prevent, one status code further up. The load run has the pair in it:
+     * {@code /api/products/feed} and {@code /api/products/search/instant}
+     * answered 500 while every uncached endpoint in the same second answered
+     * an honest 503 with Retry-After. A 500 tells a client and a proxy that
+     * retrying is pointless; a 503 tells them when to come back, and only one
+     * of those is true of a full connection pool.
+     *
+     * <p>THE CHAIN IS WALKED RATHER THAN PEELED ONCE. Spring's cache
+     * interceptor puts a {@code CacheOperationInvoker.ThrowableWrapper}
+     * between the ValueRetrievalException and whatever the loader actually
+     * threw, so {@code getCause()} alone finds plumbing rather than the
+     * failure. Unwrapping it also makes the three domain checks below see
+     * what they were always meant to see.
      */
     @ExceptionHandler(org.springframework.cache.Cache.ValueRetrievalException.class)
     public ResponseEntity<ApiError> handleCacheLoadFailure(
             org.springframework.cache.Cache.ValueRetrievalException ex,
             HttpServletRequest req) {
-        Throwable cause = ex.getCause();
+        Throwable cause = unwrapCachePlumbing(ex.getCause());
         if (cause instanceof BadRequestException bad) {
             return handleBadRequest(bad, req);
         }
@@ -351,8 +370,41 @@ public class GlobalExceptionHandler {
         if (cause instanceof ConflictException conflict) {
             return handleConflict(conflict, req);
         }
+        Exception full = poolExhaustionWithin(cause);
+        if (full != null) {
+            return handlePoolExhausted(full, req);
+        }
         log.error("Cache loader failed on {} {}", req.getMethod(), req.getRequestURI(), ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", req);
+    }
+
+    /** Strips the cache interceptor's own wrapper so the real failure is visible. */
+    private static Throwable unwrapCachePlumbing(Throwable cause) {
+        while (cause instanceof org.springframework.cache.interceptor
+                .CacheOperationInvoker.ThrowableWrapper wrapper
+                && wrapper.getCause() != null) {
+            cause = wrapper.getCause();
+        }
+        return cause;
+    }
+
+    /**
+     * The first "could not get a connection" in a cause chain, or null.
+     *
+     * <p>Bounded rather than open-ended: a cause chain is normally two or three
+     * deep, and a malformed or self-referential one must not spin here while
+     * the pool it is complaining about stays empty.
+     */
+    private static Exception poolExhaustionWithin(Throwable cause) {
+        for (int depth = 0; cause != null && depth < 10; depth++, cause = cause.getCause()) {
+            if (cause instanceof java.sql.SQLTransientConnectionException
+                    || cause instanceof org.springframework.transaction.CannotCreateTransactionException
+                    || cause instanceof org.springframework.jdbc.CannotGetJdbcConnectionException
+                    || cause instanceof org.springframework.dao.DataAccessResourceFailureException) {
+                return (Exception) cause;
+            }
+        }
+        return null;
     }
 
     /**
