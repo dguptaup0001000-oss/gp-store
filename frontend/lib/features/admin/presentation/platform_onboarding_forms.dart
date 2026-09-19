@@ -985,3 +985,169 @@ class _Handover extends StatelessWidget {
     );
   }
 }
+
+/// Gives a business that has none its first shop.
+///
+/// THE STATE THIS EXISTS FOR IS A REAL ONE. GUPT SAREE reached production as a
+/// merchant row with an owner account and zero shops - registered through
+/// "Register a business only", which opens a login and deliberately opens no
+/// shop, and then hands over a one-time password. The owner used it, and
+/// Merchant Admin told them their account was not associated with a shop.
+/// Nothing was broken; there was simply nothing there, and no way back short
+/// of deleting the business and starting again.
+///
+/// It asks only what a shop cannot be without: where it is, and how far it
+/// delivers. ShopReadiness calls both blocking, so a shop opened without them
+/// looks finished and can never sell.
+class PlatformAddFirstShopDialog extends ConsumerStatefulWidget {
+  const PlatformAddFirstShopDialog({
+    super.key,
+    required this.merchantId,
+    required this.businessName,
+    required this.merchantStatus,
+  });
+
+  final int merchantId;
+  final String businessName;
+  final String? merchantStatus;
+
+  @override
+  ConsumerState<PlatformAddFirstShopDialog> createState() =>
+      _PlatformAddFirstShopDialogState();
+}
+
+class _PlatformAddFirstShopDialogState
+    extends ConsumerState<PlatformAddFirstShopDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _shopName = TextEditingController();
+  final _location = TextEditingController();
+  final _radius = TextEditingController(text: '5');
+  bool _saving = false;
+
+  /// True when opening the shop will also move the business forward, so the
+  /// dialog can say so BEFORE it happens rather than after.
+  bool get _willApprove =>
+      widget.merchantStatus == 'APPLICATION' ||
+      widget.merchantStatus == 'PENDING_REVIEW';
+
+  @override
+  void dispose() {
+    _shopName.dispose();
+    _location.dispose();
+    _radius.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final where = PlatformOnboardMerchantDialog.parseLocation(_location.text)!;
+    setState(() => _saving = true);
+    try {
+      final made = await ref.read(platformRepositoryProvider).addFirstShop(
+            merchantId: widget.merchantId,
+            displayName: _shopName.text.trim(),
+            latitude: where.lat,
+            longitude: where.lng,
+            maxDeliveryRadiusKm: double.parse(_radius.text.trim()),
+          );
+      ref.invalidate(platformMerchantsProvider);
+      ref.invalidate(platformShopsProvider);
+      if (!mounted) return;
+      Navigator.of(context).pop(made);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(extractErrorMessage(error))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add the first shop'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${widget.businessName} has no shop, so its owner has nothing '
+                'to sign in to. This opens one and makes the owner its first '
+                'member.',
+                style: const TextStyle(fontSize: 13),
+              ),
+              if (_willApprove) ...[
+                const SizedBox(height: 8),
+                // SAID IN ADVANCE, because it changes the business and not
+                // only the shop. A shop can only be opened under an approved
+                // merchant, so this is what is actually in the way.
+                const Text(
+                  'This business will also be approved, because a shop can '
+                  'only be opened under an approved one. The shop still opens '
+                  'as a draft, so nothing goes in front of customers yet.',
+                  style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+                ),
+              ],
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _shopName,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(
+                  labelText: 'Shop name',
+                  hintText: widget.businessName,
+                  helperText: 'Leave blank to use the business name',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _location,
+                decoration: const InputDecoration(
+                  labelText: 'Location *',
+                  hintText: '26.76, 83.37',
+                  helperText: 'Latitude, longitude',
+                ),
+                validator: (value) =>
+                    PlatformOnboardMerchantDialog.parseLocation(value ?? '') ==
+                            null
+                        ? 'Two numbers: latitude, longitude'
+                        : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _radius,
+                keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'Delivery radius (km) *',
+                  helperText: 'A shop that has not said is offered to nobody',
+                ),
+                validator: (value) {
+                  final km = double.tryParse((value ?? '').trim());
+                  if (km == null || km <= 0) return 'How far will it deliver?';
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : hapticize(_save),
+          child: Text(_saving ? 'Opening...' : 'Open the shop'),
+        ),
+      ],
+    );
+  }
+}

@@ -35,6 +35,20 @@ String extractErrorMessage(Object error) {
   // rows. The data was perfect; the app was talking to last week's server.
   if (meansEndpointMissing(error)) return _endpointMissing;
 
+  // THE BUSINESS EXISTS AND HAS NO SHOP, which is a different thing from
+  // being refused and reads like a fault when it is not one.
+  //
+  // A real merchant hit this. GUPT SAREE was registered through the console's
+  // "Register a business only" action - which opens a login and deliberately
+  // opens no shop - and the owner was then handed a one-time password. They
+  // used it, and the app said "This account is not associated with a shop."
+  // over two buttons that could not help: Retry asks the same question and
+  // gets the same answer forever, and signing out changes nothing.
+  //
+  // Nothing was broken and nothing they could do would fix it, so the app now
+  // says which of those two it is and who can act.
+  if (meansNoShopYet(error)) return _noShopYet;
+
   // The backend spoke. It knows more than we do - use its words.
   if (error is ApiException) return error.message;
   if (error is DioException && error.error is ApiException) {
@@ -81,6 +95,26 @@ const _endpointMissing =
 /// Matched on the backend's own wording, which
 /// GlobalExceptionHandler.handleNoHandler produces for every unmapped path; a
 /// backend test pins that prefix so it cannot drift silently.
+const _noShopYet =
+    'No shop has been set up for this business yet, so there is nothing to '
+    'manage here. Ask GP-STORE support to add your first shop - your account '
+    'itself is fine.';
+
+/// A signed-in account that resolves to no shop at all.
+///
+/// Matched on the backend's own sentence rather than on the status, because
+/// 403 covers a great many things and only this one means "there is nothing
+/// here yet". The neighbouring message - "not associated with THIS shop" - is
+/// a genuine refusal and must keep reading as one, so the match is on the
+/// phrase that separates them.
+bool meansNoShopYet(Object error) {
+  final status = apiStatusOf(error);
+  if (status != 403) return false;
+  final message = _rawBackendMessage(error);
+  return message != null &&
+      message.contains('not associated with a shop');
+}
+
 bool meansEndpointMissing(Object error) {
   if (apiStatusOf(error) != 404) return false;
   final message = _rawBackendMessage(error);

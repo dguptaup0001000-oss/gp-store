@@ -8,6 +8,7 @@ import '../api/api_client.dart';
 import 'push_availability.dart';
 import 'voice_announcement_service.dart';
 import '../logging/app_log.dart';
+import '../../shared/app_kind.dart';
 
 /// Runs when a push arrives while the app is fully backgrounded/terminated.
 /// Must be a top-level (or static) function - Firebase spins this up in its
@@ -261,7 +262,34 @@ class PushNotificationService {
     }
   }
 
+  /// The token this device most recently registered, so sign-out can say
+  /// which registration to retire without asking Firebase again - by then the
+  /// session may already be gone.
+  String? _registeredToken;
+
   Future<void> _registerToken(String token) async {
+    _registeredToken = token;
+    // THE NEW REGISTER, WHICH SAYS WHICH APP THIS IS.
+    //
+    // /api/customers/me/fcm-token holds ONE token per account, in a column.
+    // That cannot answer the question a merchant alert has to ask - "which of
+    // this person's devices is the counter phone, running the merchant app" -
+    // and it survives a sign-out, so a counter phone handed to a different
+    // merchant kept delivering the first one's orders.
+    try {
+      await apiClient.dio.post('/api/push/registrations', data: {
+        'token': token,
+        'app': _appName,
+        'platform': 'ANDROID',
+      });
+    } catch (e) {
+      appLog('Failed to register push device with backend: $e');
+    }
+
+    // The old column is still written, because the customer order-status path
+    // and the worker app both still read it. Removing it is a separate change
+    // from fixing who hears about a new order, and doing both at once would
+    // put an unrelated regression in the same release.
     try {
       await apiClient.dio
           .put('/api/customers/me/fcm-token', data: {'fcmToken': token});
@@ -270,16 +298,44 @@ class PushNotificationService {
     }
   }
 
-  /// Call on logout - stops listening, though the backend's stored token
-  /// for this account is deliberately left as-is (harmless: the next login
-  /// on this device re-registers it anyway, and a stale token just means a
-  /// silently-dropped send, not a leak to anyone else).
-  void stop() {
+  static String get _appName => switch (AppKind.current) {
+        AppKind.admin => 'MERCHANT_ADMIN',
+        AppKind.superAdmin => 'SUPER_ADMIN',
+        AppKind.customer => 'CUSTOMER',
+      };
+
+  /// Call on logout: stops listening AND retires this device's registration.
+  ///
+  /// THE COMMENT THIS REPLACES SAID THE OPPOSITE, and was right for a single
+  /// shop. It read: "the backend's stored token for this account is
+  /// deliberately left as-is (harmless ... not a leak to anyone else)". In a
+  /// marketplace it is exactly a leak to someone else. A counter phone gets
+  /// handed to a new manager, or sold, or borrowed; if the previous merchant's
+  /// registration is still live, that phone keeps receiving their customers'
+  /// names and order totals until the token happens to rotate.
+  ///
+  /// Best effort and never blocking: the sign-out itself must finish whether
+  /// or not this call reaches the server, and a registration that outlives one
+  /// failed attempt is retired the moment somebody signs in on the device
+  /// again - a token is unique platform-wide, so registering it moves it.
+  Future<void> stop() async {
     _tokenRefreshSub?.cancel();
     _foregroundSub?.cancel();
     _openedAppSub?.cancel();
     _tokenRefreshSub = null;
     _foregroundSub = null;
     _openedAppSub = null;
+
+    final token = _registeredToken;
+    _registeredToken = null;
+    if (token == null) return;
+    try {
+      await apiClient.dio.delete(
+        '/api/push/registrations',
+        data: {'token': token},
+      );
+    } catch (e) {
+      appLog('Could not retire this device push registration: $e');
+    }
   }
 }

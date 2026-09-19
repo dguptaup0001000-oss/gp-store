@@ -324,6 +324,42 @@ class PlatformRepository {
         Map<String, dynamic>.from(response.data as Map));
   }
 
+  /// Opens the FIRST shop for a business that has none.
+  ///
+  /// WHY NOT [openShop]. That route refuses any merchant which is not already
+  /// APPROVED, which is exactly the wall an operator hits after registering a
+  /// business - and it is where GUPT SAREE stopped: merchant row, owner
+  /// account, zero shops, and an owner whose sign-in said "This account is not
+  /// associated with a shop." This one approves the business if that is what
+  /// is in the way, opens the shop, makes the owner its first member, and
+  /// reports what it did to the business on the way past.
+  ///
+  /// The shop still arrives in DRAFT, so this is not permission to trade.
+  Future<AddedFirstShop> addFirstShop({
+    required int merchantId,
+    String? shopCode,
+    String? displayName,
+    required double latitude,
+    required double longitude,
+    required double maxDeliveryRadiusKm,
+    String? timeZone,
+  }) async {
+    final response = await apiClient.dio.post(
+      '/api/platform/merchants/$merchantId/first-shop',
+      data: {
+        if (shopCode != null && shopCode.isNotEmpty) 'shopCode': shopCode,
+        if (displayName != null && displayName.isNotEmpty)
+          'displayName': displayName,
+        'latitude': latitude,
+        'longitude': longitude,
+        'maxDeliveryRadiusKm': maxDeliveryRadiusKm,
+        if (timeZone != null && timeZone.isNotEmpty) 'timeZone': timeZone,
+      },
+    );
+    return AddedFirstShop.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
+  }
+
   /// Opens a storefront under an already-approved merchant.
   ///
   /// ARRIVES AS `DRAFT`, deliberately: a shop is built before it sells, and

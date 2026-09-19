@@ -195,3 +195,27 @@ class OnboardedMerchant with _$OnboardedMerchant {
   factory OnboardedMerchant.fromJson(Map<String, dynamic> json) =>
       _$OnboardedMerchantFromJson(json);
 }
+
+/// What POST /api/platform/merchants/{id}/first-shop produced.
+///
+/// It reports the merchant's status on BOTH sides of the call because the
+/// operation may have moved it: a business sitting in APPLICATION cannot hold
+/// a shop at all, so opening its first one approves it. That is a real change
+/// to the business and the console says so rather than letting the operator
+/// discover it later.
+@freezed
+class AddedFirstShop with _$AddedFirstShop {
+  const factory AddedFirstShop({
+    required int merchantId,
+    String? businessName,
+    required int shopId,
+    String? shopCode,
+    String? shopName,
+    int? ownerCustomerId,
+    String? merchantStatusBefore,
+    String? merchantStatusAfter,
+  }) = _AddedFirstShop;
+
+  factory AddedFirstShop.fromJson(Map<String, dynamic> json) =>
+      _$AddedFirstShopFromJson(json);
+}
