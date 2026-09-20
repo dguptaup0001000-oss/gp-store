@@ -12,6 +12,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import com.gpstore.platform.PlatformProfiles.AuditEntry;
+import com.gpstore.platform.PlatformProfiles.MerchantActivity;
+import com.gpstore.platform.PlatformProfiles.MerchantCommerce;
+import com.gpstore.platform.PlatformProfiles.MerchantReputation;
+import com.gpstore.platform.PlatformProfiles.MerchantWorkforce;
+import com.gpstore.platform.PlatformProfiles.WorkerLine;
 import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.sql.ResultSet;
@@ -136,6 +142,23 @@ public class PlatformControlTowerService {
                               String shopName, String status, BigDecimal total,
                               LocalDateTime orderedAt) {}
 
+    /**
+     * A customer 360, composed of the existing profile plus what was missing.
+     *
+     * <p>{@link #core} is the unchanged {@link Customer360}, so the order
+     * summary and finance figures have one definition rather than two.
+     */
+    public record CustomerProfile(Customer360 core,
+                                  List<PlatformProfiles.AddressLine> addresses,
+                                  List<PlatformProfiles.ShopAffinity> shops,
+                                  List<PlatformProfiles.CategoryAffinity> categories,
+                                  List<PlatformProfiles.PaymentLine> payments,
+                                  List<PlatformProfiles.RefundLine> refunds,
+                                  List<PlatformProfiles.ReviewLine> reviews,
+                                  List<PlatformProfiles.ReturnLine> returns,
+                                  PlatformProfiles.CustomerActivity activity,
+                                  List<PlatformProfiles.AuditEntry> security) {}
+
     public record Customer360(CustomerIdentity identity, CustomerOrderSummary orders,
                               CustomerFinance finance, long reviews,
                               long reportedReviews, List<RecentOrder> recentOrders) {}
@@ -159,6 +182,21 @@ public class PlatformControlTowerService {
                            String verification, String city, String state,
                            String orderAcceptance, long workers, long products,
                            long orders, BigDecimal gmv) {}
+
+    /**
+     * A merchant 360, composed of the existing profile plus what was missing.
+     *
+     * <p>{@link #core} is the unchanged {@link Merchant360}, so there is one
+     * definition of this merchant's identity, shops and totals rather than a
+     * second that drifts from it.
+     */
+    public record MerchantProfile(Merchant360 core,
+                                  PlatformProfiles.MerchantCommerce commerce,
+                                  PlatformProfiles.MerchantWorkforce workforce,
+                                  PlatformProfiles.MerchantReputation reputation,
+                                  PlatformProfiles.MerchantActivity activity,
+                                  List<PlatformProfiles.AuditEntry> security,
+                                  LocalDateTime from, LocalDateTime to) {}
 
     public record Merchant360(MerchantIdentity identity, List<ShopLine> shops,
                               long totalOrders, long completedOrders,
@@ -187,6 +225,581 @@ public class PlatformControlTowerService {
     public record DashboardFilters(Long merchantId, Long shopId,
                                    String orderStatus, String paymentStatus,
                                    String paymentMethod) {}
+
+    /**
+     * One merchant as the directory lists them.
+     *
+     * <p>CARRIES THE SHOP COUNT AND THE OWNER because those are what an
+     * operator reads to tell two Deepaks apart before tapping either. Both
+     * come from the same statement as the row - a count per result would be
+     * the N+1 the marketplace work spent so long removing.
+     */
+    public record MerchantHit(Long id, String merchantRef, String displayName,
+                              String legalName, String ownerName, String email,
+                              String phone, String status, boolean active,
+                              long shopCount, LocalDateTime createdAt) {}
+
+    /** One customer as the directory lists them, with enough to identify them. */
+    public record CustomerHit(Long id, String customerRef, String name, String email,
+                              String phone, boolean active, long orderCount,
+                              LocalDateTime createdAt, LocalDateTime lastOrderAt) {}
+
+    /**
+     * The merchants section of the control tower.
+     *
+     * <h2>What it matches</h2>
+     *
+     * <p>Merchant display and legal name, the merchant's own contact name,
+     * email and phone, the owner's name, email and phone, the merchant
+     * reference (M-123) and a bare id - and, through an EXISTS, any of that
+     * merchant's shop names, shop codes, shop references and business names.
+     * An operator who only remembers the shop finds the merchant behind it,
+     * which is usually how this search is actually used.
+     *
+     * <h2>Why it is one statement</h2>
+     *
+     * <p>The shop match is an EXISTS rather than a join, so a merchant with
+     * forty shops is one row and not forty. The shop COUNT is a correlated
+     * subquery evaluated for the page's rows only. Two statements serve a
+     * search: this one and its count. Nothing scales with the number of
+     * results.
+     *
+     * <h2>Why the parameters are bound</h2>
+     *
+     * <p>Every value travels as a named parameter. The term is never
+     * concatenated into SQL, so there is nothing for an operator's apostrophe
+     * - or an attacker's - to terminate.
+     */
+    @Transactional
+    public PageEnvelope<MerchantHit> searchMerchants(String rawQuery, int requestedPage,
+                                                     int requestedSize) {
+        String term = requireSearchTerm(rawQuery);
+        int page = Math.max(0, requestedPage);
+        int size = pageSize(requestedSize);
+
+        MapSqlParameterSource params = searchParams(term, page, size);
+
+        String where = """
+                m.deleted_at IS NULL AND (
+                     lower(m.display_name) LIKE :pattern
+                  OR lower(m.legal_name) LIKE :pattern
+                  OR lower(m.contact_name) LIKE :pattern
+                  OR lower(m.contact_email) LIKE :pattern
+                  OR lower(owner.full_name) LIKE :pattern
+                  OR lower(owner.email) LIKE :pattern
+                  OR lower('m-' || CAST(m.id AS varchar)) LIKE :pattern
+                  OR CAST(m.id AS varchar) = :exact
+                  OR (CAST(:digits AS varchar) IS NOT NULL AND (
+                         lower(m.contact_phone) LIKE CAST(:digitsPattern AS varchar)
+                      OR lower(owner.mobile_number) LIKE CAST(:digitsPattern AS varchar)))
+                  OR EXISTS (
+                        SELECT 1 FROM shops s
+                         WHERE s.merchant_id = m.id AND s.deleted_at IS NULL
+                           AND (lower(s.display_name) LIKE :pattern
+                             OR lower(s.code) LIKE :pattern
+                             OR lower(s.business_name) LIKE :pattern
+                             OR lower('s-' || CAST(s.id AS varchar)) LIKE :pattern
+                             OR CAST(s.id AS varchar) = :exact)))
+                """;
+
+        List<MerchantHit> content = jdbc.query("""
+                SELECT m.id, m.display_name, m.legal_name, m.contact_email,
+                       m.contact_phone, m.status, m.active, m.created_at,
+                       owner.full_name AS owner_name,
+                       (SELECT count(*) FROM shops s2
+                         WHERE s2.merchant_id = m.id AND s2.deleted_at IS NULL) AS shop_count
+                  FROM merchants m
+                  LEFT JOIN customers owner ON owner.id = m.owner_customer_id
+                 WHERE %s
+                 ORDER BY lower(COALESCE(m.display_name, m.legal_name, '')), m.id
+                 LIMIT :limit OFFSET :offset
+                """.formatted(where), params, (rs, row) -> new MerchantHit(
+                        rs.getLong("id"),
+                        "M-" + rs.getLong("id"),
+                        rs.getString("display_name"),
+                        rs.getString("legal_name"),
+                        rs.getString("owner_name"),
+                        rs.getString("contact_email"),
+                        rs.getString("contact_phone"),
+                        rs.getString("status"),
+                        rs.getBoolean("active"),
+                        rs.getLong("shop_count"),
+                        timestamp(rs, "created_at")));
+
+        Long count = jdbc.queryForObject("""
+                SELECT count(*) FROM merchants m
+                  LEFT JOIN customers owner ON owner.id = m.owner_customer_id
+                 WHERE %s
+                """.formatted(where), params, Long.class);
+
+        auditSearch("PLATFORM_MERCHANT_SEARCH", term, page, content.size());
+        return page(content, page, size, count == null ? 0 : count);
+    }
+
+    /**
+     * The customers section of the control tower.
+     *
+     * <p>Matches name, email, the customer reference (C-123), a bare id, a
+     * phone in any of the shapes people write them in, and an order number -
+     * because a support call usually starts with "my order GPS-1234" rather
+     * than with a name.
+     *
+     * <p>Same shape as the merchant search: one statement for the page, one
+     * for the count, order and last-order date correlated for the page's rows
+     * only.
+     */
+    @Transactional
+    public PageEnvelope<CustomerHit> searchCustomers(String rawQuery, int requestedPage,
+                                                     int requestedSize) {
+        String term = requireSearchTerm(rawQuery);
+        int page = Math.max(0, requestedPage);
+        int size = pageSize(requestedSize);
+
+        MapSqlParameterSource params = searchParams(term, page, size);
+
+        String where = """
+                     lower(c.full_name) LIKE :pattern
+                  OR lower(c.email) LIKE :pattern
+                  OR lower('c-' || CAST(c.id AS varchar)) LIKE :pattern
+                  OR CAST(c.id AS varchar) = :exact
+                  OR (CAST(:digits AS varchar) IS NOT NULL AND lower(c.mobile_number) LIKE CAST(:digitsPattern AS varchar))
+                  OR EXISTS (
+                        SELECT 1 FROM orders o2
+                         WHERE o2.customer_id = c.id
+                           AND lower(o2.order_number) LIKE :pattern)
+                """;
+
+        List<CustomerHit> content = jdbc.query("""
+                SELECT c.id, c.full_name, c.email, c.mobile_number, c.active, c.created_at,
+                       (SELECT count(*) FROM orders o WHERE o.customer_id = c.id) AS order_count,
+                       (SELECT max(o.order_date) FROM orders o
+                         WHERE o.customer_id = c.id) AS last_order_at
+                  FROM customers c
+                 WHERE %s
+                 ORDER BY lower(COALESCE(c.full_name, '')), c.id
+                 LIMIT :limit OFFSET :offset
+                """.formatted(where), params, (rs, row) -> new CustomerHit(
+                        rs.getLong("id"),
+                        "C-" + rs.getLong("id"),
+                        rs.getString("full_name"),
+                        rs.getString("email"),
+                        rs.getString("mobile_number"),
+                        rs.getBoolean("active"),
+                        rs.getLong("order_count"),
+                        timestamp(rs, "created_at"),
+                        timestamp(rs, "last_order_at")));
+
+        Long count = jdbc.queryForObject(
+                "SELECT count(*) FROM customers c WHERE " + where, params, Long.class);
+
+        auditSearch("PLATFORM_CUSTOMER_SEARCH", term, page, content.size());
+        return page(content, page, size, count == null ? 0 : count);
+    }
+
+    // ----------------------------------------------------- customer profile
+
+    /**
+     * Everything a Super Admin legitimately needs about one customer.
+     *
+     * <p>Composes the existing {@link Customer360} the same way the merchant
+     * profile composes its core, and adds the sections §11-§18 asked for:
+     * addresses, where they actually buy, payments, refunds, reviews, returns
+     * and real session-backed activity.
+     *
+     * <h2>Query budget</h2>
+     *
+     * <p>The core profile, then one statement each for addresses, shop
+     * affinity, category affinity, payments, refunds, reviews, returns and
+     * activity. Flat in the number of orders: the affinity breakdowns are
+     * GROUP BY in the database, never a fetch-all-orders-and-count-in-Java.
+     * §20 named that anti-pattern explicitly and a query-count test holds it.
+     */
+    @Transactional
+    public CustomerProfile customerProfile(Long id) {
+        if (id == null || id <= 0) {
+            throw new BadRequestException("customerId must be positive");
+        }
+        Customer360 core = customer(id);
+        Map<String, Object> params = Map.of("id", id);
+
+        List<PlatformProfiles.AddressLine> addresses = jdbc.query("""
+                SELECT a.id, a.label, a.house_no, a.street, a.building_name,
+                       a.area, a.city, a.pincode, a.default_address
+                  FROM addresses a WHERE a.customer_id = :id
+                 ORDER BY a.default_address DESC, a.id
+                 LIMIT 25
+                """, params, (rs, row) -> new PlatformProfiles.AddressLine(
+                        rs.getLong("id"), rs.getString("label"),
+                        joinParts(rs.getString("house_no"), rs.getString("building_name"),
+                                rs.getString("street")),
+                        rs.getString("area"), rs.getString("city"), rs.getString("pincode"),
+                        bool(rs.getObject("default_address"))));
+
+        // WHERE THEY BUY, and whether they ever said so. The preferred flag is
+        // an EXISTS against the customer's own saved preferences - never
+        // inferred from the order count beside it. See ShopAffinity.
+        List<PlatformProfiles.ShopAffinity> shops = jdbc.query("""
+                SELECT o.shop_id, s.display_name, count(*) orders,
+                       COALESCE(sum(o.total_amount - COALESCE(o.delivery_fee,0)),0) spent,
+                       max(o.order_date) last_order,
+                       EXISTS (SELECT 1 FROM customer_preferred_shops ps
+                                WHERE ps.customer_id = :id
+                                  AND ps.preferred_shop_id = o.shop_id) preferred
+                  FROM orders o LEFT JOIN shops s ON s.id = o.shop_id
+                 WHERE o.customer_id = :id
+                 GROUP BY o.shop_id, s.display_name
+                 ORDER BY count(*) DESC, o.shop_id
+                 LIMIT 20
+                """, params, (rs, row) -> new PlatformProfiles.ShopAffinity(
+                        rs.getLong("shop_id"), rs.getString("display_name"),
+                        rs.getLong("orders"), decimal(rs.getObject("spent")),
+                        timestamp(rs, "last_order"), rs.getBoolean("preferred")));
+
+        List<PlatformProfiles.CategoryAffinity> categories = jdbc.query("""
+                SELECT c.id, c.name, count(DISTINCT o.id) orders
+                  FROM orders o
+                  JOIN order_items oi ON oi.order_id = o.id
+                  JOIN product_variants v ON v.id = oi.product_variant_id
+                  JOIN products p ON p.id = v.product_id
+                  JOIN categories c ON c.id = p.category_id
+                 WHERE o.customer_id = :id
+                 GROUP BY c.id, c.name
+                 ORDER BY count(DISTINCT o.id) DESC, c.id
+                 LIMIT 10
+                """, params, (rs, row) -> new PlatformProfiles.CategoryAffinity(
+                        rs.getLong("id"), rs.getString("name"), rs.getLong("orders")));
+
+        // PROVIDER REFERENCES, NEVER CREDENTIALS. provider_payment_id and
+        // provider_order_id are the handles an operator quotes to a payment
+        // provider when chasing a stuck payment. No card number, no CVV, no
+        // UPI PIN, no provider secret and no token exists in this projection.
+        List<PlatformProfiles.PaymentLine> payments = jdbc.query("""
+                SELECT p.id, p.order_id, o.order_number, p.payment_method, p.payment_status,
+                       p.amount, p.provider_payment_id, p.provider_order_id, p.payment_date
+                  FROM payments p LEFT JOIN orders o ON o.id = p.order_id
+                 WHERE o.customer_id = :id
+                 ORDER BY p.payment_date DESC NULLS LAST, p.id DESC
+                 LIMIT 25
+                """, params, (rs, row) -> new PlatformProfiles.PaymentLine(
+                        rs.getLong("id"), (Long) rs.getObject("order_id"),
+                        rs.getString("order_number"), rs.getString("payment_method"),
+                        rs.getString("payment_status"), decimal(rs.getObject("amount")),
+                        rs.getString("provider_payment_id"), rs.getString("provider_order_id"),
+                        timestamp(rs, "payment_date")));
+
+        List<PlatformProfiles.RefundLine> refunds = jdbc.query("""
+                SELECT r.id, o.id order_id, o.order_number, r.status, r.amount,
+                       r.reason, r.settled_at
+                  FROM refunds r
+                  JOIN payments p ON p.id = r.payment_id
+                  JOIN orders o ON o.id = p.order_id
+                 WHERE o.customer_id = :id
+                 ORDER BY r.settled_at DESC NULLS LAST, r.id DESC
+                 LIMIT 25
+                """, params, (rs, row) -> new PlatformProfiles.RefundLine(
+                        rs.getLong("id"), (Long) rs.getObject("order_id"),
+                        rs.getString("order_number"), rs.getString("status"),
+                        decimal(rs.getObject("amount")), rs.getString("reason"),
+                        timestamp(rs, "settled_at")));
+
+        List<PlatformProfiles.ReviewLine> reviews = jdbc.query("""
+                SELECT r.id, 'PRODUCT' kind, r.product_id target_id, p.name target_name,
+                       r.rating, r.comment, r.reported_at, r.review_date created_at
+                  FROM reviews r LEFT JOIN products p ON p.id = r.product_id
+                 WHERE r.customer_id = :id
+                UNION ALL
+                SELECT sr.id, 'SHOP', sr.shop_id, s.display_name,
+                       sr.rating, sr.comment, sr.reported_at, sr.created_at
+                  FROM shop_ratings sr LEFT JOIN shops s ON s.id = sr.shop_id
+                 WHERE sr.customer_id = :id
+                 ORDER BY created_at DESC NULLS LAST
+                 LIMIT 25
+                """, params, (rs, row) -> new PlatformProfiles.ReviewLine(
+                        rs.getLong("id"), rs.getString("kind"), (Long) rs.getObject("target_id"),
+                        rs.getString("target_name"), (Integer) rs.getObject("rating"),
+                        rs.getString("comment"), rs.getObject("reported_at") != null,
+                        timestamp(rs, "created_at")));
+
+        List<PlatformProfiles.ReturnLine> returns = jdbc.query("""
+                SELECT ret.id, ret.order_id, o.order_number, ret.status, ret.reason,
+                       ret.refund_amount, ret.requested_at, ret.decided_at
+                  FROM order_returns ret LEFT JOIN orders o ON o.id = ret.order_id
+                 WHERE ret.customer_id = :id
+                 ORDER BY ret.requested_at DESC NULLS LAST, ret.id DESC
+                 LIMIT 25
+                """, params, (rs, row) -> new PlatformProfiles.ReturnLine(
+                        rs.getLong("id"), (Long) rs.getObject("order_id"),
+                        rs.getString("order_number"), rs.getString("status"),
+                        rs.getString("reason"), decimal(rs.getObject("refund_amount")),
+                        timestamp(rs, "requested_at"), timestamp(rs, "decided_at")));
+
+        // REAL, unlike the merchant equivalent: the customer app does report
+        // sessions. Still client-reported and server-capped - see the note.
+        Map<String, Object> activity = jdbc.queryForMap("""
+                SELECT (SELECT min(started_at) FROM customer_app_sessions WHERE customer_id=:id) first_session,
+                       (SELECT max(started_at) FROM customer_app_sessions WHERE customer_id=:id) last_session,
+                       (SELECT count(*) FROM customer_app_sessions WHERE customer_id=:id) sessions,
+                       (SELECT COALESCE(sum(seconds),0) FROM customer_app_sessions WHERE customer_id=:id) total_seconds,
+                       (SELECT count(DISTINCT CAST(started_at AS date)) FROM customer_app_sessions
+                         WHERE customer_id=:id) active_days,
+                       (SELECT max(order_date) FROM orders WHERE customer_id=:id) last_order
+                """, params);
+
+        long sessions = number(activity.get("sessions"));
+        PlatformProfiles.CustomerActivity activeness = new PlatformProfiles.CustomerActivity(
+                time(activity.get("first_session")), time(activity.get("last_session")),
+                sessions, number(activity.get("total_seconds")),
+                number(activity.get("active_days")), time(activity.get("last_order")),
+                sessions > 0, PlatformProfiles.CustomerActivity.CLIENT_REPORTED);
+
+        List<AuditEntry> security = auditFor(
+                "a.entity_type = 'Customer' AND a.entity_id = :id", params);
+
+        return new CustomerProfile(core, addresses, shops, categories, payments,
+                refunds, reviews, returns, activeness, security);
+    }
+
+    /** Address parts that exist, comma-joined; null when the customer gave none. */
+    private static String joinParts(String... parts) {
+        StringBuilder out = new StringBuilder();
+        for (String part : parts) {
+            if (part == null || part.isBlank()) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append(", ");
+            }
+            out.append(part.trim());
+        }
+        return out.length() == 0 ? null : out.toString();
+    }
+
+    // ----------------------------------------------------- merchant profile
+
+    /**
+     * Everything a Super Admin legitimately needs about one merchant.
+     *
+     * <h2>Why this composes rather than replaces</h2>
+     *
+     * <p>{@link #merchant(Long)} already returns identity, per-shop lines and
+     * merchant-wide totals, and the Flutter screens that call it still work.
+     * This adds the sections that were missing - commerce across all three
+     * modes, the workforce, reputation, activity and the administrative
+     * record - and carries the existing {@link Merchant360} inside rather than
+     * restating its fields. One definition of "this merchant's GMV", not two
+     * that drift.
+     *
+     * <h2>Query budget</h2>
+     *
+     * <p>Bounded and flat: the core profile, then one grouped statement each
+     * for commerce, workforce, reputation, activity and the audit page. Seven
+     * statements for a merchant with one shop and seven for a merchant with
+     * forty - nothing here loops over shops, orders or workers. A query-count
+     * test holds that.
+     */
+    @Transactional
+    public MerchantProfile merchantProfile(Long id, LocalDateTime from, LocalDateTime to) {
+        if (id == null || id <= 0) {
+            throw new BadRequestException("merchantId must be positive");
+        }
+        validateRange(from, to);
+        Merchant360 core = merchant(id);
+
+        Map<String, Object> params = Map.of("id", id, "from", from, "to", to);
+
+        Map<String, Long> orderStatuses = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT o.order_status, count(*) total
+                  FROM orders o JOIN shops s ON s.id = o.shop_id
+                 WHERE s.merchant_id = :id AND o.order_date >= :from AND o.order_date < :to
+                 GROUP BY o.order_status
+                """, params, (RowCallbackHandler) rs ->
+                orderStatuses.put(rs.getString("order_status"), rs.getLong("total")));
+
+        Map<String, Object> listings = jdbc.queryForMap("""
+                SELECT COALESCE(sum(CASE WHEN COALESCE(spv.active,true) THEN 1 ELSE 0 END),0) active_listings,
+                       COALESCE(sum(CASE WHEN COALESCE(spv.commerce_mode,'ONLINE_PURCHASE')='ONLINE_PURCHASE'
+                                         THEN 1 ELSE 0 END),0) online_listings,
+                       COALESCE(sum(CASE WHEN spv.commerce_mode='VISIT_TO_BUY' THEN 1 ELSE 0 END),0) visit_listings,
+                       COALESCE(sum(CASE WHEN spv.commerce_mode='SERVICE_AT_SHOP' THEN 1 ELSE 0 END),0) service_listings,
+                       COALESCE(sum(CASE WHEN COALESCE(inv.stock,0) <= 0 THEN 1 ELSE 0 END),0) out_of_stock
+                  FROM shop_product_variants spv
+                  JOIN shops s ON s.id = spv.shop_id
+                  LEFT JOIN inventory inv ON inv.shop_id = spv.shop_id
+                                         AND inv.product_variant_id = spv.product_variant_id
+                 WHERE s.merchant_id = :id AND s.deleted_at IS NULL
+                """, Map.of("id", id));
+
+        Long offers = jdbc.queryForObject("""
+                SELECT count(*) FROM coupons cp JOIN shops s ON s.id = cp.shop_id
+                 WHERE s.merchant_id = :id AND s.deleted_at IS NULL AND cp.active = true
+                """, Map.of("id", id), Long.class);
+
+        MerchantCommerce commerce = new MerchantCommerce(
+                Map.copyOf(orderStatuses),
+                number(listings.get("active_listings")),
+                number(listings.get("out_of_stock")),
+                number(listings.get("online_listings")),
+                number(listings.get("visit_listings")),
+                number(listings.get("service_listings")),
+                offers == null ? 0 : offers);
+
+        List<WorkerLine> workers = jdbc.query("""
+                SELECT w.id, w.name, w.shop_id, s.display_name shop_name,
+                       w.active, w.available, w.suspended_until
+                  FROM delivery_partners w
+                  JOIN shops s ON s.id = w.shop_id
+                 WHERE s.merchant_id = :id AND w.deleted_at IS NULL AND s.deleted_at IS NULL
+                 ORDER BY s.id, w.id
+                 LIMIT 200
+                """, Map.of("id", id), (rs, row) -> new WorkerLine(
+                        rs.getLong("id"), "W-" + rs.getLong("id"), rs.getString("name"),
+                        rs.getLong("shop_id"), rs.getString("shop_name"),
+                        bool(rs.getObject("active")), bool(rs.getObject("available")),
+                        timestamp(rs, "suspended_until")));
+        long activeWorkers = workers.stream().filter(WorkerLine::active).count();
+        MerchantWorkforce workforce = new MerchantWorkforce(
+                workers.size(), activeWorkers, workers.size() - activeWorkers, workers);
+
+        Map<String, Object> reputation = jdbc.queryForMap("""
+                SELECT COALESCE(avg(sr.rating),0) average_rating,
+                       COALESCE(avg(sr.rating) FILTER (WHERE sr.created_at >= :recent),0) recent_rating,
+                       count(sr.id) rating_count,
+                       COALESCE(sum(CASE WHEN sr.reported_at IS NOT NULL THEN 1 ELSE 0 END),0) reported
+                  FROM shop_ratings sr JOIN shops s ON s.id = sr.shop_id
+                 WHERE s.merchant_id = :id AND sr.hidden_at IS NULL
+                """, Map.of("id", id, "recent", to.minusDays(90)));
+
+        Map<String, Object> grief = jdbc.queryForMap("""
+                SELECT COALESCE(count(ret.id),0) returns_requested,
+                       COALESCE(sum(CASE WHEN ret.status='APPROVED' THEN 1 ELSE 0 END),0) returns_approved
+                  FROM order_returns ret JOIN shops s ON s.id = ret.shop_id
+                 WHERE s.merchant_id = :id
+                """, Map.of("id", id));
+
+        Map<String, Object> refunds = jdbc.queryForMap("""
+                SELECT count(r.id) refund_count, COALESCE(sum(r.amount),0) refund_amount
+                  FROM refunds r
+                  JOIN payments p ON p.id = r.payment_id
+                  JOIN orders o ON o.id = p.order_id
+                  JOIN shops s ON s.id = o.shop_id
+                 WHERE s.merchant_id = :id AND r.status='SUCCEEDED'
+                """, Map.of("id", id));
+
+        MerchantReputation reviews = new MerchantReputation(
+                decimal(reputation.get("average_rating")),
+                decimal(reputation.get("recent_rating")),
+                number(reputation.get("rating_count")),
+                number(reputation.get("reported")),
+                number(grief.get("returns_requested")),
+                number(grief.get("returns_approved")),
+                number(refunds.get("refund_count")),
+                decimal(refunds.get("refund_amount")));
+
+        Map<String, Object> activity = jdbc.queryForMap("""
+                SELECT (SELECT min(o.order_date) FROM orders o JOIN shops s ON s.id=o.shop_id
+                         WHERE s.merchant_id=:id) first_order,
+                       (SELECT max(o.order_date) FROM orders o JOIN shops s ON s.id=o.shop_id
+                         WHERE s.merchant_id=:id) last_order,
+                       (SELECT max(spv.updated_at) FROM shop_product_variants spv
+                          JOIN shops s ON s.id=spv.shop_id WHERE s.merchant_id=:id) last_listing,
+                       (SELECT max(a.occurred_at) FROM audit_logs a WHERE a.merchant_id=:id) last_admin,
+                       (SELECT count(DISTINCT CAST(o.order_date AS date)) FROM orders o
+                          JOIN shops s ON s.id=o.shop_id
+                         WHERE s.merchant_id=:id AND o.order_date>=:from AND o.order_date<:to) active_days
+                """, params);
+
+        MerchantActivity activeness = new MerchantActivity(
+                time(activity.get("first_order")), time(activity.get("last_order")),
+                time(activity.get("last_listing")), time(activity.get("last_admin")),
+                number(activity.get("active_days")),
+                false, MerchantActivity.NOT_MEASURED);
+
+        List<AuditEntry> security = auditFor("a.merchant_id = :id", Map.of("id", id));
+
+        return new MerchantProfile(core, commerce, workforce, reviews, activeness,
+                security, from, to);
+    }
+
+    /**
+     * The administrative record, newest first.
+     *
+     * <p>Bounded at fifty on purpose: a 360 screen is a summary and the audit
+     * screen already exists for the full history. An unbounded read here is
+     * how one merchant with years of events makes this endpoint slow for
+     * everybody.
+     */
+    private List<AuditEntry> auditFor(String predicate, Map<String, ?> params) {
+        return jdbc.query("""
+                SELECT a.id, a.action, a.actor_email, a.actor_role, a.entity_type,
+                       a.entity_id, a.previous_state, a.new_state, a.reason, a.occurred_at
+                  FROM audit_logs a
+                 WHERE %s
+                 ORDER BY a.occurred_at DESC, a.id DESC
+                 LIMIT 50
+                """.formatted(predicate), params, (rs, row) -> new AuditEntry(
+                        rs.getLong("id"), rs.getString("action"), rs.getString("actor_email"),
+                        rs.getString("actor_role"), rs.getString("entity_type"),
+                        (Long) rs.getObject("entity_id"), rs.getString("previous_state"),
+                        rs.getString("new_state"), rs.getString("reason"),
+                        timestamp(rs, "occurred_at")));
+    }
+
+    // ------------------------------------------------------- search plumbing
+
+    private static String requireSearchTerm(String rawQuery) {
+        String term = rawQuery == null ? "" : rawQuery.trim();
+        if (term.length() < 2) {
+            throw new BadRequestException("Search requires at least 2 characters");
+        }
+        if (term.length() > MAX_SEARCH_LENGTH) {
+            throw new BadRequestException("Search is limited to 120 characters");
+        }
+        return term;
+    }
+
+    /**
+     * The bound values every directory search uses.
+     *
+     * <p>{@code exact} lets a bare id find exactly one row rather than every
+     * row whose id merely contains those characters - typing 7 should not
+     * return customer 7, 17, 70 and 1007 above the person you wanted.
+     *
+     * <p>{@code digits} is null when the term is not numeric enough to be a
+     * phone number, and the SQL tests for that before applying the phone
+     * predicate. Without it, searching a name would compare every phone
+     * column against a nonsense pattern for nothing.
+     */
+    private static MapSqlParameterSource searchParams(String term, int page, int size) {
+        String digits = com.gpstore.auth.IndianPhoneNumbers.searchDigits(term);
+        return new MapSqlParameterSource()
+                .addValue("pattern", "%" + term.toLowerCase(Locale.ROOT) + "%")
+                .addValue("exact", term)
+                .addValue("digits", digits)
+                .addValue("digitsPattern", digits == null ? null : "%" + digits + "%")
+                .addValue("limit", size)
+                .addValue("offset", Math.multiplyExact((long) page, size));
+    }
+
+    /**
+     * THE TERM ITSELF IS NEVER WRITTEN DOWN. It is routinely somebody's phone
+     * number or email address, and an audit log that records who searched for
+     * whom is a second copy of the personal data the log exists to protect.
+     * What is recorded is that a search happened, how long the term was, and
+     * how much came back.
+     */
+    private void auditSearch(String action, String term, int page, int resultCount) {
+        audit.logRequired(action, "PlatformSearch", null, null, null, null, null,
+                "platform investigation",
+                "queryLength=" + term.length() + ", page=" + page
+                        + ", resultCount=" + resultCount);
+    }
+
+    private static LocalDateTime timestamp(java.sql.ResultSet rs, String column)
+            throws java.sql.SQLException {
+        java.sql.Timestamp value = rs.getTimestamp(column);
+        return value == null ? null : value.toLocalDateTime();
+    }
 
     @Transactional
     public PageEnvelope<SearchResult> search(String rawQuery, int requestedPage, int requestedSize) {

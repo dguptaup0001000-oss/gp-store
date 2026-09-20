@@ -26,6 +26,7 @@ import '../../features/admin/presentation/platform_console_screen.dart';
 import '../../features/admin/presentation/platform_control_tower_screen.dart';
 import '../../features/admin/presentation/platform_finance_screen.dart';
 import '../../features/admin/presentation/platform_resource_screen.dart';
+import '../../features/admin/presentation/platform_directory_screen.dart';
 import '../../features/admin/presentation/platform_system_health_screen.dart';
 import '../../features/admin/presentation/shop_earnings_screen.dart';
 import '../dashboard/admin_dashboard_screen.dart';
@@ -527,12 +528,17 @@ class AdminNav {
   static Widget _platform(BuildContext context) => const PlatformConsoleScreen();
   static Widget _controlTower(BuildContext context) =>
       const PlatformControlTowerScreen();
-  static Widget _platformMerchants(BuildContext context) => const PlatformResourceScreen(
-      resource: 'merchants', title: 'Merchants', icon: Icons.business_outlined);
+  // SEARCH FIRST, NOT A LIST. On a marketplace of any size, paging through
+  // every merchant to find one is not how anybody uses this screen - an
+  // operator arrives with a name, a phone number or a shop, and wants that
+  // record. The generic resource list is still reachable for browsing; this
+  // is the door for looking somebody up.
+  static Widget _platformMerchants(BuildContext context) =>
+      const PlatformDirectoryScreen(kind: DirectoryKind.merchants);
   static Widget _platformShops(BuildContext context) => const PlatformResourceScreen(
       resource: 'shops', title: 'Shops', icon: Icons.storefront_outlined);
-  static Widget _platformCustomers(BuildContext context) => const PlatformResourceScreen(
-      resource: 'customers', title: 'Customers', icon: Icons.people_outline);
+  static Widget _platformCustomers(BuildContext context) =>
+      const PlatformDirectoryScreen(kind: DirectoryKind.customers);
   static Widget _platformOrders(BuildContext context) => const PlatformResourceScreen(
       resource: 'orders', title: 'Orders', icon: Icons.receipt_long_outlined);
   static Widget _platformWorkers(BuildContext context) => const PlatformResourceScreen(
