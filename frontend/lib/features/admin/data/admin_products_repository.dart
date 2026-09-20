@@ -15,6 +15,7 @@ import '../domain/delivery_breach_model.dart';
 import '../domain/delivery_partner_models.dart';
 import '../../orders/domain/order_models.dart';
 import '../domain/inventory_models.dart';
+import '../domain/selling_mode.dart';
 import '../domain/variant_attribute.dart';
 import '../domain/shop_category.dart';
 
@@ -126,10 +127,12 @@ class AdminProductsRepository {
     double? costPrice,
     List<VariantAttribute> attributes = const [],
     bool allowBelowCost = false,
+    SellingSetup? selling,
   }) async {
     final response = await apiClient.dio.post(
       '/api/shop/products/$productId/variants',
       data: {
+        ...?selling?.toJson(),
         'label': label,
         'quantity': quantity,
         'unit': unit,
@@ -157,10 +160,12 @@ class AdminProductsRepository {
     required bool available,
     List<VariantAttribute> attributes = const [],
     bool allowBelowCost = false,
+    SellingSetup? selling,
   }) async {
     await apiClient.dio.put(
       '/api/shop/variants/$variantId',
       data: {
+        ...?selling?.toJson(),
         'label': label,
         'quantity': quantity,
         'unit': unit,
