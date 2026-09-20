@@ -281,23 +281,23 @@ public class PlatformControlTowerService {
 
         String where = """
                 m.deleted_at IS NULL AND (
-                     lower(COALESCE(m.display_name, '')) LIKE :pattern
-                  OR lower(COALESCE(m.legal_name, '')) LIKE :pattern
-                  OR lower(COALESCE(m.contact_name, '')) LIKE :pattern
-                  OR lower(COALESCE(m.contact_email, '')) LIKE :pattern
-                  OR lower(COALESCE(owner.full_name, '')) LIKE :pattern
-                  OR lower(COALESCE(owner.email, '')) LIKE :pattern
+                     lower(m.display_name) LIKE :pattern
+                  OR lower(m.legal_name) LIKE :pattern
+                  OR lower(m.contact_name) LIKE :pattern
+                  OR lower(m.contact_email) LIKE :pattern
+                  OR lower(owner.full_name) LIKE :pattern
+                  OR lower(owner.email) LIKE :pattern
                   OR lower('m-' || CAST(m.id AS varchar)) LIKE :pattern
                   OR CAST(m.id AS varchar) = :exact
                   OR (CAST(:digits AS varchar) IS NOT NULL AND (
-                         COALESCE(m.contact_phone, '') LIKE CAST(:digitsPattern AS varchar)
-                      OR COALESCE(owner.mobile_number, '') LIKE CAST(:digitsPattern AS varchar)))
+                         lower(m.contact_phone) LIKE CAST(:digitsPattern AS varchar)
+                      OR lower(owner.mobile_number) LIKE CAST(:digitsPattern AS varchar)))
                   OR EXISTS (
                         SELECT 1 FROM shops s
                          WHERE s.merchant_id = m.id AND s.deleted_at IS NULL
-                           AND (lower(COALESCE(s.display_name, '')) LIKE :pattern
-                             OR lower(COALESCE(s.code, '')) LIKE :pattern
-                             OR lower(COALESCE(s.business_name, '')) LIKE :pattern
+                           AND (lower(s.display_name) LIKE :pattern
+                             OR lower(s.code) LIKE :pattern
+                             OR lower(s.business_name) LIKE :pattern
                              OR lower('s-' || CAST(s.id AS varchar)) LIKE :pattern
                              OR CAST(s.id AS varchar) = :exact)))
                 """;
@@ -358,15 +358,15 @@ public class PlatformControlTowerService {
         MapSqlParameterSource params = searchParams(term, page, size);
 
         String where = """
-                     lower(COALESCE(c.full_name, '')) LIKE :pattern
-                  OR lower(COALESCE(c.email, '')) LIKE :pattern
+                     lower(c.full_name) LIKE :pattern
+                  OR lower(c.email) LIKE :pattern
                   OR lower('c-' || CAST(c.id AS varchar)) LIKE :pattern
                   OR CAST(c.id AS varchar) = :exact
-                  OR (CAST(:digits AS varchar) IS NOT NULL AND COALESCE(c.mobile_number, '') LIKE CAST(:digitsPattern AS varchar))
+                  OR (CAST(:digits AS varchar) IS NOT NULL AND lower(c.mobile_number) LIKE CAST(:digitsPattern AS varchar))
                   OR EXISTS (
                         SELECT 1 FROM orders o2
                          WHERE o2.customer_id = c.id
-                           AND lower(COALESCE(o2.order_number, '')) LIKE :pattern)
+                           AND lower(o2.order_number) LIKE :pattern)
                 """;
 
         List<CustomerHit> content = jdbc.query("""
