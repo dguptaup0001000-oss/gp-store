@@ -1,4 +1,5 @@
 import '../../features/marketplace/domain/marketplace_feed_models.dart';
+import '../../features/marketplace/domain/marketplace_offer.dart';
 import '../api/api_client.dart';
 import 'marketplace_models.dart';
 
@@ -59,6 +60,32 @@ class MarketplaceRepository {
         .whereType<Map<String, dynamic>>()
         .map(MarketplaceCard.fromJson)
         .toList(growable: false);
+  }
+
+  /// Every nearby shop offering this product, nearest first.
+  ///
+  /// ALL THREE MODES COME BACK and the screen groups them. Filtering here by
+  /// the mode the customer arrived through would hide a shop that delivers
+  /// the thing from somebody looking at a Visit-to-Buy card - a narrower
+  /// answer than the question they actually have.
+  Future<ProductOffers> offersOf({
+    required int productId,
+    required double? latitude,
+    required double? longitude,
+  }) async {
+    if (latitude == null || longitude == null) {
+      return const ProductOffers([]);
+    }
+    final response = await apiClient.dio.get(
+      '/api/marketplace/products/$productId/offers',
+      queryParameters: {'lat': latitude, 'lng': longitude},
+    );
+    final data = response.data;
+    if (data is! List) return const ProductOffers([]);
+    return ProductOffers(data
+        .whereType<Map<String, dynamic>>()
+        .map(MarketplaceOffer.fromJson)
+        .toList(growable: false));
   }
 
   /// Shops that will deliver to this point, nearest first.

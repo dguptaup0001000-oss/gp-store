@@ -2,6 +2,8 @@ import '../../marketplace/presentation/marketplace_drawer.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../marketplace/domain/marketplace_feed_models.dart';
+import '../../marketplace/domain/marketplace_offer.dart';
+import '../../marketplace/presentation/product_offers_screen.dart';
 import '../../marketplace/presentation/marketplace_feed_provider.dart';
 import '../../marketplace/presentation/marketplace_feed_section.dart';
 import 'package:flutter/material.dart';
@@ -92,7 +94,49 @@ class HomeScreen extends ConsumerWidget {
     // A marketplace card carries a product ID rather than a whole product -
     // the feed deliberately does not pay for every product's full detail to
     // draw a grid. So the detail is fetched when one is actually opened.
+    /// Adds one shop's offer of a product to the cart.
+    ///
+    /// THE SAME DOOR AS THE FEED'S ADD, on purpose. The offers screen can
+    /// legitimately offer to add - a shop further away may deliver what the
+    /// card could only be visited for - and routing that through a second,
+    /// parallel add would be two places to keep the error handling and the
+    /// confirmation wording in step.
+    Future<void> addFromOffer(MarketplaceOffer offer) async {
+      final variantId = offer.productVariantId;
+      if (variantId == null || !offer.addable) return;
+      try {
+        await ref
+            .read(cartControllerProvider.notifier)
+            .addToCart(variantId: variantId, quantity: 1);
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${offer.productName} added to cart')),
+        );
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+      }
+    }
+
     Future<void> openMarketplaceCard(MarketplaceCard card) async {
+      // A VISIT-TO-BUY CARD CANNOT OPEN THE PRODUCT SCREEN. That screen's
+      // whole shape is an ADD TO CART button, and drawing one for something
+      // the backend will refuse is a promise the app cannot keep. It opens
+      // the shops-near-you screen instead, which answers the question that
+      // card actually raises: who has it, where, and for how much.
+      if (!card.addable) {
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => ProductOffersScreen(
+            card: card,
+            // A shop two streets further may deliver the same thing, and that
+            // offer is addable even though the card was not - so the screen
+            // still needs a way to add, and it is the same one the feed uses.
+            onAdd: (offer) => addFromOffer(offer),
+          ),
+        ));
+        return;
+      }
       try {
         final product = await ref
             .read(productsRepositoryProvider)

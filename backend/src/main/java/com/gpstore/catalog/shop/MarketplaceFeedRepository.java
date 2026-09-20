@@ -192,6 +192,104 @@ public class MarketplaceFeedRepository {
         }, args.toArray());
     }
 
+    /**
+     * Every nearby shop that offers this product, in any mode.
+     *
+     * <p>THE OTHER HALF OF THE FEED'S DEDUPLICATION. The feed shows one card
+     * per product on purpose - five shops selling Coke is one drink, not five
+     * results. That is right for browsing and wrong the moment the customer
+     * taps it, because "who has it, where, and for how much" is exactly the
+     * question they opened the card to ask. So the card collapses and the
+     * detail expands, and neither is inventing anything the other hid.
+     *
+     * <p>CARRIES WHERE TO GO. A Visit-to-Buy listing whose screen cannot say
+     * the address is a poster with no shop behind it, so the shop's address,
+     * its coordinates and its public support number come back with the price.
+     * These are the things a storefront already shows any passer-by - no
+     * merchant's private numbers, no takings, no owner details.
+     *
+     * <p>Bounded like everything else here: shop ids from ShopDiscovery, and
+     * an explicit IN, because a filtered query could only answer about one
+     * shop and the question spans the town.
+     */
+    public List<Object[]> offersOf(Long productId,
+                                   Collection<Long> shopIds,
+                                   Map<Long, Double> distanceByShop) {
+        if (productId == null || shopIds == null || shopIds.isEmpty()) {
+            return List.of();
+        }
+        List<Object> args = new ArrayList<>();
+        StringBuilder distances = new StringBuilder();
+        for (Long shopId : shopIds) {
+            if (distances.length() > 0) {
+                distances.append(", ");
+            }
+            distances.append("(?::bigint, ?::double precision)");
+            args.add(shopId);
+            args.add(distanceByShop.getOrDefault(shopId, Double.MAX_VALUE));
+        }
+
+        String sql = """
+                WITH near AS (SELECT * FROM (VALUES %s) AS d(shop_id, distance_km))
+                SELECT v.id                AS variant_id,
+                       v.quantity          AS variant_quantity,
+                       v.unit              AS variant_unit,
+                       p.id                AS product_id,
+                       p.name              AS product_name,
+                       p.brand             AS brand,
+                       spv.selling_price   AS selling_price,
+                       spv.mrp             AS mrp,
+                       spv.price_max       AS price_max,
+                       spv.price_mode      AS price_mode,
+                       spv.commerce_mode   AS commerce_mode,
+                       spv.offline_availability AS offline_availability,
+                       spv.service_duration_minutes AS service_duration_minutes,
+                       s.id                AS shop_id,
+                       s.display_name      AS shop_name,
+                       s.address_line      AS address_line,
+                       s.locality          AS locality,
+                       s.city              AS city,
+                       s.pincode           AS pincode,
+                       s.latitude          AS shop_latitude,
+                       s.longitude         AS shop_longitude,
+                       s.support_phone     AS support_phone,
+                       near.distance_km    AS distance_km
+                  FROM shop_product_variants spv
+                  JOIN near            ON near.shop_id = spv.shop_id
+                  JOIN shops s         ON s.id = spv.shop_id
+                  JOIN product_variants v ON v.id = spv.product_variant_id
+                  JOIN products p      ON p.id = v.product_id
+                 WHERE spv.shop_id IN (%s)
+                   AND v.product_id = ?
+                   AND spv.available = true
+                   AND COALESCE(spv.active, true) = true
+                   AND spv.selling_price IS NOT NULL
+                   AND spv.selling_price > 0
+                   AND v.available = true
+                   AND COALESCE(v.active, true) = true
+                   AND p.active = true
+                 ORDER BY near.distance_km ASC, spv.selling_price ASC, spv.id ASC
+                """.formatted(distances, placeholders(shopIds.size()));
+
+        args.addAll(shopIds);
+        args.add(productId);
+
+        return jdbc.query(sql, (rs, rowNum) -> new Object[] {
+                rs.getLong("variant_id"), rs.getObject("variant_quantity"),
+                rs.getString("variant_unit"), rs.getLong("product_id"),
+                rs.getString("product_name"), rs.getString("brand"),
+                rs.getBigDecimal("selling_price"), rs.getBigDecimal("mrp"),
+                rs.getBigDecimal("price_max"), rs.getString("price_mode"),
+                rs.getString("commerce_mode"), rs.getString("offline_availability"),
+                rs.getObject("service_duration_minutes"),
+                rs.getLong("shop_id"), rs.getString("shop_name"),
+                rs.getString("address_line"), rs.getString("locality"),
+                rs.getString("city"), rs.getString("pincode"),
+                rs.getObject("shop_latitude"), rs.getObject("shop_longitude"),
+                rs.getString("support_phone"), rs.getDouble("distance_km")
+        }, args.toArray());
+    }
+
     private static String placeholders(int count) {
         return String.join(", ", java.util.Collections.nCopies(count, "?"));
     }

@@ -453,6 +453,33 @@ public class MarketplaceController {
     }
 
     /**
+     * Every nearby shop offering this product, and how to reach each one.
+     *
+     * <p>THE SCREEN BEHIND A VISIT-TO-BUY CARD. The feed collapses five shops
+     * selling the same drink into one card, because five Cokes is one drink
+     * and not five results. The moment the customer taps it, though, "who has
+     * it, where, and for how much" is the whole question - so this expands the
+     * card back out. Nothing was hidden and nothing is invented: it is the
+     * same rows, collapsed and expanded.
+     *
+     * <p>ALL THREE MODES COME BACK. A customer looking at a Visit-to-Buy card
+     * for something a shop two streets further delivers should be told so.
+     * Filtering by the mode they arrived through would hide the better answer
+     * to the question they actually have, which is "how do I get this?".
+     *
+     * <p>Anonymous-readable, like the feed and the shop list: this is what a
+     * storefront shows any passer-by - a name, an address, a public number, a
+     * price. No merchant's private contact, no takings, no owner details.
+     */
+    @GetMapping("/products/{productId}/offers")
+    public List<MarketplaceOfferView> offersOf(
+            @PathVariable Long productId,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return marketplaceFeed.offersOf(productId, lat, lng);
+    }
+
+    /**
      * Reads the mode filter, refusing to guess.
      *
      * <p>An unrecognised mode falls back to Buy Online rather than to
