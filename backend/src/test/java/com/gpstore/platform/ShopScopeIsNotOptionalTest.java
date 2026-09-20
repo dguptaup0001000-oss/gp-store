@@ -183,6 +183,55 @@ class ShopScopeIsNotOptionalTest {
      * no warning, though: somebody reading it would go looking for a leak that
      * is not there and might miss one that is.
      */
+    /**
+     * Classes that reach a shop-owned table through a JdbcTemplate, and have
+     * been read.
+     *
+     * <p>Each one has to say what narrows it, because Hibernate does not.
+     */
+    private static final Set<String> REVIEWED_JDBC_TEMPLATE_CLASSES = Set.of(
+            // THE MARKETPLACE FEED, whose entire job is to span shops - a
+            // customer standing in a town is asking what the TOWN sells, and
+            // a filtered query could only ever answer about one shop. Bounded
+            // by "spv.shop_id IN (:shopIds)" with ids that come from
+            // ShopDiscovery, the existing authority on which storefronts a
+            // customer may see, and it reads only what a shopfront already
+            // shows anybody: name, price, availability. No order, no takings,
+            // no private merchant data is reachable through it.
+            "MarketplaceFeedRepository",
+
+            // RECONCILIATION, which exists precisely to compare what the
+            // central catalogue says against what shops have listed. It runs
+            // as maintenance rather than on a request, so there is no customer
+            // whose scope it could inherit.
+            "ShopCatalogReconciliation",
+
+            // THE PLATFORM CONTROL TOWER, which is the Super Admin's
+            // deliberately marketplace-wide view. Reaching every shop is the
+            // feature; it is gated by PLATFORM_ADMIN in SecurityConfig rather
+            // than by a scope.
+            "PlatformControlTowerService",
+
+            // SHEDLOCK's table, which merely shares a word with a shop-owned
+            // one. It holds scheduler leases and no shop data at all.
+            "SchedulerLockConfig",
+
+            // THE BOOTSTRAP TABLE RESET, which this sweep found on its first
+            // run - a grep for the obvious table names had missed it, which
+            // is rather the point of having the test do the looking.
+            //
+            // It DROPs tables, one of which (shop_business_hours) is
+            // shop-owned, so it is worth being explicit about why that is not
+            // a data-loss bug waiting to happen. It is gated by
+            // @ConditionalOnProperty("gpstore.flyway.reset-owned-tables"),
+            // that property is set nowhere in main configuration, and the
+            // class comment says in as many words that production must never
+            // set it. It exists so a FRESH database lets the versioned scripts
+            // create tables Hibernate would otherwise create without their
+            // CHECK constraints. Nothing about it is scope-sensitive: there is
+            // no request, no customer and no shop in play when it runs.
+            "FlywayOwnedTableReset");
+
     private static final Set<String> REVIEWED_NATIVE_QUERIES = Set.of(
             "OrderRepository.revenueByDayBetween",
 
@@ -483,6 +532,66 @@ class ShopScopeIsNotOptionalTest {
                 "these native queries read a shop-owned table and Hibernate does not filter them. "
                         + "Give each one an explicit shop predicate, then add it to "
                         + "REVIEWED_NATIVE_QUERIES with a note: " + unreviewed);
+    }
+
+    /**
+     * Hand-written JDBC that reads a shop-owned table, which the check above
+     * cannot see.
+     *
+     * <p>WHY A SECOND SWEEP. The native-query check reads {@code @Query}
+     * annotations on Spring Data interfaces, which is most of this
+     * application's SQL and none of the rest. A class holding a
+     * {@code JdbcTemplate} writes SQL that never passes through an annotation,
+     * never passes through Hibernate, and therefore never meets the shop
+     * filter - and until this test existed, nothing noticed. Three such
+     * classes were already here; the guard had simply never been able to see
+     * them.
+     *
+     * <p>That is the more dangerous half of the two. A JPQL slip returns one
+     * shop's rows when you wanted many, which is visibly wrong. A JdbcTemplate
+     * slip returns EVERY shop's rows when you wanted one, which looks like a
+     * working feature.
+     *
+     * <p>SOURCE, NOT BYTECODE, deliberately. The SQL is a string built at
+     * runtime, sometimes assembled from fragments, so there is nothing to
+     * reflect over. Reading the file is crude and it is also the only thing
+     * that would have caught these.
+     */
+    @Test
+    @DisplayName("hand-written JDBC against a shop-owned table has to be looked at too")
+    void jdbcTemplateQueriesAreNotFilteredEitherSoTheyAreListed() throws java.io.IOException {
+        Set<String> tables = shopOwnedTableNames();
+        Set<String> found = new TreeSet<>();
+
+        java.nio.file.Path root = java.nio.file.Path.of("src/main/java");
+        try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(root)) {
+            for (java.nio.file.Path file : files
+                    .filter(f -> f.toString().endsWith(".java")).toList()) {
+                String source = java.nio.file.Files.readString(file);
+                if (!source.contains("JdbcTemplate")) {
+                    continue;
+                }
+                String lower = source.toLowerCase(Locale.ROOT);
+                for (String table : tables) {
+                    // Word-ish boundaries: "orders" must not match
+                    // "order_returns" or a Java identifier that contains it.
+                    if (java.util.regex.Pattern.compile("[^a-z_]" + java.util.regex.Pattern.quote(table) + "[^a-z_]")
+                            .matcher(lower).find()) {
+                        found.add(file.getFileName().toString().replace(".java", ""));
+                        break;
+                    }
+                }
+            }
+        }
+
+        Set<String> unreviewed = new TreeSet<>(found);
+        unreviewed.removeAll(REVIEWED_JDBC_TEMPLATE_CLASSES);
+
+        assertTrue(unreviewed.isEmpty(),
+                "these classes write SQL by hand against a shop-owned table, where Hibernate's "
+                        + "shop filter does not reach. Give each statement an explicit shop "
+                        + "predicate, then add the class to REVIEWED_JDBC_TEMPLATE_CLASSES with a "
+                        + "note saying what bounds it: " + unreviewed);
     }
 
     @Test
