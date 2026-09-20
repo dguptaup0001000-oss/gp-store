@@ -312,6 +312,21 @@ public class SecurityConfig {
                 // app that cannot show anybody anything until they sign in.
                 .requestMatchers(HttpMethod.GET, "/api/marketplace/**").permitAll()
 
+                // WHAT A CUSTOMER DID ABOUT AN OFFLINE LISTING, which is the
+                // only way a merchant finds out whether a Visit-to-Buy card
+                // brought anybody in - an online sale records itself, that
+                // one does not. Anonymous like the browsing it measures:
+                // most marketplace traffic is signed out, and refusing those
+                // taps would make the numbers a survey of logged-in users
+                // rather than of interest.
+                //
+                // IT CANNOT BE USED TO LEARN ANYTHING. It answers 202 for a
+                // listing that exists, one that does not and one belonging to
+                // another shop alike, the mode is read from the listing
+                // rather than taken from the caller, and it writes only a
+                // count. It is rate-limited with the rest of /api/**.
+                .requestMatchers(HttpMethod.POST, "/api/marketplace/engagement").permitAll()
+
                 // THE PLATFORM SURFACE. Merchants, shop lifecycle, and looking
                 // into any shop - the only routes whose scope spans merchants.
                 // Above everything else so nothing below can widen it.

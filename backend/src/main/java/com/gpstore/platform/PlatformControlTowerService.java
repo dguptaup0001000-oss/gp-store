@@ -70,6 +70,33 @@ public class PlatformControlTowerService {
                                     long activeCustomerAccounts, long newCustomers,
                                     long totalWorkers, long activeWorkers) {}
 
+    /**
+     * How much of the marketplace is online, over-the-counter and services.
+     *
+     * <p>THE SUPER ADMIN COULD NOT SEE TWO THIRDS OF IT. Every count on this
+     * dashboard is derived from orders, and a Visit-to-Buy listing and a
+     * service produce no order by design. So a platform operator looking at
+     * this screen saw a marketplace of online kiranas and had no way to tell
+     * whether the jewellers and barbers they onboarded had listed anything at
+     * all.
+     *
+     * <p>LISTINGS AND INTEREST, NOT REVENUE. These are counts of what exists
+     * and of what customers did in the app. GP-STORE does not know what an
+     * offline listing earned, and this record deliberately has nowhere to put
+     * such a number - a platform that bills against trade it did not witness
+     * is charging for a guess.
+     *
+     * @param engagementNote travels with the numbers rather than living in a
+     *                       screen's copy, so a second client cannot show
+     *                       them without it.
+     */
+    public record CommerceModeMix(long onlineListings, long visitToBuyListings,
+                                  long serviceListings,
+                                  long shopsSellingOnline, long shopsWithVisitToBuy,
+                                  long shopsWithServices,
+                                  Map<String, Long> engagementByMode,
+                                  String engagementNote) {}
+
     public record FinanceSummary(BigDecimal gmv, BigDecimal completedSales,
                                  BigDecimal merchantProductSales,
                                  BigDecimal deliveryCharges, BigDecimal refunds,
@@ -81,6 +108,7 @@ public class PlatformControlTowerService {
 
     public record DashboardSummary(LocalDateTime from, LocalDateTime to,
                                    MarketplaceCounts marketplace,
+                                   CommerceModeMix commerceModes,
                                    Map<String, Long> orderStatuses,
                                    FinanceSummary finance,
                                    Integer recentlyActiveAuthenticatedAccounts,
@@ -366,8 +394,57 @@ public class PlatformControlTowerService {
                 commission, fees, adjustments, false);
 
         PresenceSnapshot snapshot = presence.snapshot();
-        return new DashboardSummary(from, to, counts, Map.copyOf(statuses), finance,
+        return new DashboardSummary(from, to, counts, commerceModeMix(range),
+                Map.copyOf(statuses), finance,
                 snapshot.onlineNow(), snapshot.windowSeconds(), snapshot.available());
+    }
+
+    /**
+     * What the marketplace is actually made of, beyond what produced orders.
+     *
+     * <p>ONE STATEMENT FOR THE LISTINGS and one for the interest, both grouped
+     * in the database. This runs on the Super Admin dashboard, which loads
+     * across every shop on the platform - a per-mode or per-shop loop here is
+     * the shape that cost this application its ceiling once already.
+     *
+     * <p>Cross-shop on purpose and by permission: reaching every shop IS the
+     * control tower's job, and PLATFORM_ADMIN in SecurityConfig is what gates
+     * it rather than a tenant scope.
+     */
+    private CommerceModeMix commerceModeMix(MapSqlParameterSource range) {
+        Map<String, Long> listings = new LinkedHashMap<>();
+        Map<String, Long> shopsWith = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE') AS mode,
+                       count(*)                       AS listings,
+                       count(DISTINCT spv.shop_id)    AS shops
+                  FROM shop_product_variants spv
+                  JOIN shops s ON s.id = spv.shop_id AND s.deleted_at IS NULL
+                 WHERE COALESCE(spv.active, true) = true
+                 GROUP BY COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE')
+                """, Map.of(), (RowCallbackHandler) rs -> {
+            listings.put(rs.getString("mode"), rs.getLong("listings"));
+            shopsWith.put(rs.getString("mode"), rs.getLong("shops"));
+        });
+
+        Map<String, Long> engagement = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT e.commerce_mode AS mode, count(*) AS total
+                  FROM listing_engagement_events e
+                 WHERE e.occurred_at >= :from AND e.occurred_at < :to
+                 GROUP BY e.commerce_mode
+                """, range, (RowCallbackHandler) rs ->
+                engagement.put(rs.getString("mode"), rs.getLong("total")));
+
+        return new CommerceModeMix(
+                listings.getOrDefault("ONLINE_PURCHASE", 0L),
+                listings.getOrDefault("VISIT_TO_BUY", 0L),
+                listings.getOrDefault("SERVICE_AT_SHOP", 0L),
+                shopsWith.getOrDefault("ONLINE_PURCHASE", 0L),
+                shopsWith.getOrDefault("VISIT_TO_BUY", 0L),
+                shopsWith.getOrDefault("SERVICE_AT_SHOP", 0L),
+                Map.copyOf(engagement),
+                com.gpstore.engagement.ListingEngagement.EngagementReport.NOTE);
     }
 
     @Transactional(readOnly = true)

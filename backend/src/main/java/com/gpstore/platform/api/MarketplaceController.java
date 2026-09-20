@@ -57,6 +57,7 @@ public class MarketplaceController {
     private final com.gpstore.repository.StoreClosureRepository closures;
     private final MarketplaceFeedService marketplaceFeed;
     private final com.gpstore.catalog.shop.SellerResolution sellers;
+    private final com.gpstore.engagement.ListingEngagement engagement;
     private final com.gpstore.security.CurrentUser currentUser;
     private final com.gpstore.repository.AddressRepository addresses;
 
@@ -74,7 +75,8 @@ public class MarketplaceController {
                                  MarketplaceFeedService marketplaceFeed,
                                  com.gpstore.catalog.shop.SellerResolution sellers,
                                  com.gpstore.security.CurrentUser currentUser,
-                                 com.gpstore.repository.AddressRepository addresses) {
+                                 com.gpstore.repository.AddressRepository addresses,
+                                 com.gpstore.engagement.ListingEngagement engagement) {
         this.shelves = shelves;
         this.stars = stars;
         this.categories = categories;
@@ -90,6 +92,7 @@ public class MarketplaceController {
         this.closures = closures;
         this.marketplaceFeed = marketplaceFeed;
         this.sellers = sellers;
+        this.engagement = engagement;
         this.currentUser = currentUser;
         this.addresses = addresses;
     }
@@ -451,6 +454,57 @@ public class MarketplaceController {
             @RequestParam(defaultValue = "20") int size) {
         return marketplaceFeed.page(lat, lng, modesFrom(mode), categoryId, page, size);
     }
+
+    /**
+     * Records that a customer did something about an offline listing.
+     *
+     * <p>WHY THIS ENDPOINT EXISTS AT ALL. An online sale records itself - an
+     * order, a payment, a receipt. A Visit-to-Buy listing has none of that:
+     * the customer sees the card, taps Directions, walks in and pays in cash,
+     * and GP-STORE never learns whether any of it happened. A jeweller who
+     * lists their showroom stock has no way to tell whether it brought
+     * anybody in. This is how they find out.
+     *
+     * <p>INTEREST, NOT SALES. What is recorded is what the app genuinely saw:
+     * a card drawn, a detail opened, directions asked for, a call placed.
+     * GP-STORE does not know who walked in, who bought or what they paid, and
+     * nothing built on these rows may claim otherwise.
+     *
+     * <p>THE MODE IS NOT A PARAMETER. It is read from the listing inside that
+     * shop's scope, so a client cannot dress ordinary online browsing up as
+     * showroom interest - which is exactly the number a merchant would be
+     * tempted to pay for position against.
+     *
+     * <p>ALWAYS 202, AND ALWAYS FAST. An unknown listing, another shop's
+     * variant or a failed write are all silently nothing: this must never
+     * break browsing, and it must never become a way to discover which
+     * listing ids a shop has.
+     */
+    @PostMapping("/engagement")
+    @org.springframework.web.bind.annotation.ResponseStatus(
+            org.springframework.http.HttpStatus.ACCEPTED)
+    public void recordEngagement(@RequestBody EngagementRequest request) {
+        if (request == null) {
+            return;
+        }
+        Long shopper;
+        try {
+            shopper = currentUser.customerId();
+        } catch (RuntimeException anonymous) {
+            // Most marketplace browsing is anonymous and an anonymous tap is
+            // still a real signal. Recorded with no identifier at all rather
+            // than with a pseudonymous one.
+            shopper = null;
+        }
+        engagement.record(request.shopId(), request.productVariantId(),
+                com.gpstore.engagement.EngagementKind.of(request.kind()), shopper);
+    }
+
+    /**
+     * @param kind one of VIEWED_CARD, OPENED_DETAIL, ASKED_DIRECTIONS,
+     *             CALLED_SHOP. Anything else is dropped rather than guessed.
+     */
+    public record EngagementRequest(Long shopId, Long productVariantId, String kind) {}
 
     /**
      * Search what the TOWN sells, not what one shop's shelf holds.
