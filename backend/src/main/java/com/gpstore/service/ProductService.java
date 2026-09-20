@@ -330,11 +330,85 @@ public class ProductService {
                             + com.gpstore.platform.TenantContext.require().shopId());
         }
 
+        // HOW THIS SHOP SELLS IT, applied to the listing that was just created.
+        //
+        // SET HERE RATHER THAN BY A FOLLOW-UP EDIT, and that is not a
+        // convenience: a Visit-to-Buy item created as an online listing and
+        // corrected a moment later is buyable in that gap. On a marketplace
+        // with live customers that gap is an order the shop cannot fulfil.
+        if (listing != null) {
+            applyFirstVariantSellingMode(listing, first);
+            shopCatalog.save(listing);
+        }
+
         com.gpstore.entity.Inventory stock = new com.gpstore.entity.Inventory();
         stock.setProductVariant(savedVariant);
         stock.setStock(first.getStock() == null ? 0 : first.getStock());
         stock.setReservedStock(0);
         inventory.save(stock);
+    }
+
+    /**
+     * Reads the selling mode off the create request onto the new listing.
+     *
+     * <p>ABSENT MEANS ONLINE, which is what every product created before
+     * commerce modes existed is - so a client that does not send these fields
+     * behaves exactly as it always did.
+     *
+     * <p>AN UNKNOWN VALUE IS REFUSED, not silently defaulted. Defaulting would
+     * quietly make a Visit-to-Buy item buyable, which is the one direction
+     * this must never fail in; an error tells the merchant their app is out
+     * of date while the item stays uncreated.
+     */
+    private static void applyFirstVariantSellingMode(
+            com.gpstore.catalog.shop.ShopProductVariant listing,
+            com.gpstore.dto.request.ProductCreateRequest.FirstVariant first) {
+        listing.setCommerceMode(parseOrRefuse(
+                com.gpstore.catalog.shop.CommerceMode.class, first.getCommerceMode(),
+                com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE, "selling mode"));
+        listing.setPriceMode(parseOrRefuse(
+                com.gpstore.catalog.shop.ListingPriceMode.class, first.getPriceMode(),
+                com.gpstore.catalog.shop.ListingPriceMode.EXACT_PRICE, "price mode"));
+        listing.setPriceMax(first.getPriceMax());
+        listing.setOfflineAvailability(parseOrRefuse(
+                com.gpstore.catalog.shop.OfflineAvailability.class,
+                first.getOfflineAvailability(), null, "availability"));
+        listing.setServiceDurationMinutes(first.getServiceDurationMinutes());
+
+        boolean online = listing.getCommerceMode() == null
+                || listing.getCommerceMode().isBuyableOnline();
+
+        // AN ONLINE PRICE IS A PROMISE - a cart totals it and a receipt prints
+        // it - so the same rule the edit path enforces applies at creation.
+        if (online && listing.getPriceMode() != com.gpstore.catalog.shop.ListingPriceMode.EXACT_PRICE) {
+            throw new BadRequestException(
+                    "An item sold online needs one exact price, because that is what the "
+                            + "customer is charged.");
+        }
+        if (listing.getPriceMode() == com.gpstore.catalog.shop.ListingPriceMode.PRICE_RANGE
+                && (listing.getPriceMax() == null
+                    || listing.getPriceMax().compareTo(java.math.BigDecimal.ZERO) <= 0)) {
+            throw new BadRequestException("A price range needs a top price.");
+        }
+        if (!online && listing.getOfflineAvailability() == null) {
+            listing.setOfflineAvailability(
+                    com.gpstore.catalog.shop.OfflineAvailability.AVAILABLE);
+        }
+        if (online) {
+            listing.setServiceDurationMinutes(null);
+        }
+    }
+
+    private static <E extends Enum<E>> E parseOrRefuse(Class<E> type, String raw,
+                                                       E whenAbsent, String what) {
+        if (raw == null || raw.isBlank()) {
+            return whenAbsent;
+        }
+        try {
+            return Enum.valueOf(type, raw.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            throw new BadRequestException("Unknown " + what + ": " + raw);
+        }
     }
 
     /**

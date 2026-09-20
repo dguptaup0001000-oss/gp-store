@@ -79,6 +79,16 @@ void main() {
       // which no shop role holds - see admin_permissions_test. It is in this
       // console rather than a fifth app because the platform operator and the
       // shopkeeper use the same screens for orders, customers and audit.
+      //
+      // The two ways to sell that are not "post it and ship it". Both sit in
+      // Catalogue immediately after Products, and both are behind catalogView
+      // like the rest of that group - a merchant who may edit their shelf may
+      // see what is on it. They were the whole point of the commerce_mode
+      // work and for a release they existed only as a field buried in the
+      // variant form, which is why merchant_can_reach_every_mode_test now
+      // asserts their position in the drawer and not just their existence.
+      'Visit to Buy',
+      'Services at Shop',
     };
 
     final labels = AdminNav.groups

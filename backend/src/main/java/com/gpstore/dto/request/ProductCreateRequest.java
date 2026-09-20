@@ -166,6 +166,80 @@ public class ProductCreateRequest {
 
         private Boolean available;
 
+
+        /**
+
+         * HOW this shop sells it: online, over the counter, or as a service.
+
+         *
+
+         * <p>NULL MEANS ONLINE, which is what every product created before
+
+         * commerce modes existed is, so a caller that does not send these keeps
+
+         * behaving exactly as it did. They are here so the Visit-to-Buy and
+
+         * Services screens can create a listing that is already in the right mode
+
+         * rather than creating an online one and immediately editing it - which
+
+         * would leave a window where the item is buyable.
+
+         */
+
+        @Size(max = 24, message = "Unknown selling mode.")
+
+        private String commerceMode;
+
+
+        @Size(max = 24, message = "Unknown price mode.")
+
+        private String priceMode;
+
+
+        private BigDecimal priceMax;
+
+
+        @Size(max = 24, message = "Unknown availability.")
+
+        private String offlineAvailability;
+
+
+        private Integer serviceDurationMinutes;
+
+
+        public String getCommerceMode() { return commerceMode; }
+
+        public void setCommerceMode(String commerceMode) { this.commerceMode = commerceMode; }
+
+
+        public String getPriceMode() { return priceMode; }
+
+        public void setPriceMode(String priceMode) { this.priceMode = priceMode; }
+
+
+        public BigDecimal getPriceMax() { return priceMax; }
+
+        public void setPriceMax(BigDecimal priceMax) { this.priceMax = priceMax; }
+
+
+        public String getOfflineAvailability() { return offlineAvailability; }
+
+        public void setOfflineAvailability(String offlineAvailability) {
+
+            this.offlineAvailability = offlineAvailability;
+
+        }
+
+
+        public Integer getServiceDurationMinutes() { return serviceDurationMinutes; }
+
+        public void setServiceDurationMinutes(Integer serviceDurationMinutes) {
+
+            this.serviceDurationMinutes = serviceDurationMinutes;
+
+        }
+
         public String getLabel() { return label; }
         public void setLabel(String label) { this.label = label; }
 

@@ -43,6 +43,25 @@ class AdminFormat {
   static String rupees(double amount) =>
       '₹${groupIndian(amount.round())}';
 
+  /// Rupees to the paise: 2673 -> ₹2,673.00, 99.5 -> ₹99.50.
+  ///
+  /// THE OTHER HALF OF THE RULE ABOVE. A KPI tile drops paise because nobody
+  /// reads a month's takings to the paise. A customer's ledger is the
+  /// opposite case: the operator is looking at it because somebody is asking
+  /// what they were charged, and ₹2,673 when the receipt says ₹2,672.50 is
+  /// the kind of small wrongness that costs an hour to unpick.
+  ///
+  /// Rounds half away from zero on the paise, which is what toStringAsFixed
+  /// does, and keeps Indian grouping on the rupee part.
+  static String rupeesExact(double amount) {
+    final negative = amount < 0;
+    final fixed = amount.abs().toStringAsFixed(2);
+    final dot = fixed.lastIndexOf('.');
+    final whole = int.tryParse(fixed.substring(0, dot)) ?? 0;
+    final paise = fixed.substring(dot + 1);
+    return '${negative ? '-' : ''}₹${groupIndian(whole)}.$paise';
+  }
+
   /// Short form for tight spaces - a chart axis, a dense tile.
   /// 1250 -> ₹1.2K, 145000 -> ₹1.5L, 12500000 -> ₹1.3Cr.
   static String rupeesCompact(double amount) {

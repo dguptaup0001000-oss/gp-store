@@ -37,4 +37,37 @@ public class Category implements Serializable {
     private BigDecimal gstRate;
 
     private Boolean active;
+
+
+    /**
+
+     * The category this one sits under, or null for a top-level category.
+
+     *
+
+     * <p>NULL IS NOT A MIGRATION GAP. Every category that existed before the
+
+     * marketplace is top-level and stays that way: those rows are attached to
+
+     * real listings in real shops, and reorganising them into a taxonomy
+
+     * invented in a migration would be a script rearranging somebody's working
+
+     * catalogue overnight. New categories can be nested from the start, and
+
+     * the existing ones can be organised deliberately later.
+
+     *
+
+     * <p>A PLAIN ID RATHER THAN A @ManyToOne, so loading a category never drags
+
+     * its ancestors along one query at a time. The picker reads the whole set
+
+     * it needs in one statement and assembles the tree in memory.
+
+     */
+
+    @Column(name = "parent_id")
+
+    private Long parentId;
 }

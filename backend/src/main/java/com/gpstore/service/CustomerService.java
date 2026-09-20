@@ -34,6 +34,7 @@ public class CustomerService {
     private final PushNotificationService pushNotificationService;
     private final CustomerAccountStatusService accountStatusService;
     private final com.gpstore.repository.CustomerAppSessionRepository appSessionRepository;
+    private final com.gpstore.service.AuditLogService auditLog;
 
     public CustomerService(
             CustomerRepository customerRepository,
@@ -47,7 +48,8 @@ public class CustomerService {
             NotificationRepository notificationRepository,
             PushNotificationService pushNotificationService,
             CustomerAccountStatusService accountStatusService,
-            com.gpstore.repository.CustomerAppSessionRepository appSessionRepository) {
+            com.gpstore.repository.CustomerAppSessionRepository appSessionRepository,
+            com.gpstore.service.AuditLogService auditLog) {
         this.customerRepository = customerRepository;
         this.orderRepository = orderRepository;
         this.shopCustomers = shopCustomers;
@@ -60,6 +62,7 @@ public class CustomerService {
         this.notificationRepository = notificationRepository;
         this.accountStatusService = accountStatusService;
         this.appSessionRepository = appSessionRepository;
+        this.auditLog = auditLog;
     }
 
     /**
@@ -211,6 +214,26 @@ public class CustomerService {
      * need to log in again, which is the correct behavior either way.
      */
     public Customer setAccountActive(Long customerId, boolean active) {
+        return setAccountActive(customerId, active, null);
+    }
+
+    /**
+     * The same change, with the operator's stated reason recorded beside it.
+     *
+     * <p>WHY THE REASON IS A PARAMETER AND NOT A CONVENTION. Barring somebody
+     * from a marketplace they buy food on is not a settings toggle. Six months
+     * later the only thing that can answer "why is this account off" is a row
+     * written at the moment it was turned off, naming who did it and what they
+     * were looking at. An audit trail that records the action but not the
+     * grounds tells you a decision happened, not whether it was right.
+     *
+     * <p>The reason is REQUIRED FROM SUPER ADMIN and optional here, because
+     * the existing merchant-facing route (PUT /api/customers/{id}/active) has
+     * been live without one and rejecting those calls now would break a
+     * shipped app build. The Super Admin console supplies one on every call
+     * and PlatformControlTowerController refuses a request without it.
+     */
+    public Customer setAccountActive(Long customerId, boolean active, String reason) {
         Customer customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
 
@@ -238,8 +261,21 @@ public class CustomerService {
             }
         }
 
+        boolean wasActive = Boolean.TRUE.equals(customer.getActive());
         customer.setActive(active);
         Customer saved = customerRepository.save(customer);
+
+        // WRITTEN EVEN WHEN NOTHING CHANGED. A second "deactivate" on an
+        // already-barred account still says an operator went looking and
+        // acted, which is exactly the pattern a review of an abused
+        // permission needs to see. Nothing here carries a password, a hash,
+        // a token or a contact detail - only the id, the two states and the
+        // words the operator typed.
+        auditLog.logRequired(
+                active ? "CUSTOMER_ACCOUNT_REACTIVATED" : "CUSTOMER_ACCOUNT_DEACTIVATED",
+                "Customer", customerId, null, null,
+                wasActive ? "ACTIVE" : "INACTIVE", active ? "ACTIVE" : "INACTIVE",
+                reason == null || reason.isBlank() ? null : reason.trim(), null);
 
         if (!active) {
             refreshTokenService.revokeAllForCustomer(customerId);

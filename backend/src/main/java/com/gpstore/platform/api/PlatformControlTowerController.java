@@ -86,6 +86,27 @@ public class PlatformControlTowerController {
         return service.revealCustomerPii(id, request.field(), request.reason());
     }
 
+    public record StatusRequest(Boolean active, String reason) {}
+
+    /**
+     * Bar this customer from the marketplace, or restore them.
+     *
+     * <p>Authorization is the {@code /api/platform/**} rule in SecurityConfig
+     * (PLATFORM_ADMIN) - not a check written here, and not anything the app
+     * does. The reason is required by the service, the change is audited with
+     * the previous and new state, and every session the account holds is
+     * revoked by the route this delegates to.
+     */
+    @PutMapping("/customers/{id}/status")
+    public java.util.Map<String, Object> setCustomerStatus(
+            @PathVariable Long id, @RequestBody StatusRequest request) {
+        if (request == null || request.active() == null) {
+            throw new com.gpstore.exception.BadRequestException(
+                    "active is required: true to restore the account, false to bar it");
+        }
+        return service.setCustomerActive(id, request.active(), request.reason());
+    }
+
     @GetMapping("/merchants/{id}")
     public PlatformControlTowerService.Merchant360 merchant(@PathVariable Long id) {
         return service.merchant(id);

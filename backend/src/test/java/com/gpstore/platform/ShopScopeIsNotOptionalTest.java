@@ -241,7 +241,27 @@ class ShopScopeIsNotOptionalTest {
             // delivery quote it then computes is NOT done here - that runs
             // inside ShopScopeSwitch.within(shopId, ...), under the shop's own
             // scope, so one merchant's rates are never quoted for another.
-            "SellerResolution");
+            "SellerResolution",
+
+            // THE MERCHANT'S OWN SHELF, read for their own screens. Hand-written
+            // because it joins the listing to the catalogue row and the
+            // inventory row in one statement - the alternative was a product
+            // fetch per listing, which is the N+1 this project keeps removing.
+            // It is NOT cross-shop: every statement carries an explicit
+            // "spv.shop_id = :shopId", and that id comes from TenantContext
+            // rather than from any parameter. A request with no scope is
+            // refused rather than defaulted, because a read that fell back to
+            // "some shop" would show one merchant another's shelf.
+            "ShopCatalogueBrowse",
+
+            // CATEGORY SEARCH, which touches a shop-owned table only to ask
+            // "which categories does this shop already sell in" so it can put
+            // those first. What it RETURNS is category rows - central
+            // catalogue data carrying no listing, price or stock - so no
+            // shop-owned value crosses the boundary even when the scope is
+            // absent, which is why a null shop is allowed here and refused in
+            // ShopCatalogueBrowse.
+            "CategoryFinder");
 
     private static final Set<String> REVIEWED_NATIVE_QUERIES = Set.of(
             "OrderRepository.revenueByDayBetween",

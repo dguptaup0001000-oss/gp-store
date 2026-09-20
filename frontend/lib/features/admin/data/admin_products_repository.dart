@@ -15,6 +15,7 @@ import '../domain/delivery_breach_model.dart';
 import '../domain/delivery_partner_models.dart';
 import '../../orders/domain/order_models.dart';
 import '../domain/inventory_models.dart';
+import '../domain/catalogue_item.dart';
 import '../domain/listing_engagement.dart';
 import '../domain/selling_mode.dart';
 import '../domain/variant_attribute.dart';
@@ -179,6 +180,62 @@ class AdminProductsRepository {
         'attributes': attributes.map((a) => a.toJson()).toList(),
       },
     );
+  }
+
+  /// This shop's shelf, filtered by how the items are sold.
+  ///
+  /// SERVER-SIDE FILTERING AND PAGING. The Visit-to-Buy screen asks for that
+  /// mode and gets that mode; it never downloads the whole catalogue and
+  /// filters on the phone, which on a shop with a few thousand listings is
+  /// both slow and pointless.
+  Future<CataloguePage> catalogue({
+    required SellingMode mode,
+    String? query,
+    int page = 0,
+    int size = 30,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/shop/catalogue',
+      queryParameters: {
+        'mode': mode.wire,
+        if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+        'page': page,
+        'size': size,
+      },
+    );
+    final data = response.data;
+    if (data is! Map) return CataloguePage.empty;
+    return CataloguePage.fromJson(Map<String, dynamic>.from(data));
+  }
+
+  /// How many listings this shop has in each mode, for the nav counts.
+  Future<Map<String, int>> catalogueCounts() async {
+    final response = await apiClient.dio.get('/api/shop/catalogue/counts');
+    final data = response.data;
+    if (data is! Map) return const {};
+    return data.map((key, value) =>
+        MapEntry('$key', value is num ? value.toInt() : 0));
+  }
+
+  /// Categories for a picker, most relevant to THIS shop first.
+  ///
+  /// The relevance ordering is the server's, not this app's: it knows which
+  /// categories the shop already sells in, and computing that here would mean
+  /// downloading the shelf to sort a dropdown.
+  Future<List<CategoryOption>> searchCategories({String? query, int limit = 40}) async {
+    final response = await apiClient.dio.get(
+      '/api/shop/category-search',
+      queryParameters: {
+        if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+        'limit': limit,
+      },
+    );
+    final data = response.data;
+    if (data is! List) return const [];
+    return data
+        .whereType<Map>()
+        .map((e) => CategoryOption.fromJson(Map<String, dynamic>.from(e)))
+        .toList(growable: false);
   }
 
   /// What this shop's offline listings attracted, over a window.
@@ -841,6 +898,7 @@ class AdminFirstVariant {
     required this.sellingPrice,
     this.mrp,
     this.stock,
+    this.selling,
   });
 
   final String label;
@@ -848,10 +906,16 @@ class AdminFirstVariant {
   final double? mrp;
   final int? stock;
 
+  /// HOW this shop sells it. Absent means Buy Online, which is what every
+  /// product created before commerce modes existed was, so an older caller
+  /// that does not send it keeps behaving exactly as it did.
+  final SellingSetup? selling;
+
   Map<String, dynamic> toJson() => {
         if (label.trim().isNotEmpty) 'label': label.trim(),
         'sellingPrice': sellingPrice,
         if (mrp != null) 'mrp': mrp,
         'stock': stock ?? 0,
+        ...?selling?.toJson(),
       };
 }
