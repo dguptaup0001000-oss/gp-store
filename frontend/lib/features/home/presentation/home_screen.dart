@@ -1,7 +1,12 @@
+import '../../marketplace/presentation/marketplace_drawer.dart';
+import '../../cart/presentation/cart_providers.dart';
+import '../../../core/marketplace/marketplace_providers.dart';
+import '../../marketplace/domain/marketplace_feed_models.dart';
+import '../../marketplace/presentation/marketplace_feed_provider.dart';
+import '../../marketplace/presentation/marketplace_feed_section.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../shared/widgets/brands_row.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/horizontal_product_section.dart';
@@ -62,16 +67,73 @@ class HomeScreen extends ConsumerWidget {
     // Watched HERE rather than inside HomeFeedSlivers.build, which runs inside
     // ScrollToTop's builder callback and so executes during ScrollToTop's
     // build rather than this one.
-    final feedAsync = belowFoldReady
+    // WHICH FEED THIS SCREEN IS. On a marketplace the home screen shows the
+    // TOWN - every shop that would serve this customer - because requiring
+    // somebody to pick a shop before they can see a product is what made
+    // "All Products" show one kirana's shelf, or nothing at all. Under a
+    // single shop the two questions have the same answer, so the older
+    // shop-scoped feed stays and nothing changes for that deployment.
+    //
+    // Browsing one storefront on purpose is unaffected either way: that is
+    // the shop screen, and it is still there.
+    final onAMarketplace = ref.watch(isMarketplaceProvider);
+    final feedAsync = belowFoldReady && !onAMarketplace
         ? ref.watch(productFeedProvider)
         : const AsyncValue<ProductFeedState>.loading();
+    final marketplaceAsync = belowFoldReady && onAMarketplace
+        ? ref.watch(marketplaceFeedProvider)
+        : const AsyncValue<MarketplaceFeedState>.loading();
     final isLoggedIn = ref.watch(authControllerProvider).status == AuthStatus.authenticated;
 
     void openProduct(Product product) => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
         );
 
+    // A marketplace card carries a product ID rather than a whole product -
+    // the feed deliberately does not pay for every product's full detail to
+    // draw a grid. So the detail is fetched when one is actually opened.
+    Future<void> openMarketplaceCard(MarketplaceCard card) async {
+      try {
+        final product = await ref
+            .read(productsRepositoryProvider)
+            .fetchProductDetail(card.productId);
+        if (!context.mounted) return;
+        openProduct(product);
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+      }
+    }
+
+    // ADD IS ONLY EVER CALLED FOR A CARD THE SERVER SAID IS ADDABLE - the
+    // tile passes null otherwise - and the backend refuses a Visit-to-Buy or
+    // a service anyway. Two doors, because a hidden button is a courtesy
+    // rather than a control.
+    Future<void> addFromMarketplace(MarketplaceCard card) async {
+      final variantId = card.productVariantId;
+      if (variantId == null) return;
+      try {
+        await ref
+            .read(cartControllerProvider.notifier)
+            .addToCart(variantId: variantId, quantity: 1);
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${card.name} added to cart')),
+        );
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+      }
+    }
+
     return Scaffold(
+      // THE DRAWER IS ONLY ON A MARKETPLACE. Under a single shop there are no
+      // modes to switch between, and an entry labelled "Visit to Buy" that
+      // leads to an empty feed is the dead end this app is careful not to
+      // build.
+      drawer: onAMarketplace ? const MarketplaceDrawer() : null,
       bottomNavigationBar: const CartSummaryBar(),
       body: Column(
         children: [
@@ -95,7 +157,9 @@ class HomeScreen extends ConsumerWidget {
                 Future.sync(() => ref.invalidate(newArrivalsProvider)),
                 Future.sync(() => ref.invalidate(trendingProvider)),
                 Future.sync(() => ref.invalidate(recommendedForMeProvider)),
-                Future.sync(() => ref.invalidate(productFeedProvider)),
+                Future.sync(() => ref.invalidate(onAMarketplace
+                    ? marketplaceFeedProvider
+                    : productFeedProvider)),
               ]),
               child: ScrollToTop(
                 builder: (context, scrollController) => NotificationListener<ScrollNotification>(
@@ -115,7 +179,11 @@ class HomeScreen extends ConsumerWidget {
                         notification.depth == 0 &&
                         notification.metrics.axis == Axis.vertical &&
                         notification.metrics.extentAfter < 600) {
-                      ref.read(productFeedProvider.notifier).loadMore();
+                      if (onAMarketplace) {
+                        ref.read(marketplaceFeedProvider.notifier).loadMore();
+                      } else {
+                        ref.read(productFeedProvider.notifier).loadMore();
+                      }
                     }
                     // false: this listener observes, it does not consume.
                     return false;
@@ -250,8 +318,14 @@ class HomeScreen extends ConsumerWidget {
                       // screen. This is where it stops ending after New
                       // arrivals and keeps going through the whole catalogue,
                       // one page at a time.
-                      ...HomeFeedSlivers.build(context, ref,
-                          feed: feedAsync, onProductTap: openProduct),
+                      if (onAMarketplace)
+                        ...MarketplaceFeedSlivers.build(context, ref,
+                            feed: marketplaceAsync,
+                            onCardTap: openMarketplaceCard,
+                            onAdd: addFromMarketplace)
+                      else
+                        ...HomeFeedSlivers.build(context, ref,
+                            feed: feedAsync, onProductTap: openProduct),
                     ],
                   ),
                 ),

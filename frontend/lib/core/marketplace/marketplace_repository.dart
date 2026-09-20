@@ -1,3 +1,4 @@
+import '../../features/marketplace/domain/marketplace_feed_models.dart';
 import '../api/api_client.dart';
 import 'marketplace_models.dart';
 
@@ -15,6 +16,50 @@ class MarketplaceRepository {
   MarketplaceRepository({required this.apiClient});
 
   final ApiClient apiClient;
+
+  /// THE MARKETPLACE ITSELF: what is for sale near this customer, before
+  /// they have chosen anybody's shop.
+  ///
+  /// NOT /api/products/feed, and the difference is the whole point. That
+  /// route answers "what does the shop I am in sell" - it requires a listing,
+  /// listings are shop-owned, and a customer who has chosen no shop resolves
+  /// to Shop #1. So it showed one kirana's shelf on a screen labelled All
+  /// Products, or nothing at all where that shop has no listings. This route
+  /// asks about the TOWN, which is a different question and needed a
+  /// different endpoint rather than a repair to that one.
+  ///
+  /// A MISSING PIN RETURNS EMPTY, deliberately. A customer whose address
+  /// cannot be placed cannot be told which shops deliver to them, and
+  /// inventing a location would show somebody in one town another town's
+  /// shops. The caller draws "add an address to see what is nearby", which is
+  /// an honest answer rather than an error.
+  Future<List<MarketplaceCard>> feed({
+    required double? latitude,
+    required double? longitude,
+    CommerceMode mode = CommerceMode.buyOnline,
+    int? categoryId,
+    int page = 0,
+    int size = 20,
+  }) async {
+    if (latitude == null || longitude == null) return const [];
+    final response = await apiClient.dio.get(
+      '/api/marketplace/feed',
+      queryParameters: {
+        'lat': latitude,
+        'lng': longitude,
+        'mode': mode.wire,
+        if (categoryId != null) 'categoryId': categoryId,
+        'page': page,
+        'size': size,
+      },
+    );
+    final data = response.data;
+    if (data is! List) return const [];
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map(MarketplaceCard.fromJson)
+        .toList(growable: false);
+  }
 
   /// Shops that will deliver to this point, nearest first.
   ///
