@@ -8,6 +8,7 @@ import '../../../admin/design/admin_format.dart';
 import '../../../admin/design/admin_tokens.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/analytics_models.dart';
+import '../domain/listing_engagement.dart';
 import 'admin_inventory_screen.dart';
 import 'admin_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -60,6 +61,8 @@ class AdminAnalyticsScreen extends ConsumerWidget {
             const _OrderStatusBreakdown(),
             const SizedBox(height: AdminSpacing.lg),
             const _TopProductsList(),
+            const SizedBox(height: AdminSpacing.lg),
+            const _OfflineInterestSection(),
             const SizedBox(height: AdminSpacing.xxl),
           ],
         ),
@@ -191,6 +194,102 @@ class _RevenueSection extends ConsumerWidget {
         ),
         data: (points) => AdminRevenueChart(points: points, height: 180),
       ),
+    );
+  }
+}
+
+/// How the listings that produce no order are doing.
+///
+/// EVERY OTHER NUMBER ON THIS SCREEN COMES FROM AN ORDER, which is why a
+/// merchant who lists showroom stock or offers a service saw nothing here at
+/// all. An online sale records itself - an order, a payment, a receipt. A
+/// Visit-to-Buy listing has none of that: the customer sees the card, taps
+/// Directions, walks in and pays in cash.
+///
+/// SO THE NOTE IS NOT OPTIONAL FURNITURE. It comes from the server with the
+/// counts and is drawn every time they are, because a merchant reading "412"
+/// beside "Asked for directions" on a page otherwise made of takings will
+/// read it as trade unless something says plainly that it is not.
+///
+/// DRAWS NOTHING when the shop has no offline listings - a section of zeroes
+/// under a heading about visits is noise to a kirana that only delivers.
+class _OfflineInterestSection extends ConsumerWidget {
+  const _OfflineInterestSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final report = ref.watch(adminListingEngagementProvider);
+    final days = ref.watch(analyticsPeriodDaysProvider);
+
+    return report.when(
+      // Silent while loading and silent on failure: this sits below the
+      // takings, and a skeleton or an error card for a section many shops do
+      // not have would be worse than its absence.
+      loading: () => const SizedBox.shrink(),
+      error: (error, stackTrace) => const SizedBox.shrink(),
+      data: (data) {
+        if (!data.hasOfflineListings || data.total == 0) {
+          return const SizedBox.shrink();
+        }
+        return AdminSectionCard(
+          title: 'Interest in your shop',
+          subtitle: 'What customers did about your listings in the last $days days',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final mode in const ['VISIT_TO_BUY', 'SERVICE_AT_SHOP'])
+                if ((data.forMode(mode)).isNotEmpty) ...[
+                  Text(ListingEngagementReport.modeLabel(mode),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 13)),
+                  const SizedBox(height: 6),
+                  for (final entry in data.forMode(mode).entries)
+                    if (ListingEngagementReport.kindLabel(entry.key).isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(ListingEngagementReport.kindLabel(entry.key),
+                                style: const TextStyle(
+                                    fontSize: 13, color: AdminColors.textSecondary)),
+                            Text('${entry.value}',
+                                style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                    fontFeatures: [FontFeature.tabularFigures()])),
+                          ],
+                        ),
+                      ),
+                  const SizedBox(height: AdminSpacing.md),
+                ],
+              if (data.note.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AdminColors.background,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.info_outline,
+                          size: 15, color: AdminColors.textSecondary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(data.note,
+                            style: const TextStyle(
+                                fontSize: 11.5,
+                                height: 1.35,
+                                color: AdminColors.textSecondary)),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

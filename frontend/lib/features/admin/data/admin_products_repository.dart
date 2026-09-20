@@ -15,6 +15,7 @@ import '../domain/delivery_breach_model.dart';
 import '../domain/delivery_partner_models.dart';
 import '../../orders/domain/order_models.dart';
 import '../domain/inventory_models.dart';
+import '../domain/listing_engagement.dart';
 import '../domain/selling_mode.dart';
 import '../domain/variant_attribute.dart';
 import '../domain/shop_category.dart';
@@ -178,6 +179,24 @@ class AdminProductsRepository {
         'attributes': attributes.map((a) => a.toJson()).toList(),
       },
     );
+  }
+
+  /// What this shop's offline listings attracted, over a window.
+  ///
+  /// INTEREST, NOT SALES, and the server says so in the payload rather than
+  /// leaving it to this app to remember.
+  Future<ListingEngagementReport> getListingEngagement({int days = 30}) async {
+    final now = DateTime.now();
+    final response = await apiClient.dio.get(
+      '/api/shop/engagement',
+      queryParameters: {
+        'from': now.subtract(Duration(days: days)).toIso8601String(),
+        'to': now.toIso8601String(),
+      },
+    );
+    final data = response.data;
+    if (data is! Map<String, dynamic>) return ListingEngagementReport.empty;
+    return ListingEngagementReport.fromJson(data);
   }
 
   /// One of this shop's variants, with the attributes it already carries.

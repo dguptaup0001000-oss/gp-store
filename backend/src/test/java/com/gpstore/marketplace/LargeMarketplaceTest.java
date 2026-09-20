@@ -236,7 +236,7 @@ class LargeMarketplaceTest {
                 SELECT COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE') AS mode, count(*) AS total
                   FROM shop_product_variants spv
                   JOIN shops s ON s.id = spv.shop_id
-                 WHERE s.code LIKE 'test-%'
+                 WHERE s.code LIKE 'gptest-%'
                  GROUP BY COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE')
                 """, rs -> {
             byMode.put(rs.getString("mode"), rs.getLong("total"));
@@ -260,7 +260,7 @@ class LargeMarketplaceTest {
                     SELECT spv.shop_id
                       FROM shop_product_variants spv
                       JOIN shops s ON s.id = spv.shop_id
-                     WHERE s.code LIKE 'test-%'
+                     WHERE s.code LIKE 'gptest-%'
                      GROUP BY spv.shop_id
                     HAVING count(DISTINCT COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE')) > 1
                 ) mixed
@@ -285,7 +285,7 @@ class LargeMarketplaceTest {
         Long onlineButVague = jdbc.queryForObject("""
                 SELECT count(*) FROM shop_product_variants spv
                   JOIN shops s ON s.id = spv.shop_id
-                 WHERE s.code LIKE 'test-%'
+                 WHERE s.code LIKE 'gptest-%'
                    AND spv.commerce_mode = 'ONLINE_PURCHASE'
                    AND spv.price_mode <> 'EXACT_PRICE'
                 """, Long.class);
@@ -296,7 +296,7 @@ class LargeMarketplaceTest {
         Long rangeWithNoTop = jdbc.queryForObject("""
                 SELECT count(*) FROM shop_product_variants spv
                   JOIN shops s ON s.id = spv.shop_id
-                 WHERE s.code LIKE 'test-%'
+                 WHERE s.code LIKE 'gptest-%'
                    AND spv.price_mode = 'PRICE_RANGE'
                    AND (spv.price_max IS NULL OR spv.price_max < spv.selling_price)
                 """, Long.class);

@@ -100,6 +100,9 @@ final List<ProviderOrFamily> shopScopedProviders = <ProviderOrFamily>[
   adminAllReviewsProvider,
   adminAuditLogProvider,
   adminSalesSummaryProvider,
+  // One shop's interest in its own listings. A merchant switching to their
+  // second shop must not see the first shop's directions and calls.
+  adminListingEngagementProvider,
   adminSalesSeriesProvider,
   adminTopProductsProvider,
   deliveryTypeSharesProvider,
