@@ -169,6 +169,22 @@ export const options = {
         exec: 'browse',
       },
     };
+    // THE MARKETPLACE'S OWN FEED, which is now the default customer
+    // experience and was not exercised by this test at all. Its shape is
+    // completely different from the shop-scoped shelf above: it spans every
+    // shop that serves a pin rather than one, so it is the endpoint most
+    // capable of quietly reintroducing the per-shop loop the discovery work
+    // removed. A ladder that only climbed the old shelf would prove the old
+    // ceiling.
+    s.marketplace = {
+      executor: 'ramping-vus',
+      startVUs: 0,
+      stages: [
+        { duration: RAMP_TIME, target: Math.max(1, Math.round(VUS / 3)) },
+        { duration: HOLD_TIME, target: Math.max(1, Math.round(VUS / 3)) },
+      ],
+      exec: 'marketplace',
+    };
     if (SHOPPERS > 0) {
       s.shopper = {
         executor: 'constant-vus',
@@ -185,6 +201,15 @@ export const options = {
     // not fail a stage; broken ones do.
     'http_req_duration{name:discovery}': ['p(95)<2000', 'p(99)<4000'],
     'http_req_duration{name:shelf}': ['p(95)<2000', 'p(99)<4000'],
+    // THE SAME BUDGET AS THE SHOP-SCOPED SHELF, deliberately. The marketplace
+    // feed reads across every shop serving a pin rather than one, so it would
+    // be easy to justify a looser gate for it - and that is exactly how an
+    // endpoint drifts into a per-shop loop without anybody noticing. It does
+    // its grouping, ranking and paging in one statement; if it stops doing
+    // that, this fails.
+    'http_req_duration{name:market_feed}': ['p(95)<2000', 'p(99)<4000'],
+    'http_req_duration{name:market_search}': ['p(95)<2000', 'p(99)<4000'],
+    'http_req_duration{name:market_offers}': ['p(95)<2000', 'p(99)<4000'],
     status_502: ['count==0'],
     status_503_unexpected: ['count==0'],
     status_500: ['count==0'],
@@ -303,6 +328,65 @@ export function browse(data) {
     }
   } else {
     get(`/api/marketplace/shops/${shopId}`, 'storefront', hdr);
+  }
+
+  sleep(1.5 + Math.random() * 2.5);
+}
+
+/**
+ * A customer who never chooses a shop - which is now the default.
+ *
+ * WHY THIS IS A SEPARATE SCENARIO FROM browse(). browse() models the old
+ * journey: pick a storefront, then look at its shelf, everything after scoped
+ * to one shop. This models the new one: stand somewhere and ask the TOWN what
+ * it sells. No X-Shop-Id is ever sent, which is the whole point - these
+ * endpoints span shops by design, so they are the ones where a per-shop loop
+ * or a missing bound would show up first and worst.
+ *
+ * NO TENANT-LEAK CHECK HERE, and that is not an omission. Seeing many shops
+ * in one response is what this endpoint is FOR; the leak check in browse()
+ * asks the opposite question of an endpoint that must answer about one shop.
+ * Applying it here would fail the feed for working.
+ */
+export function marketplace() {
+  const where = pin();
+
+  // 1. What is for sale near me - no shop chosen, no header sent.
+  const feed = get(
+    `/api/marketplace/feed?lat=${where.lat}&lng=${where.lng}&page=0&size=20`,
+    'market_feed');
+  check(feed, { 'marketplace feed answered or was refused on purpose':
+    (r) => r.status === 200 || r.status === 429 || isShed(r) });
+
+  sleep(1 + Math.random() * 2);
+
+  const roll = Math.random();
+  if (roll < 0.35) {
+    // 2a. A second page. Paging is where an offset scan would hurt.
+    get(`/api/marketplace/feed?lat=${where.lat}&lng=${where.lng}&page=1&size=20`,
+        'market_feed');
+  } else if (roll < 0.55) {
+    // 2b. The same feed asked for the other two modes, which is the drawer.
+    const mode = Math.random() < 0.5 ? 'VISIT_TO_BUY' : 'SERVICE_AT_SHOP';
+    get(`/api/marketplace/feed?lat=${where.lat}&lng=${where.lng}&mode=${mode}&page=0&size=20`,
+        'market_feed');
+  } else if (roll < 0.80) {
+    // 2c. Search across the town and across all three modes.
+    const term = SEARCH_TERMS[Math.floor(Math.random() * SEARCH_TERMS.length)];
+    get(`/api/marketplace/search?q=${term}&lat=${where.lat}&lng=${where.lng}&page=0&size=20`,
+        'market_search');
+  } else if (feed.status === 200) {
+    // 2d. Tapping a card: who else near me has this. This one expands a
+    // collapsed card back into every shop offering it, so it is the read
+    // most likely to fan out if the bound is ever lost.
+    try {
+      const cards = feed.json();
+      if (cards && cards.length) {
+        const card = cards[Math.floor(Math.random() * cards.length)];
+        get(`/api/marketplace/products/${card.productId}/offers`
+            + `?lat=${where.lat}&lng=${where.lng}`, 'market_offers');
+      }
+    } catch (e) { /* a shed or throttled response has no cards */ }
   }
 
   sleep(1.5 + Math.random() * 2.5);
