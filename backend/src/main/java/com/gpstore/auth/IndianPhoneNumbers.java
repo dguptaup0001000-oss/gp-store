@@ -38,6 +38,62 @@ public final class IndianPhoneNumbers {
     }
 
     /**
+     * The digits worth matching a phone number against, for a SEARCH box.
+     *
+     * <p>WHY {@link #normalizeTo91} CANNOT BE USED HERE. It validates, and it
+     * throws on anything that is not a complete Indian mobile. That is right
+     * for signing in and wrong for searching: an operator typing a number one
+     * key at a time is holding a partial number for most of the interaction,
+     * and turning each of those keystrokes into a 400 would make the search
+     * box unusable.
+     *
+     * <p>SO THIS NORMALISES WITHOUT JUDGING. It strips spaces, dashes,
+     * brackets and a leading +, drops a 91 or 0 country/trunk prefix when what
+     * follows still looks like a mobile, and hands back the digits. The caller
+     * matches those as a substring, so "+91 98765-43210", "098765 43210" and
+     * "9876543210" all find the same person - which is the entire point, since
+     * an operator is usually reading the number off something a customer wrote
+     * by hand.
+     *
+     * @return the digits to match, or null when the input is not numeric
+     *         enough to be a phone number at all - in which case the caller
+     *         should treat the term as a name or an email instead.
+     */
+    public static String searchDigits(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        StringBuilder digits = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c >= '0' && c <= '9') {
+                digits.append(c);
+            }
+        }
+        String value = digits.toString();
+        // Fewer than four digits matches most of the table and is not a phone
+        // search by any reasonable reading - "99" should not return everyone.
+        if (value.length() < 4) {
+            return null;
+        }
+        if (value.startsWith("00")) {
+            value = value.substring(2);
+        }
+        // Only strip a prefix when what remains still looks like a mobile, so
+        // a number that merely happens to begin with 91 is left intact.
+        if (value.length() > 10 && value.startsWith("91")) {
+            value = value.substring(2);
+        } else if (value.length() > 10 && value.startsWith("0")) {
+            value = value.substring(1);
+        }
+        // Longer than a mobile means the trailing ten digits are the number.
+        if (value.length() > 10) {
+            value = value.substring(value.length() - 10);
+        }
+        return value;
+    }
+
+    /**
      * Last four digits only, e.g. {@code ******3210}. Never log a full number.
      */
     public static String mask(String raw) {
