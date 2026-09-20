@@ -103,6 +103,10 @@ public class ShopCatalogueBrowse {
                     OR lower(c.name) LIKE :pattern)
                 """ : "");
 
+        // The gallery join is LATERAL and LIMIT 1 rather than a plain join so
+        // a product with eight photos still yields one row per listing. It
+        // rides idx_product_images_product_sort, so it costs one index probe
+        // per row on the page, not a scan.
         String from = """
                   FROM shop_product_variants spv
                   JOIN product_variants v ON v.id = spv.product_variant_id
@@ -113,9 +117,26 @@ public class ShopCatalogueBrowse {
                  WHERE %s
                 """.formatted(where);
 
+        String fromWithGallery = """
+                  FROM shop_product_variants spv
+                  JOIN product_variants v ON v.id = spv.product_variant_id
+                  JOIN products p ON p.id = v.product_id
+                  LEFT JOIN categories c ON c.id = p.category_id
+                  LEFT JOIN inventory inv ON inv.shop_id = spv.shop_id
+                                         AND inv.product_variant_id = spv.product_variant_id
+                  LEFT JOIN LATERAL (
+                        SELECT pi.image_url
+                          FROM product_images pi
+                         WHERE pi.product_id = p.id
+                         ORDER BY pi.sort_order, pi.id
+                         LIMIT 1
+                  ) gallery ON true
+                 WHERE %s
+                """.formatted(where);
+
         List<CatalogueItem> content = jdbc.query("""
                 SELECT spv.product_variant_id, p.id AS product_id, p.name, p.brand,
-                       COALESCE(v.image_url, p.image_url) AS image_url,
+                       COALESCE(v.image_url, gallery.image_url) AS image_url,
                        c.id AS category_id, c.name AS category_name, v.unit AS variant_label,
                        spv.selling_price, spv.mrp, spv.price_max, spv.price_mode,
                        COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE') AS commerce_mode,
@@ -123,7 +144,7 @@ public class ShopCatalogueBrowse {
                        spv.available, spv.active, inv.stock
                 %s ORDER BY p.name, spv.product_variant_id
                 LIMIT :limit OFFSET :offset
-                """.formatted(from), params, (rs, row) -> {
+                """.formatted(fromWithGallery), params, (rs, row) -> {
             CommerceMode mode = CommerceMode.valueOf(rs.getString("commerce_mode"));
             return new CatalogueItem(
                     rs.getLong("product_variant_id"), rs.getLong("product_id"),
