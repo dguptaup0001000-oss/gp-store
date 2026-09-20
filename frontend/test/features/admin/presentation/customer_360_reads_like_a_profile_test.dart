@@ -72,6 +72,8 @@ void main() {
             'completedPurchaseValue': 2673.00,
             'refunds': 1499.50,
             'cancellationFees': 0,
+            'averageCompletedOrder': 86.23,
+            'lastOrderAt': '2026-08-30T11:00:00',
           },
           'reviews': 4,
           'reportedReviews': 0,
@@ -257,6 +259,71 @@ void main() {
       expect(find.text('₹1,499.50'), findsOneWidget);
       // Net to the platform: paid minus refunded.
       expect(find.text('₹1,173.50'), findsOneWidget);
+    });
+
+    testWidgets('shows what a typical order came to, and when the last one was',
+        (tester) async {
+      tall(tester);
+      await tester.pumpWidget(host().widget);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Typical order'), findsOneWidget);
+      expect(find.text('₹86.23'), findsOneWidget);
+      expect(find.text('Last order'), findsOneWidget);
+      expect(find.text('30/08/2026 11:00'), findsOneWidget);
+    });
+
+    /// A customer who has never completed an order has no typical order. Zero
+    /// is a number they earned; this is the absence of one, and a console
+    /// that prints Rs 0.00 invites somebody to act on a figure that is not
+    /// about this person at all.
+    testWidgets('prints a dash, not zero, when they have never completed one',
+        (tester) async {
+      tall(tester);
+      final adapter = FakeHttpClientAdapter();
+      final blank = profile();
+      (blank['core'] as Map)['finance'] = {
+        'completedPurchaseValue': 0,
+        'refunds': 0,
+        'cancellationFees': 0,
+        'averageCompletedOrder': 0,
+        'lastOrderAt': null,
+      };
+      adapter.on('GET', '/api/platform/control/customers/42/profile',
+          (_) => FakeResponse(blank));
+      adapter.on('GET', '/api/platform/control/orders',
+          (_) => FakeResponse(ordersPage(0, total: 0)));
+
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          platformRepositoryProvider.overrideWithValue(
+              PlatformRepository(apiClient: buildTestApiClient(adapter))),
+        ],
+        child: const MaterialApp(
+          home: PlatformCustomerProfileScreen(customerId: 42, title: 'Anita Sharma'),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      // SCOPED TO THE ONE FACT. "Paid for goods: Rs 0.00" is TRUE of a
+      // customer who never ordered, and asserting no zero appears anywhere
+      // would be asserting that a true statement is a bug.
+      final typicalOrder = find
+          .ancestor(of: find.text('Typical order'), matching: find.byType(Column))
+          .first;
+      expect(find.descendant(of: typicalOrder, matching: find.text('—')),
+          findsOneWidget,
+          reason: 'a typical order of zero is not a fact about this customer');
+
+      final lastOrder = find
+          .ancestor(of: find.text('Last order'), matching: find.byType(Column))
+          .first;
+      expect(find.descendant(of: lastOrder, matching: find.text('—')),
+          findsOneWidget,
+          reason: 'never ordered is a dash, never today');
+
+      // The money rows are a different matter, and their zeros are real.
+      expect(find.text('₹0.00'), findsWidgets);
     });
   });
 

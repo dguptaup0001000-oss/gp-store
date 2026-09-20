@@ -64,6 +64,16 @@ class _CategoryPickerSheetState extends ConsumerState<CategoryPickerSheet> {
   String? _error;
   List<CategoryOption> _results = const [];
 
+  /// How far into the tree the merchant has walked, outermost first.
+  ///
+  /// EMPTY IS THE ROOT, which is also the search view. The trail exists so
+  /// "back" goes up one level rather than closing the sheet, and so the
+  /// merchant can see where they are - a list of children with no context is
+  /// just another flat list.
+  final List<CategoryOption> _trail = [];
+
+  bool get _browsing => _trail.isNotEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -99,6 +109,52 @@ class _CategoryPickerSheetState extends ConsumerState<CategoryPickerSheet> {
       if (!mounted || seq != _seq) return;
       setState(() {
         _error = extractErrorMessage(e);
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted || seq != _seq) return;
+      setState(() {
+        _error = extractErrorMessage(e);
+        _loading = false;
+      });
+    }
+  }
+
+  /// Walk into a parent and list what is under it.
+  ///
+  /// The search box is cleared on the way in: a query and a position in the
+  /// tree are two different ways of narrowing, and showing both at once
+  /// leaves the merchant unable to tell which one produced the list.
+  Future<void> _openChildren(CategoryOption parent) async {
+    _controller.clear();
+    _trail.add(parent);
+    await _loadChildren(parent.id);
+  }
+
+  /// Back up one level - to the parent above, or out to search.
+  Future<void> _up() async {
+    if (_trail.isEmpty) return;
+    _trail.removeLast();
+    if (_trail.isEmpty) {
+      await _load('');
+    } else {
+      await _loadChildren(_trail.last.id);
+    }
+  }
+
+  Future<void> _loadChildren(int parentId) async {
+    final seq = ++_seq;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final results = await ref
+          .read(adminProductsRepositoryProvider)
+          .categoryChildren(parentId);
+      if (!mounted || seq != _seq) return;
+      setState(() {
+        _results = results;
         _loading = false;
       });
     } catch (e) {
@@ -152,6 +208,11 @@ class _CategoryPickerSheetState extends ConsumerState<CategoryPickerSheet> {
                         ),
                 ),
                 onChanged: (value) {
+                  // TYPING LEAVES THE TREE. A merchant three levels into
+                  // Electronics who types "atta" means the whole catalogue,
+                  // not "atta under Electronics" - which would find nothing
+                  // and read as a broken search.
+                  _trail.clear();
                   setState(() {}); // keeps the clear button in step
                   _debouncer.onQueryChanged(
                     value,
@@ -182,6 +243,34 @@ class _CategoryPickerSheetState extends ConsumerState<CategoryPickerSheet> {
       return const _Empty();
     }
 
+    if (_browsing) {
+      final here = _trail.last;
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(
+            AdminSpacing.lg, 0, AdminSpacing.lg, AdminSpacing.xxl),
+        children: [
+          _Breadcrumb(trail: _trail, onUp: _up),
+          // THE PARENT IS ITSELF A CHOICE. A shop that sells phones of every
+          // kind wants "Mobile Phones", not one of its children, and without
+          // this the only way to pick a category with children would be to
+          // search for it.
+          _UseThisOne(
+            category: here,
+            selected: widget.selectedId == here.id,
+            onTap: () => Navigator.of(context).pop(here),
+          ),
+          const SizedBox(height: AdminSpacing.md),
+          _Heading('Inside ${here.name}'),
+          for (final category in _results)
+            _Row(
+              category: category,
+              selectedId: widget.selectedId,
+              onDrillDown: category.hasChildren ? () => _openChildren(category) : null,
+            ),
+        ],
+      );
+    }
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(
           AdminSpacing.lg, 0, AdminSpacing.lg, AdminSpacing.xxl),
@@ -190,14 +279,99 @@ class _CategoryPickerSheetState extends ConsumerState<CategoryPickerSheet> {
         // these are at the top rather than wondering what the order means.
         if (mine.isNotEmpty) ...[
           const _Heading('Your categories'),
-          for (final category in mine) _Row(category: category, selectedId: widget.selectedId),
+          for (final category in mine)
+            _Row(
+              category: category,
+              selectedId: widget.selectedId,
+              onDrillDown: category.hasChildren ? () => _openChildren(category) : null,
+            ),
           const SizedBox(height: AdminSpacing.md),
         ],
         if (rest.isNotEmpty) ...[
           _Heading(mine.isEmpty ? 'Categories' : 'All categories'),
-          for (final category in rest) _Row(category: category, selectedId: widget.selectedId),
+          for (final category in rest)
+            _Row(
+              category: category,
+              selectedId: widget.selectedId,
+              onDrillDown: category.hasChildren ? () => _openChildren(category) : null,
+            ),
         ],
       ],
+    );
+  }
+}
+
+/// Where the merchant is in the tree, and the way back out.
+class _Breadcrumb extends StatelessWidget {
+  const _Breadcrumb({required this.trail, required this.onUp});
+
+  final List<CategoryOption> trail;
+  final VoidCallback onUp;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      child: Row(children: [
+        IconButton(
+          onPressed: hapticize(onUp),
+          icon: const Icon(Icons.arrow_back, size: 18),
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          tooltip: 'Back',
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            ['All categories', ...trail.map((c) => c.name)].join('  ›  '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                fontSize: 12, color: AdminColors.textSecondary),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// "Use Electronics itself", offered at the top of its own children.
+class _UseThisOne extends StatelessWidget {
+  const _UseThisOne({
+    required this.category,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final CategoryOption category;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: hapticize(onTap),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+        decoration: BoxDecoration(
+          color: AdminColors.primaryFaint,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AdminColors.primaryLight),
+        ),
+        child: Row(children: [
+          Expanded(
+            child: Text('Use ${category.name} itself',
+                style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                    color: AdminColors.primaryDeep)),
+          ),
+          if (selected)
+            const Icon(Icons.check_circle, size: 18, color: AdminColors.primary),
+        ]),
+      ),
     );
   }
 }
@@ -223,10 +397,23 @@ class _Heading extends StatelessWidget {
 }
 
 class _Row extends StatelessWidget {
-  const _Row({required this.category, required this.selectedId});
+  const _Row({
+    required this.category,
+    required this.selectedId,
+    this.onDrillDown,
+  });
 
   final CategoryOption category;
   final int? selectedId;
+
+  /// Non-null when this category has children worth walking into.
+  ///
+  /// THE COUNT USED TO BE DECORATION. It said "12" beside Electronics and
+  /// tapping the row picked Electronics, so the twelve were unreachable
+  /// unless the merchant already knew their names to type. The count is now
+  /// a button, and the row keeps selecting - the two actions are separated
+  /// rather than one of them guessed from the other.
+  final VoidCallback? onDrillDown;
 
   @override
   Widget build(BuildContext context) {
@@ -257,12 +444,22 @@ class _Row extends StatelessWidget {
                 ],
               ),
             ),
-            if (category.hasChildren)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Text('${category.childCount}',
-                    style: const TextStyle(
-                        fontSize: 11, color: AdminColors.textSecondary)),
+            if (onDrillDown != null)
+              InkWell(
+                onTap: hapticize(onDrillDown!),
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('${category.childCount}',
+                        style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: AdminColors.primary)),
+                    const Icon(Icons.chevron_right,
+                        size: 18, color: AdminColors.primary),
+                  ]),
+                ),
               ),
             if (selected)
               const Icon(Icons.check_circle, size: 18, color: AdminColors.primary),

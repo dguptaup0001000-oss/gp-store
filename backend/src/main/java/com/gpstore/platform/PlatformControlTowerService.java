@@ -148,8 +148,19 @@ public class PlatformControlTowerService {
                                        long cancelled, long failed, long returned,
                                        long refunded) {}
 
+    /**
+     * @param averageCompletedOrder what a typical completed order came to, or
+     *     ZERO when they have never completed one. COMPUTED FROM COMPLETED
+     *     ORDERS ONLY, like the lifetime figure beside it: averaging in a
+     *     cancelled basket would describe spending that never happened.
+     * @param lastOrderAt when they last ordered anything, whatever became of
+     *     it. Null for a customer who has never ordered - the console prints
+     *     a dash rather than inventing a date.
+     */
     public record CustomerFinance(BigDecimal completedPurchaseValue,
-                                  BigDecimal refunds, BigDecimal cancellationFees) {}
+                                  BigDecimal refunds, BigDecimal cancellationFees,
+                                  BigDecimal averageCompletedOrder,
+                                  LocalDateTime lastOrderAt) {}
 
     public record RecentOrder(Long id, String orderNumber, Long shopId,
                               String shopName, String status, BigDecimal total,
@@ -1095,9 +1106,14 @@ public class PlatformControlTowerService {
         long active = Math.max(0, total - completed - cancelled - failed);
         long returned = count("SELECT count(*) FROM order_returns r JOIN orders o ON o.id = r.order_id WHERE o.customer_id = :id", Map.of("id", id));
         long refundedOrders = count("SELECT count(DISTINCT o.id) FROM refunds r JOIN payments p ON p.id=r.payment_id JOIN orders o ON o.id=p.order_id WHERE o.customer_id=:id AND r.status='SUCCEEDED'", Map.of("id", id));
+        // ONE STATEMENT, FOUR FACTS. The average and the last-order date come
+        // out of the scan that was already counting purchases, rather than
+        // two more round trips for numbers the same rows already hold.
         Map<String, Object> finance = jdbc.queryForMap("""
                 SELECT COALESCE(SUM(CASE WHEN order_status IN ('DELIVERED','COMPLETED') THEN total_amount ELSE 0 END),0) purchases,
-                       COALESCE(SUM(cancellation_fee),0) cancellation
+                       COALESCE(SUM(cancellation_fee),0) cancellation,
+                       COALESCE(AVG(CASE WHEN order_status IN ('DELIVERED','COMPLETED') THEN total_amount END),0) average_completed,
+                       MAX(order_date) last_order_at
                 FROM orders WHERE customer_id=:id
                 """, Map.of("id", id));
         BigDecimal refunded = decimal(jdbc.queryForObject("SELECT COALESCE(SUM(r.amount),0) FROM refunds r JOIN payments p ON p.id=r.payment_id JOIN orders o ON o.id=p.order_id WHERE o.customer_id=:id AND r.status='SUCCEEDED'", Map.of("id", id), BigDecimal.class));
@@ -1113,7 +1129,10 @@ public class PlatformControlTowerService {
         return new Customer360(identities.getFirst(),
                 new CustomerOrderSummary(total, completed, active, cancelled, failed, returned, refundedOrders),
                 new CustomerFinance(decimal(finance.get("purchases")), refunded,
-                        decimal(finance.get("cancellation"))), reviews, reported, recent);
+                        decimal(finance.get("cancellation")),
+                        decimal(finance.get("average_completed")),
+                        time(finance.get("last_order_at"))),
+                reviews, reported, recent);
     }
 
     @Transactional
