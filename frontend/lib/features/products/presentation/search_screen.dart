@@ -17,6 +17,10 @@ import 'product_detail_screen.dart';
 import 'products_providers.dart';
 import 'search_matches.dart';
 import 'recent_searches.dart';
+import '../../../core/marketplace/marketplace_providers.dart';
+import '../../marketplace/domain/marketplace_feed_models.dart';
+import '../../marketplace/presentation/marketplace_card_tile.dart';
+import '../../marketplace/presentation/product_offers_screen.dart';
 import 'voice_search_sheet.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -43,6 +47,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _debouncer = SearchDebouncer();
 
   List<Product> _results = [];
+
+  /// Marketplace results, when this deployment has more than one shop.
+  ///
+  /// A SECOND LIST RATHER THAN A CONVERSION. A marketplace card carries what
+  /// a Product does not - the shop that is offering it, how far away it is,
+  /// whether a cart can hold it at all - and flattening it into a Product to
+  /// reuse one grid would throw away exactly the fields that make a
+  /// Visit-to-Buy result honest.
+  List<MarketplaceCard> _marketCards = [];
   bool _isLoading = false;
   String? _errorMessage;
   bool _hasSearched = false;
@@ -183,6 +196,17 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       _isLoadingMore = false;
     });
 
+    // ON A MARKETPLACE THE SEARCH LOOKS AT THE TOWN. Every product search
+    // route is shop-scoped - listings are shop-owned and the tenant filter
+    // applies - so a customer who had chosen no storefront was searching Shop
+    // #1's shelf and being told the town does not sell what they asked for.
+    // Searching for a haircut found nothing not because no barber exists but
+    // because the query could not see one.
+    if (ref.read(isMarketplaceProvider)) {
+      await _searchTheMarketplace(query, seq);
+      return;
+    }
+
     try {
       final result = await ref.read(productsRepositoryProvider).searchSmart(
             query,
@@ -190,6 +214,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           );
       if (!mounted || seq != _searchSeq) return;
       setState(() {
+        _marketCards = const [];
         _results = result.products;
         _interpretedAs = result.interpretedAs;
         _didYouMean = result.didYouMean;
@@ -223,6 +248,67 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     }
   }
 
+  /// The same search, asked of the whole marketplace.
+  ///
+  /// ALL THREE MODES. Somebody typing "haircut" wants the barber and somebody
+  /// typing "gold chain" wants the jeweller they have to visit; a search that
+  /// only looks at what a cart can hold finds neither. The server decides
+  /// which results a cart CAN hold and says so per card, so this screen never
+  /// has to guess.
+  Future<void> _searchTheMarketplace(String query, int seq) async {
+    final pin = ref.read(deliveryPinProvider);
+    if (pin == null) {
+      // No placeable address means nobody can say which shops serve them.
+      // Empty rather than invented, the same rule the marketplace feed keeps.
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _marketCards = const [];
+        _results = const [];
+        _isLoading = false;
+      });
+      return;
+    }
+
+    try {
+      final cards = await ref.read(marketplaceRepositoryProvider).search(
+            query: query,
+            latitude: pin.lat,
+            longitude: pin.lng,
+            page: 0,
+          );
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _marketCards = cards;
+        _results = const [];
+        _interpretedAs = null;
+        _didYouMean = null;
+        _hasMore = cards.length >= _marketPageSize;
+        _isLoading = false;
+      });
+      if (cards.isNotEmpty) {
+        final terms = await _recent.remember(query);
+        if (mounted) setState(() => _recentTerms = terms);
+      }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) return;
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _errorMessage = extractErrorMessage(e);
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _errorMessage = extractErrorMessage(e);
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// Matches the server's own default page, so "is there more" is a full page
+  /// rather than a number this screen guessed.
+  static const int _marketPageSize = 20;
+
   /// Fetches the next page and APPENDS it.
   ///
   /// Guarded by the same sequence number as _search: if the customer types
@@ -235,6 +321,36 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final seq = _searchSeq;
     final nextPage = _page + 1;
     setState(() => _isLoadingMore = true);
+
+    // The marketplace search pages through its own endpoint. Same guard, same
+    // append-never-replace rule: replacing would jump the customer back to
+    // the top of the results they were already reading.
+    if (ref.read(isMarketplaceProvider)) {
+      final pin = ref.read(deliveryPinProvider);
+      try {
+        final cards = pin == null
+            ? const <MarketplaceCard>[]
+            : await ref.read(marketplaceRepositoryProvider).search(
+                  query: _lastQuery,
+                  latitude: pin.lat,
+                  longitude: pin.lng,
+                  page: nextPage,
+                );
+        if (!mounted || seq != _searchSeq) return;
+        setState(() {
+          _marketCards = [..._marketCards, ...cards];
+          _page = nextPage;
+          _hasMore = cards.length >= _marketPageSize;
+          _isLoadingMore = false;
+        });
+      } catch (e) {
+        if (!mounted || seq != _searchSeq) return;
+        // Does NOT replace what is on screen with an error: a failed page 3
+        // must not blank out the results the customer is reading.
+        setState(() => _isLoadingMore = false);
+      }
+      return;
+    }
 
     try {
       final result = await ref.read(productsRepositoryProvider).searchSmart(
@@ -341,7 +457,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       );
     }
 
-    if (_results.isEmpty) {
+    if (_results.isEmpty && _marketCards.isEmpty) {
       // A SHOP OR A CATEGORY IS STILL AN ANSWER. Typing a chemist's name
       // matches no product at all, and "No results" over a screen that could
       // have offered the chemist is the search box failing at the one thing
@@ -411,7 +527,86 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     );
   }
 
+  /// Marketplace results, drawn by the same tile the home feed uses.
+  ///
+  /// THE SAME TILE ON PURPOSE. It already knows that a Visit-to-Buy card gets
+  /// VIEW and not ADD, that a starting-from price is not a promise, and which
+  /// shop is offering it. A second tile written for this screen would be a
+  /// second place for those rules to be got wrong.
+  ///
+  /// TWO COLUMNS, not the three the product grid uses: these cards carry a
+  /// shop name, a distance and a mode badge, and three across makes each of
+  /// them a line of truncated text.
+  Widget _buildMarketGrid() {
+    return ScrollToTop(
+      builder: (context, scrollController) => GridView.builder(
+        controller: scrollController,
+        padding: const EdgeInsets.all(12),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 0.62,
+        ),
+        itemCount: _marketCards.length,
+        itemBuilder: (context, index) {
+          final card = _marketCards[index];
+          return MarketplaceCardTile(
+            card: card,
+            onTap: hapticize(() => _openMarketCard(card)),
+            // Null when the server said it is not addable, so the tile draws
+            // VIEW instead - and the backend refuses the call anyway.
+            onAdd: card.addable ? () => _addCardToCart(card) : null,
+          );
+        },
+      ),
+    );
+  }
+
+  /// Opens a result. A non-addable one opens the shops-near-you screen,
+  /// because the ordinary product screen's whole shape is an ADD button.
+  Future<void> _openMarketCard(MarketplaceCard card) async {
+    if (!card.addable) {
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ProductOffersScreen(card: card),
+      ));
+      return;
+    }
+    try {
+      final product = await ref
+          .read(productsRepositoryProvider)
+          .fetchProductDetail(card.productId);
+      if (!mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ProductDetailScreen(product: product),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+    }
+  }
+
+  Future<void> _addCardToCart(MarketplaceCard card) async {
+    final variantId = card.productVariantId;
+    if (variantId == null) return;
+    try {
+      await ref
+          .read(cartControllerProvider.notifier)
+          .addToCart(variantId: variantId, quantity: 1);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${card.name} added to cart')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+    }
+  }
+
   Widget _buildGrid() {
+    if (_marketCards.isNotEmpty) return _buildMarketGrid();
     return ScrollToTop(
       builder: (context, scrollController) => GridView.builder(
       controller: scrollController,

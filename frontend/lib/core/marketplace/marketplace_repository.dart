@@ -62,6 +62,42 @@ class MarketplaceRepository {
         .toList(growable: false);
   }
 
+  /// Search the whole marketplace, across every mode.
+  ///
+  /// The product search routes are shop-scoped, so on a marketplace they can
+  /// only ever answer about one shop. This asks what the TOWN sells, and it
+  /// defaults to all three modes because somebody typing "haircut" wants the
+  /// barber - a search restricted to what a cart can hold finds nothing.
+  Future<List<MarketplaceCard>> search({
+    required String query,
+    required double? latitude,
+    required double? longitude,
+    CommerceMode? mode,
+    int page = 0,
+    int size = 20,
+  }) async {
+    if (latitude == null || longitude == null || query.trim().isEmpty) {
+      return const [];
+    }
+    final response = await apiClient.dio.get(
+      '/api/marketplace/search',
+      queryParameters: {
+        'q': query.trim(),
+        'lat': latitude,
+        'lng': longitude,
+        if (mode != null) 'mode': mode.wire,
+        'page': page,
+        'size': size,
+      },
+    );
+    final data = response.data;
+    if (data is! List) return const [];
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map(MarketplaceCard.fromJson)
+        .toList(growable: false);
+  }
+
   /// Every nearby shop offering this product, nearest first.
   ///
   /// ALL THREE MODES COME BACK and the screen groups them. Filtering here by

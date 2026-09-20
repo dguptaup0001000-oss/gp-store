@@ -83,6 +83,46 @@ public class MarketplaceFeedService {
     }
 
     /**
+     * A search of the whole marketplace, across every mode asked for.
+     *
+     * <p>SEARCH HAD THE SAME BUG THE HOME FEED DID: every existing search
+     * route is shop-scoped, so a customer who had chosen no shop was
+     * searching Shop #1's shelf and being told the town does not stock what
+     * they asked for. This looks where the customer is standing instead.
+     *
+     * <p>A customer typing "haircut" wants the barber and one typing "gold
+     * chain" wants the jeweller they have to visit, so the default here is
+     * ALL THREE MODES rather than what a cart can hold. The mode is on every
+     * result, so the screen can label them.
+     */
+    @Transactional(readOnly = true)
+    public List<MarketplaceFeedView> search(String keyword, Double lat, Double lng,
+                                            Set<CommerceMode> modes, int page, int size) {
+        if (lat == null || lng == null || keyword == null || keyword.isBlank()) {
+            return List.of();
+        }
+        List<ShopDiscovery.NearbyShop> nearby = discovery.shopsServing(lat, lng);
+        if (nearby.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Double> distanceByShop = new HashMap<>();
+        for (ShopDiscovery.NearbyShop near : nearby) {
+            distanceByShop.put(near.shop().getId(), near.distanceKm());
+        }
+
+        int limit = Math.min(Math.max(size, 1), MAX_PAGE);
+        int offset = Math.max(page, 0) * limit;
+
+        List<MarketplaceFeedView> results = new ArrayList<>();
+        for (Object[] row : feed.search(keyword, distanceByShop.keySet(),
+                modes == null || modes.isEmpty() ? Set.of(CommerceMode.values()) : modes,
+                distanceByShop, limit, offset)) {
+            results.add(toCard(row));
+        }
+        return results;
+    }
+
+    /**
      * Every nearby shop offering this product, nearest first.
      *
      * <p>ALL THREE MODES, ALWAYS. The customer tapped a Visit-to-Buy card and

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../../core/images/gp_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -224,7 +224,7 @@ class _AdminVariantFormDialogState
         ),
         const SizedBox(height: 6),
         Text(_selling.explanation,
-            style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
+            style: const TextStyle(fontSize: 11.5, color: AdminColors.textSecondary)),
 
         // Everything below is meaningless for an online listing - it is
         // exactly priced, it is in stock or it is not, and it takes no time.

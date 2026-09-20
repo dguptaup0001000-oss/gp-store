@@ -453,6 +453,37 @@ public class MarketplaceController {
     }
 
     /**
+     * Search what the TOWN sells, not what one shop's shelf holds.
+     *
+     * <p>Every existing search route narrows to one shop, because listings
+     * are shop-owned and the tenant filter applies - so a customer who had
+     * chosen no storefront was searching Shop #1 and being told the town does
+     * not stock what they asked for. This is the search that matches the
+     * marketplace feed.
+     *
+     * <p>ALL THREE MODES BY DEFAULT, unlike the feed. Somebody typing
+     * "haircut" wants the barber and somebody typing "gold chain" wants the
+     * jeweller they have to visit; a search restricted to what a cart can
+     * hold finds neither. The mode is on every result so the screen can
+     * label it, and the caller may still narrow with ?mode= when a screen
+     * genuinely is about one.
+     */
+    @GetMapping("/search")
+    public List<MarketplaceFeedView> search(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng,
+            @RequestParam(required = false) String mode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        java.util.Set<com.gpstore.catalog.shop.CommerceMode> modes =
+                (mode == null || mode.isBlank())
+                        ? java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.values())
+                        : modesFrom(mode);
+        return marketplaceFeed.search(q, lat, lng, modes, page, size);
+    }
+
+    /**
      * Every nearby shop offering this product, and how to reach each one.
      *
      * <p>THE SCREEN BEHIND A VISIT-TO-BUY CARD. The feed collapses five shops
