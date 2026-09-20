@@ -400,7 +400,7 @@ public class PlatformControlTowerService {
                          WHERE o.customer_id = c.id) AS last_order_at
                   FROM customers c
                  WHERE %s
-                 ORDER BY lower(COALESCE(c.full_name, '')), c.id
+                 ORDER BY lower(c.full_name), c.id
                  LIMIT :limit OFFSET :offset
                 """.formatted(where), params, (rs, row) -> new CustomerHit(
                         rs.getLong("id"),
@@ -870,9 +870,9 @@ public class PlatformControlTowerService {
                        'C-' || CAST(c.id AS varchar) reference,
                        'Customer account' subtitle, c.email email, c.mobile_number phone
                 FROM customers c
-                WHERE lower(COALESCE(c.full_name, '')) LIKE :pattern
-                   OR lower(COALESCE(c.email, '')) LIKE :pattern
-                   OR lower(COALESCE(c.mobile_number, '')) LIKE :pattern
+                WHERE lower(c.full_name) LIKE :pattern
+                   OR lower(c.email) LIKE :pattern
+                   OR lower(c.mobile_number) LIKE :pattern
                    OR lower('C-' || CAST(c.id AS varchar)) LIKE :pattern
                 UNION ALL
                 SELECT 'MERCHANT', m.id, COALESCE(m.display_name, m.legal_name),
@@ -881,13 +881,13 @@ public class PlatformControlTowerService {
                 FROM merchants m
                 LEFT JOIN customers owner ON owner.id=m.owner_customer_id
                 WHERE m.deleted_at IS NULL AND (
-                      lower(COALESCE(m.legal_name, '')) LIKE :pattern
-                   OR lower(COALESCE(m.display_name, '')) LIKE :pattern
-                   OR lower(COALESCE(m.contact_email, '')) LIKE :pattern
-                   OR lower(COALESCE(m.contact_phone, '')) LIKE :pattern
-                   OR lower(COALESCE(owner.full_name, '')) LIKE :pattern
-                   OR lower(COALESCE(owner.email, '')) LIKE :pattern
-                   OR lower(COALESCE(owner.mobile_number, '')) LIKE :pattern
+                      lower(m.legal_name) LIKE :pattern
+                   OR lower(m.display_name) LIKE :pattern
+                   OR lower(m.contact_email) LIKE :pattern
+                   OR lower(m.contact_phone) LIKE :pattern
+                   OR lower(owner.full_name) LIKE :pattern
+                   OR lower(owner.email) LIKE :pattern
+                   OR lower(owner.mobile_number) LIKE :pattern
                    OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern)
                 UNION ALL
                 SELECT 'SHOP', s.id, s.display_name,
@@ -895,8 +895,8 @@ public class PlatformControlTowerService {
                        'Merchant M-' || CAST(s.merchant_id AS varchar), NULL, s.support_phone
                 FROM shops s JOIN merchants m ON m.id=s.merchant_id
                 WHERE s.deleted_at IS NULL AND (
-                      lower(COALESCE(s.display_name, '')) LIKE :pattern
-                   OR lower(COALESCE(s.code, '')) LIKE :pattern
+                      lower(s.display_name) LIKE :pattern
+                   OR lower(s.code) LIKE :pattern
                    OR lower(COALESCE(m.display_name, m.legal_name, '')) LIKE :pattern
                    OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern
                    OR lower('M-' || CAST(s.merchant_id AS varchar)) LIKE :pattern)
@@ -909,12 +909,12 @@ public class PlatformControlTowerService {
                 LEFT JOIN payments pay ON pay.order_id = o.id
                 LEFT JOIN shops s ON s.id = o.shop_id
                 LEFT JOIN merchants m ON m.id = s.merchant_id
-                WHERE lower(COALESCE(o.order_number, '')) LIKE :pattern
-                   OR lower(COALESCE(c.full_name, '')) LIKE :pattern
-                   OR lower(COALESCE(pay.transaction_id, '')) LIKE :pattern
-                   OR lower(COALESCE(pay.provider_order_id, '')) LIKE :pattern
-                   OR lower(COALESCE(pay.provider_payment_id, '')) LIKE :pattern
-                   OR lower(COALESCE(s.display_name, '')) LIKE :pattern
+                WHERE lower(o.order_number) LIKE :pattern
+                   OR lower(c.full_name) LIKE :pattern
+                   OR lower(pay.transaction_id) LIKE :pattern
+                   OR lower(pay.provider_order_id) LIKE :pattern
+                   OR lower(pay.provider_payment_id) LIKE :pattern
+                   OR lower(s.display_name) LIKE :pattern
                    OR lower(COALESCE(m.display_name, m.legal_name, '')) LIKE :pattern
                    OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern
                    OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern
@@ -926,10 +926,10 @@ public class PlatformControlTowerService {
                 JOIN shops s ON s.id=w.shop_id
                 JOIN merchants m ON m.id=s.merchant_id
                 WHERE w.deleted_at IS NULL AND (
-                      lower(COALESCE(w.name, '')) LIKE :pattern
-                   OR lower(COALESCE(w.mobile, '')) LIKE :pattern
-                   OR lower(COALESCE(w.login_email, '')) LIKE :pattern
-                   OR lower(COALESCE(s.display_name, '')) LIKE :pattern
+                      lower(w.name) LIKE :pattern
+                   OR lower(w.mobile) LIKE :pattern
+                   OR lower(w.login_email) LIKE :pattern
+                   OR lower(s.display_name) LIKE :pattern
                    OR lower(COALESCE(m.display_name, m.legal_name, '')) LIKE :pattern
                    OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern
                    OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern
@@ -939,11 +939,11 @@ public class PlatformControlTowerService {
                        'P-' || CAST(p.id AS varchar),
                        COALESCE(p.brand, 'Catalogue product'), NULL, NULL
                 FROM products p
-                WHERE lower(COALESCE(p.name, '')) LIKE :pattern
-                   OR lower(COALESCE(p.brand, '')) LIKE :pattern
+                WHERE lower(p.name) LIKE :pattern
+                   OR lower(p.brand) LIKE :pattern
                    OR EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id=p.id
-                              AND (lower(COALESCE(pv.sku, '')) LIKE :pattern
-                                   OR lower(COALESCE(pv.barcode, '')) LIKE :pattern))
+                              AND (lower(pv.sku) LIKE :pattern
+                                   OR lower(pv.barcode) LIKE :pattern))
                    OR lower('P-' || CAST(p.id AS varchar)) LIKE :pattern
                 """;
     }
@@ -1451,7 +1451,7 @@ public class PlatformControlTowerService {
                            c.enabled enabled,c.active active,c.verified verified,c.created_at "createdAt",
                            (SELECT count(*) FROM orders o WHERE o.customer_id=c.id) orders
                     """, "FROM customers c",
-                    "lower(COALESCE(c.full_name,'')) LIKE :pattern OR lower(COALESCE(c.email,'')) LIKE :pattern OR lower(COALESCE(c.mobile_number,'')) LIKE :pattern OR lower('C-' || CAST(c.id AS varchar)) LIKE :pattern",
+                    "lower(c.full_name) LIKE :pattern OR lower(c.email) LIKE :pattern OR lower(c.mobile_number) LIKE :pattern OR lower('C-' || CAST(c.id AS varchar)) LIKE :pattern",
                     "ORDER BY c.id DESC");
             case "merchants" -> new ResourceSql("""
                     SELECT m.id id,COALESCE(m.display_name,m.legal_name) name,m.legal_name "legalName",
@@ -1459,14 +1459,14 @@ public class PlatformControlTowerService {
                            m.status_reason "statusReason",m.active active,m.created_at "createdAt",
                            (SELECT count(*) FROM shops s WHERE s.merchant_id=m.id AND s.deleted_at IS NULL) shops
                     """, "FROM merchants m",
-                    "m.deleted_at IS NULL AND (lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR lower(COALESCE(m.contact_email,'')) LIKE :pattern OR lower(COALESCE(m.contact_phone,'')) LIKE :pattern OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern)",
+                    "m.deleted_at IS NULL AND (lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR lower(m.contact_email) LIKE :pattern OR lower(m.contact_phone) LIKE :pattern OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern)",
                     "ORDER BY m.id DESC");
             case "shops" -> new ResourceSql("""
                     SELECT s.id id,s.display_name name,s.code code,s.status status,s.status_reason "statusReason",
                            s.active active,s.verification_level verification,s.city city,s.state state,
                            m.id "merchantId",COALESCE(m.display_name,m.legal_name) merchant
                     """, "FROM shops s JOIN merchants m ON m.id=s.merchant_id",
-                    "s.deleted_at IS NULL AND (lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower(COALESCE(s.code,'')) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern)",
+                    "s.deleted_at IS NULL AND (lower(s.display_name) LIKE :pattern OR lower(s.code) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern)",
                     "ORDER BY s.id DESC");
             case "orders" -> new ResourceSql("""
                     SELECT o.id id,o.order_number "orderNumber",o.order_date "orderedAt",
@@ -1475,7 +1475,7 @@ public class PlatformControlTowerService {
                            s.id "shopId",s.display_name shop,m.id "merchantId",
                            COALESCE(m.display_name,m.legal_name) merchant
                     """, "FROM orders o LEFT JOIN customers c ON c.id=o.customer_id JOIN shops s ON s.id=o.shop_id JOIN merchants m ON m.id=s.merchant_id",
-                    "lower(COALESCE(o.order_number,'')) LIKE :pattern OR lower('O-' || CAST(o.id AS varchar)) LIKE :pattern OR lower(COALESCE(c.full_name,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR EXISTS (SELECT 1 FROM payments pay WHERE pay.order_id=o.id AND (lower(COALESCE(pay.transaction_id,'')) LIKE :pattern OR lower(COALESCE(pay.provider_order_id,'')) LIKE :pattern OR lower(COALESCE(pay.provider_payment_id,'')) LIKE :pattern))",
+                    "lower(o.order_number) LIKE :pattern OR lower('O-' || CAST(o.id AS varchar)) LIKE :pattern OR lower(c.full_name) LIKE :pattern OR lower(s.display_name) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR EXISTS (SELECT 1 FROM payments pay WHERE pay.order_id=o.id AND (lower(pay.transaction_id) LIKE :pattern OR lower(pay.provider_order_id) LIKE :pattern OR lower(pay.provider_payment_id) LIKE :pattern))",
                     "ORDER BY o.order_date DESC");
             case "workers" -> new ResourceSql("""
                     SELECT w.id id,w.name name,w.mobile phone,w.available available,w.active active,
@@ -1485,7 +1485,7 @@ public class PlatformControlTowerService {
                            (SELECT count(*) FROM orders o WHERE o.assigned_worker_partner_id=w.id AND o.order_status IN ('READY_TO_DISPATCH','OUT_FOR_DELIVERY')) "activeOrders",
                            (SELECT count(*) FROM orders o WHERE o.assigned_worker_partner_id=w.id AND o.order_status IN ('DELIVERED','COMPLETED')) "completedDeliveries"
                     """, "FROM delivery_partners w JOIN shops s ON s.id=w.shop_id JOIN merchants m ON m.id=s.merchant_id",
-                    "lower(COALESCE(w.name,'')) LIKE :pattern OR lower(COALESCE(w.mobile,'')) LIKE :pattern OR lower('W-' || CAST(w.id AS varchar)) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern",
+                    "lower(w.name) LIKE :pattern OR lower(w.mobile) LIKE :pattern OR lower('W-' || CAST(w.id AS varchar)) LIKE :pattern OR lower(s.display_name) LIKE :pattern OR lower('S-' || CAST(s.id AS varchar)) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR lower('M-' || CAST(m.id AS varchar)) LIKE :pattern",
                     "ORDER BY w.id DESC");
             case "products" -> new ResourceSql("""
                     SELECT spv.id id,p.id "productId",p.name product,p.brand brand,c.name category,
@@ -1494,7 +1494,7 @@ public class PlatformControlTowerService {
                            COALESCE(i.stock,0) stock,COALESCE(i.reserved_stock,0) "reservedStock",
                            s.id "shopId",s.display_name shop,m.id "merchantId"
                     """, "FROM shop_product_variants spv JOIN product_variants pv ON pv.id=spv.product_variant_id JOIN products p ON p.id=pv.product_id LEFT JOIN categories c ON c.id=p.category_id JOIN shops s ON s.id=spv.shop_id JOIN merchants m ON m.id=s.merchant_id LEFT JOIN inventory i ON i.shop_id=s.id AND i.product_variant_id=pv.id",
-                    "lower(COALESCE(p.name,'')) LIKE :pattern OR lower(COALESCE(p.brand,'')) LIKE :pattern OR lower('P-' || CAST(p.id AS varchar)) LIKE :pattern OR lower(COALESCE(pv.sku,'')) LIKE :pattern OR lower(COALESCE(pv.barcode,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern",
+                    "lower(p.name) LIKE :pattern OR lower(p.brand) LIKE :pattern OR lower('P-' || CAST(p.id AS varchar)) LIKE :pattern OR lower(pv.sku) LIKE :pattern OR lower(pv.barcode) LIKE :pattern OR lower(s.display_name) LIKE :pattern",
                     "ORDER BY p.name,spv.id");
             case "payments" -> new ResourceSql("""
                     SELECT p.id id,o.id "orderId",o.order_number "orderNumber",p.amount amount,
@@ -1503,7 +1503,7 @@ public class PlatformControlTowerService {
                            p.payment_date "createdAt",s.id "shopId",s.display_name shop,
                            m.id "merchantId",c.full_name customer
                     """, "FROM payments p JOIN orders o ON o.id=p.order_id JOIN shops s ON s.id=o.shop_id JOIN merchants m ON m.id=s.merchant_id LEFT JOIN customers c ON c.id=o.customer_id",
-                    "lower(COALESCE(o.order_number,'')) LIKE :pattern OR lower(COALESCE(p.transaction_id,'')) LIKE :pattern OR lower(COALESCE(p.provider_order_id,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern",
+                    "lower(o.order_number) LIKE :pattern OR lower(p.transaction_id) LIKE :pattern OR lower(p.provider_order_id) LIKE :pattern OR lower(s.display_name) LIKE :pattern",
                     "ORDER BY p.payment_date DESC,p.id DESC");
             case "refunds" -> new ResourceSql("""
                     SELECT r.id id,r.refund_id "refundReference",r.amount amount,r.status status,
@@ -1512,7 +1512,7 @@ public class PlatformControlTowerService {
                            p.id "paymentId",o.id "orderId",o.order_number "orderNumber",
                            s.id "shopId",s.display_name shop,m.id "merchantId",c.full_name customer
                     """, "FROM refunds r JOIN payments p ON p.id=r.payment_id JOIN orders o ON o.id=p.order_id JOIN shops s ON s.id=o.shop_id JOIN merchants m ON m.id=s.merchant_id LEFT JOIN customers c ON c.id=o.customer_id",
-                    "lower(COALESCE(r.refund_id,'')) LIKE :pattern OR lower(COALESCE(o.order_number,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern",
+                    "lower(r.refund_id) LIKE :pattern OR lower(o.order_number) LIKE :pattern OR lower(s.display_name) LIKE :pattern",
                     "ORDER BY r.created_at DESC,r.id DESC");
             case "returns" -> new ResourceSql("""
                     SELECT r.id id,r.status status,r.reason reason,r.decision_note "decisionNote",
@@ -1521,14 +1521,14 @@ public class PlatformControlTowerService {
                            o.id "orderId",o.order_number "orderNumber",s.id "shopId",s.display_name shop,
                            c.full_name customer
                     """, "FROM order_returns r JOIN orders o ON o.id=r.order_id JOIN shops s ON s.id=o.shop_id LEFT JOIN customers c ON c.id=r.customer_id",
-                    "lower(COALESCE(o.order_number,'')) LIKE :pattern OR lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower(COALESCE(c.full_name,'')) LIKE :pattern",
+                    "lower(o.order_number) LIKE :pattern OR lower(s.display_name) LIKE :pattern OR lower(c.full_name) LIKE :pattern",
                     "ORDER BY r.requested_at DESC,r.id DESC");
             case "reviews" -> new ResourceSql("""
                     SELECT r.id id,'PRODUCT' "reviewType",r.rating rating,r.comment review,
                            r.review_date "createdAt",r.reported_at "reportedAt",r.hidden_at "hiddenAt",
                            p.id "productId",p.name product,c.full_name customer,r.responding_shop_id "shopId"
                     """, "FROM reviews r JOIN products p ON p.id=r.product_id LEFT JOIN customers c ON c.id=r.customer_id",
-                    "lower(COALESCE(p.name,'')) LIKE :pattern OR lower(COALESCE(c.full_name,'')) LIKE :pattern OR lower(COALESCE(r.comment,'')) LIKE :pattern",
+                    "lower(p.name) LIKE :pattern OR lower(c.full_name) LIKE :pattern OR lower(r.comment) LIKE :pattern",
                     "ORDER BY r.review_date DESC,r.id DESC");
             case "shop-reviews" -> new ResourceSql("""
                     SELECT r.id id,'SHOP' "reviewType",r.rating rating,r.comment review,
@@ -1536,7 +1536,7 @@ public class PlatformControlTowerService {
                            s.id "shopId",s.display_name shop,m.id "merchantId",
                            COALESCE(m.display_name,m.legal_name) merchant,c.full_name customer
                     """, "FROM shop_ratings r JOIN shops s ON s.id=r.shop_id JOIN merchants m ON m.id=s.merchant_id LEFT JOIN customers c ON c.id=r.customer_id",
-                    "lower(COALESCE(s.display_name,'')) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR lower(COALESCE(c.full_name,'')) LIKE :pattern OR lower(COALESCE(r.comment,'')) LIKE :pattern",
+                    "lower(s.display_name) LIKE :pattern OR lower(COALESCE(m.display_name,m.legal_name,'')) LIKE :pattern OR lower(c.full_name) LIKE :pattern OR lower(r.comment) LIKE :pattern",
                     "ORDER BY r.created_at DESC,r.id DESC");
             case "audit" -> new ResourceSql("""
                     SELECT a.id id,a.occurred_at "occurredAt",a.actor_customer_id "actorUserId",
@@ -1545,7 +1545,7 @@ public class PlatformControlTowerService {
                            a.shop_id "shopId",a.previous_state "previousState",a.new_state "newState",
                            a.reason reason,a.request_id "requestId",a.details details
                     """, "FROM audit_logs a",
-                    "lower(COALESCE(a.action,'')) LIKE :pattern OR lower(COALESCE(a.entity_type,'')) LIKE :pattern OR lower(COALESCE(a.actor_email,'')) LIKE :pattern OR lower(COALESCE(a.request_id,'')) LIKE :pattern",
+                    "lower(a.action) LIKE :pattern OR lower(a.entity_type) LIKE :pattern OR lower(a.actor_email) LIKE :pattern OR lower(a.request_id) LIKE :pattern",
                     "ORDER BY a.occurred_at DESC,a.id DESC");
             case "security" -> new ResourceSql("""
                     SELECT a.id id,a.occurred_at "occurredAt",a.actor_customer_id "actorUserId",
@@ -1554,7 +1554,7 @@ public class PlatformControlTowerService {
                            a.shop_id "shopId",a.previous_state "previousState",a.new_state "newState",
                            a.reason reason,a.request_id "requestId",a.details details
                     """, "FROM audit_logs a",
-                    "lower(COALESCE(a.action,'')) LIKE :pattern OR lower(COALESCE(a.entity_type,'')) LIKE :pattern OR lower(COALESCE(a.actor_email,'')) LIKE :pattern OR lower(COALESCE(a.request_id,'')) LIKE :pattern",
+                    "lower(a.action) LIKE :pattern OR lower(a.entity_type) LIKE :pattern OR lower(a.actor_email) LIKE :pattern OR lower(a.request_id) LIKE :pattern",
                     "ORDER BY a.occurred_at DESC,a.id DESC");
             default -> throw new BadRequestException("Unknown platform resource: " + resource);
         };

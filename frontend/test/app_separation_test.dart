@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/shared/app_kind.dart';
 
 void main() {
+  _cashfreeGroup();
+
   test('customer profile has no admin Store Management entry', () {
     final src = File('lib/features/profile/presentation/profile_screen.dart')
         .readAsStringSync();
@@ -137,5 +139,86 @@ void main() {
       expect(report.contains('gpstore-superadmin-release.apk'), isTrue);
       expect(report.contains('gpstore-superadmin-armv7.apk'), isTrue);
     });
+  });
+}
+
+/// Which apps can actually reach the Cashfree SDK, walked rather than assumed.
+///
+/// WHY THE IMPORT GRAPH AND NOT A grep. A shallow check of an entrypoint says
+/// nothing: nobody imports a payment SDK from main.dart. The SDK is four hops
+/// down - cashfree_checkout_service <- checkout_screen <- cart_screen <- the
+/// customer shell - and only a walk of the whole closure can tell you whether
+/// an app reaches it.
+///
+/// This is the precondition for taking the SDK out of the Super Admin and
+/// Worker builds: those apps may only drop it while they genuinely never
+/// execute an SDK payment flow. If somebody later routes a merchant or an
+/// operator through checkout, this test fails and says so before the packaging
+/// decision silently becomes wrong.
+///
+/// SUPER ADMIN STILL SEES MONEY. Dropping the client SDK is not dropping
+/// payment visibility: payments and refunds reach the console through
+/// /api/platform/control/payments and /refunds, which are backend reads
+/// behind PLATFORM_ADMIN and have nothing to do with the checkout SDK. The
+/// assertion below is about the SDK only.
+Set<String> _importClosure(String entrypoint) {
+  final seen = <String>{};
+  final queue = <String>[entrypoint];
+  final external = <String>{};
+
+  while (queue.isNotEmpty) {
+    final path = queue.removeLast();
+    if (!seen.add(path)) continue;
+    final file = File(path);
+    if (!file.existsSync()) continue;
+
+    for (final line in file.readAsLinesSync()) {
+      final match = RegExp(
+              '''^\\s*(?:import|export)\\s+['"]([^'"]+)['"]''')
+          .firstMatch(line);
+      if (match == null) continue;
+      final target = match.group(1)!;
+
+      if (target.startsWith('package:gpstore/')) {
+        queue.add('lib/${target.substring('package:gpstore/'.length)}');
+      } else if (target.startsWith('package:') || target.startsWith('dart:')) {
+        external.add(target);
+      } else {
+        // Relative to the importing file's own directory.
+        final dir = path.substring(0, path.lastIndexOf('/'));
+        queue.add(File('$dir/$target').uri.normalizePath().toFilePath());
+      }
+    }
+  }
+  return external;
+}
+
+void _cashfreeGroup() {
+  const sdk = 'package:flutter_cashfree_pg_sdk/';
+
+  bool reachesCashfree(String entrypoint) =>
+      _importClosure(entrypoint).any((p) => p.startsWith(sdk));
+
+  test('the customer app reaches the Cashfree SDK, because customers pay', () {
+    expect(reachesCashfree('lib/customer_main.dart'), isTrue,
+        reason: 'if this fails, online checkout is gone from the customer app');
+  });
+
+  test('Super Admin never reaches the Cashfree SDK', () {
+    expect(reachesCashfree('lib/super_admin_main.dart'), isFalse,
+        reason: 'the platform console reads payments through the backend, '
+            'and must not carry a client payment SDK');
+  });
+
+  test('the Worker app never reaches the Cashfree SDK', () {
+    expect(reachesCashfree('lib/worker_main.dart'), isFalse,
+        reason: 'a rider collects cash; they do not run a gateway checkout');
+  });
+
+  test('Merchant Admin never reaches the Cashfree SDK either', () {
+    // Recorded rather than required: today the merchant console runs no
+    // gateway checkout, which is worth knowing before anyone decides which
+    // builds need the SDK.
+    expect(reachesCashfree('lib/admin_main.dart'), isFalse);
   });
 }
