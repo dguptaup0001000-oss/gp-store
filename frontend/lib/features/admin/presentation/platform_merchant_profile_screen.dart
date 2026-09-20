@@ -100,6 +100,13 @@ class _PlatformMerchantProfileScreenState
       children: [
         _Identity(identity: identity, shopCount: shops.length),
         const SizedBox(height: AdminSpacing.lg),
+
+        // THE SAME FOUR-TILE SUMMARY THE CUSTOMER 360 OPENS WITH, because an
+        // operator moving between the two screens should not have to relearn
+        // where the headline numbers are. The tiles differ; the shape does not.
+        _StatCards(core: core, shopCount: shops.length, reputation: reputation),
+        const SizedBox(height: AdminSpacing.lg),
+
         _RangePicker(days: _days, onChanged: (d) { setState(() => _days = d); _load(); }),
         const SizedBox(height: AdminSpacing.lg),
 
@@ -110,12 +117,12 @@ class _PlatformMerchantProfileScreenState
           title: 'Money',
           subtitle: 'GMV is customer spend, not GP-STORE revenue',
           child: Column(children: [
-            _Row('GMV', AdminFormat.rupees(_money(core['gmv']))),
-            _Row('Merchant product sales', AdminFormat.rupees(_money(core['merchantProductSales']))),
-            _Row('Delivery charges', AdminFormat.rupees(_money(core['deliveryCharges']))),
-            _Row('Refunds', AdminFormat.rupees(_money(core['refunds']))),
-            _Row('Platform commission', AdminFormat.rupees(_money(core['platformCommission']))),
-            _Row('Platform fees', AdminFormat.rupees(_money(core['platformFees']))),
+            _Row('GMV', AdminFormat.rupeesExact(_money(core['gmv']))),
+            _Row('Merchant product sales', AdminFormat.rupeesExact(_money(core['merchantProductSales']))),
+            _Row('Delivery charges', AdminFormat.rupeesExact(_money(core['deliveryCharges']))),
+            _Row('Refunds', AdminFormat.rupeesExact(_money(core['refunds']))),
+            _Row('Platform commission', AdminFormat.rupeesExact(_money(core['platformCommission']))),
+            _Row('Platform fees', AdminFormat.rupeesExact(_money(core['platformFees']))),
           ]),
         ),
         const SizedBox(height: AdminSpacing.lg),
@@ -192,6 +199,12 @@ class _PlatformMerchantProfileScreenState
       value <= 0 ? '—' : value.toStringAsFixed(1);
 }
 
+/// Who this merchant is, read at a glance.
+///
+/// INITIALS, NEVER A LOGO WE DO NOT HAVE. GP-STORE stores no merchant logo,
+/// so there is nothing to draw and nothing is invented to fill the space -
+/// the monogram is derived from the name on the account and is honest about
+/// being exactly that.
 class _Identity extends StatelessWidget {
   const _Identity({required this.identity, required this.shopCount});
 
@@ -200,23 +213,172 @@ class _Identity extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final name = ((identity['displayName'] ?? identity['legalName'] ?? '')
+            as String)
+        .trim();
+    final legal = ((identity['legalName'] ?? '') as String).trim();
+    final status = ((identity['status'] ?? '') as String).trim();
+    final reason = ((identity['statusReason'] ?? '') as String).trim();
+
     return AdminSectionCard(
-      title: (identity['displayName'] ?? identity['legalName'] ?? '—') as String,
-      subtitle: identity['merchantRef'] as String?,
-      child: Column(children: [
-        _Row('Legal name', (identity['legalName'] ?? '—') as String),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            width: 64,
+            height: 64,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AdminColors.primaryLight,
+              borderRadius: BorderRadius.circular(AdminRadius.lg),
+            ),
+            child: Text(_monogram(name),
+                style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: AdminColors.primaryDeep)),
+          ),
+          const SizedBox(width: AdminSpacing.lg),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name.isEmpty ? 'Unnamed merchant' : name,
+                  style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                      color: AdminColors.textPrimary)),
+              const SizedBox(height: 2),
+              Text((identity['merchantRef'] ?? '') as String,
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AdminColors.textSecondary)),
+              const SizedBox(height: AdminSpacing.sm),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                if (status.isNotEmpty)
+                  AdminStatusBadge(
+                      label: _pretty(status), tone: _merchantTone(status)),
+                if (_yes(identity['demo']))
+                  const AdminStatusBadge(
+                      label: 'Demo', tone: AdminStatusTone.warning),
+                if ((identity['tier'] as String?) != null &&
+                    '${identity['tier']}'.trim().isNotEmpty)
+                  AdminStatusBadge(
+                      label: _pretty('${identity['tier']}'),
+                      tone: AdminStatusTone.neutral),
+              ]),
+            ]),
+          ),
+        ]),
+        if (reason.isNotEmpty) ...[
+          const SizedBox(height: AdminSpacing.md),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AdminColors.neutralBg,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text('Status reason: $reason',
+                style: const TextStyle(
+                    fontSize: 11.5, height: 1.35, color: AdminColors.textSecondary)),
+          ),
+        ],
+        const Divider(height: AdminSpacing.xl),
+        if (legal.isNotEmpty && legal != name) _Row('Legal name', legal),
         _Row('Owner', (identity['ownerCustomerRef'] ?? '—') as String),
         _Row('Email', (identity['email'] ?? '—') as String),
         _Row('Phone', (identity['phone'] ?? '—') as String),
-        _Row('Status', (identity['status'] ?? '—') as String),
-        if (identity['statusReason'] != null)
-          _Row('Reason', identity['statusReason'] as String),
-        _Row('Tier', (identity['tier'] ?? '—') as String),
         _Row('Shops', '$shopCount'),
         _Row('Joined', _when(_time(identity['createdAt']))),
       ]),
     );
   }
+
+  /// Up to two initials, taken with runes so a Devanagari or emoji first
+  /// letter is not sliced into replacement boxes.
+  static String _monogram(String name) {
+    final words =
+        name.split(RegExp(r'\s+')).where((w) => w.trim().isNotEmpty).toList();
+    if (words.isEmpty) return '?';
+    String first(String word) {
+      final runes = word.runes;
+      return runes.isEmpty ? '?' : String.fromCharCode(runes.first).toUpperCase();
+    }
+    return words.length == 1
+        ? first(words.first)
+        : first(words.first) + first(words.last);
+  }
+
+  static AdminStatusTone _merchantTone(String status) =>
+      switch (status.toUpperCase()) {
+        'ACTIVE' || 'LIVE' => AdminStatusTone.success,
+        'SUSPENDED' || 'CLOSED' || 'REJECTED' => AdminStatusTone.danger,
+        'PENDING' || 'ONBOARDING' || 'PENDING_VERIFICATION' =>
+          AdminStatusTone.warning,
+        _ => AdminStatusTone.neutral,
+      };
+}
+
+/// The four numbers an operator opens a merchant for.
+class _StatCards extends StatelessWidget {
+  const _StatCards({
+    required this.core,
+    required this.shopCount,
+    required this.reputation,
+  });
+
+  final Map<String, dynamic> core;
+  final int shopCount;
+  final Map<String, dynamic> reputation;
+
+  @override
+  Widget build(BuildContext context) {
+    final rating = _num(reputation['averageRating']);
+    final cards = <Widget>[
+      AdminKpiCard(
+        icon: Icons.payments_outlined,
+        label: 'GMV',
+        value: AdminFormat.rupeesCompact(_money(core['gmv'])),
+      ),
+      AdminKpiCard(
+        icon: Icons.receipt_long_outlined,
+        label: 'Orders',
+        value: AdminFormat.count(_num(core['totalOrders']).toInt()),
+      ),
+      AdminKpiCard(
+        icon: Icons.storefront_outlined,
+        label: shopCount == 1 ? 'Shop' : 'Shops',
+        value: AdminFormat.count(shopCount),
+      ),
+      AdminKpiCard(
+        icon: Icons.star_outline,
+        // AN UNRATED MERCHANT IS NOT A ZERO-STAR MERCHANT. A dash says
+        // nobody has rated them; 0.0 would say every customer hated them.
+        label: 'Rating',
+        value: rating <= 0 ? '—' : rating.toStringAsFixed(1),
+      ),
+    ];
+    return LayoutBuilder(builder: (context, constraints) {
+      final columns = constraints.maxWidth >= 720 ? 4 : 2;
+      const spacing = AdminSpacing.md;
+      final width = (constraints.maxWidth - spacing * (columns - 1)) / columns;
+      return Wrap(
+        spacing: spacing,
+        runSpacing: spacing,
+        children: [
+          for (final card in cards) SizedBox(width: width, child: card),
+        ],
+      );
+    });
+  }
+}
+
+bool _yes(Object? raw) => raw is bool && raw;
+
+/// SCREAMING_SNAKE from the database into something a person reads.
+String _pretty(String raw) {
+  final words = raw.trim().replaceAll('_', ' ').toLowerCase();
+  if (words.isEmpty) return raw;
+  return words[0].toUpperCase() + words.substring(1);
 }
 
 /// §8's answer, drawn honestly.

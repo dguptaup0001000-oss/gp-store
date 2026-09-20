@@ -37,6 +37,27 @@ void main() {
     });
   });
 
+  group('rupeesExact', () {
+    // The figure the Super Admin spec asks to see written out, and the one
+    // a whole-rupee formatter gets wrong. A customer querying a ₹1,499.50
+    // refund is not helped by a screen that says ₹1,500.
+    test('keeps the paise', () {
+      expect(AdminFormat.rupeesExact(2673), '₹2,673.00');
+      expect(AdminFormat.rupeesExact(1499.5), '₹1,499.50');
+      expect(AdminFormat.rupeesExact(0), '₹0.00');
+      expect(AdminFormat.rupeesExact(0.05), '₹0.05');
+    });
+
+    test('groups the rupee part the Indian way', () {
+      expect(AdminFormat.rupeesExact(145000), '₹1,45,000.00');
+      expect(AdminFormat.rupeesExact(12345678.9), '₹1,23,45,678.90');
+    });
+
+    test('keeps the sign outside the symbol', () {
+      expect(AdminFormat.rupeesExact(-2673), '-₹2,673.00');
+    });
+  });
+
   group('rupeesCompact', () {
     // Values chosen to sit clear of a .x5 boundary on purpose. Whether
     // toStringAsFixed rounds 1.45 up or down depends on the exact binary

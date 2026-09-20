@@ -47,12 +47,16 @@ public class PlatformControlTowerService {
     private final PresenceTracker presence;
     private final AuditLogService audit;
 
+    private final com.gpstore.service.CustomerService customers;
+
     public PlatformControlTowerService(NamedParameterJdbcTemplate jdbc,
                                        PresenceTracker presence,
-                                       AuditLogService audit) {
+                                       AuditLogService audit,
+                                       com.gpstore.service.CustomerService customers) {
         this.jdbc = jdbc;
         this.presence = presence;
         this.audit = audit;
+        this.customers = customers;
     }
 
     public record PageEnvelope<T>(List<T> content, int page, int size,
@@ -121,10 +125,19 @@ public class PlatformControlTowerService {
                                    Integer presenceWindowSeconds,
                                    boolean presenceAvailable) {}
 
+    /**
+     * @param profileImageUrl the picture the customer uploaded, or NULL when
+     *     they never uploaded one. The console draws initials in that case.
+     *     There is no placeholder avatar and no generated face: a photo on a
+     *     profile is a claim that this is what this person looks like, and an
+     *     invented one would be a lie told to an operator who is about to act
+     *     on the account.
+     */
     public record CustomerIdentity(Long id, String customerRef, String name,
                                    String maskedEmail, String maskedPhone,
                                    String role, Boolean enabled, Boolean active,
-                                   Boolean verified, LocalDateTime createdAt) {
+                                   Boolean verified, LocalDateTime createdAt,
+                                   String profileImageUrl) {
         @com.fasterxml.jackson.annotation.JsonProperty("email")
         public String email() { return maskedEmail; }
         @com.fasterxml.jackson.annotation.JsonProperty("phone")
@@ -1063,13 +1076,15 @@ public class PlatformControlTowerService {
     @Transactional(readOnly = true)
     public Customer360 customer(Long id) {
         List<CustomerIdentity> identities = jdbc.query("""
-                SELECT id, full_name, email, mobile_number, role, enabled, active, verified, created_at
+                SELECT id, full_name, email, mobile_number, role, enabled, active, verified,
+                       created_at, profile_image_url
                 FROM customers WHERE id = :id
                 """, Map.of("id", id), (rs, row) -> new CustomerIdentity(
                 rs.getLong("id"), "C-" + rs.getLong("id"), rs.getString("full_name"),
                 rs.getString("email"), rs.getString("mobile_number"),
                 rs.getString("role"), bool(rs.getObject("enabled")), bool(rs.getObject("active")),
-                bool(rs.getObject("verified")), time(rs.getObject("created_at"))));
+                bool(rs.getObject("verified")), time(rs.getObject("created_at")),
+                rs.getString("profile_image_url")));
         if (identities.isEmpty()) throw new ResourceNotFoundException("Customer not found");
 
         Map<String, Long> status = statusCounts("SELECT order_status, count(*) total FROM orders WHERE customer_id = :id GROUP BY order_status", id);
@@ -1117,6 +1132,31 @@ public class PlatformControlTowerService {
         audit.logRequired("SENSITIVE_PII_REVEALED", "Customer", id, null, null,
                 null, null, reason.trim(), "field=" + field);
         return new RevealedPii(id, field, value);
+    }
+
+    /**
+     * Bar a customer from the marketplace, or let them back in.
+     *
+     * <h2>This calls the existing route, it does not become a second one</h2>
+     *
+     * <p>{@code CustomerService.setAccountActive} already flips the flag,
+     * revokes every refresh token the account holds and drops the two-second
+     * JWT status cache so a live session dies on the next tap. Writing a
+     * second implementation here would mean two places that can bar somebody
+     * and only one of them logging them out. So this validates what Super
+     * Admin additionally owes - a reason - and delegates.
+     *
+     * <p>THE REASON IS MANDATORY ON THIS PATH. Five characters is not a high
+     * bar, but it is the difference between an audit row that says an
+     * operator acted and one that says why.
+     */
+    public Map<String, Object> setCustomerActive(Long id, boolean active, String reason) {
+        if (reason == null || reason.trim().length() < 5 || reason.trim().length() > 500) {
+            throw new BadRequestException("A reason of 5 to 500 characters is required");
+        }
+        var saved = customers.setAccountActive(id, active, reason.trim());
+        return Map.of("customerId", id,
+                "active", Boolean.TRUE.equals(saved.getActive()));
     }
 
     @Transactional(readOnly = true)

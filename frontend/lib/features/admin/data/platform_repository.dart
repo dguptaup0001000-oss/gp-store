@@ -147,6 +147,25 @@ class PlatformRepository {
     return body['value']?.toString();
   }
 
+  /// Bar a customer from the marketplace, or let them back in.
+  ///
+  /// The reason is not optional and is not decoration: the server refuses a
+  /// call without one, and writes it into the audit row beside the previous
+  /// and new state. Returns the state the server ended up in, which is what
+  /// the screen shows - never the state the button assumed.
+  Future<bool> setCustomerActive({
+    required int customerId,
+    required bool active,
+    required String reason,
+  }) async {
+    final response = await apiClient.dio.put(
+      '/api/platform/control/customers/$customerId/status',
+      data: {'active': active, 'reason': reason},
+    );
+    final body = Map<String, dynamic>.from(response.data as Map);
+    return body['active'] == true;
+  }
+
   Future<PlatformResourcePage> controlTowerResource({
     required String resource,
     String query = '',
