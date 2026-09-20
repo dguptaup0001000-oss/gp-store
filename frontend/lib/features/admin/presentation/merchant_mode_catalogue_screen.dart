@@ -53,6 +53,15 @@ class _MerchantModeCatalogueScreenState
   String? _error;
   CataloguePage _page = CataloguePage.empty;
 
+  /// EVERY PAGE FETCHED SO FAR, not just the last one.
+  ///
+  /// This screen used to draw _page.content and nothing else, which meant a
+  /// merchant with 31 Visit-to-Buy items could see thirty of them and had no
+  /// way to reach the thirty-first. Silently dropping a merchant's stock off
+  /// the end of their own list is the same class of bug as the drawer entry
+  /// that was never added: the data is there and the screen does not show it.
+  final List<CatalogueItem> _items = [];
+
   bool get _isService => widget.mode == SellingMode.serviceAtShop;
 
   @override
@@ -68,19 +77,26 @@ class _MerchantModeCatalogueScreenState
     super.dispose();
   }
 
-  Future<void> _load(String query, [CancelToken? _]) async {
+  Future<void> _load(String query, [CancelToken? _]) => _fetch(query, 0);
+
+  /// Page 0 replaces what is on screen; any later page is appended. A search
+  /// always starts at 0, because the results of "atta" are not a continuation
+  /// of the results of nothing.
+  Future<void> _fetch(String query, int page) async {
     final seq = ++_seq;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final page = await ref
+      final result = await ref
           .read(adminProductsRepositoryProvider)
-          .catalogue(mode: widget.mode, query: query);
+          .catalogue(mode: widget.mode, query: query, page: page);
       if (!mounted || seq != _seq) return;
       setState(() {
-        _page = page;
+        if (page == 0) _items.clear();
+        _items.addAll(result.content);
+        _page = result;
         _loading = false;
       });
     } on DioException catch (e) {
@@ -164,7 +180,10 @@ class _MerchantModeCatalogueScreenState
   }
 
   Widget _body() {
-    if (_loading) {
+    // THE SPINNER ONLY TAKES THE WHOLE SCREEN WHEN THERE IS NOTHING TO KEEP.
+    // Fetching the next page must not blank out the thirty items the
+    // merchant is already looking at; the footer button shows the wait.
+    if (_loading && _items.isEmpty) {
       return const Center(child: CircularProgressIndicator(color: AdminColors.primary));
     }
     if (_error != null) {
@@ -173,22 +192,50 @@ class _MerchantModeCatalogueScreenState
         onRetry: hapticize(() => _load(_controller.text.trim())),
       );
     }
-    if (_page.isEmpty) {
+    if (_items.isEmpty) {
       return _Empty(mode: widget.mode, searching: _controller.text.trim().isNotEmpty);
     }
 
+    final more = _items.length < _page.totalElements;
     return RefreshIndicator(
       color: AdminColors.primary,
       onRefresh: () => _load(_controller.text.trim()),
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(
             AdminSpacing.lg, 0, AdminSpacing.lg, 96),
-        itemCount: _page.content.length,
+        itemCount: _items.length + (more ? 1 : 0),
         separatorBuilder: (_, __) => const SizedBox(height: AdminSpacing.sm),
-        itemBuilder: (context, index) => _ItemCard(
-          item: _page.content[index],
-          onTap: () => _edit(_page.content[index]),
-        ),
+        itemBuilder: (context, index) {
+          if (index == _items.length) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: AdminSpacing.sm),
+              child: Center(
+                child: TextButton.icon(
+                  onPressed: _loading
+                      ? null
+                      : hapticize(
+                          () => _fetch(_controller.text.trim(), _page.page + 1)),
+                  icon: _loading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: AdminColors.primary))
+                      : const Icon(Icons.expand_more, size: 18),
+                  label: Text(_loading
+                      ? 'Loading…'
+                      : 'Show more '
+                          '(${_items.length} of ${_page.totalElements})'),
+                  style: TextButton.styleFrom(foregroundColor: AdminColors.primary),
+                ),
+              ),
+            );
+          }
+          return _ItemCard(
+            item: _items[index],
+            onTap: () => _edit(_items[index]),
+          );
+        },
       ),
     );
   }

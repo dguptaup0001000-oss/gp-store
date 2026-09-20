@@ -73,7 +73,15 @@ BEGIN
 END
 $$;
 
--- "Which categories does this shop already sell in" is the first thing the
--- merchant picker shows, so it must not scan the shop's whole shelf.
-CREATE INDEX IF NOT EXISTS idx_spv_shop_variant
-    ON shop_product_variants (shop_id, product_variant_id);
+-- NO INDEX FOR "which categories does this shop already sell in", and that
+-- is the result of reading the plan rather than guessing. That read is a
+-- lookup on shop_product_variants (shop_id, product_variant_id), and
+-- uk_shop_product_variant - the UNIQUE constraint that has been on the table
+-- since the shop catalogue existed - is a b-tree on exactly those two
+-- columns in that order. A second index over the same pair would be chosen
+-- by the planner exactly as often as the first, would be written on every
+-- listing insert, price change and stock update, and would buy nothing.
+--
+-- idx_spv_offline_modes covers the other new read, "everything this shop
+-- sells as Visit to Buy": it is (shop_id, commerce_mode) partial on the
+-- non-online modes, which is the whole of that query's predicate.

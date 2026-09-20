@@ -95,6 +95,33 @@ public class CategoryFinder {
                 .addValue("pattern", searching ? "%" + text.toLowerCase(Locale.ROOT) + "%" : null)
                 .addValue("limit", Math.max(1, Math.min(limit, MAX_RESULTS)));
 
+        // THE FILTER IS BUILT, NOT PARAMETERISED AWAY, and that is the whole
+        // difference between the trigram index being used and being dead
+        // weight on the table. Written as
+        //
+        //     AND (CAST(:pattern AS varchar) IS NULL OR lower(c.name) LIKE ...)
+        //
+        // the predicate is an OR whose first branch depends on a parameter,
+        // so the planner cannot push either branch at an index and seq-scans
+        // every category. EXPLAIN says so: no Bitmap Index Scan, and the cost
+        // grows straight-line with the catalogue. Two statements shaped for
+        // their own case each get a plan that fits.
+        //
+        // The match is on the category's own name OR its parent's, because a
+        // merchant typing "electronics" means the whole branch. Both halves
+        // are stated as index-shaped predicates over categories, so both can
+        // ride idx_categories_name_trgm.
+        String matching = searching ? """
+                   AND c.id IN (
+                       SELECT m.id FROM categories m
+                        WHERE lower(m.name) LIKE CAST(:pattern AS varchar)
+                       UNION
+                       SELECT kid.id FROM categories kid
+                         JOIN categories par ON par.id = kid.parent_id
+                        WHERE lower(par.name) LIKE CAST(:pattern AS varchar)
+                   )
+                """ : "";
+
         // The shop's own categories, as a set the ordering can test against.
         // LEFT JOIN rather than a correlated subquery per row: one pass.
         String sql = """
@@ -119,12 +146,9 @@ public class CategoryFinder {
                   LEFT JOIN mine ON mine.category_id = c.id
                   LEFT JOIN categories parent ON parent.id = c.parent_id
                  WHERE c.active = true
-                   AND (CAST(:pattern AS varchar) IS NULL
-                        OR lower(c.name) LIKE CAST(:pattern AS varchar)
-                        OR lower(parent.name) LIKE CAST(:pattern AS varchar))
-                 ORDER BY band, lower(c.name), c.id
+                %s ORDER BY band, lower(c.name), c.id
                  LIMIT :limit
-                """;
+                """.formatted(matching);
 
         return jdbc.query(sql, params, (rs, row) -> new CategoryOption(
                 rs.getLong("id"), rs.getString("name"),
