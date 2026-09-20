@@ -90,6 +90,11 @@ public class ShopVariantEditing {
                               Boolean active,
                               Integer displayOrder,
                               Long shopCategoryId,
+                              CommerceMode commerceMode,
+                              ListingPriceMode priceMode,
+                              BigDecimal priceMax,
+                              OfflineAvailability offlineAvailability,
+                              Integer serviceDurationMinutes,
                               List<AttributeEdit> attributes) {
     }
 
@@ -107,6 +112,12 @@ public class ShopVariantEditing {
                               Boolean available,
                               Boolean active,
                               Long shopCategoryId,
+                              CommerceMode commerceMode,
+                              String commerceLabel,
+                              ListingPriceMode priceMode,
+                              BigDecimal priceMax,
+                              OfflineAvailability offlineAvailability,
+                              Integer serviceDurationMinutes,
                               boolean editableDescription,
                               List<AttributeEdit> attributes) {
     }
@@ -160,6 +171,7 @@ public class ShopVariantEditing {
                     () -> new BadRequestException("That department does not belong to this shop."));
             listing.setShopCategoryId(edit.shopCategoryId());
         }
+        applyCommerceMode(listing, edit);
         listings.save(listing);
 
         if (mayEditDescription(productVariantId)) {
@@ -229,6 +241,7 @@ public class ShopVariantEditing {
                     () -> new BadRequestException("That department does not belong to this shop."));
             listing.setShopCategoryId(edit.shopCategoryId());
         }
+        applyCommerceMode(listing, edit);
         // shop_id is stamped by TenantEntityListener from the resolved scope.
         listings.save(listing);
 
@@ -368,6 +381,89 @@ public class ShopVariantEditing {
         return cleaned;
     }
 
+    /** As long as a service plausibly takes - eight hours, not eight days. */
+    public static final int MAX_SERVICE_MINUTES = 8 * 60;
+
+    /**
+     * How this shop SELLS this item: online, over the counter, or as a service.
+     *
+     * <p>THE SAME LISTING ROW, three ways of trading. A jeweller, a barber and
+     * a kirana are not three kinds of product needing three kinds of table -
+     * they are one shelf entry with a different answer to "how do I get this?".
+     * That is why there is no JewelleryProduct and no BarberService here: the
+     * columns that differ between the three are the four below, and they sit
+     * on the listing because they are the SHOP's answer, not the catalogue's.
+     * Two shops may sell the same catalogue saree, one online and one only
+     * across the counter, and both are telling the truth.
+     *
+     * <p>ABSENT MEANS UNCHANGED, not reset. A merchant app that saves a price
+     * without sending a mode must not silently turn a Visit-to-Buy listing
+     * into an online one - that would put an item in carts the shop cannot
+     * ship. Existing screens that know nothing about modes keep working, and
+     * changing the mode stays a deliberate act.
+     */
+    private void applyCommerceMode(ShopProductVariant listing, VariantEdit edit) {
+        if (edit.commerceMode() != null) {
+            listing.setCommerceMode(edit.commerceMode());
+        }
+        if (edit.priceMode() != null) {
+            listing.setPriceMode(edit.priceMode());
+        }
+        if (edit.priceMax() != null) {
+            listing.setPriceMax(edit.priceMax());
+        }
+        if (edit.offlineAvailability() != null) {
+            listing.setOfflineAvailability(edit.offlineAvailability());
+        }
+        if (edit.serviceDurationMinutes() != null) {
+            listing.setServiceDurationMinutes(edit.serviceDurationMinutes());
+        }
+
+        CommerceMode mode = listing.getCommerceMode() == null
+                ? CommerceMode.ONLINE_PURCHASE : listing.getCommerceMode();
+        ListingPriceMode price = listing.getPriceMode() == null
+                ? ListingPriceMode.EXACT_PRICE : listing.getPriceMode();
+
+        // AN ONLINE PRICE IS A PROMISE. A cart totals it, a payment charges it
+        // and a receipt prints it, so "from Rs 500" cannot be the number a
+        // customer is billed. The database says the same thing in
+        // ck_spv_online_price_is_exact; this says it in words a merchant can
+        // act on instead of as a constraint violation.
+        if (mode.isBuyableOnline() && price != ListingPriceMode.EXACT_PRICE) {
+            throw new BadRequestException(
+                    "An item sold online needs one exact price, because that is what the "
+                            + "customer is charged. Use Visit to Buy for starting-from or "
+                            + "on-request pricing.");
+        }
+        if (price == ListingPriceMode.PRICE_RANGE) {
+            BigDecimal top = listing.getPriceMax();
+            if (top == null || top.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new BadRequestException("A price range needs a top price.");
+            }
+            if (listing.getSellingPrice() != null
+                    && top.compareTo(listing.getSellingPrice()) < 0) {
+                throw new BadRequestException(
+                        "The top of the range cannot be below the starting price.");
+            }
+        }
+        if (mode != CommerceMode.SERVICE_AT_SHOP && listing.getServiceDurationMinutes() != null) {
+            // Not an error - a merchant switching a service back to a product
+            // should not have to hunt for a field the screen no longer shows.
+            listing.setServiceDurationMinutes(null);
+        }
+        Integer minutes = listing.getServiceDurationMinutes();
+        if (minutes != null && (minutes <= 0 || minutes > MAX_SERVICE_MINUTES)) {
+            throw new BadRequestException(
+                    "How long the service takes must be between 1 minute and "
+                            + MAX_SERVICE_MINUTES + " minutes.");
+        }
+        // An offline listing with no availability stated reads as available,
+        // which is the honest default for something standing in a shop.
+        if (!mode.isBuyableOnline() && listing.getOfflineAvailability() == null) {
+            listing.setOfflineAvailability(OfflineAvailability.AVAILABLE);
+        }
+    }
+
     /**
      * The price rules, and only the rules that are actually rules.
      *
@@ -416,6 +512,14 @@ public class ShopVariantEditing {
                 listing.getAvailable(),
                 listing.getActive(),
                 listing.getShopCategoryId(),
+                listing.getCommerceMode(),
+                listing.getCommerceMode() == null
+                        ? CommerceMode.ONLINE_PURCHASE.customerLabel()
+                        : listing.getCommerceMode().customerLabel(),
+                listing.getPriceMode(),
+                listing.getPriceMax(),
+                listing.getOfflineAvailability(),
+                listing.getServiceDurationMinutes(),
                 mayEditDescription(listing.getProductVariantId()),
                 pairs);
     }

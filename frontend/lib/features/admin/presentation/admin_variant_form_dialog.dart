@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import '../../../admin/design/admin_tokens.dart';
 import '../../../core/images/gp_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart' show extractErrorMessage;
 import '../../products/domain/product_models.dart';
 import '../data/admin_products_repository.dart';
+import '../domain/selling_mode.dart';
 import '../domain/variant_save_action.dart';
 import '../domain/variant_attribute.dart';
 import '../../../core/api/error_messages.dart'
@@ -54,6 +56,16 @@ class _AdminVariantFormDialogState
   late final TextEditingController _sellingPriceController;
   late final TextEditingController _costPriceController;
   late bool _available;
+
+  /// HOW this shop sells this one thing. Defaults to online, which is what
+  /// every listing was before modes existed, so a kirana never meets these
+  /// controls as a decision they have to make.
+  SellingMode _selling = SellingMode.onlinePurchase;
+  PriceMode _priceMode = PriceMode.exact;
+  OfflineStock _stock = OfflineStock.available;
+  late final TextEditingController _priceMaxController;
+  late final TextEditingController _serviceMinutesController;
+
   bool _isSaving = false;
   bool _isUploadingImage = false;
 
@@ -89,6 +101,8 @@ class _AdminVariantFormDialogState
     // nothing to prefill. Leaving it blank means "no change" is NOT what
     // happens here though - see the save-time warning below.
     _costPriceController = TextEditingController();
+    _priceMaxController = TextEditingController();
+    _serviceMinutesController = TextEditingController();
     _available = v?.available ?? true;
 
     // Seeded from the variant's existing single thumbnail so an old
@@ -167,12 +181,120 @@ class _AdminVariantFormDialogState
     }
     _mrpController.dispose();
     _sellingPriceController.dispose();
+    _priceMaxController.dispose();
+    _serviceMinutesController.dispose();
     _costPriceController.dispose();
     super.dispose();
   }
 
+  /// HOW THIS SHOP SELLS THIS ONE THING.
+  ///
+  /// Not a separate screen and not a separate kind of product: a jeweller, a
+  /// barber and a kirana all fill in the same form, and this is the field
+  /// where they differ. A shop that only ever sells online never touches it -
+  /// the default is what every listing already was.
+  Widget _sellingModeSection() {
+    final allowedPrices = PriceMode.allowedFor(_selling);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('How you sell this',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+        const SizedBox(height: 8),
+        SegmentedButton<SellingMode>(
+          segments: SellingMode.values
+              .map((m) => ButtonSegment<SellingMode>(
+                    value: m,
+                    label: Text(m.label, style: const TextStyle(fontSize: 11.5)),
+                  ))
+              .toList(),
+          selected: {_selling},
+          showSelectedIcon: false,
+          onSelectionChanged: (chosen) {
+            setState(() {
+              _selling = chosen.first;
+              // An online item must be exactly priced, so switching to online
+              // puts the price mode back where the rule allows rather than
+              // leaving an invalid pair on screen for the server to reject.
+              if (!PriceMode.allowedFor(_selling).contains(_priceMode)) {
+                _priceMode = PriceMode.exact;
+              }
+            });
+          },
+        ),
+        const SizedBox(height: 6),
+        Text(_selling.explanation,
+            style: const TextStyle(fontSize: 11.5, color: AdminColors.textSecondary)),
+
+        // Everything below is meaningless for an online listing - it is
+        // exactly priced, it is in stock or it is not, and it takes no time.
+        if (!_selling.isOnline) ...[
+          const SizedBox(height: 12),
+          DropdownButtonFormField<PriceMode>(
+            initialValue: _priceMode,
+            decoration: const InputDecoration(labelText: 'How the price is shown'),
+            items: allowedPrices
+                .map((m) => DropdownMenuItem(value: m, child: Text(m.label)))
+                .toList(),
+            onChanged: (m) => setState(() => _priceMode = m ?? PriceMode.exact),
+          ),
+          if (_priceMode == PriceMode.range) ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _priceMaxController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Top of the range (₹)',
+                helperText: 'The selling price above is the bottom of the range',
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          DropdownButtonFormField<OfflineStock>(
+            initialValue: _stock,
+            decoration: const InputDecoration(labelText: 'At the shop'),
+            items: OfflineStock.values
+                .map((v) => DropdownMenuItem(value: v, child: Text(v.label)))
+                .toList(),
+            onChanged: (v) => setState(() => _stock = v ?? OfflineStock.available),
+          ),
+        ],
+        if (_selling == SellingMode.serviceAtShop) ...[
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _serviceMinutesController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'How long it takes (minutes)',
+              helperText: 'Optional - helps customers plan their visit',
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// What the merchant typed about selling, as one value.
+  SellingSetup get _sellingSetup => SellingSetup(
+        selling: _selling,
+        price: _priceMode,
+        priceMax: double.tryParse(_priceMaxController.text.trim()),
+        stock: _stock,
+        serviceMinutes: int.tryParse(_serviceMinutesController.text.trim()),
+      );
+
   Future<void> _save({bool allowBelowCost = false}) async {
     if (!_formKey.currentState!.validate()) return;
+
+    // Told beside the field rather than after a round trip. The server checks
+    // the same rules again and is the one that binds.
+    final setup = _sellingSetup;
+    final wrong = setup.problem(
+        sellingPrice: double.tryParse(_sellingPriceController.text.trim()));
+    if (wrong != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(wrong)));
+      return;
+    }
 
     setState(() => _isSaving = true);
 
@@ -220,6 +342,7 @@ class _AdminVariantFormDialogState
           costPrice: costPrice,
           available: _available,
           allowBelowCost: allowBelowCost,
+          selling: setup,
         );
         if (_imagesChanged) {
           await repository.setVariantImages(widget.variant!.id, _images);
@@ -237,6 +360,7 @@ class _AdminVariantFormDialogState
           costPrice: costPrice,
           available: _available,
           allowBelowCost: allowBelowCost,
+          selling: setup,
         );
         if (_images.length > 1 || _imagesChanged) {
           await repository.setVariantImages(_createdVariantId!, _images);
@@ -253,6 +377,7 @@ class _AdminVariantFormDialogState
           sellingPrice: sellingPrice,
           costPrice: costPrice,
           allowBelowCost: allowBelowCost,
+          selling: setup,
         );
         _createdVariantId = newVariantId;
 
@@ -552,6 +677,8 @@ class _AdminVariantFormDialogState
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+              _sellingModeSection(),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _costPriceController,

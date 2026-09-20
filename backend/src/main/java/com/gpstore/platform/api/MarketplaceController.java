@@ -56,6 +56,10 @@ public class MarketplaceController {
     private final com.gpstore.repository.StoreOperationsSettingsRepository storeSettings;
     private final com.gpstore.repository.StoreClosureRepository closures;
     private final MarketplaceFeedService marketplaceFeed;
+    private final com.gpstore.catalog.shop.SellerResolution sellers;
+    private final com.gpstore.engagement.ListingEngagement engagement;
+    private final com.gpstore.security.CurrentUser currentUser;
+    private final com.gpstore.repository.AddressRepository addresses;
 
     public MarketplaceController(ShopDiscovery discovery, ShopRepository shops,
                                  PlatformProperties platform, ShopScopeSwitch shopScope,
@@ -68,7 +72,11 @@ public class MarketplaceController {
                                  com.gpstore.repository.CategoryRepository categories,
                                  com.gpstore.repository.StoreOperationsSettingsRepository storeSettings,
                                  com.gpstore.repository.StoreClosureRepository closures,
-                                 MarketplaceFeedService marketplaceFeed) {
+                                 MarketplaceFeedService marketplaceFeed,
+                                 com.gpstore.catalog.shop.SellerResolution sellers,
+                                 com.gpstore.security.CurrentUser currentUser,
+                                 com.gpstore.repository.AddressRepository addresses,
+                                 com.gpstore.engagement.ListingEngagement engagement) {
         this.shelves = shelves;
         this.stars = stars;
         this.categories = categories;
@@ -83,6 +91,10 @@ public class MarketplaceController {
         this.storeSettings = storeSettings;
         this.closures = closures;
         this.marketplaceFeed = marketplaceFeed;
+        this.sellers = sellers;
+        this.engagement = engagement;
+        this.currentUser = currentUser;
+        this.addresses = addresses;
     }
 
     /**
@@ -444,6 +456,115 @@ public class MarketplaceController {
     }
 
     /**
+     * Records that a customer did something about an offline listing.
+     *
+     * <p>WHY THIS ENDPOINT EXISTS AT ALL. An online sale records itself - an
+     * order, a payment, a receipt. A Visit-to-Buy listing has none of that:
+     * the customer sees the card, taps Directions, walks in and pays in cash,
+     * and GP-STORE never learns whether any of it happened. A jeweller who
+     * lists their showroom stock has no way to tell whether it brought
+     * anybody in. This is how they find out.
+     *
+     * <p>INTEREST, NOT SALES. What is recorded is what the app genuinely saw:
+     * a card drawn, a detail opened, directions asked for, a call placed.
+     * GP-STORE does not know who walked in, who bought or what they paid, and
+     * nothing built on these rows may claim otherwise.
+     *
+     * <p>THE MODE IS NOT A PARAMETER. It is read from the listing inside that
+     * shop's scope, so a client cannot dress ordinary online browsing up as
+     * showroom interest - which is exactly the number a merchant would be
+     * tempted to pay for position against.
+     *
+     * <p>ALWAYS 202, AND ALWAYS FAST. An unknown listing, another shop's
+     * variant or a failed write are all silently nothing: this must never
+     * break browsing, and it must never become a way to discover which
+     * listing ids a shop has.
+     */
+    @PostMapping("/engagement")
+    @org.springframework.web.bind.annotation.ResponseStatus(
+            org.springframework.http.HttpStatus.ACCEPTED)
+    public void recordEngagement(@RequestBody EngagementRequest request) {
+        if (request == null) {
+            return;
+        }
+        Long shopper;
+        try {
+            shopper = currentUser.customerId();
+        } catch (RuntimeException anonymous) {
+            // Most marketplace browsing is anonymous and an anonymous tap is
+            // still a real signal. Recorded with no identifier at all rather
+            // than with a pseudonymous one.
+            shopper = null;
+        }
+        engagement.record(request.shopId(), request.productVariantId(),
+                com.gpstore.engagement.EngagementKind.of(request.kind()), shopper);
+    }
+
+    /**
+     * @param kind one of VIEWED_CARD, OPENED_DETAIL, ASKED_DIRECTIONS,
+     *             CALLED_SHOP. Anything else is dropped rather than guessed.
+     */
+    public record EngagementRequest(Long shopId, Long productVariantId, String kind) {}
+
+    /**
+     * Search what the TOWN sells, not what one shop's shelf holds.
+     *
+     * <p>Every existing search route narrows to one shop, because listings
+     * are shop-owned and the tenant filter applies - so a customer who had
+     * chosen no storefront was searching Shop #1 and being told the town does
+     * not stock what they asked for. This is the search that matches the
+     * marketplace feed.
+     *
+     * <p>ALL THREE MODES BY DEFAULT, unlike the feed. Somebody typing
+     * "haircut" wants the barber and somebody typing "gold chain" wants the
+     * jeweller they have to visit; a search restricted to what a cart can
+     * hold finds neither. The mode is on every result so the screen can
+     * label it, and the caller may still narrow with ?mode= when a screen
+     * genuinely is about one.
+     */
+    @GetMapping("/search")
+    public List<MarketplaceFeedView> search(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng,
+            @RequestParam(required = false) String mode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        java.util.Set<com.gpstore.catalog.shop.CommerceMode> modes =
+                (mode == null || mode.isBlank())
+                        ? java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.values())
+                        : modesFrom(mode);
+        return marketplaceFeed.search(q, lat, lng, modes, page, size);
+    }
+
+    /**
+     * Every nearby shop offering this product, and how to reach each one.
+     *
+     * <p>THE SCREEN BEHIND A VISIT-TO-BUY CARD. The feed collapses five shops
+     * selling the same drink into one card, because five Cokes is one drink
+     * and not five results. The moment the customer taps it, though, "who has
+     * it, where, and for how much" is the whole question - so this expands the
+     * card back out. Nothing was hidden and nothing is invented: it is the
+     * same rows, collapsed and expanded.
+     *
+     * <p>ALL THREE MODES COME BACK. A customer looking at a Visit-to-Buy card
+     * for something a shop two streets further delivers should be told so.
+     * Filtering by the mode they arrived through would hide the better answer
+     * to the question they actually have, which is "how do I get this?".
+     *
+     * <p>Anonymous-readable, like the feed and the shop list: this is what a
+     * storefront shows any passer-by - a name, an address, a public number, a
+     * price. No merchant's private contact, no takings, no owner details.
+     */
+    @GetMapping("/products/{productId}/offers")
+    public List<MarketplaceOfferView> offersOf(
+            @PathVariable Long productId,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return marketplaceFeed.offersOf(productId, lat, lng);
+    }
+
+    /**
      * Reads the mode filter, refusing to guess.
      *
      * <p>An unrecognised mode falls back to Buy Online rather than to
@@ -467,6 +588,58 @@ public class MarketplaceController {
         return modes.isEmpty()
                 ? java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE)
                 : modes;
+    }
+
+    /**
+     * Who can supply this product, best first.
+     *
+     * <p>On a marketplace feed the customer chose a PRODUCT, not a shop.
+     * Several shops near them may sell it at different prices with different
+     * delivery charges, and one may be the shop they already named as their
+     * preference for this sort of thing. This is that decision, exposed so
+     * the app can either show the choice or take the head of the list.
+     *
+     * <p>ONE METHOD FOR BOTH BEHAVIOURS, so the chooser and the automatic
+     * pick cannot disagree about which shop is best - which, to a customer,
+     * looks like the app adding from a shop they did not select.
+     *
+     * <p>The customer's own address is read from their account rather than
+     * from the request: delivery cost depends on where it is going, and where
+     * it is going is not something a caller should be able to assert.
+     */
+    @Transactional(readOnly = true)
+    @GetMapping("/sellers")
+    public List<com.gpstore.catalog.shop.SellerOption> sellersFor(
+            @RequestParam Long variantId,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        // ANONYMOUS IS A REAL CALLER HERE. Browsing what a town sells, and
+        // seeing who would supply it, is not something a customer should have
+        // to sign in for - they simply get no preference applied, because they
+        // have not expressed one.
+        Long customerId;
+        try {
+            customerId = currentUser.customerId();
+        } catch (RuntimeException notSignedIn) {
+            customerId = null;
+        }
+        final Long shopper = customerId;
+        com.gpstore.entity.Address address = shopper == null ? null
+                : addresses.findByCustomerId(shopper).stream()
+                        .filter(a -> Boolean.TRUE.equals(a.getDefaultAddress()))
+                        .findFirst()
+                        .orElseGet(() -> addresses.findByCustomerId(shopper).stream()
+                                .findFirst().orElse(null));
+
+        // A signed-in customer's own address is the better pin than anything
+        // the client sent: it is where the order would actually go.
+        Double useLat = lat;
+        Double useLng = lng;
+        if (address != null && address.getLatitude() != null && address.getLongitude() != null) {
+            useLat = address.getLatitude();
+            useLng = address.getLongitude();
+        }
+        return sellers.sellersFor(shopper, variantId, useLat, useLng, address);
     }
 
     @GetMapping("/mode")

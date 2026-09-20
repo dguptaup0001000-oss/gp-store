@@ -63,6 +63,14 @@ public record MarketplaceFeedView(
         int sellerCount) {
 
     /** So a client cannot come to its own conclusion about what is buyable. */
+    // JACKSON SERIALISES A RECORD FROM ITS COMPONENTS ONLY, so this derived
+    // accessor is invisible on the wire without an explicit @JsonProperty -
+    // and a missing field is not a visible failure. The Flutter model reads
+    // `addable` with `?? false`, so every card in the app rendered VIEW
+    // instead of ADD while the backend and its tests were perfectly correct:
+    // they call this method in Java and never cross JSON. Found by curling
+    // the endpoint against the seeded marketplace.
+    @com.fasterxml.jackson.annotation.JsonProperty("addable")
     public boolean addable() {
         return commerceMode != null && commerceMode.isBuyableOnline();
     }

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/catalog_import_repository.dart';
+import '../domain/listing_engagement.dart';
 import '../domain/catalog_import_models.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
@@ -152,6 +153,17 @@ final analyticsPeriodDaysProvider = StateProvider.autoDispose<int>((ref) => 30);
 final adminSalesSummaryProvider = FutureProvider.autoDispose<SalesSummary>((ref) {
   final days = ref.watch(analyticsPeriodDaysProvider);
   return ref.watch(adminProductsRepositoryProvider).getSalesSummary(days: days);
+});
+
+/// What this shop's offline listings attracted.
+///
+/// Shares analyticsPeriodDaysProvider with the sales numbers beside it, so the
+/// period selector moves both and the screen can never show interest for one
+/// window next to takings for another.
+final adminListingEngagementProvider =
+    FutureProvider.autoDispose<ListingEngagementReport>((ref) {
+  final days = ref.watch(analyticsPeriodDaysProvider);
+  return ref.watch(adminProductsRepositoryProvider).getListingEngagement(days: days);
 });
 
 /// The dashboard chart. Shares analyticsPeriodDaysProvider with the summary

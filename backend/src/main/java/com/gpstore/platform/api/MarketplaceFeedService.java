@@ -82,6 +82,95 @@ public class MarketplaceFeedService {
         return cards;
     }
 
+    /**
+     * A search of the whole marketplace, across every mode asked for.
+     *
+     * <p>SEARCH HAD THE SAME BUG THE HOME FEED DID: every existing search
+     * route is shop-scoped, so a customer who had chosen no shop was
+     * searching Shop #1's shelf and being told the town does not stock what
+     * they asked for. This looks where the customer is standing instead.
+     *
+     * <p>A customer typing "haircut" wants the barber and one typing "gold
+     * chain" wants the jeweller they have to visit, so the default here is
+     * ALL THREE MODES rather than what a cart can hold. The mode is on every
+     * result, so the screen can label them.
+     */
+    @Transactional(readOnly = true)
+    public List<MarketplaceFeedView> search(String keyword, Double lat, Double lng,
+                                            Set<CommerceMode> modes, int page, int size) {
+        if (lat == null || lng == null || keyword == null || keyword.isBlank()) {
+            return List.of();
+        }
+        List<ShopDiscovery.NearbyShop> nearby = discovery.shopsServing(lat, lng);
+        if (nearby.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Double> distanceByShop = new HashMap<>();
+        for (ShopDiscovery.NearbyShop near : nearby) {
+            distanceByShop.put(near.shop().getId(), near.distanceKm());
+        }
+
+        int limit = Math.min(Math.max(size, 1), MAX_PAGE);
+        int offset = Math.max(page, 0) * limit;
+
+        List<MarketplaceFeedView> results = new ArrayList<>();
+        for (Object[] row : feed.search(keyword, distanceByShop.keySet(),
+                modes == null || modes.isEmpty() ? Set.of(CommerceMode.values()) : modes,
+                distanceByShop, limit, offset)) {
+            results.add(toCard(row));
+        }
+        return results;
+    }
+
+    /**
+     * Every nearby shop offering this product, nearest first.
+     *
+     * <p>ALL THREE MODES, ALWAYS. The customer tapped a Visit-to-Buy card and
+     * a shop two streets further sells the same thing online - telling them
+     * only about the first is filtering away the better answer to the question
+     * they actually have, which is "how do I get this?". The mode is on every
+     * row, so the screen can group them; it is not a reason to drop one.
+     *
+     * <p>Same two queries as the feed: one to ShopDiscovery for who serves
+     * this pin, one to the database for the offers.
+     */
+    @Transactional(readOnly = true)
+    public List<MarketplaceOfferView> offersOf(Long productId, Double lat, Double lng) {
+        if (productId == null || lat == null || lng == null) {
+            return List.of();
+        }
+        List<ShopDiscovery.NearbyShop> nearby = discovery.shopsServing(lat, lng);
+        if (nearby.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Double> distanceByShop = new HashMap<>();
+        for (ShopDiscovery.NearbyShop near : nearby) {
+            distanceByShop.put(near.shop().getId(), near.distanceKm());
+        }
+
+        List<MarketplaceOfferView> offers = new ArrayList<>();
+        for (Object[] row : feed.offersOf(productId, distanceByShop.keySet(), distanceByShop)) {
+            offers.add(toOffer(row));
+        }
+        return offers;
+    }
+
+    private MarketplaceOfferView toOffer(Object[] r) {
+        CommerceMode mode = enumOf(CommerceMode.class, (String) r[10], CommerceMode.ONLINE_PURCHASE);
+        return new MarketplaceOfferView(
+                (Long) r[3], (String) r[4], (String) r[5],
+                (Long) r[0], asDouble(r[1]), (String) r[2],
+                (BigDecimal) r[6], (BigDecimal) r[7], (BigDecimal) r[8],
+                enumOf(ListingPriceMode.class, (String) r[9], ListingPriceMode.EXACT_PRICE),
+                mode, mode.customerLabel(),
+                enumOf(OfflineAvailability.class, (String) r[11], null),
+                asInteger(r[12]),
+                (Long) r[13], (String) r[14],
+                (String) r[15], (String) r[16], (String) r[17], (String) r[18],
+                asDouble(r[19]), asDouble(r[20]),
+                (String) r[21], (Double) r[22]);
+    }
+
     private MarketplaceFeedView toCard(Object[] r) {
         CommerceMode mode = enumOf(CommerceMode.class, (String) r[12], CommerceMode.ONLINE_PURCHASE);
         return new MarketplaceFeedView(

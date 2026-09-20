@@ -1,3 +1,5 @@
+import '../../features/marketplace/domain/marketplace_feed_models.dart';
+import '../../features/marketplace/domain/marketplace_offer.dart';
 import '../api/api_client.dart';
 import 'marketplace_models.dart';
 
@@ -15,6 +17,140 @@ class MarketplaceRepository {
   MarketplaceRepository({required this.apiClient});
 
   final ApiClient apiClient;
+
+  /// THE MARKETPLACE ITSELF: what is for sale near this customer, before
+  /// they have chosen anybody's shop.
+  ///
+  /// NOT /api/products/feed, and the difference is the whole point. That
+  /// route answers "what does the shop I am in sell" - it requires a listing,
+  /// listings are shop-owned, and a customer who has chosen no shop resolves
+  /// to Shop #1. So it showed one kirana's shelf on a screen labelled All
+  /// Products, or nothing at all where that shop has no listings. This route
+  /// asks about the TOWN, which is a different question and needed a
+  /// different endpoint rather than a repair to that one.
+  ///
+  /// A MISSING PIN RETURNS EMPTY, deliberately. A customer whose address
+  /// cannot be placed cannot be told which shops deliver to them, and
+  /// inventing a location would show somebody in one town another town's
+  /// shops. The caller draws "add an address to see what is nearby", which is
+  /// an honest answer rather than an error.
+  Future<List<MarketplaceCard>> feed({
+    required double? latitude,
+    required double? longitude,
+    CommerceMode mode = CommerceMode.buyOnline,
+    int? categoryId,
+    int page = 0,
+    int size = 20,
+  }) async {
+    if (latitude == null || longitude == null) return const [];
+    final response = await apiClient.dio.get(
+      '/api/marketplace/feed',
+      queryParameters: {
+        'lat': latitude,
+        'lng': longitude,
+        'mode': mode.wire,
+        if (categoryId != null) 'categoryId': categoryId,
+        'page': page,
+        'size': size,
+      },
+    );
+    final data = response.data;
+    if (data is! List) return const [];
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map(MarketplaceCard.fromJson)
+        .toList(growable: false);
+  }
+
+  /// Search the whole marketplace, across every mode.
+  ///
+  /// The product search routes are shop-scoped, so on a marketplace they can
+  /// only ever answer about one shop. This asks what the TOWN sells, and it
+  /// defaults to all three modes because somebody typing "haircut" wants the
+  /// barber - a search restricted to what a cart can hold finds nothing.
+  Future<List<MarketplaceCard>> search({
+    required String query,
+    required double? latitude,
+    required double? longitude,
+    CommerceMode? mode,
+    int page = 0,
+    int size = 20,
+  }) async {
+    if (latitude == null || longitude == null || query.trim().isEmpty) {
+      return const [];
+    }
+    final response = await apiClient.dio.get(
+      '/api/marketplace/search',
+      queryParameters: {
+        'q': query.trim(),
+        'lat': latitude,
+        'lng': longitude,
+        if (mode != null) 'mode': mode.wire,
+        'page': page,
+        'size': size,
+      },
+    );
+    final data = response.data;
+    if (data is! List) return const [];
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map(MarketplaceCard.fromJson)
+        .toList(growable: false);
+  }
+
+  /// Records that a customer did something about an offline listing.
+  ///
+  /// THE ONLY WAY A MERCHANT FINDS OUT whether a Visit-to-Buy card brought
+  /// anybody in: an online sale records itself, that one does not.
+  ///
+  /// FIRE AND FORGET, AND NEVER IN THE WAY. A customer tapping Directions
+  /// gets their directions whether or not this call succeeds, so every
+  /// failure is swallowed. Analytics that can break browsing is worse than
+  /// no analytics.
+  Future<void> recordEngagement({
+    required int shopId,
+    required int productVariantId,
+    required String kind,
+  }) async {
+    try {
+      await apiClient.dio.post(
+        '/api/marketplace/engagement',
+        data: {
+          'shopId': shopId,
+          'productVariantId': productVariantId,
+          'kind': kind,
+        },
+      );
+    } catch (_) {
+      // Deliberately silent - see above.
+    }
+  }
+
+  /// Every nearby shop offering this product, nearest first.
+  ///
+  /// ALL THREE MODES COME BACK and the screen groups them. Filtering here by
+  /// the mode the customer arrived through would hide a shop that delivers
+  /// the thing from somebody looking at a Visit-to-Buy card - a narrower
+  /// answer than the question they actually have.
+  Future<ProductOffers> offersOf({
+    required int productId,
+    required double? latitude,
+    required double? longitude,
+  }) async {
+    if (latitude == null || longitude == null) {
+      return const ProductOffers([]);
+    }
+    final response = await apiClient.dio.get(
+      '/api/marketplace/products/$productId/offers',
+      queryParameters: {'lat': latitude, 'lng': longitude},
+    );
+    final data = response.data;
+    if (data is! List) return const ProductOffers([]);
+    return ProductOffers(data
+        .whereType<Map<String, dynamic>>()
+        .map(MarketplaceOffer.fromJson)
+        .toList(growable: false));
+  }
 
   /// Shops that will deliver to this point, nearest first.
   ///

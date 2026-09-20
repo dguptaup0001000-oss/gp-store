@@ -1,7 +1,7 @@
+import '../../../core/marketplace/marketplace_providers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/app_haptics.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -37,6 +37,16 @@ class HomeHeader extends ConsumerWidget {
           children: [
             Row(
               children: [
+                // THE WAY INTO THE OTHER TWO MODES. Only on a marketplace:
+                // under one shop there is nothing to switch between, and a
+                // menu button that opens a drawer of one option is furniture.
+                if (ref.watch(isMarketplaceProvider))
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.menu_rounded),
+                    tooltip: 'Browse',
+                    onPressed: hapticize(() => Scaffold.of(context).openDrawer()),
+                  ),
                 const _Mark(),
                 const SizedBox(width: 10),
                 const Expanded(child: _DeliveringTo()),

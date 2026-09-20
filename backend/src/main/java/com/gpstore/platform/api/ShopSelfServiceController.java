@@ -54,6 +54,7 @@ public class ShopSelfServiceController {
     private final com.gpstore.repository.ProductVariantRepository variants;
     private final com.gpstore.service.ProductService products;
     private final com.gpstore.catalog.shop.ShopVariantEditing variantEditing;
+    private final com.gpstore.engagement.ListingEngagement engagement;
     private final com.gpstore.catalog.shop.ShopProductEditing productEditing;
     private final com.gpstore.catalog.shop.ShopCategoryService shopCategories;
     private final com.gpstore.service.VariantImageService variantImages;
@@ -74,10 +75,12 @@ public class ShopSelfServiceController {
                                      com.gpstore.repository.ProductVariantRepository variants,
                                      com.gpstore.service.ProductService products,
                                      com.gpstore.catalog.shop.ShopVariantEditing variantEditing,
+                                     com.gpstore.engagement.ListingEngagement engagement,
                                      com.gpstore.catalog.shop.ShopProductEditing productEditing,
                                      com.gpstore.catalog.shop.ShopCategoryService shopCategories,
                                      com.gpstore.service.VariantImageService variantImages) {
         this.variantEditing = variantEditing;
+        this.engagement = engagement;
         this.productEditing = productEditing;
         this.shopCategories = shopCategories;
         this.variantImages = variantImages;
@@ -858,6 +861,40 @@ public class ShopSelfServiceController {
      * and asking here keeps the two rules in the file that knows which is
      * which rather than in a path pattern nobody re-reads.
      */
+    /**
+     * How this shop's offline listings are doing.
+     *
+     * <p>THE ONLY HONEST ANSWER GP-STORE HAS. An online sale records itself -
+     * an order, a payment, a receipt - and the rest of this dashboard counts
+     * them. A Visit-to-Buy listing has none of that: the customer sees the
+     * card, taps Directions, walks in and pays in cash. So what comes back
+     * here is interest, and the report carries its own sentence saying that
+     * these are not sales, because a number without it invites exactly the
+     * reading that would make it a lie.
+     *
+     * <p>SCOPED BY TenantContext like every other route on this controller:
+     * the shop is not a parameter, so a merchant cannot ask about another
+     * shop's listings by changing an id.
+     */
+    @GetMapping("/engagement")
+    public com.gpstore.engagement.ListingEngagement.EngagementReport listingEngagement(
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+            java.time.LocalDateTime from,
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+            java.time.LocalDateTime to) {
+        requirePermission(AdminPermission.CATALOG_MANAGE);
+        Long shopId = TenantContext.current() == null ? null : TenantContext.current().shopId();
+        java.time.LocalDateTime end = to == null ? java.time.LocalDateTime.now() : to;
+        // A month, because that is the window a shopkeeper thinks in and the
+        // one a shorter default would keep making them widen by hand.
+        java.time.LocalDateTime start = from == null ? end.minusDays(30) : from;
+        return engagement.reportFor(shopId, start, end);
+    }
+
     private void requirePermission(AdminPermission permission) {
         if (!currentUser.has(permission)) {
             throw new org.springframework.security.access.AccessDeniedException(

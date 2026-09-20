@@ -521,11 +521,27 @@ public class MarketplaceTestData {
 
             List<Object[]> listingRows = new ArrayList<>(carry);
             List<Object[]> stockRows = new ArrayList<>(carry);
+            Trade.Trading trading = business.trade().trading();
             for (int i = 0; i < carry; i++) {
                 Long variantId = catalogue.variantIds().get(i);
                 BigDecimal selling = BigDecimal.valueOf(50 + random.nextInt(30000));
+                String[] modes = modeFor(trading, random);
+                String commerceMode = modes[0];
+                String priceMode = modes[1];
+                String availability = modes[2];
+                // A range needs a top and an exact price must not have one -
+                // the CHECK constraints V74 added say so, and a fixture that
+                // violated them would fail at insert rather than proving
+                // anything.
+                BigDecimal priceMax = "PRICE_RANGE".equals(priceMode)
+                        ? selling.add(BigDecimal.valueOf(500 + random.nextInt(5000)))
+                        : null;
+                Integer minutes = "SERVICE_AT_SHOP".equals(commerceMode)
+                        ? 15 + random.nextInt(8) * 15
+                        : null;
                 listingRows.add(new Object[]{shopId, variantId, selling,
-                        selling.add(BigDecimal.valueOf(random.nextInt(500))), true, true});
+                        selling.add(BigDecimal.valueOf(random.nextInt(500))), true, true,
+                        commerceMode, priceMode, priceMax, availability, minutes});
                 // Some shelves are empty on purpose - out of stock is a state
                 // the storefront has rules about.
                 stockRows.add(new Object[]{shopId, variantId,
@@ -539,14 +555,68 @@ public class MarketplaceTestData {
             // covers the entity; raw JDBC has to say it itself.
             batched("INSERT INTO shop_product_variants "
                     + "(shop_id, product_variant_id, selling_price, mrp, available, active, "
-                    + " created_at, updated_at) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    + " commerce_mode, price_mode, price_max, offline_availability, "
+                    + " service_duration_minutes, created_at, updated_at) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                    + " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     listingRows);
             batched("INSERT INTO inventory (shop_id, product_variant_id, stock) VALUES (?, ?, ?)",
                     stockRows);
             listings += listingRows.size();
         }
         return listings;
+    }
+
+    /**
+     * What mode this one listing gets, given how its trade sells.
+     *
+     * <p>Returns {commerce_mode, price_mode, offline_availability}, because
+     * the three are not independent: an ONLINE_PURCHASE listing must be
+     * EXACT_PRICE (a cart totals that number and a receipt prints it) and has
+     * no shelf availability, while an offline one may be priced any of the
+     * four ways and does. Deciding them together here is what keeps the
+     * fixture inside the CHECK constraints V74 added rather than discovering
+     * them at insert.
+     *
+     * <p>A MIXED trade genuinely mixes, listing by listing. That is the case
+     * worth generating: one shop holding listings in two modes at once is
+     * what a per-shop mode flag could not represent, and it is the shape the
+     * discovery queries, the cart refusal and the feed filter all have to
+     * cope with at scale.
+     */
+    private static String[] modeFor(Trade.Trading trading, Random random) {
+        return switch (trading) {
+            case DELIVERS -> new String[]{"ONLINE_PURCHASE", "EXACT_PRICE", null};
+            case SERVICE -> new String[]{"SERVICE_AT_SHOP",
+                    random.nextInt(100) < 60 ? "STARTING_FROM" : "EXACT_PRICE",
+                    offlineAvailability(random)};
+            case COUNTER -> new String[]{"VISIT_TO_BUY",
+                    offlinePriceMode(random), offlineAvailability(random)};
+            // Roughly two listings in three ship; the rest are shown and
+            // collected. Not a round number, because a real shop's split is
+            // not one either.
+            case MIXED -> random.nextInt(100) < 65
+                    ? new String[]{"ONLINE_PURCHASE", "EXACT_PRICE", null}
+                    : new String[]{"VISIT_TO_BUY", offlinePriceMode(random),
+                            offlineAvailability(random)};
+        };
+    }
+
+    private static String offlinePriceMode(Random random) {
+        int roll = random.nextInt(100);
+        if (roll < 45) return "EXACT_PRICE";
+        if (roll < 70) return "STARTING_FROM";
+        if (roll < 88) return "PRICE_RANGE";
+        return "ASK_AT_SHOP";
+    }
+
+    private static String offlineAvailability(Random random) {
+        int roll = random.nextInt(100);
+        if (roll < 60) return "AVAILABLE";
+        if (roll < 78) return "LIMITED_AVAILABILITY";
+        if (roll < 90) return "MADE_TO_ORDER";
+        if (roll < 96) return "CONTACT_SHOP";
+        return "OUT_OF_STOCK";
     }
 
     /**

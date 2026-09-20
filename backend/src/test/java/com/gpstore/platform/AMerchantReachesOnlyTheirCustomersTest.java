@@ -127,8 +127,15 @@ class AMerchantReachesOnlyTheirCustomersTest {
         // the three this test made would leave the rest behind - and then the
         // customer deletes below fail on their foreign keys.
         jdbc.update("DELETE FROM notifications WHERE title LIKE ?", "%" + tag + "%");
-        jdbc.update("DELETE FROM notifications WHERE customer_id IN (?, ?, ?)",
-                phoneCustomer, sareeCustomer, strangerCustomer);
+        // ALL FIVE, MATCHING THE CUSTOMER DELETE AT THE BOTTOM. This listed
+        // only the three shoppers, but a shop OWNER is a customer row too and
+        // the platform broadcast above writes one notification per active
+        // customer - so the owners' rows survived and the delete below hit
+        // the notifications foreign key. The failure surfaced in whichever
+        // test happened to run next, which is why it read as a broadcast bug
+        // rather than a cleanup one.
+        jdbc.update("DELETE FROM notifications WHERE customer_id IN (?, ?, ?, ?, ?)",
+                phoneOwner, sareeOwner, phoneCustomer, sareeCustomer, strangerCustomer);
         jdbc.update("DELETE FROM wishlist WHERE product_id IN (?, ?)",
                 phoneProduct, sareeProduct);
         for (long shop : new long[]{phoneShop, sareeShop}) {
@@ -233,6 +240,13 @@ class AMerchantReachesOnlyTheirCustomersTest {
                 jdbc.update("DELETE FROM store_operations_settings WHERE shop_id = ?", freshShop);
                 jdbc.update("DELETE FROM shops WHERE id = ?", freshShop);
                 jdbc.update("DELETE FROM merchants WHERE id = ?", freshMerchant);
+                // BEFORE THE CUSTOMER, because the broadcast this test just
+                // sent landed in this owner's own notification list - a shop
+                // owner is a customer row like any other. Deleting the
+                // customer first hit the notifications foreign key, the
+                // finally block threw, and the failure then read as though
+                // the broadcast itself had gone wrong.
+                jdbc.update("DELETE FROM notifications WHERE customer_id = ?", freshOwner);
                 jdbc.update("DELETE FROM customers WHERE id = ?", freshOwner);
             }
         }
