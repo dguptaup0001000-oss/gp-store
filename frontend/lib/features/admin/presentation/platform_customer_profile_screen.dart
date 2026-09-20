@@ -672,6 +672,8 @@ class _FinanceCard extends StatelessWidget {
     final spent = _money(finance['completedPurchaseValue']);
     final refunded = _money(finance['refunds']);
     final fees = _money(finance['cancellationFees']);
+    final average = _money(finance['averageCompletedOrder']);
+    final lastOrder = _time(finance['lastOrderAt']);
 
     return AdminSectionCard(
       title: 'Money',
@@ -682,6 +684,22 @@ class _FinanceCard extends StatelessWidget {
         _MoneyRow(label: 'Cancellation charges', amount: fees),
         const Divider(height: AdminSpacing.xl),
         _MoneyRow(label: 'Net to the platform', amount: spent - refunded, bold: true),
+        const SizedBox(height: AdminSpacing.md),
+        Row(children: [
+          Expanded(
+            child: _Fact(
+                label: 'Typical order',
+                // A DASH, NOT Rs 0.00, for somebody who has never completed
+                // an order. Zero is a number they earned; this is the
+                // absence of one.
+                value: average <= 0
+                    ? '—'
+                    : AdminFormat.rupeesExact(average)),
+          ),
+          Expanded(
+            child: _Fact(label: 'Last order', value: _when(lastOrder)),
+          ),
+        ]),
         const SizedBox(height: AdminSpacing.md),
         Row(children: [
           Expanded(

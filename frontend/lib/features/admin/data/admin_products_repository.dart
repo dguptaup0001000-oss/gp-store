@@ -238,6 +238,23 @@ class AdminProductsRepository {
         .toList(growable: false);
   }
 
+  /// The direct children of one category, for drilling into a parent.
+  ///
+  /// SEPARATE FROM searchCategories because it answers a different question.
+  /// Search is "find me the one I mean"; this is "show me what is under
+  /// Electronics", which is how a merchant who does not yet know the
+  /// catalogue's vocabulary finds their way in.
+  Future<List<CategoryOption>> categoryChildren(int parentId) async {
+    final response = await apiClient.dio
+        .get('/api/shop/category-search/$parentId/children');
+    final data = response.data;
+    if (data is! List) return const [];
+    return data
+        .whereType<Map>()
+        .map((e) => CategoryOption.fromJson(Map<String, dynamic>.from(e)))
+        .toList(growable: false);
+  }
+
   /// What this shop's offline listings attracted, over a window.
   ///
   /// INTEREST, NOT SALES, and the server says so in the payload rather than
