@@ -230,7 +230,18 @@ class ShopScopeIsNotOptionalTest {
             // create tables Hibernate would otherwise create without their
             // CHECK constraints. Nothing about it is scope-sensitive: there is
             // no request, no customer and no shop in play when it runs.
-            "FlywayOwnedTableReset");
+            "FlywayOwnedTableReset",
+
+            // SELLER RESOLUTION, which answers "which shops near me can
+            // supply this?" - a question about several shops by definition,
+            // so the same reasoning as the marketplace feed applies. Bounded
+            // by "spv.shop_id IN (...)" whose ids come from ShopDiscovery, and
+            // it selects only shop name, price and availability: the three
+            // things a storefront already shows any passer-by. The per-shop
+            // delivery quote it then computes is NOT done here - that runs
+            // inside ShopScopeSwitch.within(shopId, ...), under the shop's own
+            // scope, so one merchant's rates are never quoted for another.
+            "SellerResolution");
 
     private static final Set<String> REVIEWED_NATIVE_QUERIES = Set.of(
             "OrderRepository.revenueByDayBetween",

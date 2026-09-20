@@ -56,6 +56,9 @@ public class MarketplaceController {
     private final com.gpstore.repository.StoreOperationsSettingsRepository storeSettings;
     private final com.gpstore.repository.StoreClosureRepository closures;
     private final MarketplaceFeedService marketplaceFeed;
+    private final com.gpstore.catalog.shop.SellerResolution sellers;
+    private final com.gpstore.security.CurrentUser currentUser;
+    private final com.gpstore.repository.AddressRepository addresses;
 
     public MarketplaceController(ShopDiscovery discovery, ShopRepository shops,
                                  PlatformProperties platform, ShopScopeSwitch shopScope,
@@ -68,7 +71,10 @@ public class MarketplaceController {
                                  com.gpstore.repository.CategoryRepository categories,
                                  com.gpstore.repository.StoreOperationsSettingsRepository storeSettings,
                                  com.gpstore.repository.StoreClosureRepository closures,
-                                 MarketplaceFeedService marketplaceFeed) {
+                                 MarketplaceFeedService marketplaceFeed,
+                                 com.gpstore.catalog.shop.SellerResolution sellers,
+                                 com.gpstore.security.CurrentUser currentUser,
+                                 com.gpstore.repository.AddressRepository addresses) {
         this.shelves = shelves;
         this.stars = stars;
         this.categories = categories;
@@ -83,6 +89,9 @@ public class MarketplaceController {
         this.storeSettings = storeSettings;
         this.closures = closures;
         this.marketplaceFeed = marketplaceFeed;
+        this.sellers = sellers;
+        this.currentUser = currentUser;
+        this.addresses = addresses;
     }
 
     /**
@@ -467,6 +476,58 @@ public class MarketplaceController {
         return modes.isEmpty()
                 ? java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE)
                 : modes;
+    }
+
+    /**
+     * Who can supply this product, best first.
+     *
+     * <p>On a marketplace feed the customer chose a PRODUCT, not a shop.
+     * Several shops near them may sell it at different prices with different
+     * delivery charges, and one may be the shop they already named as their
+     * preference for this sort of thing. This is that decision, exposed so
+     * the app can either show the choice or take the head of the list.
+     *
+     * <p>ONE METHOD FOR BOTH BEHAVIOURS, so the chooser and the automatic
+     * pick cannot disagree about which shop is best - which, to a customer,
+     * looks like the app adding from a shop they did not select.
+     *
+     * <p>The customer's own address is read from their account rather than
+     * from the request: delivery cost depends on where it is going, and where
+     * it is going is not something a caller should be able to assert.
+     */
+    @Transactional(readOnly = true)
+    @GetMapping("/sellers")
+    public List<com.gpstore.catalog.shop.SellerOption> sellersFor(
+            @RequestParam Long variantId,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        // ANONYMOUS IS A REAL CALLER HERE. Browsing what a town sells, and
+        // seeing who would supply it, is not something a customer should have
+        // to sign in for - they simply get no preference applied, because they
+        // have not expressed one.
+        Long customerId;
+        try {
+            customerId = currentUser.customerId();
+        } catch (RuntimeException notSignedIn) {
+            customerId = null;
+        }
+        final Long shopper = customerId;
+        com.gpstore.entity.Address address = shopper == null ? null
+                : addresses.findByCustomerId(shopper).stream()
+                        .filter(a -> Boolean.TRUE.equals(a.getDefaultAddress()))
+                        .findFirst()
+                        .orElseGet(() -> addresses.findByCustomerId(shopper).stream()
+                                .findFirst().orElse(null));
+
+        // A signed-in customer's own address is the better pin than anything
+        // the client sent: it is where the order would actually go.
+        Double useLat = lat;
+        Double useLng = lng;
+        if (address != null && address.getLatitude() != null && address.getLongitude() != null) {
+            useLat = address.getLatitude();
+            useLng = address.getLongitude();
+        }
+        return sellers.sellersFor(shopper, variantId, useLat, useLng, address);
     }
 
     @GetMapping("/mode")
