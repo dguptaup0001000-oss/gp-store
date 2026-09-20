@@ -1,6 +1,7 @@
 import '../../../core/api/api_client.dart';
 import '../domain/platform_models.dart';
 import '../domain/control_tower_models.dart';
+import '../domain/directory_models.dart';
 
 /// The platform's own surface: merchants, shops, and the market.
 ///
@@ -26,6 +27,64 @@ class PlatformRepository {
     );
     return PlatformSearchPage.fromJson(
         Map<String, dynamic>.from(response.data as Map));
+  }
+
+  /// The Merchants tab's own search.
+  ///
+  /// SERVER-SIDE, ALWAYS. The whole merchant table is never downloaded and
+  /// filtered here - on a marketplace of any size that is both a slow screen
+  /// and a pointless transfer of everybody's contact details to a phone.
+  Future<DirectoryPage<MerchantHit>> searchMerchants({
+    required String query,
+    int page = 0,
+    int size = 20,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/platform/control/merchants/search',
+      queryParameters: {'q': query, 'page': page, 'size': size},
+    );
+    return DirectoryPage.fromJson<MerchantHit>(
+        Map<String, dynamic>.from(response.data as Map), MerchantHit.fromJson);
+  }
+
+  /// The Customers tab's own search. Same contract as merchants above.
+  Future<DirectoryPage<CustomerHit>> searchCustomers({
+    required String query,
+    int page = 0,
+    int size = 20,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/platform/control/customers/search',
+      queryParameters: {'q': query, 'page': page, 'size': size},
+    );
+    return DirectoryPage.fromJson<CustomerHit>(
+        Map<String, dynamic>.from(response.data as Map), CustomerHit.fromJson);
+  }
+
+  /// Everything about one merchant, in one request.
+  ///
+  /// Returned raw rather than through a generated model because the profile
+  /// is a composition of sections the screen renders independently, and a
+  /// hand-written class per section would be a second place for the wire
+  /// contract to drift. The sections that carry real logic - activity, shop
+  /// affinity, audit - do have models, and are parsed out of this map.
+  Future<Map<String, dynamic>> merchantProfile(int merchantId,
+      {DateTime? from, DateTime? to}) async {
+    final response = await apiClient.dio.get(
+      '/api/platform/control/merchants/$merchantId/profile',
+      queryParameters: {
+        if (from != null) 'from': _date(from),
+        if (to != null) 'to': _date(to),
+      },
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  /// Everything about one customer, in one request.
+  Future<Map<String, dynamic>> customerProfile(int customerId) async {
+    final response = await apiClient.dio
+        .get('/api/platform/control/customers/$customerId/profile');
+    return Map<String, dynamic>.from(response.data as Map);
   }
 
   Future<PlatformDashboardSummary> controlTowerDashboard({
