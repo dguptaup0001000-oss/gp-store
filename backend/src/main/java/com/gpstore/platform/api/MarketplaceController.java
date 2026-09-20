@@ -55,6 +55,7 @@ public class MarketplaceController {
     private final com.gpstore.repository.CategoryRepository categories;
     private final com.gpstore.repository.StoreOperationsSettingsRepository storeSettings;
     private final com.gpstore.repository.StoreClosureRepository closures;
+    private final MarketplaceFeedService marketplaceFeed;
 
     public MarketplaceController(ShopDiscovery discovery, ShopRepository shops,
                                  PlatformProperties platform, ShopScopeSwitch shopScope,
@@ -66,7 +67,8 @@ public class MarketplaceController {
                                  com.gpstore.discovery.PublicShopStars stars,
                                  com.gpstore.repository.CategoryRepository categories,
                                  com.gpstore.repository.StoreOperationsSettingsRepository storeSettings,
-                                 com.gpstore.repository.StoreClosureRepository closures) {
+                                 com.gpstore.repository.StoreClosureRepository closures,
+                                 MarketplaceFeedService marketplaceFeed) {
         this.shelves = shelves;
         this.stars = stars;
         this.categories = categories;
@@ -80,6 +82,7 @@ public class MarketplaceController {
         this.schedule = schedule;
         this.storeSettings = storeSettings;
         this.closures = closures;
+        this.marketplaceFeed = marketplaceFeed;
     }
 
     /**
@@ -400,6 +403,72 @@ public class MarketplaceController {
      * it happens to get back - one shop in range is not the same as one shop
      * existing.
      */
+    /**
+     * THE MARKETPLACE ITSELF: what is for sale near this customer, before they
+     * have chosen anybody's shop.
+     *
+     * <p>WHY THIS ROUTE HAD TO EXIST. Every customer browse path in this
+     * application was scoped to one shop. {@code /api/products/feed} requires
+     * a listing; listings are shop-owned; the tenant filter narrows them to
+     * the shop on the thread - and a customer who had chosen no shop fell
+     * through TenantResolver to Shop #1. So the home screen showed Shop #1's
+     * shelf: a kirana's groceries on a deployment whose first shop is a
+     * kirana, and the words "No products available yet" on one whose first
+     * shop has no listings, while shops full of stock sat a street away.
+     *
+     * <p>No repair to the shop-scoped feed produces a marketplace-wide one.
+     * This is the missing route rather than a patch to the wrong one, and the
+     * old route is untouched: a customer who HAS opened a storefront still
+     * gets that storefront's shelf from it, which is what it is for.
+     *
+     * <p>MODES ARE A FILTER, NOT THREE ENDPOINTS. Buy Online is the default
+     * because it is what the home screen has always meant; Visit to Buy and
+     * Service at Shop are the same marketplace asked a different question, and
+     * a client switching between them changes a query parameter rather than an
+     * API. Every card says which mode it is and whether it can be added, so no
+     * client has to work that out for itself.
+     *
+     * <p>Public, like the rest of discovery. Seeing what a town sells is not
+     * an authorization; buying it is, and that is unchanged.
+     */
+    @Transactional(readOnly = true)
+    @GetMapping("/feed")
+    public List<MarketplaceFeedView> feed(
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng,
+            @RequestParam(required = false) String mode,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return marketplaceFeed.page(lat, lng, modesFrom(mode), categoryId, page, size);
+    }
+
+    /**
+     * Reads the mode filter, refusing to guess.
+     *
+     * <p>An unrecognised mode falls back to Buy Online rather than to
+     * everything: widening on a typo would drop Visit-to-Buy cards into a
+     * screen that draws ADD buttons.
+     */
+    private java.util.Set<com.gpstore.catalog.shop.CommerceMode> modesFrom(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE);
+        }
+        java.util.Set<com.gpstore.catalog.shop.CommerceMode> modes =
+                new java.util.LinkedHashSet<>();
+        for (String piece : raw.split(",")) {
+            try {
+                modes.add(com.gpstore.catalog.shop.CommerceMode
+                        .valueOf(piece.trim().toUpperCase(java.util.Locale.ROOT)));
+            } catch (IllegalArgumentException unknown) {
+                // Ignored on purpose - see the method comment.
+            }
+        }
+        return modes.isEmpty()
+                ? java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE)
+                : modes;
+    }
+
     @GetMapping("/mode")
     public java.util.Map<String, Object> mode() {
         return java.util.Map.of(
