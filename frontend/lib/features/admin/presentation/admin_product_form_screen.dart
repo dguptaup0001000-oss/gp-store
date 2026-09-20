@@ -6,14 +6,28 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../products/domain/product_models.dart';
 import '../data/admin_products_repository.dart';
 import 'admin_providers.dart';
+import '../domain/selling_mode.dart';
+import 'category_picker_sheet.dart';
 import 'admin_variant_form_dialog.dart';
 import '../../../core/util/haptic_widgets.dart';
 
 class AdminProductFormScreen extends ConsumerStatefulWidget {
-  const AdminProductFormScreen({super.key, this.product});
+  const AdminProductFormScreen({
+    super.key,
+    this.product,
+    this.initialSellingMode = SellingMode.onlinePurchase,
+  });
 
   /// Null means "create new product" - non-null means editing this one.
   final Product? product;
+
+  /// Which selling mode this form OPENS on.
+  ///
+  /// Set by the Visit-to-Buy and Services screens so an item created from
+  /// there is in the right mode from the first save. Creating it as an online
+  /// listing and correcting it a moment later would leave a window in which a
+  /// customer could buy something the shop cannot ship.
+  final SellingMode initialSellingMode;
 
   @override
   ConsumerState<AdminProductFormScreen> createState() => _AdminProductFormScreenState();
@@ -31,6 +45,23 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
   late final TextEditingController _mrpController;
   late final TextEditingController _stockController;
   int? _selectedCategoryId;
+  String? _selectedCategoryName;
+
+  /// HOW this shop sells the thing being created. Defaults to whatever screen
+  /// opened this form, so Visit to Buy and Services land in the right mode.
+  late SellingMode _sellingMode;
+  PriceMode _priceMode = PriceMode.exact;
+  OfflineStock _offlineStock = OfflineStock.available;
+  final _priceMaxController = TextEditingController();
+  final _serviceMinutesController = TextEditingController();
+
+  SellingSetup get _sellingSetup => SellingSetup(
+        selling: _sellingMode,
+        price: _priceMode,
+        priceMax: double.tryParse(_priceMaxController.text.trim()),
+        stock: _offlineStock,
+        serviceMinutes: int.tryParse(_serviceMinutesController.text.trim()),
+      );
   late bool _isActive;
   bool _isSaving = false;
 
@@ -52,6 +83,11 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
     _mrpController = TextEditingController();
     _stockController = TextEditingController();
     _selectedCategoryId = widget.product?.category?.id;
+    _selectedCategoryName = widget.product?.category?.name;
+    _sellingMode = widget.initialSellingMode;
+    if (!PriceMode.allowedFor(_sellingMode).contains(_priceMode)) {
+      _priceMode = PriceMode.exact;
+    }
     _isActive = widget.product?.active ?? true;
     _currentProduct = widget.product;
   }
@@ -154,6 +190,7 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
             stock: _stockController.text.trim().isEmpty
                 ? 0
                 : int.tryParse(_stockController.text.trim()) ?? 0,
+            selling: _sellingSetup,
           ),
         );
       }
@@ -201,8 +238,6 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
 
   @override
   Widget build(BuildContext context) {
-    final categoriesAsync = ref.watch(adminCategoriesProvider);
-
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEditing ? 'Edit Product' : 'Add Product'),
@@ -230,17 +265,42 @@ class _AdminProductFormScreenState extends ConsumerState<AdminProductFormScreen>
                   decoration: const InputDecoration(labelText: 'Brand (optional)'),
                 ),
                 const SizedBox(height: 12),
-                categoriesAsync.when(
-                  loading: () => const LinearProgressIndicator(),
-                  error: (e, s) => const Text("Couldn't load categories"),
-                  data: (categories) => DropdownButtonFormField<int>(
-                    initialValue: _selectedCategoryId,
-                    decoration: const InputDecoration(labelText: 'Category'),
-                    items: categories
-                        .map((c) => DropdownMenuItem(value: c.id, child: Text(c.name)))
-                        .toList(),
-                    onChanged: hapticizeValue((value) => setState(() => _selectedCategoryId = value)),
-                  ),
+                // A SEARCHABLE PICKER, NOT A DROPDOWN OF EVERYTHING. The
+                // dropdown listed the whole catalogue in id order, which is
+                // thirty rows on a kirana and several thousand on a
+                // marketplace - a phone merchant scrolled past Atta, Baby
+                // Care and Beverages to reach Mobile Phones. The picker
+                // searches server-side and puts this shop's own categories
+                // first.
+                _CategoryField(
+                  categoryId: _selectedCategoryId,
+                  categoryName: _selectedCategoryName,
+                  onPick: () async {
+                    final chosen = await CategoryPickerSheet.show(context,
+                        selectedId: _selectedCategoryId);
+                    if (chosen != null && mounted) {
+                      setState(() {
+                        _selectedCategoryId = chosen.id;
+                        _selectedCategoryName = chosen.name;
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                _SellingModeSection(
+                  mode: _sellingMode,
+                  priceMode: _priceMode,
+                  stock: _offlineStock,
+                  priceMaxController: _priceMaxController,
+                  minutesController: _serviceMinutesController,
+                  onModeChanged: (value) => setState(() {
+                    _sellingMode = value;
+                    if (!PriceMode.allowedFor(value).contains(_priceMode)) {
+                      _priceMode = PriceMode.exact;
+                    }
+                  }),
+                  onPriceModeChanged: (value) => setState(() => _priceMode = value),
+                  onStockChanged: (value) => setState(() => _offlineStock = value),
                 ),
                 if (_isEditing)
                   SwitchListTile(
@@ -437,5 +497,144 @@ class _VariantsSection extends ConsumerWidget {
   String _formatQty(double? quantity) {
     if (quantity == null) return '';
     return quantity == quantity.roundToDouble() ? quantity.toStringAsFixed(0) : quantity.toStringAsFixed(1);
+  }
+}
+
+/// The category field: a tappable row that opens the searchable picker.
+///
+/// A ROW RATHER THAN A DROPDOWN because the list it opens is searchable and
+/// grouped, which a DropdownButtonFormField cannot be, and because on a
+/// catalogue of thousands a dropdown is a scroll with no way out.
+class _CategoryField extends StatelessWidget {
+  const _CategoryField({
+    required this.categoryId,
+    required this.categoryName,
+    required this.onPick,
+  });
+
+  final int? categoryId;
+  final String? categoryName;
+  final Future<void> Function() onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final chosen = categoryId != null;
+    return InkWell(
+      onTap: hapticize(onPick),
+      borderRadius: BorderRadius.circular(8),
+      child: InputDecorator(
+        decoration: const InputDecoration(labelText: 'Category'),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                chosen ? (categoryName ?? 'Category #$categoryId') : 'Choose a category',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: chosen ? null : AdminColors.textSecondary,
+                ),
+              ),
+            ),
+            const Icon(Icons.search, size: 18, color: AdminColors.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// How this shop sells the thing being created.
+///
+/// The controls that are meaningless for an online item - price mode, shelf
+/// availability, duration - are ABSENT rather than disabled, and switching to
+/// online moves an illegal price mode back rather than leaving an invalid pair
+/// on screen for the server to reject.
+class _SellingModeSection extends StatelessWidget {
+  const _SellingModeSection({
+    required this.mode,
+    required this.priceMode,
+    required this.stock,
+    required this.priceMaxController,
+    required this.minutesController,
+    required this.onModeChanged,
+    required this.onPriceModeChanged,
+    required this.onStockChanged,
+  });
+
+  final SellingMode mode;
+  final PriceMode priceMode;
+  final OfflineStock stock;
+  final TextEditingController priceMaxController;
+  final TextEditingController minutesController;
+  final ValueChanged<SellingMode> onModeChanged;
+  final ValueChanged<PriceMode> onPriceModeChanged;
+  final ValueChanged<OfflineStock> onStockChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('How you sell this',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+        const SizedBox(height: 8),
+        SegmentedButton<SellingMode>(
+          segments: SellingMode.values
+              .map((m) => ButtonSegment<SellingMode>(
+                    value: m,
+                    label: Text(m.label, style: const TextStyle(fontSize: 11.5)),
+                  ))
+              .toList(),
+          selected: {mode},
+          showSelectedIcon: false,
+          onSelectionChanged: (chosen) => onModeChanged(chosen.first),
+        ),
+        const SizedBox(height: 6),
+        Text(mode.explanation,
+            style: const TextStyle(fontSize: 11.5, color: AdminColors.textSecondary)),
+        if (!mode.isOnline) ...[
+          const SizedBox(height: 12),
+          DropdownButtonFormField<PriceMode>(
+            initialValue: priceMode,
+            decoration: const InputDecoration(labelText: 'How the price is shown'),
+            items: PriceMode.allowedFor(mode)
+                .map((m) => DropdownMenuItem(value: m, child: Text(m.label)))
+                .toList(),
+            onChanged: (m) => onPriceModeChanged(m ?? PriceMode.exact),
+          ),
+          if (priceMode == PriceMode.range) ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: priceMaxController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Top of the range (₹)',
+                helperText: 'The price above is the bottom of the range',
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          DropdownButtonFormField<OfflineStock>(
+            initialValue: stock,
+            decoration: const InputDecoration(labelText: 'At the shop'),
+            items: OfflineStock.values
+                .map((v) => DropdownMenuItem(value: v, child: Text(v.label)))
+                .toList(),
+            onChanged: (v) => onStockChanged(v ?? OfflineStock.available),
+          ),
+        ],
+        if (mode == SellingMode.serviceAtShop) ...[
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: minutesController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'How long it takes (minutes)',
+              helperText: 'Optional - helps customers plan their visit',
+            ),
+          ),
+        ],
+      ],
+    );
   }
 }

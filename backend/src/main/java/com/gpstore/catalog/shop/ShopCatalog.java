@@ -247,6 +247,18 @@ public class ShopCatalog {
      * and the branch never ran.
      */
     @Transactional
+    /**
+     * Persists a listing this class handed out.
+     *
+     * <p>NARROW ON PURPOSE. The repository stays private so nothing outside
+     * can query across shops through it; this only writes back a row a caller
+     * already legitimately holds, and the tenant listener stamps the shop on
+     * insert either way.
+     */
+    public ShopProductVariant save(ShopProductVariant listing) {
+        return listings.save(listing);
+    }
+
     public ShopProductVariant list(ProductVariant variant) {
         if (variant == null || variant.getId() == null) {
             throw new IllegalArgumentException("A listing needs a catalogue variant.");

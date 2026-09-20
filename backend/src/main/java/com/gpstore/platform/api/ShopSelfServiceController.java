@@ -55,6 +55,8 @@ public class ShopSelfServiceController {
     private final com.gpstore.service.ProductService products;
     private final com.gpstore.catalog.shop.ShopVariantEditing variantEditing;
     private final com.gpstore.engagement.ListingEngagement engagement;
+    private final com.gpstore.catalog.shop.ShopCatalogueBrowse catalogueBrowse;
+    private final com.gpstore.catalog.shop.CategoryFinder categoryFinder;
     private final com.gpstore.catalog.shop.ShopProductEditing productEditing;
     private final com.gpstore.catalog.shop.ShopCategoryService shopCategories;
     private final com.gpstore.service.VariantImageService variantImages;
@@ -76,11 +78,15 @@ public class ShopSelfServiceController {
                                      com.gpstore.service.ProductService products,
                                      com.gpstore.catalog.shop.ShopVariantEditing variantEditing,
                                      com.gpstore.engagement.ListingEngagement engagement,
+                                     com.gpstore.catalog.shop.ShopCatalogueBrowse catalogueBrowse,
+                                     com.gpstore.catalog.shop.CategoryFinder categoryFinder,
                                      com.gpstore.catalog.shop.ShopProductEditing productEditing,
                                      com.gpstore.catalog.shop.ShopCategoryService shopCategories,
                                      com.gpstore.service.VariantImageService variantImages) {
         this.variantEditing = variantEditing;
         this.engagement = engagement;
+        this.catalogueBrowse = catalogueBrowse;
+        this.categoryFinder = categoryFinder;
         this.productEditing = productEditing;
         this.shopCategories = shopCategories;
         this.variantImages = variantImages;
@@ -461,6 +467,84 @@ public class ShopSelfServiceController {
                                       @RequestParam(defaultValue = "100") int size) {
         return listings.findAllByOrderByIdAsc(com.gpstore.config.PageRequests.of(page, size))
                 .map(ListingView::of).toList();
+    }
+
+    /**
+     * This shop's shelf, filtered by how the items are sold.
+     *
+     * <p>WHAT {@code /listings} COULD NOT DO. That route returns prices and
+     * ids - no product name, no image, no commerce mode - so a screen showing
+     * "everything you sell as Visit to Buy" would have had to fetch each
+     * product separately. This reads the listing and its catalogue row in one
+     * statement and filters by mode in the database.
+     *
+     * @param mode comma-separated commerce modes. Absent means all three.
+     * @param q    optional free text over product name, brand and category.
+     */
+    @GetMapping("/catalogue")
+    public com.gpstore.catalog.shop.ShopCatalogueBrowse.CataloguePage catalogue(
+            @RequestParam(required = false) String mode,
+            @RequestParam(required = false) String q,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size) {
+        requirePermission(AdminPermission.CATALOG_VIEW);
+        return catalogueBrowse.page(commerceModes(mode), q, page, size);
+    }
+
+    /** How many listings this shop has in each mode, for the nav badges. */
+    @GetMapping("/catalogue/counts")
+    public java.util.Map<String, Long> catalogueCounts() {
+        requirePermission(AdminPermission.CATALOG_VIEW);
+        return catalogueBrowse.countsByMode();
+    }
+
+    /**
+     * Categories for a picker, most relevant to THIS shop first.
+     *
+     * <p>The picker was the whole catalogue in id order, which is thirty rows
+     * on a kirana and several thousand on a marketplace. A phone merchant
+     * should not scroll past Atta and Baby Care to reach Mobile Phones.
+     */
+    @GetMapping("/category-search")
+    public java.util.List<com.gpstore.catalog.shop.CategoryFinder.CategoryOption> categorySearch(
+            @RequestParam(required = false) String q,
+            @RequestParam(defaultValue = "40") int limit) {
+        requirePermission(AdminPermission.CATALOG_VIEW);
+        return categoryFinder.search(q, limit);
+    }
+
+    /** The direct children of a category, for drilling into a parent. */
+    @GetMapping("/category-search/{parentId}/children")
+    public java.util.List<com.gpstore.catalog.shop.CategoryFinder.CategoryOption> categoryChildren(
+            @PathVariable Long parentId) {
+        requirePermission(AdminPermission.CATALOG_VIEW);
+        return categoryFinder.childrenOf(parentId);
+    }
+
+    /**
+     * Reads the mode filter, refusing to guess.
+     *
+     * <p>An unrecognised mode yields an empty set, which the browse treats as
+     * "all modes" - widening on a typo is safe here because this is a
+     * merchant reading their OWN shelf, where every mode is theirs to see.
+     * The customer-facing feed deliberately narrows instead, because there
+     * widening would put a Visit-to-Buy card on a screen that draws ADD.
+     */
+    private static java.util.Set<com.gpstore.catalog.shop.CommerceMode> commerceModes(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return java.util.Set.of();
+        }
+        java.util.Set<com.gpstore.catalog.shop.CommerceMode> modes =
+                new java.util.LinkedHashSet<>();
+        for (String piece : raw.split(",")) {
+            try {
+                modes.add(com.gpstore.catalog.shop.CommerceMode
+                        .valueOf(piece.trim().toUpperCase(java.util.Locale.ROOT)));
+            } catch (IllegalArgumentException unknown) {
+                // Ignored - see the method comment.
+            }
+        }
+        return modes;
     }
 
     /**

@@ -27,6 +27,8 @@ import '../../features/admin/presentation/platform_control_tower_screen.dart';
 import '../../features/admin/presentation/platform_finance_screen.dart';
 import '../../features/admin/presentation/platform_resource_screen.dart';
 import '../../features/admin/presentation/platform_directory_screen.dart';
+import '../../features/admin/domain/selling_mode.dart';
+import '../../features/admin/presentation/merchant_mode_catalogue_screen.dart';
 import '../../features/admin/presentation/platform_system_health_screen.dart';
 import '../../features/admin/presentation/shop_earnings_screen.dart';
 import '../dashboard/admin_dashboard_screen.dart';
@@ -210,6 +212,29 @@ class AdminNav {
           icon: Icons.inventory_2_outlined,
           description: 'Add, edit, and manage stock',
           builder: _products,
+        ),
+        // VISIT TO BUY AND SERVICES SIT NEXT TO PRODUCTS, because to a
+        // merchant they are the same question - what do I sell - answered
+        // three ways. They shipped with a backend, a migration, an API and
+        // tests and NO WAY TO REACH THEM: the only door was Products, open a
+        // variant, scroll to a section called "How you sell this". A
+        // shopkeeper has no reason to go looking for that, and a feature
+        // nobody can find is not a feature.
+        AdminDestination(
+          id: 'visit-to-buy',
+          requires: AdminPermission.catalogView,
+          label: 'Visit to Buy',
+          icon: Icons.storefront_outlined,
+          description: 'Shown online, bought at your counter',
+          builder: _visitToBuy,
+        ),
+        AdminDestination(
+          id: 'services-at-shop',
+          requires: AdminPermission.catalogView,
+          label: 'Services at Shop',
+          icon: Icons.handyman_outlined,
+          description: 'Jobs you do at the shop, with prices',
+          builder: _servicesAtShop,
         ),
         AdminDestination(
           id: 'categories',
@@ -501,6 +526,10 @@ class AdminNav {
       const AdminDeliveryBreachesScreen();
   static Widget _products(BuildContext context) =>
       const AdminProductListScreen();
+  static Widget _visitToBuy(BuildContext context) =>
+      const MerchantModeCatalogueScreen(mode: SellingMode.visitToBuy);
+  static Widget _servicesAtShop(BuildContext context) =>
+      const MerchantModeCatalogueScreen(mode: SellingMode.serviceAtShop);
   static Widget _categories(BuildContext context) =>
       const AdminCategoryListScreen();
   static Widget _catalogImport(BuildContext context) =>
