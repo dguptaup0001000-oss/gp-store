@@ -98,6 +98,34 @@ class MarketplaceRepository {
         .toList(growable: false);
   }
 
+  /// Records that a customer did something about an offline listing.
+  ///
+  /// THE ONLY WAY A MERCHANT FINDS OUT whether a Visit-to-Buy card brought
+  /// anybody in: an online sale records itself, that one does not.
+  ///
+  /// FIRE AND FORGET, AND NEVER IN THE WAY. A customer tapping Directions
+  /// gets their directions whether or not this call succeeds, so every
+  /// failure is swallowed. Analytics that can break browsing is worse than
+  /// no analytics.
+  Future<void> recordEngagement({
+    required int shopId,
+    required int productVariantId,
+    required String kind,
+  }) async {
+    try {
+      await apiClient.dio.post(
+        '/api/marketplace/engagement',
+        data: {
+          'shopId': shopId,
+          'productVariantId': productVariantId,
+          'kind': kind,
+        },
+      );
+    } catch (_) {
+      // Deliberately silent - see above.
+    }
+  }
+
   /// Every nearby shop offering this product, nearest first.
   ///
   /// ALL THREE MODES COME BACK and the screen groups them. Filtering here by

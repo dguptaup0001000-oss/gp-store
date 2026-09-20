@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../domain/marketplace_feed_models.dart';
@@ -36,6 +39,22 @@ class ProductOffersScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final offers = ref.watch(productOffersProvider(card.productId));
+
+    // OPENING IS A DELIBERATE ACT, unlike scrolling past - which is what makes
+    // it worth more to a merchant than a view. Recorded against the shop the
+    // card named, once the offers have actually arrived, so a failed load is
+    // not counted as interest in a listing the customer never saw.
+    ref.listen(productOffersProvider(card.productId), (previous, next) {
+      if (previous?.hasValue == true || !next.hasValue) return;
+      final shopId = card.shopId;
+      final variantId = card.productVariantId;
+      if (shopId == null || variantId == null) return;
+      unawaited(ref.read(marketplaceRepositoryProvider).recordEngagement(
+            shopId: shopId,
+            productVariantId: variantId,
+            kind: 'OPENED_DETAIL',
+          ));
+    });
 
     return Scaffold(
       appBar: AppBar(title: Text(card.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
@@ -276,14 +295,14 @@ class _OfferTile extends StatelessWidget {
 /// actions are directions and a phone call - the two things somebody who has
 /// to travel actually needs - and each appears only when the shop supplied
 /// what it needs, rather than as a dead button that fails on tap.
-class _Actions extends StatelessWidget {
+class _Actions extends ConsumerWidget {
   const _Actions({required this.offer, this.onAdd});
 
   final MarketplaceOffer offer;
   final Future<void> Function(MarketplaceOffer offer)? onAdd;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (offer.addable) {
       return SizedBox(
         width: double.infinity,
@@ -298,7 +317,7 @@ class _Actions extends StatelessWidget {
     if (offer.canBeVisited) {
       buttons.add(Expanded(
         child: OutlinedButton.icon(
-          onPressed: hapticize(() => _openDirections(context, offer)),
+          onPressed: hapticize(() => _openDirections(context, ref, offer)),
           icon: const Icon(Icons.directions_outlined, size: 18),
           label: const Text('Directions'),
         ),
@@ -308,7 +327,7 @@ class _Actions extends StatelessWidget {
       if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 8));
       buttons.add(Expanded(
         child: OutlinedButton.icon(
-          onPressed: hapticize(() => _call(context, offer.supportPhone!)),
+          onPressed: hapticize(() => _call(context, ref, offer)),
           icon: const Icon(Icons.call_outlined, size: 18),
           label: const Text('Call shop'),
         ),
@@ -325,7 +344,9 @@ class _Actions extends StatelessWidget {
     return Row(children: buttons);
   }
 
-  Future<void> _openDirections(BuildContext context, MarketplaceOffer offer) async {
+  Future<void> _openDirections(
+      BuildContext context, WidgetRef ref, MarketplaceOffer offer) async {
+    _tell(ref, offer, 'ASKED_DIRECTIONS');
     // A geo: URI is what a maps app on the device answers. The label is the
     // shop's own name so the pin is recognisable when it opens.
     final uri = Uri.parse(
@@ -335,9 +356,28 @@ class _Actions extends StatelessWidget {
     await _launch(context, uri, 'No maps app to open this in.');
   }
 
-  Future<void> _call(BuildContext context, String phone) async {
-    await _launch(context, Uri(scheme: 'tel', path: phone.trim()),
+  Future<void> _call(
+      BuildContext context, WidgetRef ref, MarketplaceOffer offer) async {
+    _tell(ref, offer, 'CALLED_SHOP');
+    await _launch(context, Uri(scheme: 'tel', path: offer.supportPhone!.trim()),
         'No dialler to place this call.');
+  }
+
+  /// Tells the server what the customer did, and does not wait for it.
+  ///
+  /// NOT AWAITED ON PURPOSE. The customer asked for directions; they get
+  /// directions. A round trip in front of that would make the button feel
+  /// broken on a slow connection, and the repository swallows failures
+  /// anyway - analytics that can break browsing is worse than none.
+  void _tell(WidgetRef ref, MarketplaceOffer offer, String kind) {
+    final shopId = offer.shopId;
+    final variantId = offer.productVariantId;
+    if (shopId == null || variantId == null) return;
+    unawaited(ref.read(marketplaceRepositoryProvider).recordEngagement(
+          shopId: shopId,
+          productVariantId: variantId,
+          kind: kind,
+        ));
   }
 
   Future<void> _launch(BuildContext context, Uri uri, String ifItCannot) async {

@@ -228,6 +228,81 @@ class LargeMarketplaceTest {
                 "nor a car-parts dealer");
     }
 
+    @Test
+    @DisplayName("the marketplace trades all three ways, not just online")
+    void notEveryShopDelivers() {
+        java.util.Map<String, Long> byMode = new java.util.LinkedHashMap<>();
+        jdbc.query("""
+                SELECT COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE') AS mode, count(*) AS total
+                  FROM shop_product_variants spv
+                  JOIN shops s ON s.id = spv.shop_id
+                 WHERE s.code LIKE 'test-%'
+                 GROUP BY COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE')
+                """, rs -> {
+            byMode.put(rs.getString("mode"), rs.getLong("total"));
+        });
+
+        // A jeweller does not post a gold chain to a stranger and a barber
+        // cannot deliver a haircut. A test marketplace where all hundred
+        // trades sold online would prove nothing about two thirds of it.
+        assertTrue(byMode.getOrDefault("ONLINE_PURCHASE", 0L) > 0, byMode.toString());
+        assertTrue(byMode.getOrDefault("VISIT_TO_BUY", 0L) > 0,
+                "no over-the-counter listings at all: " + byMode);
+        assertTrue(byMode.getOrDefault("SERVICE_AT_SHOP", 0L) > 0,
+                "no services at all: " + byMode);
+    }
+
+    @Test
+    @DisplayName("one shop can hold listings in two modes at once")
+    void aMixedShopIsTheInterestingCase() {
+        Long mixedShops = jdbc.queryForObject("""
+                SELECT count(*) FROM (
+                    SELECT spv.shop_id
+                      FROM shop_product_variants spv
+                      JOIN shops s ON s.id = spv.shop_id
+                     WHERE s.code LIKE 'test-%'
+                     GROUP BY spv.shop_id
+                    HAVING count(DISTINCT COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE')) > 1
+                ) mixed
+                """, Long.class);
+
+        // A phone shop delivers a case and shows you the handset; a pharmacy
+        // delivers strips and wants you to come in for a machine. This is the
+        // case a per-shop mode flag could not represent and a per-listing one
+        // can, so the fixture has to actually contain it.
+        assertTrue(mixedShops != null && mixedShops > 0,
+                "no shop sells two ways, so the per-listing mode is never exercised");
+    }
+
+    @Test
+    @DisplayName("no generated listing breaks the price rules the database enforces")
+    void theFixtureObeysItsOwnConstraints() {
+        // These are ck_spv_online_price_is_exact and ck_spv_range_has_a_top.
+        // The insert would have failed if they were violated, so this is
+        // really asking whether the constraints are still there and still
+        // mean what V74 said - a fixture that silently stopped exercising
+        // them would be worse than one that failed.
+        Long onlineButVague = jdbc.queryForObject("""
+                SELECT count(*) FROM shop_product_variants spv
+                  JOIN shops s ON s.id = spv.shop_id
+                 WHERE s.code LIKE 'test-%'
+                   AND spv.commerce_mode = 'ONLINE_PURCHASE'
+                   AND spv.price_mode <> 'EXACT_PRICE'
+                """, Long.class);
+        assertEquals(0L, onlineButVague,
+                "a cart totals this number and a receipt prints it, so 'from Rs 500' "
+                        + "cannot be what an online customer is charged");
+
+        Long rangeWithNoTop = jdbc.queryForObject("""
+                SELECT count(*) FROM shop_product_variants spv
+                  JOIN shops s ON s.id = spv.shop_id
+                 WHERE s.code LIKE 'test-%'
+                   AND spv.price_mode = 'PRICE_RANGE'
+                   AND (spv.price_max IS NULL OR spv.price_max < spv.selling_price)
+                """, Long.class);
+        assertEquals(0L, rangeWithNoTop);
+    }
+
     // ====================================================== isolation sweep
 
     @Nested

@@ -538,6 +538,80 @@ enum Trade {
             List.of("Brass", "Marble", "Clay", "3 inch", "6 inch", "12 inch", "Diwali", "Daily"));
 
     /**
+     * HOW a trade sells, which is not the same question as what it sells.
+     *
+     * <p>A kirana delivers atta. A jeweller does not post a gold chain to a
+     * stranger - they put it in the window and you come in. A barber cannot
+     * deliver a haircut at all. Those are three different businesses on one
+     * platform, and a test marketplace where all hundred trades sell online
+     * would prove nothing about the two thirds of it that do not.
+     *
+     * <p>NOT A COLUMN PER TRADE. This is the generator's opinion about which
+     * listings to create, not a schema. The database has one nullable
+     * commerce_mode on the listing row, and these three patterns are simply
+     * how this fixture decides what to put in it - which is exactly the claim
+     * the marketplace design makes and therefore the claim worth testing.
+     */
+    enum Trading {
+        /** Everything ships. Most of retail. */
+        DELIVERS,
+
+        /**
+         * You come to the shop. High-value, made-to-measure, or too heavy or
+         * too perishable to post - a jeweller, a saree shop, a tile showroom,
+         * a mattress dealer.
+         */
+        COUNTER,
+
+        /** The thing bought is a job done at the shop: a salon, a printer. */
+        SERVICE,
+
+        /**
+         * Some of both, which is the honest answer for a lot of real shops. A
+         * pharmacy delivers strips and wants you to come in for a machine; a
+         * phone shop delivers a case and shows you the handset. This is what
+         * makes the fixture interesting: the same shop has listings in two
+         * modes at once, which is the case a per-shop mode flag could not
+         * represent and a per-listing one can.
+         */
+        MIXED
+    }
+
+    /**
+     * Which pattern this trade follows.
+     *
+     * <p>Written as membership rather than as a sixth constructor argument on
+     * a hundred entries: the classification is the interesting thing and it
+     * reads as a list of trades, not as a column of repeated enum names.
+     */
+    Trading trading() {
+        return switch (this) {
+            // YOU COME IN. Too valuable, too heavy, too bespoke or too much a
+            // matter of seeing it in person to post to a stranger.
+            case JEWELLERY, WATCHES, SAREE, ETHNIC, FURNITURE, MATTRESS,
+                 TILES, SANITARY, BUILDING_MATERIALS, TRACTOR_PARTS,
+                 AGRI_EQUIPMENT, SOLAR, FURNISHING, OPTICAL -> Trading.COUNTER;
+
+            // THE THING BOUGHT IS A JOB. Nothing is posted because nothing is
+            // a thing.
+            case SALON, BEAUTY, PRINTING, FITNESS -> Trading.SERVICE;
+
+            // BOTH, which is the honest answer for a lot of real shops - and
+            // the case worth testing, because one shop holds listings in two
+            // modes at once.
+            case PHONES, COMPUTERS, HOME_APPLIANCES, PHARMACY, MEDICAL_SUPPLIES,
+                 BICYCLE, MOTORCYCLE_PARTS, CAR_PARTS, TYRES, BATTERIES,
+                 INVERTER, WATER_PURIFIER, SECURITY, LIGHTING, HARDWARE,
+                 SPORTS_GOODS, TOYS, GIFTS, HOME_DECOR, PET -> Trading.MIXED;
+
+            // Everything else ships, which is most of retail and includes
+            // every food trade: a marketplace whose restaurants could not
+            // deliver would be a strange marketplace.
+            default -> Trading.DELIVERS;
+        };
+    }
+
+    /**
      * How many lines this kind of shop carries.
      *
      * <p>Deliberately uneven. Code that quietly assumes every shop is the same
