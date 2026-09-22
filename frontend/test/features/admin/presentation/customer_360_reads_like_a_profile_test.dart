@@ -254,7 +254,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Customer'), findsOneWidget);
-      expect(find.text('Delivery Boy'), findsOneWidget);
+      expect(find.text('Delivery boy'), findsOneWidget);
     });
   });
 
