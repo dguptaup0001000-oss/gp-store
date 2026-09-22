@@ -311,14 +311,20 @@ class SuperAdminDirectoryTest {
         @Test
         @DisplayName("paging is server-side and the total is the whole result set")
         void pagingIsServerSide() throws Exception {
-            mockMvc.perform(get("/api/platform/control/customers/search")
-                            .param("q", tag).param("page", "0").param("size", "1")
-                            .with(authentication(token(admin, Role.PLATFORM_ADMIN))))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.size").value(1))
-                    .andExpect(jsonPath("$.content.length()").value(1))
-                    .andExpect(jsonPath("$.totalElements").value(
-                            org.hamcrest.Matchers.greaterThanOrEqualTo(3)));
+            Long anotherShopper = customer("Meera Singh " + tag,
+                    tag + "-meera@example.test", "9898989898");
+            try {
+                mockMvc.perform(get("/api/platform/control/customers/search")
+                                .param("q", tag).param("page", "0").param("size", "1")
+                                .with(authentication(token(admin, Role.PLATFORM_ADMIN))))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.size").value(1))
+                        .andExpect(jsonPath("$.content.length()").value(1))
+                        .andExpect(jsonPath("$.totalElements").value(
+                                org.hamcrest.Matchers.greaterThanOrEqualTo(3)));
+            } finally {
+                jdbc.update("DELETE FROM customers WHERE id=?", anotherShopper);
+            }
         }
 
         @Test
