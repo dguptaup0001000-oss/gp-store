@@ -92,6 +92,7 @@ class ShopReportingIsolationTest {
     private long shopB;
     private Long merchantB;
     private Long customerId;
+    private Long categoryId;
     private Long variantId;
     private Long productId;
     private long orderAId;
@@ -136,12 +137,28 @@ class ShopReportingIsolationTest {
         customerId = jdbc.queryForObject(
                 "SELECT id FROM customers WHERE email = ?", Long.class, tag + "@example.test");
 
-        // One product sold by BOTH shops - the shape that makes a leak visible.
-        // A leak between shops selling different things hides in the totals.
-        variantId = jdbc.queryForObject(
-                "SELECT id FROM product_variants ORDER BY id LIMIT 1", Long.class);
+        // One fixture-owned product sold by BOTH shops - the shape that makes a
+        // leak visible without borrowing Shop #1's seeded catalogue. Borrowing
+        // the first global variant made this test depend on orders left by
+        // completely unrelated fixtures: Shop A then reported five units and
+        // two lines even though this test had inserted three and one.
+        jdbc.update("INSERT INTO categories (name, description, active) VALUES (?, ?, true)",
+                "Reporting category " + tag, "Reporting fixture category");
+        categoryId = jdbc.queryForObject(
+                "SELECT id FROM categories WHERE name = ?", Long.class,
+                "Reporting category " + tag);
+        jdbc.update("INSERT INTO products (name, brand, category_id, active) "
+                        + "VALUES (?, 'Reporting fixture', ?, true)",
+                "Reporting product " + tag, categoryId);
         productId = jdbc.queryForObject(
-                "SELECT product_id FROM product_variants WHERE id = ?", Long.class, variantId);
+                "SELECT id FROM products WHERE name = ?", Long.class,
+                "Reporting product " + tag);
+        jdbc.update("INSERT INTO product_variants "
+                        + "(product_id, unit, selling_price, mrp, available, active) "
+                        + "VALUES (?, 'one', 100, 120, true, true)",
+                productId);
+        variantId = jdbc.queryForObject(
+                "SELECT id FROM product_variants WHERE product_id = ?", Long.class, productId);
 
         orderAId = insertOrder("RPTA-" + tag, shopA, SALE_A);
         orderBId = insertOrder("RPTB-" + tag, shopB, SALE_B);
@@ -161,6 +178,15 @@ class ShopReportingIsolationTest {
         jdbc.update("DELETE FROM payments WHERE id in (?, ?)", paymentAId, paymentBId);
         jdbc.update("DELETE FROM order_items WHERE order_id in (?, ?)", orderAId, orderBId);
         jdbc.update("DELETE FROM orders WHERE id in (?, ?)", orderAId, orderBId);
+        if (variantId != null) {
+            jdbc.update("DELETE FROM product_variants WHERE id = ?", variantId);
+        }
+        if (productId != null) {
+            jdbc.update("DELETE FROM products WHERE id = ?", productId);
+        }
+        if (categoryId != null) {
+            jdbc.update("DELETE FROM categories WHERE id = ?", categoryId);
+        }
         if (customerId != null) {
             jdbc.update("DELETE FROM customers WHERE id = ?", customerId);
         }

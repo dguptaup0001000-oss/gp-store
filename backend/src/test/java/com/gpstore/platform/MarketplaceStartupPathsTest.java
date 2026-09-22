@@ -89,6 +89,20 @@ class MarketplaceStartupPathsTest {
     void tidyUp() {
         SecurityContextHolder.clearContext();
         TenantContext.clear();
+        // Hiring a rider may open their first delivery batch. Batches (and any
+        // deliveries subsequently attached to them) are children of the
+        // partner, so fixture cleanup must follow the same child-before-parent
+        // order as production foreign keys.
+        jdbc.update("""
+                DELETE FROM deliveries WHERE batch_id IN (
+                    SELECT b.id FROM delivery_batches b
+                    JOIN delivery_partners p ON p.id = b.delivery_partner_id
+                    WHERE p.name LIKE ?)
+                """, tag + "%");
+        jdbc.update("""
+                DELETE FROM delivery_batches WHERE delivery_partner_id IN (
+                    SELECT id FROM delivery_partners WHERE name LIKE ?)
+                """, tag + "%");
         jdbc.update("DELETE FROM delivery_partners WHERE name LIKE ?", tag + "%");
         jdbc.update("DELETE FROM addresses WHERE customer_id IN (?, ?)",
                 customerWithNoAddress, shopOwner);

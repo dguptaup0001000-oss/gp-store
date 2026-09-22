@@ -212,6 +212,14 @@ class MultiShopCheckoutTest {
         jdbc.update("DELETE FROM product_variants WHERE id IN (?, ?)", variantForA, variantForB);
         jdbc.update("DELETE FROM products WHERE id = ?", productId);
         jdbc.update("DELETE FROM categories WHERE id = ?", categoryId);
+        // Checkout asks DeliveryPricingService for Shop B's configuration in a
+        // write transaction, so a missing row is created from the defaults.
+        // The shop itself was a direct repository fixture rather than opened
+        // through ShopLifecycleService; its teardown must still remove every
+        // shop-owned child before deleting the shop. Without this, checkout
+        // cases left dangling pricing rows for later shared-database tests.
+        jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", shopB);
+        jdbc.update("DELETE FROM store_operations_settings WHERE shop_id = ?", shopB);
         jdbc.update("DELETE FROM shops WHERE id = ?", shopB);
         jdbc.update("DELETE FROM merchants WHERE id = ?", merchantB);
     }
