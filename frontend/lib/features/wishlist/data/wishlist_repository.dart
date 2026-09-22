@@ -13,7 +13,11 @@ class WishlistRepository {
 
   Future<WishlistItem> addToWishlist(int productId) async {
     final response = await apiClient.dio.post('/api/wishlists', data: {
-      'product': {'id': productId},
+      // WishlistRequest deliberately accepts only this scalar. Ownership is
+      // taken from the authenticated principal; posting an entity-shaped
+      // `product` object is rejected by validation and was why the heart
+      // appeared to work locally but nothing was ever persisted.
+      'productId': productId,
     });
     return WishlistItem.fromJson(response.data as Map<String, dynamic>);
   }

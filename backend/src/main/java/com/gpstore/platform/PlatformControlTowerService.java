@@ -137,7 +137,8 @@ public class PlatformControlTowerService {
                                    String maskedEmail, String maskedPhone,
                                    String role, Boolean enabled, Boolean active,
                                    Boolean verified, LocalDateTime createdAt,
-                                   String profileImageUrl) {
+                                   String profileImageUrl,
+                                   List<String> roles) {
         @com.fasterxml.jackson.annotation.JsonProperty("email")
         public String email() { return maskedEmail; }
         @com.fasterxml.jackson.annotation.JsonProperty("phone")
@@ -382,6 +383,7 @@ public class PlatformControlTowerService {
         MapSqlParameterSource params = searchParams(term, page, size);
 
         String where = """
+                c.role IN ('CUSTOMER','DELIVERY_BOY') AND (
                      lower(c.full_name) LIKE :pattern
                   OR lower(c.email) LIKE :pattern
                   OR lower('c-' || CAST(c.id AS varchar)) LIKE :pattern
@@ -390,7 +392,7 @@ public class PlatformControlTowerService {
                   OR EXISTS (
                         SELECT 1 FROM orders o2
                          WHERE o2.customer_id = c.id
-                           AND lower(o2.order_number) LIKE :pattern)
+                           AND lower(o2.order_number) LIKE :pattern))
                 """;
 
         List<CustomerHit> content = jdbc.query("""
@@ -870,10 +872,11 @@ public class PlatformControlTowerService {
                        'C-' || CAST(c.id AS varchar) reference,
                        'Customer account' subtitle, c.email email, c.mobile_number phone
                 FROM customers c
-                WHERE lower(c.full_name) LIKE :pattern
+                WHERE c.role IN ('CUSTOMER','DELIVERY_BOY') AND (
+                      lower(c.full_name) LIKE :pattern
                    OR lower(c.email) LIKE :pattern
                    OR lower(c.mobile_number) LIKE :pattern
-                   OR lower('C-' || CAST(c.id AS varchar)) LIKE :pattern
+                   OR lower('C-' || CAST(c.id AS varchar)) LIKE :pattern)
                 UNION ALL
                 SELECT 'MERCHANT', m.id, COALESCE(m.display_name, m.legal_name),
                        'M-' || CAST(m.id AS varchar), m.status,
@@ -978,9 +981,9 @@ public class PlatformControlTowerService {
                 count("SELECT count(*) FROM shops WHERE deleted_at IS NULL AND status = 'PAUSED'", Map.of()),
                 count("SELECT count(*) FROM shops WHERE deleted_at IS NULL AND status = 'CLOSED'", Map.of()),
                 count("SELECT count(*) FROM shops WHERE deleted_at IS NULL AND status = 'SUSPENDED'", Map.of()),
-                count("SELECT count(*) FROM customers", Map.of()),
-                count("SELECT count(*) FROM customers WHERE active = true AND enabled = true", Map.of()),
-                count("SELECT count(*) FROM customers WHERE created_at >= :from AND created_at < :to", range.getValues()),
+                count("SELECT count(*) FROM customers WHERE role IN ('CUSTOMER','DELIVERY_BOY')", Map.of()),
+                count("SELECT count(*) FROM customers WHERE role IN ('CUSTOMER','DELIVERY_BOY') AND active = true AND enabled = true", Map.of()),
+                count("SELECT count(*) FROM customers WHERE role IN ('CUSTOMER','DELIVERY_BOY') AND created_at >= :from AND created_at < :to", range.getValues()),
                 count("SELECT count(*) FROM delivery_partners WHERE deleted_at IS NULL", Map.of()),
                 count("SELECT count(*) FROM delivery_partners WHERE deleted_at IS NULL AND active = true", Map.of()));
 
@@ -1089,13 +1092,14 @@ public class PlatformControlTowerService {
         List<CustomerIdentity> identities = jdbc.query("""
                 SELECT id, full_name, email, mobile_number, role, enabled, active, verified,
                        created_at, profile_image_url
-                FROM customers WHERE id = :id
+                FROM customers
+                WHERE id = :id AND role IN ('CUSTOMER','DELIVERY_BOY')
                 """, Map.of("id", id), (rs, row) -> new CustomerIdentity(
                 rs.getLong("id"), "C-" + rs.getLong("id"), rs.getString("full_name"),
                 rs.getString("email"), rs.getString("mobile_number"),
                 rs.getString("role"), bool(rs.getObject("enabled")), bool(rs.getObject("active")),
                 bool(rs.getObject("verified")), time(rs.getObject("created_at")),
-                rs.getString("profile_image_url")));
+                rs.getString("profile_image_url"), customerAccountRoles(rs.getString("role"))));
         if (identities.isEmpty()) throw new ResourceNotFoundException("Customer not found");
 
         Map<String, Long> status = statusCounts("SELECT order_status, count(*) total FROM orders WHERE customer_id = :id GROUP BY order_status", id);
@@ -1145,7 +1149,8 @@ public class PlatformControlTowerService {
             throw new BadRequestException("A reason of 5 to 500 characters is required");
         }
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT email, mobile_number FROM customers WHERE id=:id", Map.of("id", id));
+                "SELECT email, mobile_number FROM customers "
+                        + "WHERE id=:id AND role IN ('CUSTOMER','DELIVERY_BOY')", Map.of("id", id));
         if (rows.isEmpty()) throw new ResourceNotFoundException("Customer not found");
         String value = (String) rows.getFirst().get(field.equals("email") ? "email" : "mobile_number");
         audit.logRequired("SENSITIVE_PII_REVEALED", "Customer", id, null, null,
@@ -1245,6 +1250,7 @@ public class PlatformControlTowerService {
                 .addValue("limit", size)
                 .addValue("offset", Math.multiplyExact((long) page, size));
         String basePredicate = switch (resource) {
+            case "customers" -> "c.role IN ('CUSTOMER','DELIVERY_BOY')";
             case "workers" -> "w.deleted_at IS NULL";
             case "merchants" -> "m.deleted_at IS NULL";
             case "shops" -> "s.deleted_at IS NULL";
@@ -1558,6 +1564,16 @@ public class PlatformControlTowerService {
                     "ORDER BY a.occurred_at DESC,a.id DESC");
             default -> throw new BadRequestException("Unknown platform resource: " + resource);
         };
+    }
+
+    private static List<String> customerAccountRoles(String role) {
+        if (role == null || role.isBlank() || role.equals("CUSTOMER")) {
+            return List.of("CUSTOMER");
+        }
+        if (role.equals("DELIVERY_BOY")) {
+            return List.of("CUSTOMER", "DELIVERY_BOY");
+        }
+        return List.of(role);
     }
 
     @Transactional(readOnly = true)

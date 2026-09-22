@@ -96,6 +96,7 @@ class PlatformControlTowerSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.identity.email")
                         .value(tag + "-customer@example.test"))
+                .andExpect(jsonPath("$.identity.roles[0]").value("CUSTOMER"))
                 .andReturn().getResponse().getContentAsString();
         assertTrue(detail.contains(tag + "-customer@example.test"), detail);
         assertFalse(detail.contains("0123456789abcdef"), detail);
@@ -140,6 +141,33 @@ class PlatformControlTowerSecurityTest {
         assertFalse(body.contains("not-a-real-hash"), body);
         assertFalse(body.toLowerCase().contains("activation_code"), body);
         assertFalse(body.toLowerCase().contains("refresh_token"), body);
+    }
+
+    @Test
+    void customerRiderHasTwoAccountRolesButStaffIsNotACustomerRecord() throws Exception {
+        Long rider = insert("Customer Rider " + tag, tag + "-rider@example.test",
+                Role.DELIVERY_BOY, null);
+        Long merchantStaff = insert("Merchant Staff " + tag, tag + "-staff@example.test",
+                Role.ADMIN, null);
+        try {
+            mockMvc.perform(get("/api/platform/control/customers/{id}", rider)
+                            .with(authentication(token(platformAdmin, Role.PLATFORM_ADMIN))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.identity.roles[0]").value("CUSTOMER"))
+                    .andExpect(jsonPath("$.identity.roles[1]").value("DELIVERY_BOY"));
+
+            mockMvc.perform(get("/api/platform/control/customers/{id}", merchantStaff)
+                            .with(authentication(token(platformAdmin, Role.PLATFORM_ADMIN))))
+                    .andExpect(status().isNotFound());
+
+            mockMvc.perform(get("/api/platform/control/customers/search")
+                            .param("q", tag + "-staff")
+                            .with(authentication(token(platformAdmin, Role.PLATFORM_ADMIN))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content").isEmpty());
+        } finally {
+            jdbc.update("DELETE FROM customers WHERE id IN (?,?)", rider, merchantStaff);
+        }
     }
 
     @Test

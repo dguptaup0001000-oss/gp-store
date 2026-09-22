@@ -106,4 +106,15 @@ class RiderIsAlsoAShopperTest {
                     role.toString());
         }
     }
+
+    @Test
+    @DisplayName("a standalone worker token is not a customer token")
+    void workerCredentialIsNotAShopper() {
+        assertEquals(Set.of("ROLE_DELIVERY_BOY"),
+                RolePermissions.workerAuthorityNamesForRoleName("DELIVERY_BOY"));
+        assertFalse(RolePermissions.workerAuthorityNamesForRoleName("DELIVERY_BOY")
+                .contains("ROLE_CUSTOMER"));
+        assertTrue(RolePermissions.workerAuthorityNamesForRoleName("ADMIN").isEmpty(),
+                "a forged worker role must fail closed rather than inherit staff powers");
+    }
 }

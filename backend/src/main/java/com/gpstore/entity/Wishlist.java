@@ -8,7 +8,8 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "wishlist")
+@Table(name = "wishlist", uniqueConstraints = @UniqueConstraint(
+        name = "uk_wishlist_customer_product", columnNames = {"customer_id", "product_id"}))
 public class Wishlist {
 
     @Id

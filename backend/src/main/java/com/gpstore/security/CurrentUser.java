@@ -26,7 +26,12 @@ public class CurrentUser {
     }
 
     public Long customerId() {
-        return get().getCustomerId();
+        Long customerId = get().getCustomerId();
+        if (customerId == null) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "This operation requires a customer account");
+        }
+        return customerId;
     }
 
     /**

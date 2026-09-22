@@ -89,6 +89,8 @@ public interface WishlistRepository extends JpaRepository<Wishlist, Long> {
 
     Optional<Wishlist> findByIdAndCustomerId(Long id, Long customerId);
 
+    Optional<Wishlist> findByCustomerIdAndProductId(Long customerId, Long productId);
+
     /** Bulk delete for account deletion - see NotificationRepository.deleteByCustomerId. */
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
     @org.springframework.data.jpa.repository.Query("delete from Wishlist w where w.customer.id = :customerId")

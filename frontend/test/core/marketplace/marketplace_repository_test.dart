@@ -1,11 +1,55 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/core/marketplace/marketplace_models.dart';
 import 'package:gpstore/core/marketplace/marketplace_repository.dart';
+import 'package:gpstore/features/marketplace/domain/marketplace_feed_models.dart';
 
 import '../../support/test_api_client.dart';
 
 void main() {
   setUpAll(setUpFakeSecureStorage);
+
+  group('MarketplaceRepository.feed', () {
+    test('Customer Home asks for the cross-shop feed, not Shop #1 products', () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? query;
+      adapter.on('GET', '/api/marketplace/feed', (options) {
+        query = Map<String, dynamic>.from(options.queryParameters);
+        return const FakeResponse([
+          {
+            'productId': 18,
+            'name': 'iPhone 18 Pro',
+            'commerceMode': 'ONLINE_PURCHASE',
+            'priceMode': 'EXACT_PRICE',
+            'addable': true,
+            'productVariantId': 81,
+            'sellingPrice': 190000,
+            'shopId': 2,
+            'shopName': 'Deepak Phone Shop',
+            'sellerCount': 1,
+          }
+        ]);
+      });
+
+      final cards = await MarketplaceRepository(
+              apiClient: buildTestApiClient(adapter))
+          .feed(latitude: 26.75, longitude: 83.37);
+
+      expect(cards.single.name, 'iPhone 18 Pro');
+      expect(cards.single.addable, isTrue);
+      expect(cards.single.commerceMode, CommerceMode.buyOnline);
+      expect(query, containsPair('mode', 'ONLINE_PURCHASE'));
+      expect(query, containsPair('lat', 26.75));
+      expect(query, containsPair('lng', 83.37));
+    });
+
+    test('without a real delivery pin it does not fabricate one', () async {
+      final adapter = FakeHttpClientAdapter();
+      final cards = await MarketplaceRepository(
+              apiClient: buildTestApiClient(adapter))
+          .feed(latitude: null, longitude: null);
+      expect(cards, isEmpty);
+    });
+  });
 
   group('MarketplaceRepository.shopsNear', () {
     test('parses the storefronts the backend returns, nearest first', () async {

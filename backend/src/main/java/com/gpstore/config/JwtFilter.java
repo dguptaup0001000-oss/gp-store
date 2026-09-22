@@ -84,7 +84,7 @@ public class JwtFilter extends OncePerRequestFilter {
                         return;
                     }
                     List<GrantedAuthority> workerAuthorities = new ArrayList<>();
-                    for (String authority : RolePermissions.authorityNamesForRoleName(role)) {
+                    for (String authority : RolePermissions.workerAuthorityNamesForRoleName(role)) {
                         workerAuthorities.add(new SimpleGrantedAuthority(authority));
                     }
                     SecurityContextHolder.getContext().setAuthentication(
