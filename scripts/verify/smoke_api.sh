@@ -206,6 +206,20 @@ say "Marketplace, unauthenticated"
 check "GET /api/marketplace/mode"           200 "$BASE/api/marketplace/mode"
 check "GET /api/marketplace/discovery"      200 "$BASE/api/marketplace/discovery?lat=$LAT&lng=$LNG"
 check "GET /api/marketplace/shops"          200 "$BASE/api/marketplace/shops?lat=$LAT&lng=$LNG"
+check "GET /api/marketplace/feed"           200 "$BASE/api/marketplace/feed?lat=$LAT&lng=$LNG&mode=ONLINE_PURCHASE&page=0&size=5"
+
+MARKET_PRODUCT=$(curl -sS --max-time 25 \
+        "$BASE/api/marketplace/feed?lat=$LAT&lng=$LNG&mode=ONLINE_PURCHASE&page=0&size=5" 2>/dev/null \
+        | python3 -c 'import json,sys; rows=json.load(sys.stdin); print(rows[0].get("productId", "") if rows else "")' 2>/dev/null || echo "")
+if [ -n "$MARKET_PRODUCT" ]; then
+  printf '  %sPASS%s  %-58s %s\n' "$GREEN" "$OFF" \
+    "marketplace feed contains an eligible Buy Online product" "$MARKET_PRODUCT"
+  pass=$((pass+1))
+else
+  printf '  %sFAIL%s  %-58s\n' "$RED" "$OFF" \
+    "marketplace feed contains an eligible Buy Online product"
+  fail=$((fail+1))
+fi
 
 # How many shops actually serve that pin decides whether the rest means
 # anything. An empty list is a correct answer and a useless fixture.
@@ -286,6 +300,30 @@ check "GET /api/preferred-shops"            200 "${AUTH[@]}" "$BASE/api/preferre
 check "GET /api/categories"                 200 "${AUTH[@]}" "$BASE/api/categories"
 check "GET /api/products/feed"              200 "${AUTH[@]}" "$BASE/api/products/feed?page=0&size=5"
 check "GET /api/products/search/instant"    200 "${AUTH[@]}" "$BASE/api/products/search/instant?keyword=dal&page=0&size=5"
+check "GET /api/notifications/mine"         200 "${AUTH[@]}" "$BASE/api/notifications/mine?page=0&size=20"
+check "GET /api/notifications/unread-count" 200 "${AUTH[@]}" "$BASE/api/notifications/unread-count"
+check "PUT /api/notifications/read-all"     200 -X PUT "${AUTH[@]}" "$BASE/api/notifications/read-all"
+check "GET /api/wishlists/mine"             200 "${AUTH[@]}" "$BASE/api/wishlists/mine"
+
+# A wishlist is account-owned state on the throwaway smoke customer. Creating
+# and deleting one row proves the exact app wire contract without touching a
+# shop's stock, price, order or money.
+if [ -n "$MARKET_PRODUCT" ]; then
+  check "POST /api/wishlists with productId" 200 -X POST "${AUTH[@]}" \
+    -H 'Content-Type: application/json' -d "{\"productId\":$MARKET_PRODUCT}" \
+    "$BASE/api/wishlists"
+  WISHLIST_ITEM=$(curl -sS --max-time 25 "${AUTH[@]}" \
+        "$BASE/api/wishlists/mine" 2>/dev/null \
+        | python3 -c 'import json,sys; rows=json.load(sys.stdin); print(rows[0].get("id", "") if rows else "")' 2>/dev/null || echo "")
+  if [ -n "$WISHLIST_ITEM" ]; then
+    check "DELETE /api/wishlists/{id}" 200 -X DELETE "${AUTH[@]}" \
+      "$BASE/api/wishlists/$WISHLIST_ITEM"
+  else
+    printf '  %sFAIL%s  %-58s\n' "$RED" "$OFF" \
+      "wishlist POST persists and GET returns the entry"
+    fail=$((fail+1))
+  fi
+fi
 
 say "Authorization: a customer is not a merchant, an admin, or a worker"
 # THE POINT OF THE WHOLE EXERCISE. Every one of these must be refused. A 200

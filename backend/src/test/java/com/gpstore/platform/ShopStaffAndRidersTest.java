@@ -373,7 +373,8 @@ class ShopStaffAndRidersTest {
     /** Exactly the principal JwtFilter builds for a worker token. */
     private void signedInAsRider() {
         List<GrantedAuthority> authorities = new ArrayList<>();
-        for (String authority : RolePermissions.authorityNames(Role.DELIVERY_BOY)) {
+        for (String authority : RolePermissions.workerAuthorityNamesForRoleName(
+                Role.DELIVERY_BOY.name())) {
             authorities.add(new SimpleGrantedAuthority(authority));
         }
         SecurityContextHolder.getContext().setAuthentication(

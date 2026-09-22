@@ -426,6 +426,67 @@ class AMerchantAddsWhatTheySellTest {
         }
     }
 
+    @Nested
+    @DisplayName("selling mode survives the complete create and reload path")
+    class SellingModes {
+
+        @Test
+        void onlineVisitAndServiceRemainDistinct() throws Exception {
+            create("Online charger " + tag, "ONLINE_PURCHASE", "EXACT_PRICE");
+            create("Visit handset " + tag, "VISIT_TO_BUY", "STARTING_FROM");
+            create("Screen repair " + tag, "SERVICE_AT_SHOP", "ASK_AT_SHOP");
+
+            assertMode("Online charger " + tag, "ONLINE_PURCHASE");
+            assertMode("Visit handset " + tag, "VISIT_TO_BUY");
+            assertMode("Screen repair " + tag, "SERVICE_AT_SHOP");
+
+            String online = body(get("/api/shop/catalogue")
+                    .param("mode", "ONLINE_PURCHASE"), phoneOwner, null);
+            String visit = body(get("/api/shop/catalogue")
+                    .param("mode", "VISIT_TO_BUY"), phoneOwner, null);
+            String service = body(get("/api/shop/catalogue")
+                    .param("mode", "SERVICE_AT_SHOP"), phoneOwner, null);
+            assertTrue(online.contains("Online charger " + tag));
+            assertFalse(online.contains("Visit handset " + tag));
+            assertTrue(visit.contains("Visit handset " + tag));
+            assertFalse(visit.contains("Screen repair " + tag));
+            assertTrue(service.contains("Screen repair " + tag));
+
+            Long visitProduct = jdbc.queryForObject(
+                    "SELECT id FROM products WHERE name=?", Long.class,
+                    "Visit handset " + tag);
+            body(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .put("/api/shop/products/" + visitProduct), phoneOwner, """
+                    {"name":"Visit handset renamed %s","brand":"Motorola",
+                     "categoryId":%d,"active":true}
+                    """.formatted(tag, phoneCategory));
+            assertMode("Visit handset renamed " + tag, "VISIT_TO_BUY");
+        }
+
+        private void create(String name, String mode, String priceMode) throws Exception {
+            body(post("/api/shop/products"), phoneOwner, """
+                    {"name":"%s","brand":"Motorola","categoryId":%d,
+                     "firstVariant":{"label":"standard","sellingPrice":1000,
+                       "mrp":1200,"stock":3,"commerceMode":"%s",
+                       "priceMode":"%s","offlineAvailability":"AVAILABLE",
+                       "serviceDurationMinutes":%s}}
+                    """.formatted(name, phoneCategory, mode, priceMode,
+                    mode.equals("SERVICE_AT_SHOP") ? "45" : "null"));
+        }
+
+        private void assertMode(String productName, String expected) {
+            String actual = jdbc.queryForObject("""
+                    SELECT spv.commerce_mode
+                      FROM shop_product_variants spv
+                      JOIN product_variants pv ON pv.id=spv.product_variant_id
+                      JOIN products p ON p.id=pv.product_id
+                     WHERE spv.shop_id=? AND p.name=?
+                    """, String.class, phoneShop, productName);
+            assertEquals(expected, actual,
+                    "the mode changed between request, listing persistence and reload");
+        }
+    }
+
     // ------------------------------------------------------------------
 
     private String myProducts(Long accountId) throws Exception {

@@ -53,13 +53,6 @@ class _PlatformCustomerProfileScreenState
   String? _error;
   bool _loading = true;
 
-  /// What the operator revealed, this session, on this screen.
-  ///
-  /// Deliberately NOT persisted and not part of the profile object: a
-  /// reveal is a logged, reasoned act, and carrying its result forward
-  /// would quietly turn one authorised look into a permanent unmasking.
-  final Map<String, String> _revealed = {};
-
   @override
   void initState() {
     super.initState();
@@ -131,8 +124,6 @@ class _PlatformCustomerProfileScreenState
         _ContactCard(
           identity: identity,
           addresses: addresses,
-          revealed: _revealed,
-          onReveal: _reveal,
         ),
         const SizedBox(height: AdminSpacing.lg),
 
@@ -167,33 +158,6 @@ class _PlatformCustomerProfileScreenState
         const SizedBox(height: AdminSpacing.xxl),
       ],
     );
-  }
-
-  /// Unmask one field, once, with a reason the server records.
-  Future<void> _reveal(String field) async {
-    final reason = await _askForReason(
-      context,
-      title: 'Show the ${field == 'email' ? 'email address' : 'phone number'}',
-      body: 'This is recorded against your account with the reason you give, '
-          'and can be read back later. Say what you are working on.',
-      confirmLabel: 'Show it',
-      danger: false,
-    );
-    if (reason == null || !mounted) return;
-    try {
-      final value = await ref.read(platformRepositoryProvider).revealCustomerPii(
-            customerId: widget.customerId,
-            field: field,
-            reason: reason,
-          );
-      if (!mounted) return;
-      setState(() {
-        if (value != null && value.isNotEmpty) _revealed[field] = value;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      _say(extractErrorMessage(e));
-    }
   }
 
   /// Bar this customer, or let them back in.
@@ -367,6 +331,14 @@ class _ProfileHeader extends StatelessWidget {
     final active = _yes(identity['active']);
     final lastSeen = activity.lastSessionAt ?? activity.lastOrderAt;
 
+    final rawRoles = identity['roles'];
+    final roles = rawRoles is List
+        ? rawRoles.map((role) => role.toString()).toList(growable: false)
+        : <String>[
+            if ((identity['role'] as String?)?.isNotEmpty == true)
+              identity['role'] as String,
+          ];
+
     return AdminSectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -398,10 +370,9 @@ class _ProfileHeader extends StatelessWidget {
                       ? AdminStatusTone.info
                       : AdminStatusTone.neutral,
                 ),
-                if ((identity['role'] as String?) != null &&
-                    identity['role'] != 'CUSTOMER')
+                for (final role in roles)
                   AdminStatusBadge(
-                    label: _pretty(identity['role'] as String),
+                    label: _pretty(role),
                     tone: AdminStatusTone.neutral,
                   ),
               ]),
@@ -499,14 +470,10 @@ class _ContactCard extends StatelessWidget {
   const _ContactCard({
     required this.identity,
     required this.addresses,
-    required this.revealed,
-    required this.onReveal,
   });
 
   final Map<String, dynamic> identity;
   final List<Map<String, dynamic>> addresses;
-  final Map<String, String> revealed;
-  final Future<void> Function(String field) onReveal;
 
   @override
   Widget build(BuildContext context) {
@@ -516,17 +483,13 @@ class _ContactCard extends StatelessWidget {
         _ContactLine(
           icon: Icons.mail_outline,
           label: 'Email',
-          masked: identity['email'] as String?,
-          revealedValue: revealed['email'],
-          onReveal: () => onReveal('email'),
+          value: identity['email'] as String?,
         ),
         const SizedBox(height: AdminSpacing.sm),
         _ContactLine(
           icon: Icons.call_outlined,
           label: 'Phone',
-          masked: identity['phone'] as String?,
-          revealedValue: revealed['phone'],
-          onReveal: () => onReveal('phone'),
+          value: identity['phone'] as String?,
         ),
         const Divider(height: AdminSpacing.xl),
         if (addresses.isEmpty)
@@ -545,26 +508,23 @@ class _ContactCard extends StatelessWidget {
   }
 }
 
-/// A masked contact detail, with an audited way to see the whole thing.
+/// Full operational contact detail for the platform owner. The backend
+/// projection never includes credentials, tokens, OTPs or payment secrets.
 class _ContactLine extends StatelessWidget {
   const _ContactLine({
     required this.icon,
     required this.label,
-    required this.masked,
-    required this.revealedValue,
-    required this.onReveal,
+    required this.value,
   });
 
   final IconData icon;
   final String label;
-  final String? masked;
-  final String? revealedValue;
-  final VoidCallback onReveal;
+  final String? value;
 
   @override
   Widget build(BuildContext context) {
-    final value = (revealedValue ?? masked ?? '').trim();
-    if (value.isEmpty) {
+    final shown = (value ?? '').trim();
+    if (shown.isEmpty) {
       return Row(children: [
         Icon(icon, size: 16, color: AdminColors.textMuted),
         const SizedBox(width: 8),
@@ -577,7 +537,7 @@ class _ContactLine extends StatelessWidget {
       Icon(icon, size: 16, color: AdminColors.textSecondary),
       const SizedBox(width: 8),
       Expanded(
-        child: Text(value,
+        child: Text(shown,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -585,17 +545,6 @@ class _ContactLine extends StatelessWidget {
                 fontWeight: FontWeight.w600,
                 color: AdminColors.textPrimary)),
       ),
-      if (revealedValue == null)
-        TextButton(
-          onPressed: hapticize(onReveal),
-          style: TextButton.styleFrom(
-            foregroundColor: AdminColors.primary,
-            padding: const EdgeInsets.symmetric(horizontal: AdminSpacing.sm),
-            minimumSize: const Size(0, 32),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          child: const Text('Show', style: TextStyle(fontSize: 12.5)),
-        ),
     ]);
   }
 }

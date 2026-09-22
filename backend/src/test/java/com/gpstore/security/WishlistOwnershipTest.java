@@ -11,11 +11,21 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * The wishlist, end to end, including the contract bug that made the feature
@@ -37,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.*;
         "otp.cleanup-initial-delay-ms=3600000",
         "delivery.late-flag-initial-delay-ms=3600000"
 })
+@AutoConfigureMockMvc
 class WishlistOwnershipTest {
 
     @Autowired private WishlistService wishlistService;
@@ -44,6 +55,8 @@ class WishlistOwnershipTest {
     @Autowired private ProductRepository productRepository;
     @Autowired private CategoryRepository categoryRepository;
     @Autowired private ProductVariantRepository variantRepository;
+    @Autowired private WishlistRepository wishlistRepository;
+    @Autowired private MockMvc mockMvc;
 
     private Customer alice;
     private Customer bob;
@@ -228,5 +241,63 @@ class WishlistOwnershipTest {
         List<WishlistResponse> mine = wishlistService.getMyWishlist(bob.getId());
         assertNotNull(mine, "null would crash the app's list rendering");
         assertTrue(mine.isEmpty());
+    }
+
+    @Test
+    @DisplayName("the customer app JSON contract persists, refetches and removes a wishlist item")
+    void mobileWireContract() throws Exception {
+        var auth = customerAuth(alice);
+
+        String first = mockMvc.perform(post("/api/wishlists")
+                        .with(authentication(auth))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"productId\":" + product.getId() + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.product.id").value(product.getId()))
+                .andReturn().getResponse().getContentAsString();
+        long itemId = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(first).get("id").asLong();
+
+        // Retrying after an uncertain network response is idempotent.
+        mockMvc.perform(post("/api/wishlists")
+                        .with(authentication(customerAuth(alice)))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"productId\":" + product.getId() + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(itemId));
+        assertEquals(1, wishlistRepository.findByCustomerId(alice.getId()).size());
+
+        mockMvc.perform(get("/api/wishlists/mine")
+                        .with(authentication(customerAuth(alice))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(itemId))
+                .andExpect(jsonPath("$[0].product.id").value(product.getId()));
+
+        mockMvc.perform(get("/api/wishlists/mine")
+                        .with(authentication(customerAuth(bob))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+
+        mockMvc.perform(delete("/api/wishlists/{id}", itemId)
+                        .with(authentication(customerAuth(alice))))
+                .andExpect(status().isOk());
+        assertTrue(wishlistRepository.findByCustomerId(alice.getId()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("the obsolete entity-shaped app payload is rejected instead of pretending to save")
+    void obsoletePayloadIsRejected() throws Exception {
+        mockMvc.perform(post("/api/wishlists")
+                        .with(authentication(customerAuth(alice)))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"product\":{\"id\":" + product.getId() + "}}"))
+                .andExpect(status().isBadRequest());
+        assertTrue(wishlistRepository.findByCustomerId(alice.getId()).isEmpty());
+    }
+
+    private UsernamePasswordAuthenticationToken customerAuth(Customer customer) {
+        return new UsernamePasswordAuthenticationToken(
+                new AuthenticatedUser(customer.getId(), customer.getEmail(), Role.CUSTOMER.name()),
+                null, java.util.List.of(new SimpleGrantedAuthority("ROLE_CUSTOMER")));
     }
 }

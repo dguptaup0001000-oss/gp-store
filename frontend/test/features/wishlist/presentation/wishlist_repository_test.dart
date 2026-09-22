@@ -48,7 +48,7 @@ void main() {
   });
 
   group('WishlistRepository.addToWishlist', () {
-    test('sends the product id nested under "product", matching backend shape', () async {
+    test('sends the scalar productId accepted by WishlistRequest', () async {
       final adapter = FakeHttpClientAdapter();
       Map<String, dynamic>? capturedBody;
 
@@ -63,9 +63,7 @@ void main() {
       final repository = WishlistRepository(apiClient: buildTestApiClient(adapter));
       await repository.addToWishlist(9);
 
-      expect(capturedBody, {
-        'product': {'id': 9},
-      });
+      expect(capturedBody, {'productId': 9});
     });
   });
 }

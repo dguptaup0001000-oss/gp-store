@@ -7,6 +7,7 @@ import com.gpstore.entity.Product;
 import com.gpstore.entity.Wishlist;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.ProductRepository;
+import com.gpstore.repository.CustomerRepository;
 import com.gpstore.repository.WishlistRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,25 +19,41 @@ public class WishlistService {
 
     private final WishlistRepository wishlistRepository;
     private final ProductRepository productRepository;
-    private final CustomerService customerService;
+    private final CustomerRepository customerRepository;
 
     private final com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue;
 
     public WishlistService(WishlistRepository wishlistRepository,
                             ProductRepository productRepository,
-                            CustomerService customerService,
+                            CustomerRepository customerRepository,
                             com.gpstore.catalog.shop.ShopPricedCatalogue shopPricedCatalogue) {
         this.wishlistRepository = wishlistRepository;
         this.productRepository = productRepository;
-        this.customerService = customerService;
+        this.customerRepository = customerRepository;
         this.shopPricedCatalogue = shopPricedCatalogue;
     }
 
     @Transactional
     public WishlistResponse saveWishlist(Long customerId, WishlistRequest request) {
+        // Serialize one customer's mutations on the row that always exists.
+        // Together with the unique index this makes two heart taps/retries an
+        // idempotent add rather than two wishlist rows.
+        Customer customer = customerRepository.findByIdForUpdate(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
         Product product = productRepository.findById(request.getProductId())
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
-        Customer customer = customerService.getById(customerId);
+
+        Wishlist existing = wishlistRepository
+                .findByCustomerIdAndProductId(customerId, product.getId())
+                .orElse(null);
+        if (existing != null) {
+            if (!Boolean.TRUE.equals(existing.getActive())) {
+                existing.setActive(true);
+                existing = wishlistRepository.save(existing);
+            }
+            return WishlistResponse.from(existing,
+                    shopPricedCatalogue.termsFor(existing.getProduct()));
+        }
 
         Wishlist wishlist = new Wishlist();
         wishlist.setCustomer(customer);

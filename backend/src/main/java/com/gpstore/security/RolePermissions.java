@@ -256,6 +256,23 @@ public final class RolePermissions {
         }
     }
 
+    /**
+     * Authorities for a standalone worker credential.
+     *
+     * <p>A Customer row whose role is DELIVERY_BOY is a shopper who also
+     * delivers, so {@link #authorityNames(Role)} correctly gives that account
+     * both roles. A worker-app credential is different: it identifies a row
+     * in workers, has a workerId and deliberately has no customerId. Giving
+     * that principal ROLE_CUSTOMER let it enter customer endpoints and only
+     * fail later when code tried to query with a null customer id.
+     */
+    public static Set<String> workerAuthorityNamesForRoleName(String roleName) {
+        if (roleName == null || !Role.DELIVERY_BOY.name().equalsIgnoreCase(roleName.trim())) {
+            return Set.of();
+        }
+        return Set.of("ROLE_" + Role.DELIVERY_BOY.name());
+    }
+
     /** True for any role that is staff - i.e. holds at least one permission. */
     public static boolean isStaff(Role role) {
         return !forRole(role).isEmpty();

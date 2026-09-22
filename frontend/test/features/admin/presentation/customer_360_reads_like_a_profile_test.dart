@@ -50,9 +50,10 @@ void main() {
             'id': 42,
             'customerRef': 'C-42',
             'name': 'Anita Sharma',
-            'email': 'a***a@example.test',
-            'phone': '98***3210',
+            'email': 'anita.sharma@example.test',
+            'phone': '9876543210',
             'role': 'CUSTOMER',
+            'roles': ['CUSTOMER'],
             'enabled': true,
             'active': active,
             'verified': true,
@@ -217,15 +218,43 @@ void main() {
       expect(find.text('14 Nehru Marg, Civil Lines, Kanpur, 208001'), findsOneWidget);
     });
 
-    testWidgets('masks contact details and offers an audited way to see them',
+    testWidgets('shows complete operational contact without a redundant reveal',
         (tester) async {
       tall(tester);
       await tester.pumpWidget(host().widget);
       await tester.pumpAndSettle();
 
-      expect(find.text('a***a@example.test'), findsOneWidget);
-      expect(find.text('98***3210'), findsOneWidget);
-      expect(find.text('Show'), findsNWidgets(2));
+      expect(find.text('anita.sharma@example.test'), findsOneWidget);
+      expect(find.text('9876543210'), findsOneWidget);
+      expect(find.text('Show'), findsNothing);
+    });
+
+    testWidgets('shows customer and delivery roles separately for a customer-rider',
+        (tester) async {
+      tall(tester);
+      final adapter = FakeHttpClientAdapter();
+      final rider = profile();
+      ((rider['core'] as Map)['identity'] as Map)['role'] = 'DELIVERY_BOY';
+      ((rider['core'] as Map)['identity'] as Map)['roles'] =
+          ['CUSTOMER', 'DELIVERY_BOY'];
+      adapter.on('GET', '/api/platform/control/customers/42/profile',
+          (_) => FakeResponse(rider));
+      adapter.on('GET', '/api/platform/control/orders',
+          (_) => FakeResponse(ordersPage(0)));
+
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          platformRepositoryProvider.overrideWithValue(
+              PlatformRepository(apiClient: buildTestApiClient(adapter))),
+        ],
+        child: const MaterialApp(
+          home: PlatformCustomerProfileScreen(customerId: 42, title: 'Anita Sharma'),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Customer'), findsOneWidget);
+      expect(find.text('Delivery boy'), findsOneWidget);
     });
   });
 
