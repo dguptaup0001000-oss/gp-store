@@ -53,8 +53,15 @@ void main() {
     await tester.pump();
     expect(find.text('Deepak kr.Gupta'), findsOneWidget);
 
-    await tester.tap(find.text('Deepak kr.Gupta'));
-    await tester.pump(const Duration(milliseconds: 300));
+    final resultTile = find.ancestor(
+      of: find.text('Deepak kr.Gupta'),
+      matching: find.byType(ListTile),
+    );
+    expect(resultTile, findsOneWidget);
+    final onTap = tester.widget<ListTile>(resultTile).onTap;
+    expect(onTap, isNotNull);
+    onTap!();
+    await tester.pump();
 
     expect(find.byType(PlatformCustomerProfileScreen), findsOneWidget,
         reason: 'The old generic PlatformEntity360Screen renders raw '
