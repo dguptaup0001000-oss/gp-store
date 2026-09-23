@@ -54,7 +54,7 @@ void main() {
     expect(find.text('Deepak kr.Gupta'), findsOneWidget);
 
     await tester.tap(find.text('Deepak kr.Gupta'));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byType(PlatformCustomerProfileScreen), findsOneWidget,
         reason: 'The old generic PlatformEntity360Screen renders raw '

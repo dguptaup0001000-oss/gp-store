@@ -89,6 +89,9 @@ void main() {
       // asserts their position in the drawer and not just their existence.
       'Visit to Buy',
       'Services at Shop',
+      // Safe installed-APK and backend identity used to distinguish a real
+      // release from a stale/corrupt sideload during phone acceptance.
+      'Release Diagnostics',
     };
 
     final labels = AdminNav.groups
@@ -122,6 +125,7 @@ void main() {
       'Security',
       'Audit Logs',
       'System Health',
+      'Release Diagnostics',
     });
     expect(labels, isNot(contains('My Shop')));
     expect(labels, isNot(contains('Store Hours')));

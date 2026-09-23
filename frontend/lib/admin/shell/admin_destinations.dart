@@ -111,6 +111,15 @@ class AdminNav {
     builder: _releaseDiagnostics,
   );
 
+  static const AdminDestination platformReleaseDiagnostics = AdminDestination(
+    id: 'platform-release-diagnostics',
+    requires: AdminPermission.platformAdmin,
+    label: 'Release Diagnostics',
+    icon: Icons.fact_check_outlined,
+    description: 'APK, API, backend and database release identity',
+    builder: _releaseDiagnostics,
+  );
+
   /// Named, like [dashboard], because the super admin APK opens on it.
   ///
   /// Still listed in the Marketplace group below and still gated on
@@ -476,7 +485,7 @@ class AdminNav {
         AdminDestination(id: 'platform-health', requires: AdminPermission.platformAdmin,
             label: 'System Health', icon: Icons.monitor_heart_outlined,
             builder: _platformHealth),
-        releaseDiagnostics,
+        platformReleaseDiagnostics,
       ],
     ),
   ];
