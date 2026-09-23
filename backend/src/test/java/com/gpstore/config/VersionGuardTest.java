@@ -17,7 +17,7 @@ class VersionGuardTest {
     void productionRefusesUnknownCommit() {
         IllegalStateException thrown = assertThrows(
                 IllegalStateException.class,
-                () -> new VersionGuard(new AppBuildInfo("1.0", "unknown", true))
+                () -> new VersionGuard(new AppBuildInfo("1.0", "unknown", true, "unknown"))
                         .requireBuildIdentityInProduction());
         assertTrue(thrown.getMessage().contains("GIT_COMMIT"));
     }
@@ -27,7 +27,7 @@ class VersionGuardTest {
     void productionRefusesShortCommit() {
         IllegalStateException thrown = assertThrows(
                 IllegalStateException.class,
-                () -> new VersionGuard(new AppBuildInfo("1.0", "77199a7", true))
+                () -> new VersionGuard(new AppBuildInfo("1.0", "77199a7", true, "77199a7"))
                         .requireBuildIdentityInProduction());
         assertTrue(thrown.getMessage().contains("40-character"));
     }
@@ -35,8 +35,19 @@ class VersionGuardTest {
     @Test
     @DisplayName("Production starts when GIT_COMMIT is a full SHA")
     void productionAcceptsFullSha() {
-        assertDoesNotThrow(() -> new VersionGuard(new AppBuildInfo("1.0", SHA, true))
+        assertDoesNotThrow(() -> new VersionGuard(new AppBuildInfo("1.0", SHA, true, SHA))
                 .requireBuildIdentityInProduction());
+    }
+
+    @Test
+    @DisplayName("Production refuses when environment and jar claim different commits")
+    void productionRefusesMismatchedBinary() {
+        String other = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class,
+                () -> new VersionGuard(new AppBuildInfo("1.0", SHA, true, other))
+                        .requireBuildIdentityInProduction());
+        assertTrue(thrown.getMessage().contains("jar contains"));
     }
 
     @Test
@@ -49,9 +60,10 @@ class VersionGuardTest {
     @Test
     @DisplayName("Public version payload never includes secrets")
     void buildInfoExposesOnlyIdentity() {
-        AppBuildInfo info = new AppBuildInfo("0.0.1-SNAPSHOT", SHA, true);
+        AppBuildInfo info = new AppBuildInfo("0.0.1-SNAPSHOT", SHA, true, SHA);
         assertEquals("production", info.environmentName());
         assertEquals(SHA, info.gitCommit());
+        assertEquals(SHA, info.binaryGitCommit());
         assertEquals("0.0.1-SNAPSHOT", info.version());
     }
 }

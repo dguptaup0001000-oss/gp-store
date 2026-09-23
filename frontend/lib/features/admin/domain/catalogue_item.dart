@@ -66,7 +66,7 @@ class CatalogueItem {
         mrp: (json['mrp'] as num?)?.toDouble(),
         priceMax: (json['priceMax'] as num?)?.toDouble(),
         priceMode: PriceMode.fromWire(json['priceMode'] as String?),
-        commerceMode: SellingMode.fromWire(json['commerceMode'] as String?),
+        commerceMode: SellingMode.fromRequiredWire(json['commerceMode']),
         offlineAvailability: json['offlineAvailability'] as String?,
         serviceDurationMinutes: (json['serviceDurationMinutes'] as num?)?.toInt(),
         available: (json['available'] as bool?) ?? true,

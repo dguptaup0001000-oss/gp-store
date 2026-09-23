@@ -407,9 +407,16 @@ class MarketplaceMode with _$MarketplaceMode {
 
   /// What a deployment that has not answered yet is assumed to be.
   ///
-  /// SINGLE SHOP, deliberately. It is the current production shape, and
-  /// guessing "marketplace" would draw a shop switcher over a deployment that
-  /// has one shop - a screen the customer cannot use and did not ask for.
+  /// SINGLE SHOP is retained only for local/development servers that genuinely
+  /// run the legacy topology. Production chooses [marketplaceProduction]
+  /// while its mode probe is loading or unavailable.
   static const MarketplaceMode singleShop =
       MarketplaceMode(mode: 'SINGLE_SHOP', multiShop: false);
+
+  /// The production-safe answer when a production APK cannot reach the mode
+  /// probe. GP-STORE production is a marketplace; silently falling back to
+  /// Shop #1 sends Home to the legacy `/api/products/feed` route and hides
+  /// valid listings belonging to every other shop.
+  static const MarketplaceMode marketplaceProduction = MarketplaceMode(
+      mode: 'MULTI_SHOP_PRODUCTION', multiShop: true);
 }

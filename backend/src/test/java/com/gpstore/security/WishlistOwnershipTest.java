@@ -295,6 +295,45 @@ class WishlistOwnershipTest {
         assertTrue(wishlistRepository.findByCustomerId(alice.getId()).isEmpty());
     }
 
+    @Test
+    @DisplayName("a customer who also delivers persists wishlist rows under the customer identity")
+    void customerRiderUsesTheCustomerRelationship() throws Exception {
+        alice.setRole(Role.DELIVERY_BOY);
+        customerRepository.saveAndFlush(alice);
+        var auth = new UsernamePasswordAuthenticationToken(
+                new AuthenticatedUser(alice.getId(), alice.getEmail(), Role.DELIVERY_BOY.name()),
+                null, java.util.List.of(
+                        new SimpleGrantedAuthority("ROLE_CUSTOMER"),
+                        new SimpleGrantedAuthority("ROLE_DELIVERY_BOY")));
+
+        mockMvc.perform(post("/api/wishlists")
+                        .with(authentication(auth))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"productId\":" + product.getId() + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.product.id").value(product.getId()));
+
+        mockMvc.perform(get("/api/wishlists/mine").with(authentication(auth)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].product.id").value(product.getId()));
+        assertEquals(1, wishlistRepository.findByCustomerId(alice.getId()).size());
+    }
+
+    @Test
+    @DisplayName("a standalone worker principal cannot create a customer wishlist")
+    void standaloneWorkerHasNoWishlistIdentity() throws Exception {
+        var auth = new UsernamePasswordAuthenticationToken(
+                new AuthenticatedUser(null, "worker@wishlist-test.invalid",
+                        Role.DELIVERY_BOY.name(), 77L),
+                null, java.util.List.of(new SimpleGrantedAuthority("ROLE_DELIVERY_BOY")));
+
+        mockMvc.perform(post("/api/wishlists")
+                        .with(authentication(auth))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"productId\":" + product.getId() + "}"))
+                .andExpect(status().isForbidden());
+    }
+
     private UsernamePasswordAuthenticationToken customerAuth(Customer customer) {
         return new UsernamePasswordAuthenticationToken(
                 new AuthenticatedUser(customer.getId(), customer.getEmail(), Role.CUSTOMER.name()),

@@ -122,6 +122,55 @@ class AutoMergeGatesFlutterTest {
     }
 
     @Test
+    @DisplayName("uploaded release bytes are frozen, revalidated and uniquely versioned")
+    void uploadedBytesAreTheValidatedBytes() throws IOException {
+        String workflow = read(".github/workflows/build-and-deploy.yml");
+
+        assertTrue(workflow.contains("Freeze verified APK bytes before bundle builds"));
+        assertTrue(workflow.contains("Final release-byte validation and checksums"));
+        assertTrue(workflow.contains("$RUNNER_TEMP/gpstore-release"));
+        assertTrue(workflow.contains("sha256sum -c -- *.sha256"));
+        assertTrue(workflow.contains("EXPECTED_APP_BUILD"));
+        assertTrue(workflow.contains("EXPECTED_API_BASE_URL"));
+        assertEquals(8, occurrences(workflow, "--build-number=\"${{ github.run_number }}\""),
+                "every APK and AAB build must carry this run's unique build number");
+        assertEquals(2, occurrences(workflow, "--dart-define=GPSTORE_APP=worker"),
+                "both Worker artifacts must identify their release app to the backend");
+        assertEquals(2, occurrences(workflow, "--dart-define=GPSTORE_APP=customer"),
+                "both Customer artifacts must identify their release app to the backend");
+        assertEquals(2, occurrences(workflow, "--dart-define=GPSTORE_APP=admin"),
+                "both Merchant Admin artifacts must identify their release app to the backend");
+        assertEquals(2, occurrences(workflow, "--dart-define=GPSTORE_APP=superadmin"),
+                "both Super Admin artifacts must identify their release app to the backend");
+
+        int finalCheck = workflow.indexOf("Final release-byte validation and checksums");
+        int firstUpload = workflow.indexOf("Upload customer ARM64 APK");
+        assertTrue(finalCheck >= 0 && firstUpload > finalCheck,
+                "no APK may be uploaded before the final byte/checksum gate");
+    }
+
+    private static int occurrences(String text, String needle) {
+        int count = 0;
+        int at = 0;
+        while ((at = text.indexOf(needle, at)) >= 0) {
+            count++;
+            at += needle.length();
+        }
+        return count;
+    }
+
+    @Test
+    @DisplayName("the published backend image embeds the source commit")
+    void backendImageCarriesItsBinaryIdentity() throws IOException {
+        String ci = read(".github/workflows/ci.yml");
+        int start = ci.indexOf("uses: docker/build-push-action@v6");
+        assertTrue(start >= 0, "the backend image build step is missing");
+        String imageBuild = ci.substring(start, ci.indexOf("\n\n", start));
+        assertTrue(imageBuild.contains("GIT_COMMIT=${{ github.sha }}"),
+                "the jar must embed the commit that produced the published image");
+    }
+
+    @Test
     @DisplayName("NDK r28 and the CameraX native-library workaround agree on 16 KB")
     void androidNativeWorkaroundsDoNotConflict() throws IOException {
         String gradle = read("frontend/android/app/build.gradle");

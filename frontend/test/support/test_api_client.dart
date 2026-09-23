@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/core/api/api_client.dart';
+import 'package:gpstore/core/config/app_environment.dart';
 import 'package:gpstore/core/storage/token_storage.dart';
 
 /// flutter_secure_storage talks to a platform channel that doesn't exist in
@@ -95,8 +96,13 @@ ApiClient buildTestApiClient(
   /// Defaults to null, which is what the shipped single-shop app effectively
   /// sends: no header at all, and the backend answers Shop #1.
   int? Function()? activeShopId,
+  AppEnvironment? environment,
 }) {
-  final client = ApiClient(tokenStorage: TokenStorage(), activeShopId: activeShopId);
+  final client = ApiClient(
+    tokenStorage: TokenStorage(),
+    activeShopId: activeShopId,
+    environment: environment,
+  );
   client.dio.httpClientAdapter = adapter;
   return client;
 }

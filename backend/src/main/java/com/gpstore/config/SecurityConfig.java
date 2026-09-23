@@ -78,7 +78,10 @@ public class SecurityConfig {
         // Without it here, a browser client (Flutter web) is blocked on the
         // CORS preflight even though native apps are unaffected. Do not
         // widen this to "*" — extra request headers would be allowed too.
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Idempotency-Key"));
+        configuration.setAllowedHeaders(List.of(
+                "Authorization", "Content-Type", "Idempotency-Key",
+                "X-GP-Store-Client-App", "X-GP-Store-Client-Build"));
+        configuration.setExposedHeaders(List.of("X-GP-Store-Backend-Build"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

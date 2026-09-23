@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/core/marketplace/marketplace_models.dart';
 import 'package:gpstore/core/marketplace/marketplace_providers.dart';
 import 'package:gpstore/core/marketplace/marketplace_repository.dart';
 import 'package:gpstore/core/marketplace/shop_context.dart';
+import 'package:gpstore/core/config/app_environment.dart';
+import 'package:gpstore/features/auth/presentation/auth_providers.dart';
 import 'package:gpstore/core/store/store_status.dart';
 import 'package:gpstore/core/store/store_status_provider.dart';
 
@@ -39,6 +43,48 @@ void main() {
               'the other way draws a shop switcher over a deployment that has '
               'one shop, on an app that was working.');
       expect(container.read(isMarketplaceProvider), isFalse);
+    });
+
+    test('a production mode-probe failure never sends Home back to Shop #1',
+        () async {
+      final adapter = FakeHttpClientAdapter();
+      final apiClient = buildTestApiClient(
+        adapter,
+        environment: AppEnvironment.production,
+      );
+      final container = ProviderContainer(overrides: [
+        apiClientProvider.overrideWithValue(apiClient),
+        marketplaceRepositoryProvider.overrideWithValue(_RefusingMarketplace()),
+      ]);
+      addTearDown(container.dispose);
+
+      final mode = await container.read(marketplaceModeProvider.future);
+      expect(mode, MarketplaceMode.marketplaceProduction);
+      expect(container.read(isMarketplaceProvider), isTrue,
+          reason: 'The production Customer APK must keep using '
+              '/api/marketplace/feed when the mode probe fails; the legacy '
+              'feed resolves an unselected customer to Shop #1.');
+    });
+
+    test('production uses marketplace Home while the mode probe is loading',
+        () {
+      final adapter = FakeHttpClientAdapter();
+      final apiClient = buildTestApiClient(
+        adapter,
+        environment: AppEnvironment.production,
+      );
+      final container = ProviderContainer(overrides: [
+        apiClientProvider.overrideWithValue(apiClient),
+        marketplaceRepositoryProvider.overrideWithValue(
+          _NeverAnswersMarketplace(),
+        ),
+      ]);
+      addTearDown(container.dispose);
+
+      // Starting the future reproduces the first release frame. That frame
+      // used to construct the legacy Shop #1 feed before /mode returned.
+      container.read(marketplaceModeProvider);
+      expect(container.read(isMarketplaceProvider), isTrue);
     });
 
     test('marketplace UI stays off until the backend says otherwise', () {
@@ -107,4 +153,12 @@ void main() {
           reason: 'null means "you choose" - the nearest serving shop');
     });
   });
+}
+
+class _NeverAnswersMarketplace extends MarketplaceRepository {
+  _NeverAnswersMarketplace()
+      : super(apiClient: buildTestApiClient(FakeHttpClientAdapter()));
+
+  @override
+  Future<MarketplaceMode> mode() => Completer<MarketplaceMode>().future;
 }

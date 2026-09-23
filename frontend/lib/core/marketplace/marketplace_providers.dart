@@ -22,16 +22,21 @@ final marketplaceRepositoryProvider = Provider<MarketplaceRepository>((ref) {
 /// came back. It is the backend's `/api/marketplace/mode`, which exists for
 /// exactly this question.
 ///
-/// A FAILURE READS AS SINGLE SHOP, deliberately. If this call is refused, or
-/// the app is talking to a backend too old to answer it, the customer gets
-/// the shop they have always had rather than a switcher over a deployment
-/// that has one shop. Being wrong in that direction costs a feature; being
-/// wrong the other way breaks the working app.
+/// A production failure must not read as Shop #1. That was the real-device
+/// failure: a transient/old `/api/marketplace/mode` answer sent Home to the
+/// legacy shop-scoped feed, so an otherwise reachable product detail existed
+/// while “All Products” said there was nothing. Development keeps its legacy
+/// single-shop fallback for local backends; the production APK is compiled
+/// for the marketplace and therefore fails in the direction that preserves
+/// marketplace discovery.
 final marketplaceModeProvider = FutureProvider<MarketplaceMode>((ref) async {
+  final apiClient = ref.watch(apiClientProvider);
   try {
     return await ref.watch(marketplaceRepositoryProvider).mode();
   } catch (_) {
-    return MarketplaceMode.singleShop;
+    return apiClient.environment.isProduction
+        ? MarketplaceMode.marketplaceProduction
+        : MarketplaceMode.singleShop;
   }
 });
 
@@ -40,7 +45,9 @@ final marketplaceModeProvider = FutureProvider<MarketplaceMode>((ref) async {
 /// Loading and error both read false, which is what keeps a slow or absent
 /// answer from flashing marketplace UI onto a single-shop app.
 final isMarketplaceProvider = Provider<bool>((ref) {
-  return ref.watch(marketplaceModeProvider).valueOrNull?.multiShop ?? false;
+  final mode = ref.watch(marketplaceModeProvider);
+  return mode.valueOrNull?.multiShop ??
+      ref.watch(apiClientProvider).environment.isProduction;
 });
 
 /// The shops that will deliver to a point, nearest first.

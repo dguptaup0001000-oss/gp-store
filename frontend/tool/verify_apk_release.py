@@ -153,6 +153,25 @@ def forbidden_payload_problems(apk: str) -> list[str]:
     return problems
 
 
+def release_identity_problems(archive: str) -> list[str]:
+    """Verify the compiled Dart snapshot carries this run's release identity."""
+    expected_build = os.environ.get("EXPECTED_APP_BUILD", "").strip()
+    expected_api = os.environ.get("EXPECTED_API_BASE_URL", "").strip()
+    if not expected_build and not expected_api:
+        return []
+    problems: list[str] = []
+    with zipfile.ZipFile(archive) as zf:
+        names = [n for n in zf.namelist() if n.endswith("/libapp.so")]
+        if not names:
+            return ["no compiled libapp.so found for release identity check"]
+        blobs = [zf.read(name) for name in names]
+        if expected_build and not any(expected_build.encode() in blob for blob in blobs):
+            problems.append(f"compiled Dart snapshot does not contain build {expected_build}")
+        if expected_api and not any(expected_api.encode() in blob for blob in blobs):
+            problems.append(f"compiled Dart snapshot does not contain API {expected_api}")
+    return problems
+
+
 def sdk_tool(name: str) -> str:
     sdk = os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME")
     if not sdk:
@@ -294,7 +313,7 @@ def expected_package(apk: str) -> str | None:
     return None
 
 
-def package_name(aapt: str, apk: str) -> str:
+def package_badging(aapt: str, apk: str) -> tuple[str, int | None, str | None]:
     result = subprocess.run(
         [aapt, "dump", "badging", apk],
         capture_output=True,
@@ -302,9 +321,15 @@ def package_name(aapt: str, apk: str) -> str:
     )
     blob = result.stdout or result.stderr
     match = re.search(r"package: name='([^']+)'", blob)
+    code = re.search(r"versionCode='([0-9]+)'", blob)
+    name = re.search(r"versionName='([^']+)'", blob)
     if result.returncode != 0 or not match:
         raise RuntimeError(f"aapt dump badging failed for {apk}: {blob.strip()}")
-    return match.group(1)
+    return (
+        match.group(1),
+        int(code.group(1)) if code else None,
+        name.group(1) if name else None,
+    )
 
 
 def main() -> None:
@@ -354,12 +379,30 @@ def main() -> None:
         else:
             print("SIGNER=release (not Android Debug)")
         try:
-            pkg = package_name(aapt, apk)
+            pkg, version_code, version_name = package_badging(aapt, apk)
         except RuntimeError as ex:
             print(ex)
             failed = True
             pkg = ""
+            version_code = None
+            version_name = None
         print(f"PACKAGE {os.path.basename(apk)}={pkg}")
+        print(
+            f"ANDROID_VERSION {os.path.basename(apk)} "
+            f"versionName={version_name or 'unknown'} "
+            f"versionCode={version_code if version_code is not None else 'unknown'}"
+        )
+        expected_build_number = os.environ.get("EXPECTED_BUILD_NUMBER", "").strip()
+        if expected_build_number:
+            expected = int(expected_build_number)
+            # Flutter adds an ABI prefix to split APK version codes: armv7 is
+            # +1000 and arm64 is +2000. An unsplit artifact keeps the base.
+            if version_code not in {expected, expected + 1000, expected + 2000}:
+                print(
+                    f"WRONG_VERSION_CODE {apk}: got {version_code}, "
+                    f"expected build {expected} (optionally ABI-prefixed)"
+                )
+                failed = True
         expected = expected_package(apk)
         if expected and pkg != expected:
             print(f"WRONG_PACKAGE {apk}: got {pkg!r}, expected {expected!r}")
@@ -387,6 +430,9 @@ def main() -> None:
             failed = True
         for problem in forbidden_payload_problems(apk):
             print(f"FORBIDDEN_PAYLOAD {problem}")
+            failed = True
+        for problem in release_identity_problems(apk):
+            print(f"RELEASE_IDENTITY_MISMATCH {apk}: {problem}")
             failed = True
 
     # SAME SUBSTRING TRAP AS expected_package. Matching "admin" loosely would
@@ -441,6 +487,12 @@ if __name__ == "__main__":
                     failed = True
                 if not elf_problems:
                     print(f"AAB_ELF_ALIGN_OK {os.path.basename(archive)} (16 KiB page)")
+            identity_problems = release_identity_problems(archive)
+            for problem in identity_problems:
+                print(f"RELEASE_IDENTITY_MISMATCH {archive}: {problem}")
+                failed = True
+            if not identity_problems:
+                print(f"RELEASE_IDENTITY_OK {os.path.basename(archive)}")
         sys.exit(1 if failed else 0)
 
     if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
@@ -558,6 +610,28 @@ if __name__ == "__main__":
                 )
             assert not forbidden_payload_problems(clean_bundle)
             assert not native_lib_elf_problems(clean_bundle)
+
+            old_build = os.environ.get("EXPECTED_APP_BUILD")
+            old_api = os.environ.get("EXPECTED_API_BASE_URL")
+            os.environ["EXPECTED_APP_BUILD"] = "abc1234"
+            os.environ["EXPECTED_API_BASE_URL"] = "https://api.example.test/v1"
+            identity_bundle = os.path.join(tmp, "identity.aab")
+            with zipfile.ZipFile(identity_bundle, "w") as zf:
+                zf.writestr(
+                    "base/lib/arm64-v8a/libapp.so",
+                    b"compiled abc1234 https://api.example.test/v1",
+                )
+            assert not release_identity_problems(identity_bundle)
+            os.environ["EXPECTED_APP_BUILD"] = "wrong"
+            assert release_identity_problems(identity_bundle)
+            if old_build is None:
+                os.environ.pop("EXPECTED_APP_BUILD", None)
+            else:
+                os.environ["EXPECTED_APP_BUILD"] = old_build
+            if old_api is None:
+                os.environ.pop("EXPECTED_API_BASE_URL", None)
+            else:
+                os.environ["EXPECTED_API_BASE_URL"] = old_api
 
             bad_bundle = os.path.join(tmp, "bad.aab")
             with zipfile.ZipFile(bad_bundle, "w") as zf:

@@ -181,17 +181,18 @@ wait_for_health() {
 verify_public_sha() {
   local expected="$1"
   local deadline=$((SECONDS + PUBLIC_SHA_TIMEOUT_SECONDS))
-  local body="" running=""
+  local body="" running="" binary=""
   while (( SECONDS < deadline )); do
     body="$(curl -fsS --max-time 15 \
       -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
       "$PUBLIC_VERSION_URL" 2>/dev/null || true)"
     running="$(printf '%s' "$body" | json_field gitCommit 2>/dev/null || true)"
-    if [ "$running" = "$expected" ]; then
+    binary="$(printf '%s' "$body" | json_field binaryGitCommit 2>/dev/null || true)"
+    if [ "$running" = "$expected" ] && [ "$binary" = "$expected" ]; then
       printf '%s' "$body"
       return 0
     fi
-    log "Public /api/version gitCommit=${running:-none} expected=$expected"
+    log "Public /api/version runtime=${running:-none} binary=${binary:-none} expected=$expected"
     sleep 5
   done
   return 1
@@ -206,7 +207,7 @@ verify_public_sha() {
 verify_traefik_sha() {
   local expected="$1"
   local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
-  local body="" running="" http_code=""
+  local body="" running="" binary="" http_code=""
   local url="https://${API_HOST}/v1/api/version"
   while (( SECONDS < deadline )); do
     body="$(curl -sS --max-time 15 --http1.1 \
@@ -216,11 +217,12 @@ verify_traefik_sha() {
     http_code="${body##*$'\n'}"
     body="${body%$'\n'*}"
     running="$(printf '%s' "$body" | json_field gitCommit 2>/dev/null || true)"
-    if [ "$running" = "$expected" ]; then
+    binary="$(printf '%s' "$body" | json_field binaryGitCommit 2>/dev/null || true)"
+    if [ "$running" = "$expected" ] && [ "$binary" = "$expected" ]; then
       printf '%s' "$body"
       return 0
     fi
-    log "Traefik-local /api/version http=${http_code:-000} gitCommit=${running:-none} expected=$expected body=$(printf '%s' "$body" | tr '\n' ' ' | cut -c1-160)"
+    log "Traefik-local /api/version http=${http_code:-000} runtime=${running:-none} binary=${binary:-none} expected=$expected body=$(printf '%s' "$body" | tr '\n' ' ' | cut -c1-220)"
     sleep 5
   done
   return 1
@@ -455,9 +457,20 @@ log "Health: $HEALTH_BODY"
 echo "[7/8] Version verification"
 VERSION_BODY="$(backend_curl "$VERSION_URL")"
 RUNNING_SHA="$(printf '%s' "$VERSION_BODY" | json_field gitCommit)"
+BINARY_SHA="$(printf '%s' "$VERSION_BODY" | json_field binaryGitCommit)"
+RUNNING_SCHEMA="$(printf '%s' "$VERSION_BODY" | json_field schemaVersion)"
+EXPECTED_SCHEMA="$(find "$COMPOSE_DIR/src/main/resources/db/migration" -maxdepth 1 \
+  -type f -name 'V*__*.sql' -printf '%f\n' | sort -V | tail -1 \
+  | sed -E 's/^V([^_]+)__.*/\1/')"
 log "In-container version: $VERSION_BODY"
 if [ "$RUNNING_SHA" != "$TARGET_SHA" ]; then
   die "Expected SHA $TARGET_SHA != running gitCommit $RUNNING_SHA"
+fi
+if [ "$BINARY_SHA" != "$TARGET_SHA" ]; then
+  die "Expected SHA $TARGET_SHA != jar binaryGitCommit ${BINARY_SHA:-none}"
+fi
+if [ -z "$EXPECTED_SCHEMA" ] || [ "$RUNNING_SCHEMA" != "$EXPECTED_SCHEMA" ]; then
+  die "Expected database migration ${EXPECTED_SCHEMA:-none} != running ${RUNNING_SCHEMA:-none}"
 fi
 TRAEFIK_VERSION_BODY="$(verify_traefik_sha "$TARGET_SHA")" \
   || die "Traefik on 127.0.0.1:443 did not serve gitCommit $TARGET_SHA"

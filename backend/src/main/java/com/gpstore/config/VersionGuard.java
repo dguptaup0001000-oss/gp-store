@@ -38,7 +38,19 @@ public class VersionGuard {
                     "Refusing to start in production with GIT_COMMIT=" + buildInfo.gitCommit()
                             + ". Production requires the full 40-character git SHA.");
         }
-        log.info("Production build identity gitCommit={} version={}",
-                buildInfo.gitCommit(), buildInfo.version());
+        if (AppBuildInfo.isUnsetCommit(buildInfo.binaryGitCommit())
+                || !buildInfo.binaryGitCommit().matches("[0-9a-fA-F]{40}")) {
+            throw new IllegalStateException(
+                    "Refusing to start production without a full git SHA embedded in the jar. "
+                            + "Build the image with Docker ARG GIT_COMMIT.");
+        }
+        if (!buildInfo.gitCommit().equalsIgnoreCase(buildInfo.binaryGitCommit())) {
+            throw new IllegalStateException(
+                    "Refusing to start production because runtime GIT_COMMIT="
+                            + buildInfo.gitCommit() + " but the jar contains "
+                            + buildInfo.binaryGitCommit());
+        }
+        log.info("Production build identity gitCommit={} binaryGitCommit={} version={}",
+                buildInfo.gitCommit(), buildInfo.binaryGitCommit(), buildInfo.version());
     }
 }

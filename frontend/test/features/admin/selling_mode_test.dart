@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/features/admin/domain/selling_mode.dart';
+import 'package:gpstore/features/admin/domain/catalogue_item.dart';
 
 void main() {
   group('How a shop says it sells something', () {
@@ -147,6 +148,18 @@ void main() {
       for (final stock in OfflineStock.values) {
         expect(OfflineStock.fromWire(stock.wire), stock);
       }
+    });
+
+    test('a merchant catalogue never silently reclassifies a missing mode', () {
+      final row = <String, dynamic>{
+        'productVariantId': 8,
+        'productId': 4,
+        'name': 'Motorola Edge 50 Pro',
+      };
+      expect(() => CatalogueItem.fromJson(row), throwsFormatException);
+      expect(
+          () => CatalogueItem.fromJson({...row, 'commerceMode': 'NEW_MODE'}),
+          throwsFormatException);
     });
   });
 }

@@ -8,6 +8,8 @@ import '../../../admin/design/admin_tokens.dart';
 import '../../../core/api/error_messages.dart';
 import '../domain/control_tower_models.dart';
 import 'platform_entity_360_screen.dart';
+import 'platform_customer_profile_screen.dart';
+import 'platform_merchant_profile_screen.dart';
 import 'platform_resource_screen.dart';
 import 'platform_providers.dart';
 
@@ -237,7 +239,25 @@ class _PlatformControlTowerScreenState
       ));
       return;
     }
-    if (const {'CUSTOMER', 'MERCHANT', 'SHOP'}.contains(result.entityType)) {
+    if (result.entityType == 'CUSTOMER') {
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => PlatformCustomerProfileScreen(
+          customerId: result.entityId,
+          title: result.title,
+        ),
+      ));
+      return;
+    }
+    if (result.entityType == 'MERCHANT') {
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => PlatformMerchantProfileScreen(
+          merchantId: result.entityId,
+          title: result.title,
+        ),
+      ));
+      return;
+    }
+    if (result.entityType == 'SHOP') {
       await Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) => PlatformEntity360Screen(result: result),
       ));
