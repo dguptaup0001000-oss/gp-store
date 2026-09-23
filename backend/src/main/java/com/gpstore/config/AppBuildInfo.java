@@ -1,7 +1,8 @@
 package com.gpstore.config;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.info.BuildProperties;
 import org.springframework.stereotype.Component;
 
@@ -17,6 +18,7 @@ public class AppBuildInfo {
     private final String binaryGitCommit;
     private final boolean production;
 
+    @Autowired
     public AppBuildInfo(
             @Value("${app.version:0.0.1-SNAPSHOT}") String version,
             @Value("${app.git-commit:unknown}") String gitCommit,
