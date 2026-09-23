@@ -39,6 +39,61 @@ void main() {
         'totalElements': 1,
       });
     });
+    adapter.on('GET', '/api/platform/control/customers/2/profile', (_) {
+      return const FakeResponse({
+        'core': {
+          'identity': {
+            'id': 2,
+            'customerRef': 'C-2',
+            'name': 'Deepak kr.Gupta',
+            'email': 'deepak@example.test',
+            'phone': '9876543210',
+            'role': 'CUSTOMER',
+            'roles': ['CUSTOMER'],
+            'enabled': true,
+            'active': true,
+            'verified': true,
+            'createdAt': '2026-09-01T08:30:00',
+          },
+          'orders': {
+            'total': 0,
+            'completed': 0,
+            'active': 0,
+            'cancelled': 0,
+            'failed': 0,
+            'returned': 0,
+            'refunded': 0,
+          },
+          'finance': {
+            'completedPurchaseValue': 0,
+            'refunds': 0,
+            'cancellationFees': 0,
+            'averageCompletedOrder': 0,
+            'lastOrderAt': null,
+          },
+          'reviews': 0,
+          'reportedReviews': 0,
+          'recentOrders': [],
+        },
+        'addresses': [],
+        'shops': [],
+        'categories': [],
+        'payments': [],
+        'refunds': [],
+        'reviews': [],
+        'returns': [],
+        'activity': {
+          'sessions': 0,
+          'activeDays': 0,
+          'totalSeconds': 0,
+          'firstSessionAt': null,
+          'lastSessionAt': null,
+          'lastOrderAt': null,
+          'note': '',
+        },
+        'security': [],
+      });
+    });
 
     final repository =
         PlatformRepository(apiClient: buildTestApiClient(adapter));
@@ -61,7 +116,7 @@ void main() {
     final onTap = tester.widget<ListTile>(resultTile).onTap;
     expect(onTap, isNotNull);
     onTap!();
-    await tester.pump();
+    await tester.pumpAndSettle();
 
     expect(find.byType(PlatformCustomerProfileScreen), findsOneWidget,
         reason: 'The old generic PlatformEntity360Screen renders raw '
