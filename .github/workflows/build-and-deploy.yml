@@ -330,6 +330,8 @@ jobs:
             --target-platform android-arm,android-arm64 \
             --flavor worker \
             -t lib/worker_main.dart \
+            --build-number="${{ github.run_number }}" \
+            --dart-define=GPSTORE_APP=worker \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
@@ -354,6 +356,8 @@ jobs:
             --target-platform android-arm,android-arm64 \
             --flavor worker \
             -t lib/worker_main.dart \
+            --build-number="${{ github.run_number }}" \
+            --dart-define=GPSTORE_APP=worker \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
@@ -364,13 +368,6 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           aab=build/app/outputs/bundle/worker/gpstore-worker-release.aab
           echo "| $(basename "$aab") | $(du -h "$aab" | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload Delivery Worker App Bundle
-        if: steps.play_signing.outputs.enabled == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: gpstore-worker-aab
-          path: frontend/build/app/outputs/bundle/worker/gpstore-worker-release.aab
 
       - name: Build Customer APK
         env:
@@ -391,6 +388,7 @@ jobs:
           flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
             --flavor customer \
             -t lib/customer_main.dart \
+            --build-number="${{ github.run_number }}" \
             --dart-define=GPSTORE_APP=customer \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
@@ -408,6 +406,7 @@ jobs:
           flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
             --flavor admin \
             -t lib/admin_main.dart \
+            --build-number="${{ github.run_number }}" \
             --dart-define=GPSTORE_APP=admin \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
@@ -438,18 +437,16 @@ jobs:
           flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
             --flavor superadmin \
             -t lib/super_admin_main.dart \
+            --build-number="${{ github.run_number }}" \
             --dart-define=GPSTORE_APP=superadmin \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
 
-      - name: Name customer and admin APKs and report actual sizes
+      - name: Name customer and admin APKs
         # arm64-v8a is the production phone APK. armeabi-v7a is legacy 32-bit
         # only, uploaded under its own name so it is not mistaken for a bundle.
         # Do not copy the same file to a second name for upload.
-        env:
-          PACKAGE_SHA: ${{ steps.src.outputs.sha }}
-          PACKAGE_SHORT: ${{ steps.src.outputs.short }}
         run: |
           set -Eeuo pipefail
           OUT=build/app/outputs/flutter-apk
@@ -457,8 +454,6 @@ jobs:
             customer gpstore-customer-release.apk gpstore-customer-armv7.apk \
             admin gpstore-admin-release.apk gpstore-admin-armv7.apk \
             superadmin gpstore-superadmin-release.apk gpstore-superadmin-armv7.apk
-          VERSION="$(python3 -c "import pathlib,re; t=pathlib.Path('pubspec.yaml').read_text(); m=re.search(r'^version:\\s*(\\S+)', t, re.M); print(m.group(1) if m else 'unknown')")"
-          python3 tool/report_apk_artifacts.py "$OUT" "$PACKAGE_SHA" "$PACKAGE_SHORT" "$VERSION"
 
       - name: Verify APK signatures and zip alignment
         # assembleRelease already signs (debug key unless key.properties exists)
@@ -480,6 +475,14 @@ jobs:
             build/app/outputs/flutter-apk/gpstore-superadmin-release.apk \
             build/app/outputs/flutter-apk/gpstore-superadmin-armv7.apk
 
+      - name: Freeze verified APK bytes before bundle builds
+        run: |
+          set -Eeuo pipefail
+          STAGE="$RUNNER_TEMP/gpstore-release"
+          mkdir -p "$STAGE"
+          cp build/app/outputs/flutter-apk/gpstore-*.apk "$STAGE/"
+          test "$(find "$STAGE" -maxdepth 1 -name '*.apk' | wc -l)" -eq 8
+
       - name: Build Customer App Bundle
         if: steps.play_signing.outputs.enabled == 'true'
         run: |
@@ -490,6 +493,7 @@ jobs:
           flutter build appbundle --release \
             --flavor customer \
             -t lib/customer_main.dart \
+            --build-number="${{ github.run_number }}" \
             --dart-define=GPSTORE_APP=customer \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
@@ -508,6 +512,7 @@ jobs:
           flutter build appbundle --release \
             --flavor admin \
             -t lib/admin_main.dart \
+            --build-number="${{ github.run_number }}" \
             --dart-define=GPSTORE_APP=admin \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
@@ -526,6 +531,7 @@ jobs:
           flutter build appbundle --release \
             --flavor superadmin \
             -t lib/super_admin_main.dart \
+            --build-number="${{ github.run_number }}" \
             --dart-define=GPSTORE_APP=superadmin \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
@@ -547,13 +553,54 @@ jobs:
             build/app/outputs/bundle/admin/gpstore-admin-release.aab \
             build/app/outputs/bundle/superadmin/gpstore-superadmin-release.aab
 
+      # The bytes uploaded below are the bytes checked here. Run #937 checked
+      # and hashed the Admin APK before later appbundle builds mutated that
+      # path, then uploaded a malformed ZIP with a different digest. APKs are
+      # now frozen before bundle builds and re-opened here immediately before
+      # upload. A checksum is evidence only for the exact staged byte stream.
+      - name: Final release-byte validation and checksums
+        env:
+          PACKAGE_SHA: ${{ steps.src.outputs.sha }}
+          PACKAGE_SHORT: ${{ steps.src.outputs.short }}
+          REQUIRE_RELEASE_SIGNING: ${{ steps.play_signing.outputs.enabled == 'true' && '1' || '0' }}
+          EXPECTED_APP_BUILD: ${{ steps.src.outputs.short }}
+          EXPECTED_API_BASE_URL: https://api.gpstore.co.in/v1
+          EXPECTED_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -Eeuo pipefail
+          STAGE="$RUNNER_TEMP/gpstore-release"
+          python3 tool/verify_apk_release.py "$STAGE"/*.apk
+          if [ "${{ steps.play_signing.outputs.enabled }}" = "true" ]; then
+            cp build/app/outputs/bundle/worker/gpstore-worker-release.aab \
+               build/app/outputs/bundle/customer/gpstore-customer-release.aab \
+               build/app/outputs/bundle/admin/gpstore-admin-release.aab \
+               build/app/outputs/bundle/superadmin/gpstore-superadmin-release.aab \
+               "$STAGE/"
+            python3 tool/verify_apk_release.py --payload-only "$STAGE"/*.aab
+          fi
+          VERSION_NAME="$(python3 -c "import pathlib,re; t=pathlib.Path('pubspec.yaml').read_text(); m=re.search(r'^version:\\s*([^+\\s]+)', t, re.M); print(m.group(1) if m else 'unknown')")"
+          python3 tool/report_apk_artifacts.py "$STAGE" "$PACKAGE_SHA" \
+            "$PACKAGE_SHORT" "${VERSION_NAME}+${{ github.run_number }}"
+          if compgen -G "$STAGE/*.aab" >/dev/null; then
+            (
+              cd "$STAGE"
+              for artifact in *.aab; do
+                sha256sum "$artifact" > "$artifact.sha256"
+              done
+            )
+          fi
+          (
+            cd "$STAGE"
+            sha256sum -c -- *.sha256
+          )
+
       - name: Upload customer ARM64 APK
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-customer-release.apk
           path: |
-            frontend/build/app/outputs/flutter-apk/gpstore-customer-release.apk
-            frontend/build/app/outputs/flutter-apk/gpstore-customer-release.apk.sha256
+            ${{ runner.temp }}/gpstore-release/gpstore-customer-release.apk
+            ${{ runner.temp }}/gpstore-release/gpstore-customer-release.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
@@ -562,8 +609,8 @@ jobs:
         with:
           name: gpstore-customer-armv7.apk
           path: |
-            frontend/build/app/outputs/flutter-apk/gpstore-customer-armv7.apk
-            frontend/build/app/outputs/flutter-apk/gpstore-customer-armv7.apk.sha256
+            ${{ runner.temp }}/gpstore-release/gpstore-customer-armv7.apk
+            ${{ runner.temp }}/gpstore-release/gpstore-customer-armv7.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
@@ -572,8 +619,8 @@ jobs:
         with:
           name: gpstore-admin-release.apk
           path: |
-            frontend/build/app/outputs/flutter-apk/gpstore-admin-release.apk
-            frontend/build/app/outputs/flutter-apk/gpstore-admin-release.apk.sha256
+            ${{ runner.temp }}/gpstore-release/gpstore-admin-release.apk
+            ${{ runner.temp }}/gpstore-release/gpstore-admin-release.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
@@ -582,8 +629,8 @@ jobs:
         with:
           name: gpstore-admin-armv7.apk
           path: |
-            frontend/build/app/outputs/flutter-apk/gpstore-admin-armv7.apk
-            frontend/build/app/outputs/flutter-apk/gpstore-admin-armv7.apk.sha256
+            ${{ runner.temp }}/gpstore-release/gpstore-admin-armv7.apk
+            ${{ runner.temp }}/gpstore-release/gpstore-admin-armv7.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
@@ -592,8 +639,8 @@ jobs:
         with:
           name: gpstore-superadmin-release.apk
           path: |
-            frontend/build/app/outputs/flutter-apk/gpstore-superadmin-release.apk
-            frontend/build/app/outputs/flutter-apk/gpstore-superadmin-release.apk.sha256
+            ${{ runner.temp }}/gpstore-release/gpstore-superadmin-release.apk
+            ${{ runner.temp }}/gpstore-release/gpstore-superadmin-release.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
@@ -602,8 +649,8 @@ jobs:
         with:
           name: gpstore-superadmin-armv7.apk
           path: |
-            frontend/build/app/outputs/flutter-apk/gpstore-superadmin-armv7.apk
-            frontend/build/app/outputs/flutter-apk/gpstore-superadmin-armv7.apk.sha256
+            ${{ runner.temp }}/gpstore-release/gpstore-superadmin-armv7.apk
+            ${{ runner.temp }}/gpstore-release/gpstore-superadmin-armv7.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
@@ -612,8 +659,8 @@ jobs:
         with:
           name: gpstore-worker-arm64.apk
           path: |
-            frontend/build/app/outputs/flutter-apk/gpstore-worker-arm64.apk
-            frontend/build/app/outputs/flutter-apk/gpstore-worker-arm64.apk.sha256
+            ${{ runner.temp }}/gpstore-release/gpstore-worker-arm64.apk
+            ${{ runner.temp }}/gpstore-release/gpstore-worker-arm64.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
@@ -622,8 +669,8 @@ jobs:
         with:
           name: gpstore-worker-armv7.apk
           path: |
-            frontend/build/app/outputs/flutter-apk/gpstore-worker-armv7.apk
-            frontend/build/app/outputs/flutter-apk/gpstore-worker-armv7.apk.sha256
+            ${{ runner.temp }}/gpstore-release/gpstore-worker-armv7.apk
+            ${{ runner.temp }}/gpstore-release/gpstore-worker-armv7.apk.sha256
           if-no-files-found: error
           retention-days: 90
 
@@ -632,21 +679,36 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-customer-release.aab
-          path: frontend/build/app/outputs/bundle/customer/gpstore-customer-release.aab
+          path: |
+            ${{ runner.temp }}/gpstore-release/gpstore-customer-release.aab
+            ${{ runner.temp }}/gpstore-release/gpstore-customer-release.aab.sha256
 
       - name: Upload Admin App Bundle
         if: steps.play_signing.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-admin-release.aab
-          path: frontend/build/app/outputs/bundle/admin/gpstore-admin-release.aab
+          path: |
+            ${{ runner.temp }}/gpstore-release/gpstore-admin-release.aab
+            ${{ runner.temp }}/gpstore-release/gpstore-admin-release.aab.sha256
 
       - name: Upload Super Admin App Bundle
         if: steps.play_signing.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: gpstore-superadmin-release.aab
-          path: frontend/build/app/outputs/bundle/superadmin/gpstore-superadmin-release.aab
+          path: |
+            ${{ runner.temp }}/gpstore-release/gpstore-superadmin-release.aab
+            ${{ runner.temp }}/gpstore-release/gpstore-superadmin-release.aab.sha256
+
+      - name: Upload Delivery Worker App Bundle
+        if: steps.play_signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpstore-worker-aab
+          path: |
+            ${{ runner.temp }}/gpstore-release/gpstore-worker-release.aab
+            ${{ runner.temp }}/gpstore-release/gpstore-worker-release.aab.sha256
 
   automerge-after-release:
     name: Auto-merge after release validation

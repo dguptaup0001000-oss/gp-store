@@ -53,6 +53,8 @@ void main() {
       Map<String, dynamic>? capturedBody;
 
       adapter.on('POST', '/api/wishlists', (options) {
+        expect(options.headers['X-GP-Store-Client-App'], isNotEmpty);
+        expect(options.headers['X-GP-Store-Client-Build'], isNotEmpty);
         capturedBody = options.data as Map<String, dynamic>;
         return const FakeResponse({
           'id': 60,

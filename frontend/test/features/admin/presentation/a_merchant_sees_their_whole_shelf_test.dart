@@ -5,6 +5,7 @@ import 'package:gpstore/features/admin/data/admin_products_repository.dart';
 import 'package:gpstore/features/admin/domain/selling_mode.dart';
 import 'package:gpstore/features/admin/presentation/admin_providers.dart';
 import 'package:gpstore/features/admin/presentation/merchant_mode_catalogue_screen.dart';
+import 'package:gpstore/features/admin/presentation/admin_product_form_screen.dart';
 
 import '../../../support/test_api_client.dart';
 
@@ -102,6 +103,22 @@ void main() {
   }
 
   group('Visit to Buy', () {
+    testWidgets('Add item opens the real product form in Visit-to-Buy mode',
+        (tester) async {
+      tall(tester);
+      final h = host(SellingMode.visitToBuy, total: 0);
+      await tester.pumpWidget(h.widget);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add item'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AdminProductFormScreen), findsOneWidget);
+      expect(find.text('Visit to Buy'), findsWidgets,
+          reason: 'The real Visit-to-Buy navigation must pass its mode into '
+              'the form before the first atomic /api/shop/products request.');
+    });
+
     testWidgets('asks the server for its own mode and nothing else',
         (tester) async {
       tall(tester);

@@ -116,6 +116,35 @@ class CustomerNotificationApiContractTest {
         org.junit.jupiter.api.Assertions.assertNotNull(stranger.getId());
     }
 
+    @Test
+    @DisplayName("a customer who also delivers keeps the customer notification identity")
+    void customerRiderReadsCustomerNotifications() throws Exception {
+        alice.setRole(Role.DELIVERY_BOY);
+        customers.saveAndFlush(alice);
+        notification(alice, "Customer order update");
+        var auth = new UsernamePasswordAuthenticationToken(
+                new AuthenticatedUser(alice.getId(), alice.getEmail(), Role.DELIVERY_BOY.name()),
+                null, List.of(
+                        new SimpleGrantedAuthority("ROLE_CUSTOMER"),
+                        new SimpleGrantedAuthority("ROLE_DELIVERY_BOY")));
+
+        mockMvc.perform(get("/api/notifications/mine").with(authentication(auth)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].title").value("Customer order update"));
+    }
+
+    @Test
+    @DisplayName("a standalone worker has no customer notification identity")
+    void standaloneWorkerCannotReadCustomerNotifications() throws Exception {
+        var auth = new UsernamePasswordAuthenticationToken(
+                new AuthenticatedUser(null, "worker@notify.invalid",
+                        Role.DELIVERY_BOY.name(), 91L),
+                null, List.of(new SimpleGrantedAuthority("ROLE_DELIVERY_BOY")));
+
+        mockMvc.perform(get("/api/notifications/mine").with(authentication(auth)))
+                .andExpect(status().isForbidden());
+    }
+
     private Customer customer(String who) {
         Customer customer = new Customer();
         customer.setFullName(who);

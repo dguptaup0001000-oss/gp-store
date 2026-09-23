@@ -19,6 +19,11 @@
 
     <properties>
         <java.version>21</java.version>
+        <!-- Overridden by the production Docker build. This value is written
+             into META-INF/build-info.properties inside the jar, so the
+             running binary can prove its source independently of a mutable
+             GIT_COMMIT environment variable. -->
+        <git.commit>unknown</git.commit>
         <!-- Pinned explicitly rather than trusting spring-boot-starter-parent's
              managed version - if your JDK is newer than what that managed
              version supports, Lombok's annotation processor can silently
@@ -258,6 +263,18 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                        <configuration>
+                            <additionalProperties>
+                                <gitCommit>${git.commit}</gitCommit>
+                            </additionalProperties>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
 
             <plugin>

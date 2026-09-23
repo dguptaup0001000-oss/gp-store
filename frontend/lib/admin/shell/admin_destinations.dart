@@ -31,6 +31,7 @@ import '../../features/admin/domain/selling_mode.dart';
 import '../../features/admin/presentation/merchant_mode_catalogue_screen.dart';
 import '../../features/admin/presentation/platform_system_health_screen.dart';
 import '../../features/admin/presentation/shop_earnings_screen.dart';
+import '../../features/support/presentation/release_diagnostics_screen.dart';
 import '../dashboard/admin_dashboard_screen.dart';
 import '../operations/morning_preparation_screen.dart';
 import '../operations/store_operations_screen.dart';
@@ -102,6 +103,14 @@ class AdminNav {
     builder: _dashboard,
   );
 
+  static const AdminDestination releaseDiagnostics = AdminDestination(
+    id: 'release-diagnostics',
+    label: 'Release Diagnostics',
+    icon: Icons.fact_check_outlined,
+    description: 'APK, API, backend and database release identity',
+    builder: _releaseDiagnostics,
+  );
+
   /// Named, like [dashboard], because the super admin APK opens on it.
   ///
   /// Still listed in the Marketplace group below and still gated on
@@ -133,6 +142,9 @@ class AdminNav {
 
   static Widget _storeHours(BuildContext context) =>
       const StoreOperationsScreen();
+
+  static Widget _releaseDiagnostics(BuildContext context) =>
+      const ReleaseDiagnosticsScreen();
 
   static const List<AdminNavGroup> groups = [
     AdminNavGroup(
@@ -394,6 +406,7 @@ class AdminNav {
           description: 'Connect a printer to auto-print new orders',
           builder: _printer,
         ),
+        releaseDiagnostics,
       ],
     ),
   ];
@@ -463,6 +476,7 @@ class AdminNav {
         AdminDestination(id: 'platform-health', requires: AdminPermission.platformAdmin,
             label: 'System Health', icon: Icons.monitor_heart_outlined,
             builder: _platformHealth),
+        releaseDiagnostics,
       ],
     ),
   ];

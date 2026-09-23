@@ -898,6 +898,8 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:latest

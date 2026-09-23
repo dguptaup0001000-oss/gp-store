@@ -187,14 +187,36 @@ say "Deployed build"
 check "GET /api/version"                    200 "$BASE/api/version"
 DEPLOYED_SHA=$(curl -sS --max-time 25 "$BASE/api/version" 2>/dev/null \
         | python3 -c 'import json,sys; print(json.load(sys.stdin).get("gitCommit",""))' 2>/dev/null || echo "")
+DEPLOYED_BINARY_SHA=$(curl -sS --max-time 25 "$BASE/api/version" 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("binaryGitCommit",""))' 2>/dev/null || echo "")
+DEPLOYED_SCHEMA=$(curl -sS --max-time 25 "$BASE/api/version" 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("schemaVersion",""))' 2>/dev/null || echo "")
 echo "  deployed gitCommit: ${DEPLOYED_SHA:-<none>}"
+echo "  binary gitCommit:   ${DEPLOYED_BINARY_SHA:-<none>}"
+echo "  schema version:     ${DEPLOYED_SCHEMA:-<none>}"
 if [ -n "$EXPECT_SHA" ]; then
-  if [ "$DEPLOYED_SHA" = "$EXPECT_SHA" ]; then
+  if [ "$DEPLOYED_SHA" = "$EXPECT_SHA" ] && [ "$DEPLOYED_BINARY_SHA" = "$EXPECT_SHA" ]; then
     printf '  %sPASS%s  %-58s %s\n' "$GREEN" "$OFF" "/api/version matches expected commit" "${DEPLOYED_SHA:0:12}"
     pass=$((pass+1))
   else
+    printf '  %sFAIL%s  %-58s runtime=%s binary=%s wanted=%s\n' "$RED" "$OFF" \
+      "/api/version matches expected commit" "${DEPLOYED_SHA:-<none>}" \
+      "${DEPLOYED_BINARY_SHA:-<none>}" "$EXPECT_SHA"
+    fail=$((fail+1))
+  fi
+fi
+EXPECTED_SCHEMA=$(find backend/src/main/resources/db/migration -maxdepth 1 \
+    -type f -name 'V*__*.sql' -printf '%f\n' 2>/dev/null \
+    | sort -V | tail -1 | sed -E 's/^V([^_]+)__.*/\1/' || true)
+if [ -n "$EXPECTED_SCHEMA" ]; then
+  if [ "$DEPLOYED_SCHEMA" = "$EXPECTED_SCHEMA" ]; then
+    printf '  %sPASS%s  %-58s %s\n' "$GREEN" "$OFF" \
+      "/api/version reports the latest database migration" "$DEPLOYED_SCHEMA"
+    pass=$((pass+1))
+  else
     printf '  %sFAIL%s  %-58s got %s, wanted %s\n' "$RED" "$OFF" \
-      "/api/version matches expected commit" "${DEPLOYED_SHA:-<none>}" "$EXPECT_SHA"
+      "/api/version reports the latest database migration" \
+      "${DEPLOYED_SCHEMA:-<none>}" "$EXPECTED_SCHEMA"
     fail=$((fail+1))
   fi
 fi
@@ -208,6 +230,18 @@ check "GET /api/marketplace/discovery"      200 "$BASE/api/marketplace/discovery
 check "GET /api/marketplace/shops"          200 "$BASE/api/marketplace/shops?lat=$LAT&lng=$LNG"
 check "GET /api/marketplace/feed"           200 "$BASE/api/marketplace/feed?lat=$LAT&lng=$LNG&mode=ONLINE_PURCHASE&page=0&size=5"
 
+MARKETPLACE_MODE=$(curl -sS --max-time 25 "$BASE/api/marketplace/mode" 2>/dev/null \
+        | python3 -c 'import json,sys; d=json.load(sys.stdin); print("true" if d.get("multiShop") is True else "false")' 2>/dev/null || echo false)
+if [ "$MARKETPLACE_MODE" = "true" ]; then
+  printf '  %sPASS%s  %-58s\n' "$GREEN" "$OFF" \
+    "production reports MULTI_SHOP marketplace mode"
+  pass=$((pass+1))
+else
+  printf '  %sFAIL%s  %-58s\n' "$RED" "$OFF" \
+    "production reports MULTI_SHOP marketplace mode"
+  fail=$((fail+1))
+fi
+
 MARKET_PRODUCT=$(curl -sS --max-time 25 \
         "$BASE/api/marketplace/feed?lat=$LAT&lng=$LNG&mode=ONLINE_PURCHASE&page=0&size=5" 2>/dev/null \
         | python3 -c 'import json,sys; rows=json.load(sys.stdin); print(rows[0].get("productId", "") if rows else "")' 2>/dev/null || echo "")
@@ -218,6 +252,20 @@ if [ -n "$MARKET_PRODUCT" ]; then
 else
   printf '  %sFAIL%s  %-58s\n' "$RED" "$OFF" \
     "marketplace feed contains an eligible Buy Online product"
+  fail=$((fail+1))
+fi
+
+MARKET_NON_LEGACY_PRODUCT=$(curl -sS --max-time 25 \
+        "$BASE/api/marketplace/feed?lat=$LAT&lng=$LNG&mode=ONLINE_PURCHASE&page=0&size=20" 2>/dev/null \
+        | python3 -c 'import json,sys; rows=json.load(sys.stdin); print(next((r.get("productId", "") for r in rows if r.get("shopId") not in (None, 1)), ""))' 2>/dev/null || echo "")
+if [ -n "$MARKET_NON_LEGACY_PRODUCT" ]; then
+  MARKET_PRODUCT="$MARKET_NON_LEGACY_PRODUCT"
+  printf '  %sPASS%s  %-58s %s\n' "$GREEN" "$OFF" \
+    "feed contains a real non-Shop-#1 Buy Online listing" "$MARKET_PRODUCT"
+  pass=$((pass+1))
+else
+  printf '  %sFAIL%s  %-58s\n' "$RED" "$OFF" \
+    "feed contains a real non-Shop-#1 Buy Online listing"
   fail=$((fail+1))
 fi
 
@@ -314,7 +362,7 @@ if [ -n "$MARKET_PRODUCT" ]; then
     "$BASE/api/wishlists"
   WISHLIST_ITEM=$(curl -sS --max-time 25 "${AUTH[@]}" \
         "$BASE/api/wishlists/mine" 2>/dev/null \
-        | python3 -c 'import json,sys; rows=json.load(sys.stdin); print(rows[0].get("id", "") if rows else "")' 2>/dev/null || echo "")
+        | python3 -c 'import json,sys; rows=json.load(sys.stdin); wanted=int(sys.argv[1]); print(next((r.get("id", "") for r in rows if (r.get("product") or {}).get("id") == wanted), ""))' "$MARKET_PRODUCT" 2>/dev/null || echo "")
   if [ -n "$WISHLIST_ITEM" ]; then
     check "DELETE /api/wishlists/{id}" 200 -X DELETE "${AUTH[@]}" \
       "$BASE/api/wishlists/$WISHLIST_ITEM"

@@ -29,6 +29,20 @@ enum SellingMode {
     }
     return SellingMode.onlinePurchase;
   }
+
+  /// Merchant-owned catalogue responses must always carry the authoritative
+  /// listing mode. Treating a missing/new value as ONLINE_PURCHASE silently
+  /// moves Visit-to-Buy and Service listings into the online section after a
+  /// reload. Failing the response is safer and makes the wire-contract fault
+  /// observable instead of changing what the merchant sells.
+  static SellingMode fromRequiredWire(Object? wire) {
+    if (wire is String) {
+      for (final mode in SellingMode.values) {
+        if (mode.wire == wire) return mode;
+      }
+    }
+    throw FormatException('Missing or unsupported commerceMode');
+  }
 }
 
 /// How the price is stated.

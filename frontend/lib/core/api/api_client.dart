@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../config/app_environment.dart';
 import '../storage/token_storage.dart';
+import 'api_runtime_trace.dart';
 import 'retry_policy.dart';
 
 /// Matches the backend's ApiError shape exactly (see GlobalExceptionHandler /
@@ -48,6 +49,11 @@ class ApiException implements Exception {
 }
 
 class ApiClient {
+  static const buildSha =
+      String.fromEnvironment('BUILD_SHA', defaultValue: 'dev');
+  static const appName =
+      String.fromEnvironment('GPSTORE_APP', defaultValue: 'unspecified');
+
   ApiClient({
     required this.tokenStorage,
     this.onSessionExpired,
@@ -75,6 +81,10 @@ class ApiClient {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: _attachAccessToken,
+        onResponse: (response, handler) {
+          ApiRuntimeTrace.response(response);
+          handler.next(response);
+        },
         onError: _handleError,
       ),
     );
@@ -125,6 +135,11 @@ class ApiClient {
     RequestOptions options,
     RequestInterceptorHandler handler,
   ) async {
+    // Safe release identity only. These values contain no credential or
+    // device identifier and let production logs distinguish an old APK from
+    // the artifact a bug report claims to use.
+    options.headers['X-GP-Store-Client-App'] = appName;
+    options.headers['X-GP-Store-Client-Build'] = buildSha;
     // Auth endpoints carry their own credential (password, or the refresh
     // token itself) - never attach a possibly-stale access token to them.
     final isAuthEndpoint = options.path.startsWith('/api/auth/');
@@ -163,6 +178,7 @@ class ApiClient {
 
   Future<void> _handleError(
       DioException error, ErrorInterceptorHandler handler) async {
+    ApiRuntimeTrace.error(error);
     final response = error.response;
 
     // The refresh-once guard is load-bearing, not defensive tidying. The

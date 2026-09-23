@@ -14,6 +14,7 @@ import '../../reviews/presentation/my_reviews_screen.dart';
 import '../../support/presentation/about_screen.dart';
 import '../../support/presentation/contact_us_screen.dart';
 import '../../support/presentation/privacy_policy_screen.dart';
+import '../../support/presentation/release_diagnostics_screen.dart';
 import '../../support/presentation/terms_screen.dart';
 import '../../wishlist/presentation/wishlist_screen.dart';
 import 'profile_providers.dart';
@@ -148,6 +149,14 @@ class ProfileScreen extends ConsumerWidget {
               icon: Icons.description_outlined,
               label: 'Terms of Service',
               onTap: hapticize(() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TermsScreen()))),
+            ),
+            _menuTile(
+              context,
+              icon: Icons.fact_check_outlined,
+              label: 'Release diagnostics',
+              onTap: hapticize(() => Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => const ReleaseDiagnosticsScreen()))),
             ),
             const SizedBox(height: 16),
             _menuTile(

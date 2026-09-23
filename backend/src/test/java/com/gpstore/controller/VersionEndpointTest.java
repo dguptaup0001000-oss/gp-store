@@ -10,6 +10,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
@@ -43,9 +44,12 @@ class VersionEndpointTest {
     void versionIsPublic() throws Exception {
         mockMvc.perform(get("/api/version"))
                 .andExpect(status().isOk())
+                .andExpect(header().exists("X-GP-Store-Backend-Build"))
                 .andExpect(jsonPath("$.application").value("gp-store-backend"))
                 .andExpect(jsonPath("$.version").value("test-version"))
                 .andExpect(jsonPath("$.gitCommit").value("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+                .andExpect(jsonPath("$.binaryGitCommit").exists())
+                .andExpect(jsonPath("$.schemaVersion").exists())
                 .andExpect(jsonPath("$.environment").value("development"))
                 .andExpect(jsonPath("$.jwtSecret").doesNotExist())
                 .andExpect(jsonPath("$.password").doesNotExist());

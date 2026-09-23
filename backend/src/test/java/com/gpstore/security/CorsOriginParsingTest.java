@@ -89,6 +89,10 @@ class CorsOriginParsingTest {
         assertFalse(cors.getAllowedOrigins().contains("*"),
                 "a wildcard origin with allowCredentials=true lets any site read authenticated responses");
         assertEquals(Boolean.TRUE, cors.getAllowCredentials());
-        assertEquals(List.of("Authorization", "Content-Type", "Idempotency-Key"), cors.getAllowedHeaders());
+        assertEquals(List.of(
+                "Authorization", "Content-Type", "Idempotency-Key",
+                "X-GP-Store-Client-App", "X-GP-Store-Client-Build"),
+                cors.getAllowedHeaders());
+        assertEquals(List.of("X-GP-Store-Backend-Build"), cors.getExposedHeaders());
     }
 }

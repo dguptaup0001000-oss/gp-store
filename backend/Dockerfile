@@ -2,6 +2,8 @@
 # Keeps the final runtime image small and free of build tooling.
 FROM eclipse-temurin:21-jdk-jammy AS build
 
+ARG GIT_COMMIT=unknown
+
 WORKDIR /app
 
 # Copy just the Maven files first so dependency downloads are cached in a
@@ -14,7 +16,7 @@ RUN chmod +x mvnw && ./mvnw dependency:go-offline -B
 
 COPY src/ src/
 # Copy the executable Boot jar only (not *.jar.original from repackage).
-RUN ./mvnw clean package -DskipTests -B \
+RUN ./mvnw clean package -DskipTests -B -Dgit.commit="${GIT_COMMIT}" \
     && cp target/backend-0.0.1-SNAPSHOT.jar /app/app.jar
 
 # Stage 2: runtime - just a JRE (not a full JDK) and the built jar.
