@@ -376,7 +376,7 @@ class OpenTheAppAndSeeTheMarketplaceTest {
                         new BigDecimal("50"));
             }
 
-            Long secondaryShopId = newShop("Secondary pagination shop");
+            Long secondaryShopId = newShop("Page2");
             Long secondaryProductId = newProduct("Secondary page product", "Hardware");
             listOn(secondaryShopId, variantOf(secondaryProductId),
                     CommerceMode.ONLINE_PURCHASE, new BigDecimal("75"));
