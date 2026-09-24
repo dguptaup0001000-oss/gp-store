@@ -24,14 +24,11 @@ class CustomerRootScreen extends StatelessWidget {
             'to manage the shop. This app is for shopping only.',
       );
     }
-    if (profile.role == 'DELIVERY_BOY') {
-      return const WrongAppScreen(
-        title: 'GP-STORE',
-        message:
-            'Delivery partners use the GP-STORE Worker app to pack orders. '
-            'This app is for shopping only.',
-      );
-    }
+    // A Customer row with DELIVERY_BOY is a shopper who also delivers. The
+    // backend grants that account both ROLE_CUSTOMER and ROLE_DELIVERY_BOY;
+    // rejecting it here contradicted the authenticated identity used by
+    // wishlist and notifications. A standalone worker has no customerId, so
+    // /api/customers/me is refused before a Profile can reach this builder.
     return const CustomerShell();
   }
 }

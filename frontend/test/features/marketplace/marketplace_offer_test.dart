@@ -153,8 +153,8 @@ void main() {
   });
 
   group('Talking to a newer server', () {
-    test('an unknown commerce mode reads as the world this app already knew', () {
-      expect(offer(mode: 'TELEPORT').commerceMode, CommerceMode.buyOnline);
+    test('an unknown commerce mode cannot silently become Buy Online', () {
+      expect(() => offer(mode: 'TELEPORT'), throwsFormatException);
       expect(offer(priceMode: 'HAGGLE').priceMode, ListingPriceMode.exact);
     });
 

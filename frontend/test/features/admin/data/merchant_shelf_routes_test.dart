@@ -1,7 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gpstore/features/admin/data/admin_products_repository.dart';
+import 'package:gpstore/features/admin/domain/selling_mode.dart';
 import 'package:gpstore/features/admin/domain/variant_attribute.dart';
+import 'package:gpstore/features/admin/presentation/admin_providers.dart';
+import 'package:gpstore/features/admin/presentation/admin_variant_form_dialog.dart';
 import 'package:gpstore/core/api/error_messages.dart';
+import 'package:gpstore/features/products/domain/product_models.dart';
 import 'package:dio/dio.dart';
 
 import '../../../support/test_api_client.dart';
@@ -23,6 +29,121 @@ void main() {
   setUpAll(setUpFakeSecureStorage);
 
   group('a merchant saves their own shelf, not the platform catalogue', () {
+    test('the edit snapshot reloads the authoritative shop commerce mode',
+        () async {
+      final adapter = FakeHttpClientAdapter();
+      adapter.on('GET', '/api/shop/variants/42', (options) {
+        return const FakeResponse({
+          'productVariantId': 42,
+          'sellingPrice': 30000,
+          'mrp': 35000,
+          'available': true,
+          'commerceMode': 'VISIT_TO_BUY',
+          'priceMode': 'STARTING_FROM',
+          'priceMax': 42000,
+          'offlineAvailability': 'LIMITED_AVAILABILITY',
+          'serviceDurationMinutes': null,
+          'attributes': [
+            {'name': 'RAM', 'value': '8 GB'},
+          ],
+        });
+      });
+
+      final repository =
+          AdminProductsRepository(apiClient: buildTestApiClient(adapter));
+      final snapshot = await repository.getVariantForEditing(42);
+
+      expect(snapshot.selling, SellingMode.visitToBuy);
+      expect(snapshot.price, PriceMode.startingFrom);
+      expect(snapshot.stock, OfflineStock.limited);
+      expect(snapshot.priceMax, 42000);
+      expect(snapshot.attributes.single.value, '8 GB');
+    });
+
+    test('the edit snapshot refuses a missing mode instead of assuming online',
+        () async {
+      final adapter = FakeHttpClientAdapter();
+      adapter.on('GET', '/api/shop/variants/42', (options) {
+        return const FakeResponse({
+          'productVariantId': 42,
+          'sellingPrice': 30000,
+          'priceMode': 'EXACT_PRICE',
+          'available': true,
+          'attributes': [],
+        });
+      });
+      final repository =
+          AdminProductsRepository(apiClient: buildTestApiClient(adapter));
+
+      await expectLater(repository.getVariantForEditing(42),
+          throwsA(isA<FormatException>()));
+    });
+
+    testWidgets(
+        'editing a Visit-to-Buy listing reloads and resends its authoritative mode',
+        (tester) async {
+      tester.view.physicalSize = const Size(1000, 2200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? saved;
+      adapter.on('GET', '/api/shop/variants/42', (options) {
+        return const FakeResponse({
+          'productVariantId': 42,
+          'sellingPrice': 30000,
+          'mrp': 35000,
+          'available': true,
+          'commerceMode': 'VISIT_TO_BUY',
+          'priceMode': 'STARTING_FROM',
+          'priceMax': null,
+          'offlineAvailability': 'AVAILABLE',
+          'serviceDurationMinutes': null,
+          'attributes': [],
+        });
+      });
+      adapter.on('GET', '/api/shop/variants/42/images', (options) =>
+          const FakeResponse(<String>[]));
+      adapter.on('PUT', '/api/shop/variants/42', (options) {
+        saved = Map<String, dynamic>.from(options.data as Map);
+        return const FakeResponse({'productVariantId': 42});
+      });
+      final repository =
+          AdminProductsRepository(apiClient: buildTestApiClient(adapter));
+
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          adminProductsRepositoryProvider.overrideWithValue(repository),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(
+            body: AdminVariantFormDialog(
+              productId: 9,
+              variant: ProductVariant(
+                id: 42,
+                unit: '8 GB + 256 GB',
+                available: true,
+                mrp: 35000,
+                sellingPrice: 30000,
+              ),
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Visit to Buy'), findsWidgets);
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+
+      expect(saved, isNotNull);
+      expect(saved!['commerceMode'], 'VISIT_TO_BUY',
+          reason: 'reopening and saving must not apply the create default '
+              'ONLINE_PURCHASE to an existing listing');
+      expect(saved!['priceMode'], 'STARTING_FROM');
+    });
+
     test('updateVariant goes to the shop route, never /api/product-variants',
         () async {
       final adapter = FakeHttpClientAdapter();

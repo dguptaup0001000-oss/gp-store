@@ -157,7 +157,8 @@ class ThePhoneShopSellsItsPhoneTest {
         String created = body(post("/api/shop/products"), phoneOwner, """
                 {"name":"moto edge 50 pro %s","brand":"motorola","categoryId":%d,
                  "firstVariant":{"label":"8 gb and 128 gb","sellingPrice":30000,
-                                 "mrp":35000,"costPrice":29000,"stock":4}}
+                                 "mrp":35000,"costPrice":29000,"stock":4,
+                                 "commerceMode":"ONLINE_PURCHASE"}}
                 """.formatted(tag, phoneCategory));
         assertTrue(created.contains("moto edge 50 pro"), "create must answer with what it made");
 
@@ -252,7 +253,8 @@ class ThePhoneShopSellsItsPhoneTest {
         body(post("/api/shop/products"), phoneOwner, """
                 {"name":"moto edge 50 pro %s","brand":"motorola","categoryId":%d,
                  "firstVariant":{"label":"8 gb and 128 gb","sellingPrice":30000,
-                                 "mrp":35000,"costPrice":29000,"stock":4}}
+                                 "mrp":35000,"costPrice":29000,"stock":4,
+                                 "commerceMode":"ONLINE_PURCHASE"}}
                 """.formatted(tag, phoneCategory));
 
         long productId = productId();
@@ -283,7 +285,8 @@ class ThePhoneShopSellsItsPhoneTest {
             body(post("/api/shop/products"), phoneOwner, """
                     {"name":"moto edge 50 pro %s","brand":"motorola","categoryId":%d,
                      "firstVariant":{"label":"8 gb and 128 gb","sellingPrice":30000,
-                                     "mrp":35000,"stock":4}}
+                                     "mrp":35000,"stock":4,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(tag, phoneCategory));
             long productId = productId();
             long listedVariant = variantId(productId);
@@ -345,7 +348,8 @@ class ThePhoneShopSellsItsPhoneTest {
             body(post("/api/shop/products"), phoneOwner, """
                     {"name":"moto edge 50 pro %s","brand":"motorola","categoryId":%d,
                      "firstVariant":{"label":"8 gb and 128 gb","sellingPrice":30000,
-                                     "mrp":35000,"stock":4}}
+                                     "mrp":35000,"stock":4,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(tag, phoneCategory));
             long productId = productId();
             long variantId = variantId(productId);
@@ -375,7 +379,8 @@ class ThePhoneShopSellsItsPhoneTest {
             body(post("/api/shop/products"), phoneOwner, """
                     {"name":"moto edge 50 pro %s","brand":"motorola","categoryId":%d,
                      "firstVariant":{"label":"8 gb and 128 gb","sellingPrice":30000,
-                                     "mrp":35000,"stock":4}}
+                                     "mrp":35000,"stock":4,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(tag, phoneCategory));
             long productId = productId();
             long variantId = variantId(productId);
@@ -414,7 +419,8 @@ class ThePhoneShopSellsItsPhoneTest {
             body(post("/api/shop/products"), phoneOwner, """
                     {"name":"moto edge 50 pro %s","brand":"motorola","categoryId":%d,
                      "firstVariant":{"label":"8 gb and 128 gb","sellingPrice":30000,
-                                     "mrp":35000,"stock":4}}
+                                     "mrp":35000,"stock":4,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(tag, phoneCategory));
             long productId = productId();
             long variantId = variantId(productId);

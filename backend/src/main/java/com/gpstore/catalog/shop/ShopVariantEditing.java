@@ -207,6 +207,9 @@ public class ShopVariantEditing {
         if (productId == null) {
             throw new BadRequestException("Which product?");
         }
+        if (edit == null || edit.commerceMode() == null) {
+            throw new BadRequestException("Choose how customers obtain this item.");
+        }
         List<ProductVariant> siblings = variants.findByProduct_IdOrderByIdAsc(productId);
         if (siblings.isEmpty()) {
             throw new ResourceNotFoundException("This shop does not sell that product.");

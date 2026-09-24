@@ -21,6 +21,53 @@ import '../domain/selling_mode.dart';
 import '../domain/variant_attribute.dart';
 import '../domain/shop_category.dart';
 
+/// Authoritative shop-listing state used when an existing variant is edited.
+///
+/// The normal ProductVariant model is customer-facing and intentionally has
+/// no shop commerce fields. Reusing it in the merchant editor was lossy, so
+/// this mirrors ShopVariantEditing.VariantView instead.
+class AdminVariantEditSnapshot {
+  const AdminVariantEditSnapshot({
+    required this.selling,
+    required this.price,
+    required this.available,
+    required this.attributes,
+    this.sellingPrice,
+    this.mrp,
+    this.priceMax,
+    this.stock,
+    this.serviceMinutes,
+  });
+
+  final SellingMode selling;
+  final PriceMode price;
+  final bool available;
+  final double? sellingPrice;
+  final double? mrp;
+  final double? priceMax;
+  final OfflineStock? stock;
+  final int? serviceMinutes;
+  final List<VariantAttribute> attributes;
+
+  factory AdminVariantEditSnapshot.fromJson(Map<String, dynamic> json) {
+    final rawStock = json['offlineAvailability'];
+    return AdminVariantEditSnapshot(
+      selling: SellingMode.fromRequiredWire(json['commerceMode']),
+      price: PriceMode.fromRequiredWire(json['priceMode']),
+      available: (json['available'] as bool?) ?? true,
+      sellingPrice: (json['sellingPrice'] as num?)?.toDouble(),
+      mrp: (json['mrp'] as num?)?.toDouble(),
+      priceMax: (json['priceMax'] as num?)?.toDouble(),
+      stock: rawStock == null ? null : OfflineStock.fromRequiredWire(rawStock),
+      serviceMinutes: (json['serviceDurationMinutes'] as num?)?.toInt(),
+      attributes: ((json['attributes'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => VariantAttribute.fromJson(Map<String, dynamic>.from(e)))
+          .toList(growable: false),
+    );
+  }
+}
+
 class AdminProductsRepository {
   AdminProductsRepository({required this.apiClient})
       : _uploads = ImageUploadService(apiClient: apiClient);
@@ -273,14 +320,16 @@ class AdminProductsRepository {
     return ListingEngagementReport.fromJson(data);
   }
 
-  /// One of this shop's variants, with the attributes it already carries.
-  Future<List<VariantAttribute>> getVariantAttributes(int variantId) async {
+  /// One of this shop's variants as the edit dialog must reopen it.
+  ///
+  /// This includes the SHOP LISTING fields, not only the shared catalogue
+  /// variant. Reading ProductVariant alone loses commerceMode; the dialog
+  /// then used its Buy Online default and an innocent price edit changed an
+  /// in-person listing into online inventory.
+  Future<AdminVariantEditSnapshot> getVariantForEditing(int variantId) async {
     final response = await apiClient.dio.get('/api/shop/variants/$variantId');
-    final data = response.data as Map<String, dynamic>;
-    final raw = (data['attributes'] as List?) ?? const [];
-    return raw
-        .map((e) => VariantAttribute.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return AdminVariantEditSnapshot.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
   }
 
   /// Lets the admin pick a photo from their gallery. Bytes go to object
@@ -913,9 +962,9 @@ class AdminFirstVariant {
   const AdminFirstVariant({
     required this.label,
     required this.sellingPrice,
+    required this.selling,
     this.mrp,
     this.stock,
-    this.selling,
   });
 
   final String label;
@@ -923,16 +972,16 @@ class AdminFirstVariant {
   final double? mrp;
   final int? stock;
 
-  /// HOW this shop sells it. Absent means Buy Online, which is what every
-  /// product created before commerce modes existed was, so an older caller
-  /// that does not send it keeps behaving exactly as it did.
-  final SellingSetup? selling;
+  /// HOW this shop sells it. Required at the Dart boundary as well as the
+  /// Spring boundary: an omitted Visit-to-Buy value must never become online
+  /// inventory because a caller forgot one field.
+  final SellingSetup selling;
 
   Map<String, dynamic> toJson() => {
         if (label.trim().isNotEmpty) 'label': label.trim(),
         'sellingPrice': sellingPrice,
         if (mrp != null) 'mrp': mrp,
         'stock': stock ?? 0,
-        ...?selling?.toJson(),
+        ...selling.toJson(),
       };
 }

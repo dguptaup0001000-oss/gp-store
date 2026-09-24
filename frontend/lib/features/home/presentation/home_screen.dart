@@ -45,11 +45,12 @@ import 'popular_categories.dart';
 /// curated rails, each of which draws NOTHING when its data is absent (§8).
 /// The endless catalogue feed still ends the page, unchanged.
 ///
-/// THE TWO-WAVE LOAD SURVIVED INTACT and is the reason this stays fast. The
-/// categories and offers are in flight the moment the screen opens; the
-/// carousels and the feed wait behind homeBelowFoldReadyProvider, because a
-/// request for something below the fold competing with content the customer
-/// can see is a slower first paint for nothing.
+/// THE TWO-WAVE LOAD SURVIVED FOR SECONDARY CONTENT. Categories, offers and
+/// the marketplace feed are in flight when the screen opens; only curated
+/// carousels and the legacy single-shop feed wait behind
+/// homeBelowFoldReadyProvider. On a marketplace the feed is the primary
+/// answer to Home, so deferring it behind unrelated rails made production
+/// look empty while those requests were slow.
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
@@ -82,7 +83,12 @@ class HomeScreen extends ConsumerWidget {
     final feedAsync = belowFoldReady && !onAMarketplace
         ? ref.watch(productFeedProvider)
         : const AsyncValue<ProductFeedState>.loading();
-    final marketplaceAsync = belowFoldReady && onAMarketplace
+    // The marketplace feed is the screen's primary answer, not a decorative
+    // below-the-fold carousel. It must start on the first build. Holding it
+    // behind categories + brands + offers made a slow production phone wait
+    // for those three requests (or their 15-second timeouts) before the feed
+    // request even existed, which looked exactly like an empty Home.
+    final marketplaceAsync = onAMarketplace
         ? ref.watch(marketplaceFeedProvider)
         : const AsyncValue<MarketplaceFeedState>.loading();
     final isLoggedIn = ref.watch(authControllerProvider).status == AuthStatus.authenticated;
@@ -219,13 +225,12 @@ class HomeScreen extends ConsumerWidget {
                     // reading .notifier would BUILD the feed provider and fire
                     // its first page, which is what the gate exists to hold
                     // back.
-                    if (belowFoldReady &&
-                        notification.depth == 0 &&
+                    if (notification.depth == 0 &&
                         notification.metrics.axis == Axis.vertical &&
                         notification.metrics.extentAfter < 600) {
                       if (onAMarketplace) {
                         ref.read(marketplaceFeedProvider.notifier).loadMore();
-                      } else {
+                      } else if (belowFoldReady) {
                         ref.read(productFeedProvider.notifier).loadMore();
                       }
                     }

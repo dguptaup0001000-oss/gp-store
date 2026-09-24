@@ -20,9 +20,11 @@ enum SellingMode {
 
   bool get isOnline => this == SellingMode.onlinePurchase;
 
-  /// Unknown values read as online, which is what every listing was before
-  /// modes existed - an older app talking to a newer server sees the world it
-  /// already understood rather than an empty screen.
+  /// Lenient legacy parser for non-authoritative display-only data.
+  ///
+  /// Merchant listing and customer marketplace responses must use
+  /// [fromRequiredWire]. They are authorization/checkout inputs, so treating
+  /// an unsupported value as online would be a dangerous mode change.
   static SellingMode fromWire(String? wire) {
     for (final mode in SellingMode.values) {
       if (mode.wire == wire) return mode;
@@ -64,6 +66,15 @@ enum PriceMode {
     return PriceMode.exact;
   }
 
+  static PriceMode fromRequiredWire(Object? wire) {
+    if (wire is String) {
+      for (final mode in PriceMode.values) {
+        if (mode.wire == wire) return mode;
+      }
+    }
+    throw FormatException('Missing or unsupported priceMode');
+  }
+
   /// Which price modes this selling mode allows.
   ///
   /// AN ONLINE PRICE IS A PROMISE: a cart totals it, a payment charges it and
@@ -94,6 +105,15 @@ enum OfflineStock {
       if (value.wire == wire) return value;
     }
     return OfflineStock.available;
+  }
+
+  static OfflineStock fromRequiredWire(Object? wire) {
+    if (wire is String) {
+      for (final value in OfflineStock.values) {
+        if (value.wire == wire) return value;
+      }
+    }
+    throw FormatException('Missing or unsupported offlineAvailability');
   }
 }
 

@@ -296,6 +296,10 @@ public class ProductService {
     private void listFirstVariant(Product product,
                                   com.gpstore.dto.request.ProductCreateRequest.FirstVariant first,
                                   boolean insideAShop) {
+        if (insideAShop && (first.getCommerceMode() == null
+                || first.getCommerceMode().isBlank())) {
+            throw new BadRequestException("Choose how customers obtain this item.");
+        }
         com.gpstore.entity.ProductVariant variant = new com.gpstore.entity.ProductVariant();
         variant.setProduct(product);
         variant.setQuantity(first.getQuantity());
@@ -351,9 +355,9 @@ public class ProductService {
     /**
      * Reads the selling mode off the create request onto the new listing.
      *
-     * <p>ABSENT MEANS ONLINE, which is what every product created before
-     * commerce modes existed is - so a client that does not send these fields
-     * behaves exactly as it always did.
+     * <p>For a shop-owned create the mode is required before any row is
+     * committed. Existing rows were backfilled by V74; silently defaulting a
+     * new merchant request is how an in-person item becomes online inventory.
      *
      * <p>AN UNKNOWN VALUE IS REFUSED, not silently defaulted. Defaulting would
      * quietly make a Visit-to-Buy item buyable, which is the one direction

@@ -255,6 +255,7 @@ class _MerchantModeCatalogueScreenState
       builder: (_) => AdminVariantFormDialog(
         productId: item.productId,
         categoryName: item.categoryName,
+        initialSellingMode: item.commerceMode,
         variant: ProductVariant(
           id: item.productVariantId,
           available: item.available,

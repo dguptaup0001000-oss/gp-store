@@ -8,20 +8,21 @@ enum CommerceMode {
   visitToBuy,
   serviceAtShop;
 
-  /// Parses the wire value, falling back rather than throwing.
+  /// Parses an authoritative commerce mode.
   ///
-  /// A card the server labels with a mode this build has never heard of - a
-  /// newer backend during a staged rollout - must not crash the home screen.
-  /// It renders as the safe thing instead, which is the one mode that has
-  /// always existed.
+  /// Missing/unknown must fail the response. Treating either as Buy Online
+  /// can turn an in-person item or service into cart inventory, which is a
+  /// worse failure than an observable feed error.
   static CommerceMode fromWire(String? raw) {
     switch (raw) {
+      case 'ONLINE_PURCHASE':
+        return CommerceMode.buyOnline;
       case 'VISIT_TO_BUY':
         return CommerceMode.visitToBuy;
       case 'SERVICE_AT_SHOP':
         return CommerceMode.serviceAtShop;
       default:
-        return CommerceMode.buyOnline;
+        throw FormatException('Missing or unsupported commerceMode');
     }
   }
 

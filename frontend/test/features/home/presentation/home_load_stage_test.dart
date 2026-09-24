@@ -5,10 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/core/marketplace/marketplace_models.dart';
 import 'package:gpstore/core/marketplace/marketplace_providers.dart';
+import 'package:gpstore/core/marketplace/marketplace_repository.dart';
 import 'package:gpstore/core/store/store_status.dart';
 import 'package:gpstore/core/store/store_status_provider.dart';
+import 'package:gpstore/features/address/domain/address_models.dart';
 import 'package:gpstore/features/address/presentation/address_providers.dart';
 import 'package:gpstore/features/home/presentation/home_screen.dart';
+import 'package:gpstore/features/marketplace/domain/marketplace_feed_models.dart';
 import 'package:gpstore/features/products/data/products_repository.dart';
 import 'package:gpstore/features/products/domain/brand_models.dart';
 import 'package:gpstore/features/products/domain/product_models.dart';
@@ -71,12 +74,45 @@ class RecordingRepository implements ProductsRepository {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class RecordingMarketplaceRepository implements MarketplaceRepository {
+  final List<String> calls = [];
+
+  @override
+  Future<List<MarketplaceCard>> feed({
+    required double? latitude,
+    required double? longitude,
+    CommerceMode mode = CommerceMode.buyOnline,
+    int? categoryId,
+    int page = 0,
+    int size = 20,
+  }) async {
+    calls.add('marketplace-feed:$latitude:$longitude:${mode.wire}:$page:$size');
+    return const [];
+  }
+
+  @override
+  Future<List<MarketCategory>> categoriesNear({
+    required double latitude,
+    required double longitude,
+  }) async => const [];
+
+  @override
+  Future<List<Storefront>> shopsNear({
+    double? latitude,
+    double? longitude,
+  }) async => const [];
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 void main() {
   setUpAll(setUpFakeSecureStorage);
 
   late RecordingRepository repository;
+  late RecordingMarketplaceRepository marketplaceRepository;
 
-  Future<void> openHome(WidgetTester tester) async {
+  Future<void> openHome(WidgetTester tester, {bool marketplace = false}) async {
     // CONSTRUCTED HERE, NOT IN setUp, and the reason is worth recording
     // because it costs an afternoon to find. testWidgets runs its body
     // inside a fake-async zone; setUp runs outside it. A Completer built in
@@ -87,11 +123,14 @@ void main() {
     // never appears to resolve, and every "...and then it loads" assertion
     // fails while the code under test is perfectly correct.
     repository = RecordingRepository();
+    marketplaceRepository = RecordingMarketplaceRepository();
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           productsRepositoryProvider.overrideWithValue(repository),
+          marketplaceRepositoryProvider
+              .overrideWithValue(marketplaceRepository),
           // The store banner is not what this test measures, but it is on the
           // home screen and it polls. Left real it opens a Dio request that
           // never resolves under the test binding, and the pending timer
@@ -105,15 +144,33 @@ void main() {
           // request the test binding never resolves. Answered here with the
           // single-shop value, which is also what this test's subject is:
           // the request budget of the ORDINARY home screen.
-          marketplaceModeProvider
-              .overrideWith((ref) async => MarketplaceMode.singleShop),
+          marketplaceModeProvider.overrideWith((ref) async => marketplace
+              ? const MarketplaceMode(
+                  mode: 'MULTI_SHOP_PRODUCTION', multiShop: true)
+              : MarketplaceMode.singleShop),
           // The header names the address the order is going to, which is
           // visible content and so genuinely belongs in the first wave - but
           // it is not a PRODUCT request, and this test measures the product
           // request budget. Left real it opens a Dio call the test binding
           // never resolves, and the pending timer fails the test for a reason
           // that has nothing to do with what it is asserting.
-          myAddressesProvider.overrideWith((ref) async => const []),
+          myAddressesProvider.overrideWith((ref) async => marketplace
+              ? const [
+                  AddressModel(
+                    id: 17,
+                    fullName: 'Release Customer',
+                    mobileNumber: '9000000000',
+                    houseNo: '1',
+                    area: 'Test Colony',
+                    city: 'Maharajganj',
+                    state: 'Uttar Pradesh',
+                    pincode: '273303',
+                    latitude: 27.16231,
+                    longitude: 83.940468,
+                    defaultAddress: true,
+                  ),
+                ]
+              : const []),
         ],
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -126,6 +183,25 @@ void main() {
   const belowFold = ['new-arrivals', 'trending', 'for-me', 'feed'];
 
   group('what opening the home screen puts on the wire', () {
+    testWidgets(
+        'marketplace feed starts before categories, brands and offers settle',
+        (tester) async {
+      await openHome(tester, marketplace: true);
+      await tester.pump();
+
+      expect(
+        marketplaceRepository.calls,
+        contains('marketplace-feed:27.16231:83.940468:ONLINE_PURCHASE:0:20'),
+        reason: 'Home must ask the marketplace on startup; waiting for three '
+            'unrelated sections reproduced the real-device empty home.',
+      );
+      expect(repository.calls, isNot(contains('feed')),
+          reason: 'marketplace Home must never fall back to Shop #1');
+      expect(repository.categories.isCompleted, isFalse);
+      expect(repository.brands.isCompleted, isFalse);
+      expect(repository.offers.isCompleted, isFalse);
+    });
+
     testWidgets('only the above-the-fold requests go out on the first frame', (tester) async {
       await openHome(tester);
 
