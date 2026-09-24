@@ -18,10 +18,9 @@
 # Pull-request builds validate the APK pipeline but are not release artifacts.
 
 # What this gives you, with ZERO extra accounts beyond GitHub itself:
-# - An APK you can download directly from the Actions run's "Artifacts"
-#   section after every push - install it on an Android phone to test.
+# - A production APK artifact only after the deployed release passes smoke.
 # - A live, clickable web URL at https://<your-username>.github.io/<repo>/,
-#   rebuilt automatically on every push to main.
+#   rebuilt automatically by the separate Pages workflow.
 #
 # Production builds always pass --dart-define=APP_ENV=production.
 # Customer applicationId: in.gpstore.customer
@@ -49,8 +48,6 @@
 name: Build APK and Deploy Web
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
