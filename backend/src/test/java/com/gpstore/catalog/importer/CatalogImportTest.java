@@ -72,7 +72,7 @@ class CatalogImportTest {
     private CatalogImportService.ImportSummary run(String body, Mode mode) {
         byte[] bytes = csv(body);
         return com.gpstore.platform.TenantContext.runWithin(
-                com.gpstore.platform.TenantScope.ofShop(com.gpstore.entity.Shop.FIRST_SHOP_ID), () -> {
+                com.gpstore.platform.TenantScope.ofShop(com.gpstore.platform.Shop.FIRST_SHOP_ID), () -> {
                     var preview = importService.preview("sheet.csv", bytes, mode, "admin@example.com");
                     return importService.commit(preview.runId(), "sheet.csv", bytes, "admin@example.com");
                 });
