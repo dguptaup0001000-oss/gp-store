@@ -76,6 +76,9 @@ void main() {
     expect(find.text('Active'), findsOneWidget);
     expect(find.text('Available'), findsOneWidget);
     expect(find.text('Bike'), findsOneWidget);
+    // Delivery sections are below the overview cards in the scrolling profile.
+    await tester.drag(find.byType(ListView), const Offset(0, -800));
+    await tester.pumpAndSettle();
     expect(find.text('GP-ORDER-80'), findsOneWidget);
     expect(find.text('GP-ORDER-81'), findsOneWidget);
     expect(find.text('password'), findsNothing);
