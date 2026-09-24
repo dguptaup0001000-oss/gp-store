@@ -193,7 +193,7 @@ class APriceEditReachesTheStorefrontTest {
                 shopSelfService.upsertListing(variantId,
                         new ShopSelfServiceController.ListingUpdate(
                                 price, null, price.add(new BigDecimal("20")),
-                                Boolean.TRUE, Boolean.TRUE, null)));
+                                Boolean.TRUE, Boolean.TRUE, null, null)));
     }
 
     private BigDecimal priceOnTheStorefront() {
