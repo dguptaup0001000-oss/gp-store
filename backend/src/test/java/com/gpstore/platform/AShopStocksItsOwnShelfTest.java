@@ -436,7 +436,7 @@ class AShopStocksItsOwnShelfTest {
 
     private void listVariant(Long owner, Long selectedVariantId, double price) throws Exception {
         perform(put("/api/shop/listings/" + selectedVariantId), owner,
-                "{\"sellingPrice\":%s,\"mrp\":%s,\"available\":true,\"active\":true}"
+                "{\"sellingPrice\":%s,\"mrp\":%s,\"commerceMode\":\"ONLINE_PURCHASE\",\"available\":true,\"active\":true}"
                         .formatted(price, price + 15), 200);
     }
 
