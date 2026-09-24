@@ -60,7 +60,7 @@ on:
         required: false
         default: ''
 concurrency:
-  group: gpstore-apk-${{ github.event.workflow_run.head_sha || github.sha }}
+  group: gpstore-apk-${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -69,37 +69,18 @@ permissions:
 
 jobs:
   build-apk:
-    # Push, pull_request, and workflow_dispatch always run.
-    # workflow_run runs when the source Deploy Production succeeded.
-    # Do not use github.ref. Do not skip solely because the event is
-    # workflow_run — that is what skipped #420.
-    if: >-
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
-      - name: Record workflow_run source
-        if: github.event_name == 'workflow_run'
-        working-directory: .
-        run: |
-          set -Eeuo pipefail
-          echo "source_event=${{ github.event.workflow_run.event }}"
-          echo "source_branch=${{ github.event.workflow_run.head_branch }}"
-          echo "source_sha=${{ github.event.workflow_run.head_sha }}"
-          echo "source_conclusion=${{ github.event.workflow_run.conclusion }}"
-
       - name: Resolve commit to package
         id: src
         working-directory: .
         run: |
           set -Eeuo pipefail
           echo "event_name=${GITHUB_EVENT_NAME}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
-            SHA="${{ github.event.workflow_run.head_sha }}"
-          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.sha }}" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.sha }}" ]; then
             SHA="${{ inputs.sha }}"
           else
             SHA="${GITHUB_SHA}"
