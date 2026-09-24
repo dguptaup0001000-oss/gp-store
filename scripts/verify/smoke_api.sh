@@ -322,7 +322,7 @@ except Exception:
     print(-1)
 ' 2>/dev/null || echo -1)
 ALL_FEED_PAGE=0
-ALL_FEED_PAGE_LIMIT=10
+ALL_FEED_PAGE_LIMIT=100
 while [ "$ALL_FEED_PAGE" -lt "$ALL_FEED_PAGE_LIMIT" ] && [ "$ALL_FEED_PAGE_COUNT" -eq 50 ]; do
   ALL_FEED_PAGE=$((ALL_FEED_PAGE+1))
   check "GET /api/marketplace/feed ALL page $ALL_FEED_PAGE" 200 \
@@ -355,7 +355,7 @@ except Exception:
   ALL_FEED_PAGE_COUNT="$NEXT_ALL_COUNT"
 done
 if [ "$ALL_FEED_PAGE" -eq "$ALL_FEED_PAGE_LIMIT" ] && [ "$ALL_FEED_PAGE_COUNT" -eq 50 ]; then
-  echo "  NOTE: stopped after $ALL_FEED_PAGE_LIMIT ALL-feed pages (500 listings); pagination check is bounded."
+  echo "  NOTE: stopped after $ALL_FEED_PAGE_LIMIT ALL-feed pages (5000 listings); pagination check is bounded and the comparison is inconclusive."
 fi
 
 SAMPLED_SECONDARY_LISTINGS=0
