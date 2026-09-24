@@ -422,8 +422,9 @@ class OpenTheAppAndSeeTheMarketplaceTest {
                             .param("size", "50"))
                     .andExpect(status().isOk())
                     .andReturn().getResponse().getContentAsString();
-            assertTrue(json.readTree(selectedBody).toString().contains(
-                            "\\"productId\\":" + secondaryProductId),
+            var selectedCards = json.readTree(selectedBody);
+            assertTrue(java.util.stream.StreamSupport.stream(selectedCards.spliterator(), false)
+                            .anyMatch(card -> card.path("productId").asLong() == secondaryProductId),
                     "the selected-shop HTTP response should retain its eligible product: " + selectedBody);
         }
 
