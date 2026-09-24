@@ -326,7 +326,6 @@ def merge_eligible_pr(number: int) -> str:
         log(merged_text or f"Merged PR #{number} into main.")
         dispatch_ssh_access_check()
         dispatch_production_deploy()
-        dispatch_production_apk()
         return "merged"
 
     if is_permission_error(merged_text) or is_permission_error(native_text):

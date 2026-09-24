@@ -534,3 +534,29 @@ jobs:
           set -Eeuo pipefail
           gh workflow run offbox-backup.yml --repo "$GITHUB_REPOSITORY" --ref main
           echo "Dispatched Off-box backup on main."
+  # Build the installable apps only after Hostinger deployment AND the
+  # read/write production smoke have both passed. GITHUB_TOKEN does not
+  # reliably fan out workflow_run events, so dispatch the release explicitly
+  # with the exact SHA that was deployed and checked above.
+  release-apks:
+    name: Build release APKs for the verified production SHA
+    needs: [smoke]
+    if: >-
+      github.event_name != 'pull_request'
+      && needs.smoke.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch APK build for deployed SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs.sha || github.sha }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run build-and-deploy.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "sha=$RELEASE_SHA"
+          echo "Dispatched APK build for deployed and smoke-tested SHA $RELEASE_SHA."
