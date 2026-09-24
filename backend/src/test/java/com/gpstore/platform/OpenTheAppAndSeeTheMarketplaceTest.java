@@ -367,6 +367,68 @@ class OpenTheAppAndSeeTheMarketplaceTest {
         }
 
         @Test
+        @DisplayName("a secondary-shop product survives ALL-feed offset pagination over real HTTP JSON")
+        void secondaryShopProductAppearsOnLaterAllPage() throws Exception {
+            Long firstShopId = shopIds.get(0);
+            for (int i = 0; i < 50; i++) {
+                Long filler = newProduct("Pagination filler " + i, "Grocery");
+                listOn(firstShopId, variantOf(filler), CommerceMode.ONLINE_PURCHASE,
+                        new BigDecimal("50"));
+            }
+
+            Long secondaryShopId = newShop("Page2");
+            Long secondaryProductId = newProduct("Secondary page product", "Hardware");
+            listOn(secondaryShopId, variantOf(secondaryProductId),
+                    CommerceMode.ONLINE_PURCHASE, new BigDecimal("75"));
+
+            String firstBody = mockMvc.perform(get("/api/marketplace/feed")
+                            .param("lat", String.valueOf(LAT))
+                            .param("lng", String.valueOf(LNG))
+                            .param("mode", "ONLINE_PURCHASE")
+                            .param("page", "0")
+                            .param("size", "50"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            var firstPage = json.readTree(firstBody);
+            assertEquals(50, firstPage.size(), "the first page should be filled by nearer/equal fixtures");
+            assertFalse(java.util.stream.StreamSupport.stream(firstPage.spliterator(), false)
+                            .anyMatch(card -> card.path("productId").asLong() == secondaryProductId),
+                    "the last inserted product should require the next page in this stable fixture");
+
+            String nextBody = mockMvc.perform(get("/api/marketplace/feed")
+                            .param("lat", String.valueOf(LAT))
+                            .param("lng", String.valueOf(LNG))
+                            .param("mode", "ONLINE_PURCHASE")
+                            .param("page", "1")
+                            .param("size", "50"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            var nextPage = json.readTree(nextBody);
+            assertTrue(java.util.stream.StreamSupport.stream(nextPage.spliterator(), false)
+                            .anyMatch(card -> card.path("productId").asLong() == secondaryProductId),
+                    "the combined ALL feed must retain the eligible secondary-shop item after offset paging: "
+                            + nextBody);
+            for (var card : nextPage) {
+                assertEquals("ONLINE_PURCHASE", card.path("commerceMode").asText(),
+                        "the serialized page changed the listing's commerce mode: " + card);
+            }
+
+            String selectedBody = mockMvc.perform(get("/api/marketplace/feed")
+                            .param("lat", String.valueOf(LAT))
+                            .param("lng", String.valueOf(LNG))
+                            .param("mode", "ONLINE_PURCHASE")
+                            .param("shopId", String.valueOf(secondaryShopId))
+                            .param("page", "0")
+                            .param("size", "50"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            var selectedCards = json.readTree(selectedBody);
+            assertTrue(java.util.stream.StreamSupport.stream(selectedCards.spliterator(), false)
+                            .anyMatch(card -> card.path("productId").asLong() == secondaryProductId),
+                    "the selected-shop HTTP response should retain its eligible product: " + selectedBody);
+        }
+
+        @Test
         @DisplayName("a caller cannot ask for the whole marketplace in one page")
         void pageSizeIsBounded() {
             assertTrue(feed.page(LAT, LNG, Set.of(CommerceMode.ONLINE_PURCHASE), null, 0, 100_000)
