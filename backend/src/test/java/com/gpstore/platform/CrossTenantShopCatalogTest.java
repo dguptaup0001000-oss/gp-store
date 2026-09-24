@@ -522,6 +522,9 @@ class CrossTenantShopCatalogTest {
         TenantContext.runWithin(TenantScope.ofShop(shopId), () -> {
             ShopProductVariant listing = listings.findByProductVariantId(variantId)
                     .orElseGet(ShopProductVariant::new);
+            if (listing.getCommerceMode() == null) {
+                listing.setCommerceMode(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE);
+            }
             listing.setProductVariantId(variantId);
             listing.setSellingPrice(price);
             listing.setCostPrice(cost);
