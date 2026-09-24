@@ -192,7 +192,7 @@ void main() {
 
       expect(
         marketplaceRepository.calls,
-        contains('marketplace-feed:27.16231:83.940468:ONLINE_PURCHASE:0:20'),
+        contains('marketplace-feed:27.16231:83.940468:ALL:0:20'),
         reason: 'Home must ask the marketplace on startup; waiting for three '
             'unrelated sections reproduced the real-device empty home.',
       );
