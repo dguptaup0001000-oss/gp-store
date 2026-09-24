@@ -473,7 +473,7 @@ class CrossTenantShopCatalogTest {
                 () -> variants.save(fresh).getId());
 
         assertNull(TenantContext.runWithin(TenantScope.platform(),
-                        () -> shopCatalog.list(variants.findById(freshId).orElseThrow())),
+                        () -> shopCatalog.list(variants.findById(freshId).orElseThrow(), com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE)),
                 "a caller with no shelf must list nothing rather than fail");
 
         assertEquals(0L, jdbc.queryForObject(
@@ -485,7 +485,7 @@ class CrossTenantShopCatalogTest {
 
         // And a shop can still pick it up afterwards, which is the whole point.
         assertNotNull(TenantContext.runWithin(TenantScope.ofShop(shopB),
-                        () -> shopCatalog.list(variants.findById(freshId).orElseThrow())),
+                        () -> shopCatalog.list(variants.findById(freshId).orElseThrow(), com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE)),
                 "a shop must still be able to list a platform-defined variant");
 
         jdbc.update("DELETE FROM shop_product_variants WHERE product_variant_id = ?", freshId);
