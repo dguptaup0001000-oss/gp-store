@@ -301,7 +301,8 @@ class AuthorizationDoesNotDependOnModeTest {
             // rule that stopped merchants trading would be worse than the leak.
             String created = body(post("/api/shop/products"), ownerA, """
                     {"name":"Mode Added %s","brand":"Test","categoryId":%d,
-                     "firstVariant":{"label":"one","sellingPrice":50,"stock":1}}
+                     "firstVariant":{"label":"one","sellingPrice":50,"stock":1,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(tag, categoryA));
             assertTrue(created.contains("Mode Added " + tag), created);
 

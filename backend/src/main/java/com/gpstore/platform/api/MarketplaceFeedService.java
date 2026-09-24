@@ -156,7 +156,7 @@ public class MarketplaceFeedService {
     }
 
     private MarketplaceOfferView toOffer(Object[] r) {
-        CommerceMode mode = enumOf(CommerceMode.class, (String) r[10], CommerceMode.ONLINE_PURCHASE);
+        CommerceMode mode = requiredEnum(CommerceMode.class, (String) r[10], "commerce mode");
         return new MarketplaceOfferView(
                 (Long) r[3], (String) r[4], (String) r[5],
                 (Long) r[0], asDouble(r[1]), (String) r[2],
@@ -172,7 +172,7 @@ public class MarketplaceFeedService {
     }
 
     private MarketplaceFeedView toCard(Object[] r) {
-        CommerceMode mode = enumOf(CommerceMode.class, (String) r[12], CommerceMode.ONLINE_PURCHASE);
+        CommerceMode mode = requiredEnum(CommerceMode.class, (String) r[12], "commerce mode");
         return new MarketplaceFeedView(
                 (Long) r[0], (String) r[1], (String) r[2],
                 asLong(r[3]), (String) r[4],
@@ -186,14 +186,7 @@ public class MarketplaceFeedService {
                 (Long) r[15], (String) r[16], (Double) r[17], (Integer) r[18]);
     }
 
-    /**
-     * An unrecognised stored value falls back rather than throwing.
-     *
-     * <p>A row written by a newer deployment during a rolling release must not
-     * take the whole home screen down for everybody still on the old one. The
-     * card renders as the safe thing instead, which for a commerce mode means
-     * the mode every existing listing already had.
-     */
+    /** Optional display metadata may retain a backwards-compatible fallback. */
     private static <E extends Enum<E>> E enumOf(Class<E> type, String raw, E fallback) {
         if (raw == null || raw.isBlank()) {
             return fallback;
@@ -202,6 +195,25 @@ public class MarketplaceFeedService {
             return Enum.valueOf(type, raw);
         } catch (IllegalArgumentException unknown) {
             return fallback;
+        }
+    }
+
+    /**
+     * Commerce mode decides whether an item may enter a cart. Missing or
+     * unknown stored data must be observable rather than reclassified as
+     * ONLINE_PURCHASE. V74 made the column NOT NULL and constrained its
+     * values, so reaching this means schema/data drift that must stop the
+     * response instead of changing the merchant's business rule.
+     */
+    private static <E extends Enum<E>> E requiredEnum(
+            Class<E> type, String raw, String what) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalStateException("Missing " + what + " in marketplace listing");
+        }
+        try {
+            return Enum.valueOf(type, raw);
+        } catch (IllegalArgumentException unknown) {
+            throw new IllegalStateException("Unsupported " + what + " in marketplace listing");
         }
     }
 

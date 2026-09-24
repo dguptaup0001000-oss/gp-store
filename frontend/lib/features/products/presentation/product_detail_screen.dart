@@ -82,7 +82,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         actions: [
           Consumer(
             builder: (context, ref, _) {
-              final isWishlisted = ref.watch(wishlistControllerProvider.notifier).isWishlisted(product.id);
+              // Watch the STATE as well as reading its controller. Watching
+              // only `.notifier` never rebuilt this icon after POST/DELETE,
+              // so a persisted wishlist change still looked like a dead tap.
+              ref.watch(wishlistControllerProvider);
+              final isWishlisted = ref
+                  .read(wishlistControllerProvider.notifier)
+                  .isWishlisted(product.id);
               return IconButton(
                 icon: Icon(
                   isWishlisted ? Icons.favorite : Icons.favorite_border,

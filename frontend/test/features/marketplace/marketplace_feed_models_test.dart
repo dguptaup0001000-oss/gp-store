@@ -24,18 +24,18 @@ void main() {
       expect(card.commerceMode, CommerceMode.visitToBuy);
     });
 
-    test('a mode this build has never heard of does not crash the feed', () {
-      // A newer backend during a staged rollout must not take the home screen
-      // down for everybody still on the old app. It falls back to the mode
-      // every listing has always had.
-      final card = MarketplaceCard.fromJson(const {
-        'productId': 2,
-        'name': 'Something new',
-        'commerceMode': 'RENT_BY_THE_HOUR',
-        'addable': false,
-      });
+    test('a missing or unknown mode never becomes Buy Online', () {
+      Map<String, dynamic> card(String? mode) => {
+            'productId': 2,
+            'name': 'Something new',
+            if (mode != null) 'commerceMode': mode,
+            'addable': false,
+          };
 
-      expect(card.commerceMode, CommerceMode.buyOnline);
+      expect(() => MarketplaceCard.fromJson(card('RENT_BY_THE_HOUR')),
+          throwsFormatException);
+      expect(() => MarketplaceCard.fromJson(card(null)),
+          throwsFormatException);
     });
   });
 

@@ -19,7 +19,8 @@ class AdminVariantFormDialog extends ConsumerStatefulWidget {
       {super.key,
       required this.productId,
       this.variant,
-      this.categoryName});
+      this.categoryName,
+      this.initialSellingMode});
 
   final int productId;
 
@@ -30,6 +31,10 @@ class AdminVariantFormDialog extends ConsumerStatefulWidget {
 
   /// Null means "add new variant" - non-null means editing this one.
   final ProductVariant? variant;
+
+  /// For a brand-new variant opened from a mode-specific screen. Existing
+  /// variants always reload their authoritative mode from the shop API.
+  final SellingMode? initialSellingMode;
 
   @override
   ConsumerState<AdminVariantFormDialog> createState() =>
@@ -60,13 +65,15 @@ class _AdminVariantFormDialogState
   /// HOW this shop sells this one thing. Defaults to online, which is what
   /// every listing was before modes existed, so a kirana never meets these
   /// controls as a decision they have to make.
-  SellingMode _selling = SellingMode.onlinePurchase;
+  late SellingMode _selling;
   PriceMode _priceMode = PriceMode.exact;
   OfflineStock _stock = OfflineStock.available;
   late final TextEditingController _priceMaxController;
   late final TextEditingController _serviceMinutesController;
 
   bool _isSaving = false;
+  bool _listingStateLoaded = false;
+  String? _listingStateError;
   bool _isUploadingImage = false;
 
   /// The photos this variant should end up with, in order. First is primary.
@@ -104,6 +111,7 @@ class _AdminVariantFormDialogState
     _priceMaxController = TextEditingController();
     _serviceMinutesController = TextEditingController();
     _available = v?.available ?? true;
+    _selling = widget.initialSellingMode ?? SellingMode.onlinePurchase;
 
     // Seeded from the variant's existing single thumbnail so an old
     // one-image variant opens showing the photo it already has, rather than
@@ -114,8 +122,9 @@ class _AdminVariantFormDialogState
         : const [];
     if (_isEditing) {
       _loadExistingImages();
-      _loadExistingAttributes();
+      _loadExistingListingState();
     } else {
+      _listingStateLoaded = true;
       _seedAttributesFromTemplate();
     }
   }
@@ -136,21 +145,39 @@ class _AdminVariantFormDialogState
   /// details list did not load would be noise. A variant that has none - every
   /// variant created before this feature - falls back to the trade template so
   /// the merchant still has somewhere to type.
-  Future<void> _loadExistingAttributes() async {
+  Future<void> _loadExistingListingState() async {
+    setState(() {
+      _listingStateLoaded = false;
+      _listingStateError = null;
+    });
     try {
       final loaded = await ref
           .read(adminProductsRepositoryProvider)
-          .getVariantAttributes(widget.variant!.id);
+          .getVariantForEditing(widget.variant!.id);
       if (!mounted) return;
       setState(() {
+        _selling = loaded.selling;
+        _priceMode = loaded.price;
+        _stock = loaded.stock ?? OfflineStock.available;
+        _priceMaxController.text = loaded.priceMax?.toString() ?? '';
+        _serviceMinutesController.text = loaded.serviceMinutes?.toString() ?? '';
+        _sellingPriceController.text =
+            loaded.sellingPrice?.toString() ?? _sellingPriceController.text;
+        _mrpController.text = loaded.mrp?.toString() ?? _mrpController.text;
+        _available = loaded.available;
         _attributes
           ..clear()
-          ..addAll(loaded.map((a) => _AttributeRow(name: a.name, value: a.value)));
+          ..addAll(loaded.attributes
+              .map((a) => _AttributeRow(name: a.name, value: a.value)));
         if (_attributes.isEmpty) _seedAttributesFromTemplate();
+        _listingStateLoaded = true;
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
-      if (_attributes.isEmpty) setState(_seedAttributesFromTemplate);
+      setState(() {
+        _listingStateError = extractErrorMessage(error);
+        _listingStateLoaded = false;
+      });
     }
   }
 
@@ -284,6 +311,14 @@ class _AdminVariantFormDialogState
       );
 
   Future<void> _save({bool allowBelowCost = false}) async {
+    if (_isEditing && !_listingStateLoaded) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(_listingStateError == null
+            ? 'Wait for the current selling mode to load.'
+            : 'Could not load the current selling mode. Retry before saving.'),
+      ));
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
 
     // Told beside the field rather than after a round trip. The server checks
@@ -678,7 +713,27 @@ class _AdminVariantFormDialogState
                 ],
               ),
               const SizedBox(height: 16),
-              _sellingModeSection(),
+              if (_isEditing && !_listingStateLoaded)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _listingStateError == null
+                      ? const LinearProgressIndicator(minHeight: 2)
+                      : Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Could not load selling mode: $_listingStateError',
+                                style: const TextStyle(color: AdminColors.danger),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _loadExistingListingState,
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                ),
+              if (!_isEditing || _listingStateLoaded) _sellingModeSection(),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _costPriceController,
@@ -783,7 +838,9 @@ class _AdminVariantFormDialogState
             onPressed: hapticize(() => Navigator.of(context).pop(false)),
             child: const Text('Cancel')),
         FilledButton(
-          onPressed: _isSaving ? null : () => _save(),
+          onPressed: _isSaving || (_isEditing && !_listingStateLoaded)
+              ? null
+              : () => _save(),
           child: _isSaving
               ? const SizedBox(
                   height: 16,

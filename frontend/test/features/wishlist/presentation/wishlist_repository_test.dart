@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gpstore/core/config/app_environment.dart';
 import 'package:gpstore/features/wishlist/data/wishlist_repository.dart';
 
 import '../../../support/test_api_client.dart';
@@ -67,5 +68,59 @@ void main() {
 
       expect(capturedBody, {'productId': 9});
     });
+  });
+
+  test('production wire flow survives a new repository session and removes',
+      () async {
+    final adapter = FakeHttpClientAdapter();
+    Map<String, dynamic>? persisted;
+    final urls = <String>[];
+
+    adapter.on('POST', '/api/wishlists', (options) {
+      urls.add(options.uri.toString());
+      expect(options.data, {'productId': 9});
+      persisted ??= {
+        'id': 55,
+        'product': {'id': 9, 'name': 'Motorola Edge 50 Pro', 'variants': []},
+      };
+      return FakeResponse(persisted);
+    });
+    adapter.on('GET', '/api/wishlists/mine', (options) {
+      urls.add(options.uri.toString());
+      return FakeResponse(persisted == null ? const [] : [persisted]);
+    });
+    adapter.on('DELETE', '/api/wishlists/55', (options) {
+      urls.add(options.uri.toString());
+      persisted = null;
+      return const FakeResponse(null);
+    });
+
+    WishlistRepository session() => WishlistRepository(
+          apiClient: buildTestApiClient(
+            adapter,
+            environment: AppEnvironment.production,
+          ),
+        );
+
+    final firstSession = session();
+    expect(await firstSession.getMyWishlist(), isEmpty);
+    final firstAdd = await firstSession.addToWishlist(9);
+    final repeatedAdd = await firstSession.addToWishlist(9);
+    expect(firstAdd.id, repeatedAdd.id,
+        reason: 'a repeated tap/request must be idempotent');
+    expect((await firstSession.getMyWishlist()).single.product?.id, 9);
+
+    // A fresh repository mirrors closing/reopening or logging in again: no
+    // optimistic controller state is available, only the server response.
+    final nextSession = session();
+    expect((await nextSession.getMyWishlist()).single.product?.id, 9);
+    await nextSession.removeFromWishlist(55);
+    expect(await nextSession.getMyWishlist(), isEmpty);
+
+    expect(
+      urls,
+      everyElement(startsWith('https://api.gpstore.co.in/v1/api/wishlists')),
+      reason: 'the release URL must contain exactly one /v1 segment',
+    );
   });
 }

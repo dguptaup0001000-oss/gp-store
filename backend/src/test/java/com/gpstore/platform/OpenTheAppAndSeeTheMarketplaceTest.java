@@ -10,8 +10,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -22,6 +24,8 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * A customer opens GP-STORE, has chosen nobody's shop, and sees the town.
@@ -48,6 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "otp.cleanup-initial-delay-ms=3600000",
         "delivery.late-flag-initial-delay-ms=3600000"
 })
+@AutoConfigureMockMvc
 @DisplayName("Open the app, choose no shop, see the marketplace")
 class OpenTheAppAndSeeTheMarketplaceTest {
 
@@ -56,6 +61,8 @@ class OpenTheAppAndSeeTheMarketplaceTest {
     @Autowired private ShopRepository shops;
     @Autowired private MerchantRepository merchants;
     @Autowired private PlatformProperties platform;
+    @Autowired private MockMvc mockMvc;
+    @Autowired private com.fasterxml.jackson.databind.ObjectMapper json;
 
     /** A pin the customer is standing on; every fixture shop is within a few hundred metres. */
     private static final double LAT = 19.4321;
@@ -133,6 +140,35 @@ class OpenTheAppAndSeeTheMarketplaceTest {
             assertTrue(shopsRepresented.size() >= 5,
                     "the feed must span the marketplace, not one shop's shelf. Shops seen: "
                             + shopsRepresented.size());
+        }
+
+        @Test
+        @DisplayName("the actual Customer APK route returns parseable cross-shop JSON")
+        void customerHomeWireContract() throws Exception {
+            String body = mockMvc.perform(get("/api/marketplace/feed")
+                            .param("lat", String.valueOf(LAT))
+                            .param("lng", String.valueOf(LNG))
+                            .param("mode", "ONLINE_PURCHASE")
+                            .param("page", "0")
+                            .param("size", "20"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+
+            var cards = json.readTree(body);
+            assertTrue(cards.isArray() && cards.size() >= 5,
+                    "the serialized HTTP response was not the five-shop feed: " + body);
+            Set<Long> represented = new HashSet<>();
+            boolean phone = false;
+            for (var card : cards) {
+                represented.add(card.path("shopId").asLong());
+                assertEquals("ONLINE_PURCHASE", card.path("commerceMode").asText());
+                assertTrue(card.path("addable").asBoolean(),
+                        "Buy Online card was serialized as non-addable: " + card);
+                phone |= "Phone charger".equals(card.path("name").asText());
+            }
+            assertTrue(phone, "the non-Shop-#1 phone listing vanished from HTTP JSON: " + body);
+            assertTrue(represented.size() >= 5,
+                    "the HTTP endpoint collapsed back to one shop: " + represented);
         }
 
         @Test

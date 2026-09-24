@@ -175,7 +175,8 @@ class AMerchantAddsWhatTheySellTest {
                     {"name":"Motorola Edge 50 Pro","brand":"Motorola",
                      "categoryId":%d,
                      "firstVariant":{"label":"12 GB + 256 GB","sellingPrice":29999,
-                                     "mrp":35999,"stock":4}}
+                                     "mrp":35999,"stock":4,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(phoneCategory));
             assertTrue(created.contains("Motorola Edge 50 Pro"),
                     "the create must answer with what it made: " + created);
@@ -194,7 +195,8 @@ class AMerchantAddsWhatTheySellTest {
         void catalogueVariantListingAndStockAllExist() throws Exception {
             body(post("/api/shop/products"), phoneOwner, """
                     {"name":"Edge 50 Fusion","brand":"Motorola","categoryId":%d,
-                     "firstVariant":{"label":"8 GB + 128 GB","sellingPrice":22999,"stock":7}}
+                     "firstVariant":{"label":"8 GB + 128 GB","sellingPrice":22999,"stock":7,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(phoneCategory));
 
             Long productId = jdbc.queryForObject(
@@ -226,7 +228,8 @@ class AMerchantAddsWhatTheySellTest {
         void itPersistsAcrossAFreshFetch() throws Exception {
             body(post("/api/shop/products"), phoneOwner, """
                     {"name":"Edge 50 Neo","brand":"Motorola","categoryId":%d,
-                     "firstVariant":{"label":"8 GB + 256 GB","sellingPrice":24999,"stock":2}}
+                     "firstVariant":{"label":"8 GB + 256 GB","sellingPrice":24999,"stock":2,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(phoneCategory));
 
             // A second, independent request is what "close and reopen the app"
@@ -262,7 +265,8 @@ class AMerchantAddsWhatTheySellTest {
         void duplicateCreateIsRefused() throws Exception {
             String payload = """
                     {"name":"Edge 50 Ultra","brand":"Motorola","categoryId":%d,
-                     "firstVariant":{"label":"12 GB + 512 GB","sellingPrice":39999,"stock":1}}
+                     "firstVariant":{"label":"12 GB + 512 GB","sellingPrice":39999,"stock":1,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(phoneCategory);
 
             body(post("/api/shop/products"), phoneOwner, payload);
@@ -286,11 +290,13 @@ class AMerchantAddsWhatTheySellTest {
         void noCrossShopLeak() throws Exception {
             body(post("/api/shop/products"), phoneOwner, """
                     {"name":"Edge 50 Pro Max","brand":"Motorola","categoryId":%d,
-                     "firstVariant":{"label":"12 GB + 256 GB","sellingPrice":31999,"stock":3}}
+                     "firstVariant":{"label":"12 GB + 256 GB","sellingPrice":31999,"stock":3,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(phoneCategory));
             body(post("/api/shop/products"), sareeOwner, """
                     {"name":"Banarasi Silk Saree","brand":"Kanchipuram","categoryId":%d,
-                     "firstVariant":{"label":"Red, pure silk","sellingPrice":4999,"stock":6}}
+                     "firstVariant":{"label":"Red, pure silk","sellingPrice":4999,"stock":6,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(sareeCategory));
 
             String phones = myProducts(phoneOwner);
@@ -312,7 +318,8 @@ class AMerchantAddsWhatTheySellTest {
             // condition that made the original bug report possible.
             body(post("/api/shop/products"), phoneOwner, """
                     {"name":"Edge 50","brand":"Motorola","categoryId":%d,
-                     "firstVariant":{"label":"8 GB + 128 GB","sellingPrice":19999,"stock":5}}
+                     "firstVariant":{"label":"8 GB + 128 GB","sellingPrice":19999,"stock":5,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(phoneCategory));
 
             assertEquals("[]", myProducts(sareeOwner).trim(),
@@ -330,11 +337,13 @@ class AMerchantAddsWhatTheySellTest {
         void myCategoriesAreMine() throws Exception {
             body(post("/api/shop/products"), phoneOwner, """
                     {"name":"Edge 50 Neo 5G","brand":"Motorola","categoryId":%d,
-                     "firstVariant":{"label":"8 GB + 256 GB","sellingPrice":23999,"stock":2}}
+                     "firstVariant":{"label":"8 GB + 256 GB","sellingPrice":23999,"stock":2,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(phoneCategory));
             body(post("/api/shop/products"), sareeOwner, """
                     {"name":"Silk Saree Gold","brand":"Kanchipuram","categoryId":%d,
-                     "firstVariant":{"label":"Gold, silk","sellingPrice":5999,"stock":3}}
+                     "firstVariant":{"label":"Gold, silk","sellingPrice":5999,"stock":3,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(sareeCategory));
 
             String mine = body(get("/api/categories/mine"), phoneOwner, null);
@@ -385,7 +394,8 @@ class AMerchantAddsWhatTheySellTest {
             // is exactly the arrangement that produced an empty screen.
             body(post("/api/shop/products"), phoneOwner, """
                     {"name":"Edge 50 Neo 5G","brand":"Motorola","categoryId":%d,
-                     "firstVariant":{"label":"8 GB + 256 GB","sellingPrice":23999,"stock":2}}
+                     "firstVariant":{"label":"8 GB + 256 GB","sellingPrice":23999,"stock":2,
+                                     "commerceMode":"ONLINE_PURCHASE"}}
                     """.formatted(phoneCategory));
 
             jdbc.update("INSERT INTO categories (name, description, active) "
@@ -431,6 +441,13 @@ class AMerchantAddsWhatTheySellTest {
     class SellingModes {
 
         @Test
+        void missingNullAndUnknownModeAreRefusedWithoutPartialRows() throws Exception {
+            assertModeRejected("missing", "");
+            assertModeRejected("null", ",\"commerceMode\":null");
+            assertModeRejected("unknown", ",\"commerceMode\":\"NOT_A_MODE\"");
+        }
+
+        @Test
         void onlineVisitAndServiceRemainDistinct() throws Exception {
             create("Online charger " + tag, "ONLINE_PURCHASE", "EXACT_PRICE");
             create("Visit handset " + tag, "VISIT_TO_BUY", "STARTING_FROM");
@@ -472,6 +489,21 @@ class AMerchantAddsWhatTheySellTest {
                        "serviceDurationMinutes":%s}}
                     """.formatted(name, phoneCategory, mode, priceMode,
                     mode.equals("SERVICE_AT_SHOP") ? "45" : "null"));
+        }
+
+        private void assertModeRejected(String suffix, String modeField) throws Exception {
+            String name = "Mode must be explicit " + suffix + " " + tag;
+            MvcResult result = send(post("/api/shop/products"), phoneOwner, """
+                    {"name":"%s","brand":"Motorola","categoryId":%d,
+                     "firstVariant":{"label":"standard","sellingPrice":1000,
+                       "mrp":1200,"stock":3%s}}
+                    """.formatted(name, phoneCategory, modeField));
+            assertEquals(400, result.getResponse().getStatus(),
+                    suffix + " mode became an online listing: "
+                            + result.getResponse().getContentAsString());
+            Integer rows = jdbc.queryForObject(
+                    "SELECT count(*) FROM products WHERE name=?", Integer.class, name);
+            assertEquals(0, rows, "rejected create must roll back the catalogue row too");
         }
 
         private void assertMode(String productName, String expected) {

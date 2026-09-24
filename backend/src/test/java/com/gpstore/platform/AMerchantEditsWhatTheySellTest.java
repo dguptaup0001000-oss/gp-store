@@ -441,6 +441,7 @@ class AMerchantEditsWhatTheySellTest {
             MvcResult result = send(post("/api/shop/products/" + productId + "/variants"),
                     phoneOwner, """
                     {"label":"12 GB + 256 GB","sellingPrice":35000,"mrp":39000,
+                     "commerceMode":"ONLINE_PURCHASE",
                      "attributes":[{"name":"RAM","value":"12 GB"},
                                    {"name":"Storage","value":"256 GB"}]}
                     """);
@@ -464,7 +465,8 @@ class AMerchantEditsWhatTheySellTest {
 
             MvcResult result = send(post("/api/shop/products/" + productId + "/variants"),
                     sareeOwner, """
-                    {"label":"pirated","sellingPrice":1}
+                    {"label":"pirated","sellingPrice":1,
+                     "commerceMode":"ONLINE_PURCHASE"}
                     """);
 
             assertTrue(result.getResponse().getStatus() >= 400,
@@ -474,6 +476,27 @@ class AMerchantEditsWhatTheySellTest {
                     "SELECT count(*) FROM product_variants WHERE product_id = ?",
                     Integer.class, productId);
             assertEquals(1, variants, "and the product must be untouched");
+        }
+
+        @Test
+        @DisplayName("a second variant without an explicit selling mode is refused atomically")
+        void secondVariantCannotSilentlyBecomeOnline() throws Exception {
+            long first = phoneVariant();
+            Long productId = jdbc.queryForObject(
+                    "SELECT product_id FROM product_variants WHERE id = ?", Long.class, first);
+
+            MvcResult result = send(post("/api/shop/products/" + productId + "/variants"),
+                    phoneOwner, """
+                    {"label":"mode accidentally omitted","sellingPrice":35000,"mrp":39000}
+                    """);
+
+            assertEquals(400, result.getResponse().getStatus(),
+                    "missing mode must fail instead of creating ONLINE_PURCHASE: "
+                            + result.getResponse().getContentAsString());
+            Integer variants = jdbc.queryForObject(
+                    "SELECT count(*) FROM product_variants WHERE product_id = ?",
+                    Integer.class, productId);
+            assertEquals(1, variants, "a failed request must not leave a half-created variant");
         }
     }
 
@@ -599,7 +622,8 @@ class AMerchantEditsWhatTheySellTest {
         body(post("/api/shop/products"), phoneOwner, """
                 {"name":"Moto Edge 50 Pro %s","brand":"Motorola","categoryId":%d,
                  "firstVariant":{"label":"8 GB + 128 GB","sellingPrice":30000,
-                                 "mrp":35000,"costPrice":29000,"stock":3}}
+                                 "mrp":35000,"costPrice":29000,"stock":3,
+                                 "commerceMode":"ONLINE_PURCHASE"}}
                 """.formatted(tag, phoneCategory));
         Long variant = jdbc.queryForObject(
                 "SELECT v.id FROM product_variants v JOIN products p ON p.id = v.product_id "
