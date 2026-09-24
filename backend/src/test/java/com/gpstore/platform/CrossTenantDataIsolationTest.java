@@ -133,6 +133,9 @@ class CrossTenantDataIsolationTest {
     @AfterEach
     void removeTheFixture() {
         jdbc.update("DELETE FROM inventory WHERE id in (?, ?)", variantlessInventoryA, variantlessInventoryB);
+        // Delivery batches are partner-owned operational history and may
+        // reference a fixture rider, so remove fixture children first.
+        jdbc.update("DELETE FROM delivery_batches WHERE delivery_partner_id in (?, ?)", partnerAId, partnerBId);
         jdbc.update("DELETE FROM delivery_partners WHERE id in (?, ?)", partnerAId, partnerBId);
         jdbc.update("DELETE FROM coupons WHERE id in (?, ?)", couponAId, couponBId);
         jdbc.update("DELETE FROM coupons WHERE coupon_code like ?", "XTW" + tag + "%");
