@@ -365,8 +365,8 @@ class AMerchantSeesOnlyTheirReviewsTest {
         Long variantId = jdbc.queryForObject(
                 "SELECT id FROM product_variants WHERE product_id = ?", Long.class, productId);
         jdbc.update("INSERT INTO shop_product_variants "
-                + "(shop_id, product_variant_id, selling_price, mrp, available, active) "
-                + "VALUES (?, ?, 100, 120, true, true)", shop, variantId);
+                + "(shop_id, product_variant_id, selling_price, mrp, available, active, commerce_mode) "
+                + "VALUES (?, ?, 100, 120, true, true, 'ONLINE_PURCHASE')", shop, variantId);
         return productId;
     }
 

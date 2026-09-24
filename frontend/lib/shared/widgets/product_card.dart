@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../core/images/gp_network_image.dart';
-import '../../core/util/haptic_widgets.dart';
 import '../../core/util/app_haptics.dart';
+import 'action_feedback.dart';
 
 /// Reusable across every horizontal section on the home screen, search
 /// results, and category browsing - one widget, one place to fix/improve it.
@@ -16,6 +16,7 @@ class ProductCard extends StatefulWidget {
     this.onAddPressed,
     this.isWishlisted = false,
     this.onWishlistToggle,
+    this.onWishlistMutation,
     this.quantityInCart = 0,
     this.onIncrement,
     this.onDecrement,
@@ -55,6 +56,7 @@ class ProductCard extends StatefulWidget {
   // (see WishlistController) - this widget never talks to Riverpod directly.
   final bool isWishlisted;
   final VoidCallback? onWishlistToggle;
+  final Future<bool?> Function()? onWishlistMutation;
 
   @override
   State<ProductCard> createState() => _ProductCardState();
@@ -78,6 +80,7 @@ class _ProductCardState extends State<ProductCard> {
     final onAddPressed = widget.onAddPressed;
     final isWishlisted = widget.isWishlisted;
     final onWishlistToggle = widget.onWishlistToggle;
+    final onWishlistMutation = widget.onWishlistMutation;
     final quantityInCart = widget.quantityInCart;
     final onIncrement = widget.onIncrement;
     final onDecrement = widget.onDecrement;
@@ -304,7 +307,7 @@ class _ProductCardState extends State<ProductCard> {
                           ),
                         ),
                       ),
-                    if (onWishlistToggle != null)
+                    if (onWishlistToggle != null || onWishlistMutation != null)
                       Positioned(
                         top: 2,
                         right: 2,
@@ -313,10 +316,22 @@ class _ProductCardState extends State<ProductCard> {
                           // of stock: saving something for when it is back is
                           // exactly what a shopper wants at that moment, and
                           // it is the only action still open to them here.
-                          onTap: hapticize(() {
+                          onTap: () {
                             AppHaptics.action();
-                            onWishlistToggle();
-                          }),
+                            if (onWishlistMutation != null) {
+                              () async {
+                                final added = await onWishlistMutation();
+                                if (!context.mounted) return;
+                                if (added == null) {
+                                  showActionFailure(context, "Couldn't update wishlist. Please try again.");
+                                } else {
+                                  showWishlistFeedback(context, added: added);
+                                }
+                              }();
+                            } else {
+                              onWishlistToggle!();
+                            }
+                          },
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),

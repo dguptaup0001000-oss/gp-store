@@ -37,9 +37,24 @@ void main() {
       expect(cards.single.name, 'iPhone 18 Pro');
       expect(cards.single.addable, isTrue);
       expect(cards.single.commerceMode, CommerceMode.buyOnline);
-      expect(query, containsPair('mode', 'ONLINE_PURCHASE'));
+      expect(query, isNot(contains('mode')),
+          reason: 'the default home feed must ask for every commerce mode');
       expect(query, containsPair('lat', 26.75));
       expect(query, containsPair('lng', 83.37));
+    });
+
+    test('a selected nearby shop is sent as a server filter', () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? query;
+      adapter.on('GET', '/api/marketplace/feed', (options) {
+        query = Map<String, dynamic>.from(options.queryParameters);
+        return const FakeResponse([]);
+      });
+      await MarketplaceRepository(apiClient: buildTestApiClient(adapter)).feed(
+        latitude: 26.75, longitude: 83.37, shopId: 42,
+      );
+      expect(query, containsPair('shopId', 42));
+      expect(query, isNot(contains('mode')));
     });
 
     test('without a real delivery pin it does not fabricate one', () async {

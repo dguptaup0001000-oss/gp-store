@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/error_messages.dart';
 import '../domain/worker_models.dart';
+import 'admin_worker_profile_screen.dart';
 import 'admin_providers.dart';
 
 /// The shop's delivery workers: hire, edit, pause, remove.
@@ -48,6 +49,9 @@ class AdminWorkersScreen extends ConsumerWidget {
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, i) => _WorkerCard(
                 worker: list[i],
+                onOpen: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => AdminWorkerProfileScreen(workerId: list[i].id),
+                )),
                 onEdit: () => _openForm(context, ref, list[i]),
                 onPause: () => _openPause(context, ref, list[i]),
                 onResume: () => _run(context, ref,
@@ -139,6 +143,7 @@ class AdminWorkersScreen extends ConsumerWidget {
 class _WorkerCard extends StatelessWidget {
   const _WorkerCard({
     required this.worker,
+    required this.onOpen,
     required this.onEdit,
     required this.onPause,
     required this.onResume,
@@ -146,6 +151,7 @@ class _WorkerCard extends StatelessWidget {
   });
 
   final AdminWorker worker;
+  final VoidCallback onOpen;
   final VoidCallback onEdit;
   final VoidCallback onPause;
   final VoidCallback onResume;
@@ -164,7 +170,10 @@ class _WorkerCard extends StatelessWidget {
 
     return Card(
       margin: EdgeInsets.zero,
-      child: Padding(
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 6, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,6 +209,13 @@ class _WorkerCard extends StatelessWidget {
                             .join('  ·  '),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
+                      const SizedBox(height: 6),
+                      Wrap(spacing: 6, runSpacing: 4, children: [
+                        _WorkerBadge(label: worker.active ? 'Active' : 'Inactive'),
+                        _WorkerBadge(label: worker.available ? 'Available' : 'Unavailable'),
+                        if (worker.vehicleType?.isNotEmpty == true)
+                          _WorkerBadge(label: _vehicleLabel(worker.vehicleType!)),
+                      ]),
                     ],
                   ),
                 ),
@@ -250,9 +266,13 @@ class _WorkerCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
+
+  static String _vehicleLabel(String type) => switch (type.toUpperCase()) {
+    'BIKE' => 'Bike', 'SCOOTER' => 'Scooter', 'CYCLE' => 'Cycle', 'VAN' => 'Van', _ => type,
+  };
 
   /// Time for today, date and time for anything later - a shopkeeper reading
   /// "until 17:30" should not have to wonder which day that is.
@@ -264,6 +284,17 @@ class _WorkerCard extends StatelessWidget {
         until.year == now.year && until.month == now.month && until.day == now.day;
     return sameDay ? clock : '${until.day}/${until.month} $clock';
   }
+}
+
+class _WorkerBadge extends StatelessWidget {
+  const _WorkerBadge({required this.label});
+  final String label;
+  @override
+  Widget build(BuildContext context) => Chip(
+    visualDensity: VisualDensity.compact,
+    label: Text(label, style: Theme.of(context).textTheme.labelSmall),
+    padding: EdgeInsets.zero,
+  );
 }
 
 /// Add or edit. The only mandatory fields are the ones that let them sign in.

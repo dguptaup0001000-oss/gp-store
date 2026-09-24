@@ -215,6 +215,7 @@ class StorefrontShowsItsOwnShelfTest {
 
         TenantContext.runWithin(TenantScope.ofShop(shopId), () -> {
             ShopProductVariant listing = new ShopProductVariant();
+            listing.setCommerceMode(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE);
             listing.setProductVariantId(variantId);
             listing.setSellingPrice(price);
             listing.setAvailable(Boolean.TRUE);

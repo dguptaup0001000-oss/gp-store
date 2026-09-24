@@ -41,6 +41,7 @@ public enum ImportColumn {
     UNIT("Unit", "uom", "units"),
     MRP("MRP", "mrp", "list price", "maximum retail price"),
     SELLING_PRICE("Selling Price", "price", "sale price", "sellingprice"),
+    COMMERCE_MODE("Commerce Mode", "commerce mode", "selling mode"),
     COST_PRICE("Cost Price", "cost", "purchase price"),
     DISCOUNT("Discount", "discount", "discount %", "discount percent"),
     STOCK("Stock", "stock", "quantity in stock", "qty"),

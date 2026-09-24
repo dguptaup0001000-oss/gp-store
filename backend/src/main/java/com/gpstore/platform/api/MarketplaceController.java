@@ -7,6 +7,7 @@ import com.gpstore.platform.ShopRepository;
 import com.gpstore.platform.ShopScopeSwitch;
 import com.gpstore.store.DeliveryScheduleService;
 import com.gpstore.store.StoreStatus;
+import com.gpstore.exception.BadRequestException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -450,9 +451,10 @@ public class MarketplaceController {
             @RequestParam(required = false) Double lng,
             @RequestParam(required = false) String mode,
             @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long shopId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return marketplaceFeed.page(lat, lng, modesFrom(mode), categoryId, page, size);
+        return marketplaceFeed.page(lat, lng, modesFrom(mode), categoryId, shopId, page, size);
     }
 
     /**
@@ -528,13 +530,14 @@ public class MarketplaceController {
             @RequestParam(required = false) Double lat,
             @RequestParam(required = false) Double lng,
             @RequestParam(required = false) String mode,
+            @RequestParam(required = false) Long shopId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         java.util.Set<com.gpstore.catalog.shop.CommerceMode> modes =
                 (mode == null || mode.isBlank())
                         ? java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.values())
                         : modesFrom(mode);
-        return marketplaceFeed.search(q, lat, lng, modes, page, size);
+        return marketplaceFeed.search(q, lat, lng, modes, shopId, page, size);
     }
 
     /**
@@ -565,15 +568,15 @@ public class MarketplaceController {
     }
 
     /**
-     * Reads the mode filter, refusing to guess.
-     *
-     * <p>An unrecognised mode falls back to Buy Online rather than to
-     * everything: widening on a typo would drop Visit-to-Buy cards into a
-     * screen that draws ADD buttons.
+     * Reads the mode filter. Missing/ALL means the nearby marketplace; a
+     * malformed value is rejected rather than being guessed as Buy Online.
      */
     private java.util.Set<com.gpstore.catalog.shop.CommerceMode> modesFrom(String raw) {
         if (raw == null || raw.isBlank()) {
-            return java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE);
+            return java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.values());
+        }
+        if ("ALL".equalsIgnoreCase(raw.trim())) {
+            return java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.values());
         }
         java.util.Set<com.gpstore.catalog.shop.CommerceMode> modes =
                 new java.util.LinkedHashSet<>();
@@ -582,12 +585,11 @@ public class MarketplaceController {
                 modes.add(com.gpstore.catalog.shop.CommerceMode
                         .valueOf(piece.trim().toUpperCase(java.util.Locale.ROOT)));
             } catch (IllegalArgumentException unknown) {
-                // Ignored on purpose - see the method comment.
+                throw new BadRequestException("Unsupported commerce mode: " + piece.trim());
             }
         }
-        return modes.isEmpty()
-                ? java.util.Set.of(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE)
-                : modes;
+        if (modes.isEmpty()) throw new BadRequestException("Choose a supported commerce mode.");
+        return java.util.Set.copyOf(modes);
     }
 
     /**

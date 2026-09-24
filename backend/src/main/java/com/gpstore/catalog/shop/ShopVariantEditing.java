@@ -422,8 +422,10 @@ public class ShopVariantEditing {
             listing.setServiceDurationMinutes(edit.serviceDurationMinutes());
         }
 
-        CommerceMode mode = listing.getCommerceMode() == null
-                ? CommerceMode.ONLINE_PURCHASE : listing.getCommerceMode();
+        CommerceMode mode = listing.getCommerceMode();
+        if (mode == null) {
+            throw new BadRequestException("Choose how customers obtain this item.");
+        }
         ListingPriceMode price = listing.getPriceMode() == null
                 ? ListingPriceMode.EXACT_PRICE : listing.getPriceMode();
 

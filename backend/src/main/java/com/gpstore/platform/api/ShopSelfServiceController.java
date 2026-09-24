@@ -142,16 +142,18 @@ public class ShopSelfServiceController {
 
     public record ListingView(Long id, Long productVariantId, BigDecimal sellingPrice,
                               BigDecimal costPrice, BigDecimal mrp, Boolean available,
-                              Boolean active, Integer displayOrder) {
+                              Boolean active, Integer displayOrder,
+                              com.gpstore.catalog.shop.CommerceMode commerceMode) {
         static ListingView of(ShopProductVariant l) {
             return new ListingView(l.getId(), l.getProductVariantId(), l.getSellingPrice(),
                     l.getCostPrice(), l.getMrp(), l.getAvailable(), l.getActive(),
-                    l.getDisplayOrder());
+                    l.getDisplayOrder(), l.getCommerceMode());
         }
     }
 
     public record ListingUpdate(BigDecimal sellingPrice, BigDecimal costPrice, BigDecimal mrp,
-                                Boolean available, Boolean active, Integer displayOrder) {}
+                                Boolean available, Boolean active, Integer displayOrder,
+                                String commerceMode) {}
 
     /**
      * What a shopkeeper says is on the shelf.
@@ -548,6 +550,24 @@ public class ShopSelfServiceController {
     }
 
     /**
+     * A new shelf row needs an explicit mode. An edit that omits the field may
+     * keep its already-persisted mode, but never invents Buy Online.
+     */
+    private static com.gpstore.catalog.shop.CommerceMode requireCommerceMode(
+            String requested, com.gpstore.catalog.shop.CommerceMode existing) {
+        if (requested == null || requested.isBlank()) {
+            if (existing != null) return existing;
+            throw new BadRequestException("Choose how customers obtain this item.");
+        }
+        try {
+            return com.gpstore.catalog.shop.CommerceMode.valueOf(
+                    requested.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            throw new BadRequestException("Unsupported commerce mode: " + requested);
+        }
+    }
+
+    /**
      * Sets what this shop charges for one catalogue item.
      *
      * THE SHOP IS NOT A PARAMETER. The row is found through the shop-scoped
@@ -562,6 +582,7 @@ public class ShopSelfServiceController {
         }
         ShopProductVariant listing = listings.findByProductVariantId(productVariantId)
                 .orElseGet(ShopProductVariant::new);
+        listing.setCommerceMode(requireCommerceMode(update.commerceMode(), listing.getCommerceMode()));
         listing.setProductVariantId(productVariantId);
         listing.setSellingPrice(update.sellingPrice());
         listing.setCostPrice(update.costPrice());

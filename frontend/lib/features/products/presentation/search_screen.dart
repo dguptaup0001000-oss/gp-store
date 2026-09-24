@@ -9,6 +9,7 @@ import '../../../core/util/app_haptics.dart';
 import '../../../core/voice/voice_query_parser.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/product_card.dart';
+import '../../../shared/widgets/action_feedback.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
@@ -20,6 +21,7 @@ import 'recent_searches.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../marketplace/domain/marketplace_feed_models.dart';
 import '../../marketplace/presentation/marketplace_card_tile.dart';
+import '../../marketplace/presentation/marketplace_feed_provider.dart';
 import '../../marketplace/presentation/product_offers_screen.dart';
 import 'voice_search_sheet.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
@@ -274,6 +276,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             query: query,
             latitude: pin.lat,
             longitude: pin.lng,
+            shopId: ref.read(marketplaceShopFilterProvider),
             page: 0,
           );
       if (!mounted || seq != _searchSeq) return;
@@ -334,6 +337,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   query: _lastQuery,
                   latitude: pin.lat,
                   longitude: pin.lng,
+                  shopId: ref.read(marketplaceShopFilterProvider),
                   page: nextPage,
                 );
         if (!mounted || seq != _searchSeq) return;
@@ -629,7 +633,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           )),
           onAddPressed: () => _addToCart(product),
           isWishlisted: wishlistController.isWishlisted(product.id),
-          onWishlistToggle: () => wishlistController.toggle(product.id),
+          onWishlistMutation: () => wishlistController.toggle(product.id),
         );
       },
       ),
@@ -641,9 +645,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     if (variant == null) return;
 
     try {
-      await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
+      final added = await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${product.name} added to cart')));
+      if (added == true) {
+        showAddedToCartFeedback(context, product.name);
+      } else if (added == false) {
+        showActionFailure(context, "Couldn't add to cart. Please try again.");
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

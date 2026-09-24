@@ -482,6 +482,7 @@ class MultiShopCheckoutTest {
         // Only this shop lists it, and only this shop stocks it.
         jdbc.update("DELETE FROM shop_product_variants WHERE product_variant_id = ?", variantId);
         ShopProductVariant listing = new ShopProductVariant();
+            listing.setCommerceMode(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE);
         listing.setShopId(shopId);
         listing.setProductVariantId(variantId);
         listing.setSellingPrice(price);

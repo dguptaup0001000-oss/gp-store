@@ -186,6 +186,39 @@ class AShopStocksItsOwnShelfTest {
     class TheRoute {
 
         @Test
+        @DisplayName("a new listing persists and returns the exact requested commerce mode")
+        void listingModeRoundTripsThroughHttpAndDatabase() throws Exception {
+            String response = body(put("/api/shop/listings/" + variantId), ownerA,
+                    "{\"sellingPrice\":95.00,\"commerceMode\":\"VISIT_TO_BUY\","
+                            + "\"available\":true,\"active\":true}");
+            assertTrue(response.contains("\"commerceMode\":\"VISIT_TO_BUY\""), response);
+            assertEquals("VISIT_TO_BUY", jdbc.queryForObject(
+                    "SELECT commerce_mode FROM shop_product_variants WHERE shop_id = ? "
+                            + "AND product_variant_id = ?", String.class, shopA, variantId));
+        }
+
+        @Test
+        @DisplayName("a new listing without a commerce mode is rejected")
+        void missingModeIsRejectedForNewListing() throws Exception {
+            perform(put("/api/shop/listings/" + variantId), ownerA,
+                    "{\"sellingPrice\":95.00,\"available\":true,\"active\":true}", 400);
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT count(*) FROM shop_product_variants WHERE shop_id = ? "
+                            + "AND product_variant_id = ?", Integer.class, shopA, variantId));
+        }
+
+        @Test
+        @DisplayName("an unsupported commerce mode is rejected")
+        void unsupportedModeIsRejected() throws Exception {
+            perform(put("/api/shop/listings/" + variantId), ownerA,
+                    "{\"sellingPrice\":95.00,\"commerceMode\":\"MAYBE\","
+                            + "\"available\":true,\"active\":true}", 400);
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT count(*) FROM shop_product_variants WHERE shop_id = ? "
+                            + "AND product_variant_id = ?", Integer.class, shopA, variantId));
+        }
+
+        @Test
         @DisplayName("a shop lists an item and then says how much of it there is")
         void listThenStock() throws Exception {
             list(ownerA, 95.00);
@@ -436,7 +469,7 @@ class AShopStocksItsOwnShelfTest {
 
     private void listVariant(Long owner, Long selectedVariantId, double price) throws Exception {
         perform(put("/api/shop/listings/" + selectedVariantId), owner,
-                "{\"sellingPrice\":%s,\"mrp\":%s,\"available\":true,\"active\":true}"
+                "{\"sellingPrice\":%s,\"mrp\":%s,\"commerceMode\":\"ONLINE_PURCHASE\",\"available\":true,\"active\":true}"
                         .formatted(price, price + 15), 200);
     }
 

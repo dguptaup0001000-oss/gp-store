@@ -6,6 +6,7 @@ import '../../marketplace/domain/marketplace_offer.dart';
 import '../../marketplace/presentation/product_offers_screen.dart';
 import '../../marketplace/presentation/marketplace_feed_provider.dart';
 import '../../marketplace/presentation/marketplace_feed_section.dart';
+import '../../../shared/widgets/action_feedback.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -111,13 +112,15 @@ class HomeScreen extends ConsumerWidget {
       final variantId = offer.productVariantId;
       if (variantId == null || !offer.addable) return;
       try {
-        await ref
+        final added = await ref
             .read(cartControllerProvider.notifier)
             .addToCart(variantId: variantId, quantity: 1);
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${offer.productName} added to cart')),
-        );
+        if (added == true) {
+          showAddedToCartFeedback(context, offer.productName);
+        } else if (added == false) {
+          showActionFailure(context, "Couldn't add to cart. Please try again.");
+        }
       } catch (e) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context)
@@ -164,13 +167,15 @@ class HomeScreen extends ConsumerWidget {
       final variantId = card.productVariantId;
       if (variantId == null) return;
       try {
-        await ref
+        final added = await ref
             .read(cartControllerProvider.notifier)
             .addToCart(variantId: variantId, quantity: 1);
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${card.name} added to cart')),
-        );
+        if (added == true) {
+          showAddedToCartFeedback(context, card.name);
+        } else if (added == false) {
+          showActionFailure(context, "Couldn't add to cart. Please try again.");
+        }
       } catch (e) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context)

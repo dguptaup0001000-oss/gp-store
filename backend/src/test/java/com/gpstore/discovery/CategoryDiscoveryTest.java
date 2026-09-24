@@ -318,8 +318,8 @@ class CategoryDiscoveryTest {
     /** Puts one catalogue item on one shop's shelf, priced. */
     private void list(long shopId, Long variantId) {
         jdbc.update("INSERT INTO shop_product_variants "
-                        + "(shop_id, product_variant_id, selling_price, available, active) "
-                        + "VALUES (?, ?, ?, true, true)",
+                        + "(shop_id, product_variant_id, selling_price, available, active, commerce_mode) "
+                        + "VALUES (?, ?, ?, true, true, 'ONLINE_PURCHASE')",
                 shopId, variantId, new BigDecimal("99.00"));
     }
 

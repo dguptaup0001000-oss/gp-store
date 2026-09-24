@@ -55,7 +55,10 @@ class MarketplaceFeedState {
 /// switching between them changes a value here rather than pushing a
 /// different app.
 final marketplaceModeFilterProvider =
-    StateProvider<CommerceMode>((ref) => CommerceMode.buyOnline);
+    StateProvider<CommerceMode?>((ref) => null);
+
+/// Null means ALL shops near the selected customer address.
+final marketplaceShopFilterProvider = StateProvider<int?>((ref) => null);
 
 /// Drives the marketplace feed, one server page at a time.
 ///
@@ -74,6 +77,7 @@ class MarketplaceFeedController
     _seenIds.clear();
     final pin = ref.watch(deliveryPinProvider);
     final mode = ref.watch(marketplaceModeFilterProvider);
+    final shopId = ref.watch(marketplaceShopFilterProvider);
 
     if (pin == null) {
       return const MarketplaceFeedState(
@@ -84,6 +88,7 @@ class MarketplaceFeedController
           latitude: pin.lat,
           longitude: pin.lng,
           mode: mode,
+          shopId: shopId,
           page: 0,
           size: _pageSize,
         );
@@ -108,6 +113,7 @@ class MarketplaceFeedController
             latitude: pin.lat,
             longitude: pin.lng,
             mode: ref.read(marketplaceModeFilterProvider),
+            shopId: ref.read(marketplaceShopFilterProvider),
             page: current.nextPage,
             size: _pageSize,
           );

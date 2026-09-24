@@ -8,6 +8,7 @@ import '../../features/products/domain/product_models.dart';
 import '../../features/products/presentation/products_providers.dart';
 import '../../core/util/app_haptics.dart';
 import '../../core/util/haptic_widgets.dart';
+import 'action_feedback.dart';
 
 /// Choosing a pack size without leaving the grid.
 ///
@@ -106,7 +107,7 @@ class _VariantPickerSheet extends ConsumerWidget {
                     itemCount: variants.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (context, index) =>
-                        _VariantRow(variant: variants[index]),
+                        _VariantRow(variant: variants[index], productName: product.name),
                   );
                 },
               ),
@@ -133,9 +134,10 @@ class _VariantPickerSheet extends ConsumerWidget {
 }
 
 class _VariantRow extends ConsumerWidget {
-  const _VariantRow({required this.variant});
+  const _VariantRow({required this.variant, required this.productName});
 
   final ProductVariant variant;
+  final String productName;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -207,9 +209,15 @@ class _VariantRow extends ConsumerWidget {
                     ? OutlinedButton(
                         onPressed: () => _guard(context, () async {
                           AppHaptics.heavy();
-                          await ref
+                          final added = await ref
                               .read(cartControllerProvider.notifier)
                               .addToCart(variantId: variant.id, quantity: 1);
+                          if (!context.mounted) return;
+                          if (added == true) {
+                            showAddedToCartFeedback(context, productName);
+                          } else if (added == false) {
+                            showActionFailure(context, "Couldn't add to cart. Please try again.");
+                          }
                         }),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.cart,

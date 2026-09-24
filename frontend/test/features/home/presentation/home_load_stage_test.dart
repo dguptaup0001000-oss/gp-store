@@ -81,12 +81,13 @@ class RecordingMarketplaceRepository implements MarketplaceRepository {
   Future<List<MarketplaceCard>> feed({
     required double? latitude,
     required double? longitude,
-    CommerceMode mode = CommerceMode.buyOnline,
+    CommerceMode? mode,
     int? categoryId,
+    int? shopId,
     int page = 0,
     int size = 20,
   }) async {
-    calls.add('marketplace-feed:$latitude:$longitude:${mode.wire}:$page:$size');
+    calls.add('marketplace-feed:$latitude:$longitude:${mode?.wire ?? 'ALL'}:$page:$size');
     return const [];
   }
 
@@ -191,7 +192,7 @@ void main() {
 
       expect(
         marketplaceRepository.calls,
-        contains('marketplace-feed:27.16231:83.940468:ONLINE_PURCHASE:0:20'),
+        contains('marketplace-feed:27.16231:83.940468:ALL:0:20'),
         reason: 'Home must ask the marketplace on startup; waiting for three '
             'unrelated sections reproduced the real-device empty home.',
       );

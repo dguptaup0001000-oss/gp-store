@@ -6,6 +6,7 @@ import '../../features/cart/presentation/cart_providers.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../features/wishlist/presentation/wishlist_providers.dart';
 import 'product_card.dart';
+import 'action_feedback.dart';
 import '../../core/util/haptic_widgets.dart';
 
 /// One reusable section for every horizontal product row on the home screen
@@ -99,7 +100,7 @@ class HorizontalProductSection extends ConsumerWidget {
                     onTap: onProductTap == null ? null : () => onProductTap!(product),
                     onAddPressed: () => _addToCart(context, ref, product),
                     isWishlisted: wishlistController.isWishlisted(product.id),
-                    onWishlistToggle: () => wishlistController.toggle(product.id),
+                    onWishlistMutation: () => wishlistController.toggle(product.id),
                   ),
                 );
               },
@@ -115,9 +116,13 @@ class HorizontalProductSection extends ConsumerWidget {
     if (variant == null) return;
 
     try {
-      await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
+      final added = await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${product.name} added to cart')));
+      if (added == true) {
+        showAddedToCartFeedback(context, product.name);
+      } else if (added == false) {
+        showActionFailure(context, "Couldn't add to cart. Please try again.");
+      }
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

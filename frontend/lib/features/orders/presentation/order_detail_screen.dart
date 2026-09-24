@@ -95,11 +95,15 @@ class _OrderDetailBodyState extends ConsumerState<_OrderDetailBody> {
     var failedCount = 0;
     for (final item in reorderable) {
       try {
-        await ref.read(cartControllerProvider.notifier).addToCart(
+        final added = await ref.read(cartControllerProvider.notifier).addToCart(
               variantId: item.variantId!,
               quantity: item.quantity,
             );
-        addedCount++;
+        if (added == true) {
+          addedCount++;
+        } else if (added == false) {
+          failedCount++;
+        }
       } catch (e) {
         failedCount++;
       }

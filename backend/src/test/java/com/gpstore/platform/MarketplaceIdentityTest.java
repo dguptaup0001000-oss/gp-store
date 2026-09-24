@@ -522,7 +522,7 @@ class MarketplaceIdentityTest {
     void shopAdminsMayPriceTheirOwnShelf() throws Exception {
         assertEquals(200, statusOf(put("/api/shop/listings/" + variantId)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"sellingPrice\":71.50,\"available\":true,\"active\":true}"),
+                        .content("{\"sellingPrice\":71.50,\"available\":true,\"active\":true,\"commerceMode\":\"ONLINE_PURCHASE\"}"),
                 ownerB, Role.ADMIN),
                 "a shopkeeper must be able to set their own price");
 

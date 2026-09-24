@@ -37,8 +37,8 @@ class CartController extends AsyncNotifier<CartModel> {
     return ref.read(cartRepositoryProvider).getMyCart();
   }
 
-  Future<void> addToCart({required int variantId, required int quantity}) async {
-    if (_mutationInFlight) return;
+  Future<bool?> addToCart({required int variantId, required int quantity}) async {
+    if (_mutationInFlight) return null;
     _mutationInFlight = true;
 
     final previous = state.valueOrNull;
@@ -71,8 +71,10 @@ class CartController extends AsyncNotifier<CartModel> {
       // Physical confirmation the tap registered. Fires on success only, so
       // a failed add never feels like it worked.
       AppHaptics.action();
+      return true;
     } catch (error, stackTrace) {
       _rollback(previous, error, stackTrace);
+      return false;
     } finally {
       _mutationInFlight = false;
     }

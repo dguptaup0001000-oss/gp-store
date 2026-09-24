@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/product_card.dart';
+import '../../../shared/widgets/action_feedback.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../products/domain/product_models.dart';
@@ -143,7 +144,7 @@ class _FeedGrid extends ConsumerWidget {
               product: product,
               onTap: hapticize(() => onProductTap(product)),
               isWishlisted: wishlistController.isWishlisted(product.id),
-              onWishlistToggle: () => wishlistController.toggle(product.id),
+              onWishlistMutation: () => wishlistController.toggle(product.id),
               onAddPressed: variant == null
                   ? null
                   : () => _addToCart(context, ref, product, variant),
@@ -167,11 +168,13 @@ class _FeedGrid extends ConsumerWidget {
 Future<void> _addToCart(
     BuildContext context, WidgetRef ref, Product product, ProductVariant variant) async {
   try {
-    await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
+    final added = await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${product.name} added to cart')),
-    );
+    if (added == true) {
+      showAddedToCartFeedback(context, product.name);
+    } else if (added == false) {
+      showActionFailure(context, "Couldn't add to cart. Please try again.");
+    }
   } catch (e) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));

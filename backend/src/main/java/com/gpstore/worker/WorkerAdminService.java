@@ -5,7 +5,12 @@ import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ConflictException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.repository.DeliveryPartnerRepository;
+import com.gpstore.repository.DeliveryRepository;
+import com.gpstore.platform.TenantContext;
+import com.gpstore.platform.ShopRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,13 +45,19 @@ public class WorkerAdminService {
     private final DeliveryPartnerRepository repository;
     private final PasswordEncoder passwordEncoder;
     private final WorkerAccessService accessService;
+    private final DeliveryRepository deliveries;
+    private final ShopRepository shops;
 
     public WorkerAdminService(DeliveryPartnerRepository repository,
                               PasswordEncoder passwordEncoder,
-                              WorkerAccessService accessService) {
+                              WorkerAccessService accessService,
+                              DeliveryRepository deliveries,
+                              ShopRepository shops) {
         this.repository = repository;
         this.passwordEncoder = passwordEncoder;
         this.accessService = accessService;
+        this.deliveries = deliveries;
+        this.shops = shops;
     }
 
     /** Everything the shop typed, plus what the server derived. Never the hash. */
@@ -74,6 +85,53 @@ public class WorkerAdminService {
             String vehicleType,
             String vehicleNumber,
             Boolean available) {
+    }
+
+    public record DeliverySummary(Long deliveryId, String orderNumber, String status,
+                                  LocalDateTime assignedAt, LocalDateTime deliveredAt) { }
+
+    public record WorkerProfile(WorkerView worker, String shopName,
+                                long totalAssigned, long completed,
+                                long active, long exceptions, int page, int size,
+                                boolean hasNext, List<DeliverySummary> currentWork,
+                                List<DeliverySummary> history) { }
+
+    /** One bounded, tenant-checked Worker 360 response; history is paginated. */
+    @Transactional(readOnly = true)
+    public WorkerProfile profile(Long id, int page, int size) {
+        if (page < 0 || size < 1 || size > 50) {
+            throw new BadRequestException("History page must be non-negative and size must be 1–50.");
+        }
+        DeliveryPartner worker = live(id);
+        var scope = TenantContext.require();
+        if (scope.isSingleShop() && !scope.shopId().equals(worker.getShopId())) {
+            throw new AccessDeniedException("This worker is outside the selected shop.");
+        }
+
+        List<Object[]> raw = deliveries.workerHistory(id, PageRequest.of(page, size + 1));
+        boolean hasNext = raw.size() > size;
+        List<DeliverySummary> history = raw.stream().limit(size)
+                .map(WorkerAdminService::deliverySummary).toList();
+        List<DeliverySummary> current = deliveries.workerCurrentWork(id, PageRequest.of(0, 50))
+                .stream().map(WorkerAdminService::deliverySummary).toList();
+        long completed = 0, active = 0, exceptions = 0, total = 0;
+        for (Object[] row : deliveries.workerDeliveryCounts(id)) {
+            String status = String.valueOf(row[0]);
+            long count = ((Number) row[1]).longValue();
+            total += count;
+            if ("DELIVERED".equals(status)) completed += count;
+            else if ("CANCELLED".equals(status)) exceptions += count;
+            else active += count;
+        }
+        String shopName = worker.getShopId() == null ? null
+                : shops.findById(worker.getShopId()).map(shop -> shop.getDisplayName()).orElse(null);
+        return new WorkerProfile(describe(worker), shopName, total, completed, active, exceptions,
+                page, size, hasNext, current, history);
+    }
+
+    private static DeliverySummary deliverySummary(Object[] row) {
+        return new DeliverySummary((Long) row[0], (String) row[1], (String) row[2],
+                (LocalDateTime) row[3], (LocalDateTime) row[4]);
     }
 
     @Transactional(readOnly = true)

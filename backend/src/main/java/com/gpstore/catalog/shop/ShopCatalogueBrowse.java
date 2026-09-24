@@ -90,12 +90,11 @@ public class ShopCatalogueBrowse {
                 .addValue("limit", size)
                 .addValue("offset", Math.multiplyExact((long) page, size));
 
-        // COALESCE on commerce_mode because rows written before V74 have NULL
-        // there and are online listings by definition - the backfill set them,
-        // but a row inserted by an older deployment mid-rollout would not be.
+        // V74 backfills all existing rows and makes the field NOT NULL. Do not
+        // reclassify malformed/null rows as Buy Online here.
         String where = """
                 spv.shop_id = :shopId
-                  AND COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE') IN (:modes)
+                  AND spv.commerce_mode IN (:modes)
                 """
                 + (searching ? """
                   AND (lower(p.name) LIKE :pattern
@@ -139,7 +138,7 @@ public class ShopCatalogueBrowse {
                        COALESCE(v.image_url, gallery.image_url) AS image_url,
                        c.id AS category_id, c.name AS category_name, v.unit AS variant_label,
                        spv.selling_price, spv.mrp, spv.price_max, spv.price_mode,
-                       COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE') AS commerce_mode,
+                       spv.commerce_mode AS commerce_mode,
                        spv.offline_availability, spv.service_duration_minutes,
                        spv.available, spv.active, inv.stock
                 %s ORDER BY p.name, spv.product_variant_id
@@ -174,10 +173,10 @@ public class ShopCatalogueBrowse {
             counts.put(mode.name(), 0L);
         }
         jdbc.query("""
-                SELECT COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE') AS mode, count(*) AS total
+                SELECT spv.commerce_mode AS mode, count(*) AS total
                   FROM shop_product_variants spv
                  WHERE spv.shop_id = :shopId
-                 GROUP BY COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE')
+                 GROUP BY spv.commerce_mode
                 """, new MapSqlParameterSource("shopId", currentShopId()),
                 rs -> { counts.put(rs.getString("mode"), rs.getLong("total")); });
         return Map.copyOf(counts);

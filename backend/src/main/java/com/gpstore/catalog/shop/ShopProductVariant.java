@@ -92,14 +92,13 @@ public class ShopProductVariant implements ShopOwned {
     /**
      * How this offer ends: online, in person, or as work done at the shop.
      *
-     * <p>NEVER NULL IN PRACTICE, and defaulted in the field as well as in the
-     * migration. A listing that forgot to say what it is would be read as
-     * "not buyable online" by the guard and vanish from the shop's shelf, so
-     * the safe default is the one every existing row already had.
+     * <p>Required at creation. The migration backfills existing listings, but
+     * a new or malformed listing must state its mode rather than being
+     * silently classified as Buy Online.
      */
     @Enumerated(EnumType.STRING)
-    @Column(name = "commerce_mode", length = 24)
-    private CommerceMode commerceMode = CommerceMode.ONLINE_PURCHASE;
+    @Column(name = "commerce_mode", length = 24, nullable = false)
+    private CommerceMode commerceMode;
 
     /** Whether sellingPrice is a promise, a floor, the bottom of a band, or nothing. */
     @Enumerated(EnumType.STRING)
@@ -195,18 +194,8 @@ public class ShopProductVariant implements ShopOwned {
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
-    /**
-     * NEVER NULL TO A CALLER, whatever the row says.
-     *
-     * <p>Rows written before this column existed read back as null through
-     * any path that bypassed the migration's backfill, and a null here would
-     * be read by the purchase guard as "not sold online" - which would take a
-     * working shelf off the internet. The field defaults, the migration
-     * backfills, and this returns the same answer a third time, because the
-     * failure mode of getting it wrong is a merchant losing sales silently.
-     */
     public CommerceMode getCommerceMode() {
-        return commerceMode == null ? CommerceMode.ONLINE_PURCHASE : commerceMode;
+        return commerceMode;
     }
 
     public void setCommerceMode(CommerceMode commerceMode) { this.commerceMode = commerceMode; }

@@ -248,7 +248,9 @@ public class CatalogImportService {
         // listing moves with the catalogue row. Without this an import would
         // update the catalogue default and leave the shelf showing the old
         // price - the sheet applied to the wrong table.
-        shopCatalog.list(savedVariant);
+        com.gpstore.catalog.shop.CommerceMode commerceMode =
+                (com.gpstore.catalog.shop.CommerceMode) values.get(ImportColumn.COMMERCE_MODE);
+        shopCatalog.list(savedVariant, commerceMode);
 
         // ---- stock --------------------------------------------------------
         if (values.containsKey(ImportColumn.STOCK)

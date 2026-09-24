@@ -156,9 +156,9 @@ class SecondMerchantLandsInTheirOwnShopTest {
                 tag + "-kirana", jdbc, categories, products, variants);
         try {
             TenantContext.runWithin(TenantScope.ofShop(made.shopId()),
-                    () -> shopCatalog.list(variants.findById(phone.variantId()).orElseThrow()));
+                    () -> shopCatalog.list(variants.findById(phone.variantId()).orElseThrow(), com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE));
             TenantContext.runWithin(TenantScope.ofShop(Shop.FIRST_SHOP_ID),
-                    () -> shopCatalog.list(variants.findById(kirana.variantId()).orElseThrow()));
+                    () -> shopCatalog.list(variants.findById(kirana.variantId()).orElseThrow(), com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE));
 
             String body = mockMvc.perform(get("/api/products/admin/all")
                             .with(authentication(owner(made.ownerCustomerId()))))

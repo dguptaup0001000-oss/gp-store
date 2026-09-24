@@ -356,8 +356,8 @@ class ThePhoneShopSellsItsPhoneTest {
 
             // The saree shop starts selling the same catalogue item.
             jdbc.update("INSERT INTO shop_product_variants "
-                    + "(shop_id, product_variant_id, selling_price, available, active, created_at) "
-                    + "VALUES (?, ?, 31000, true, true, now())", sareeShop, variantId);
+                    + "(shop_id, product_variant_id, selling_price, available, active, created_at, commerce_mode) "
+                    + "VALUES (?, ?, 31000, true, true, now(), 'ONLINE_PURCHASE')", sareeShop, variantId);
 
             MvcResult result = send(put("/api/shop/products/" + productId), phoneOwner, """
                     {"name":"renamed by one merchant"}
@@ -385,8 +385,8 @@ class ThePhoneShopSellsItsPhoneTest {
             long productId = productId();
             long variantId = variantId(productId);
             jdbc.update("INSERT INTO shop_product_variants "
-                    + "(shop_id, product_variant_id, selling_price, available, active, created_at) "
-                    + "VALUES (?, ?, 31000, true, true, now())", sareeShop, variantId);
+                    + "(shop_id, product_variant_id, selling_price, available, active, created_at, commerce_mode) "
+                    + "VALUES (?, ?, 31000, true, true, now(), 'ONLINE_PURCHASE')", sareeShop, variantId);
 
             body(put("/api/shop/products/" + productId), phoneOwner, """
                     {"active":false}
@@ -427,8 +427,8 @@ class ThePhoneShopSellsItsPhoneTest {
 
             // The merchant's OTHER shop also sells it, at its own price.
             jdbc.update("INSERT INTO shop_product_variants "
-                    + "(shop_id, product_variant_id, selling_price, available, active, created_at) "
-                    + "VALUES (?, ?, 32000, true, true, now())",
+                    + "(shop_id, product_variant_id, selling_price, available, active, created_at, commerce_mode) "
+                    + "VALUES (?, ?, 32000, true, true, now(), 'ONLINE_PURCHASE')",
                     secondShopOfPhoneMerchant, variantId);
 
             // Acting in the DEFAULT shop, the price change must land there.

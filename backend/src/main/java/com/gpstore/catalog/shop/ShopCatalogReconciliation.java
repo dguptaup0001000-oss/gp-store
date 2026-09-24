@@ -63,9 +63,10 @@ public class ShopCatalogReconciliation implements ApplicationRunner {
         int listed = jdbc.update("""
                 INSERT INTO shop_product_variants
                     (shop_id, product_variant_id, selling_price, cost_price, mrp,
-                     available, active, display_order)
+                     available, active, display_order, commerce_mode, price_mode)
                 SELECT ?, v.id, v.selling_price, v.cost_price, v.mrp,
-                       coalesce(v.available, TRUE), coalesce(v.active, TRUE), v.display_order
+                       coalesce(v.available, TRUE), coalesce(v.active, TRUE), v.display_order,
+                       'ONLINE_PURCHASE', 'EXACT_PRICE'
                 FROM product_variants v
                 WHERE v.selling_price IS NOT NULL
                   AND v.selling_price > 0

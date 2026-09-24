@@ -14,6 +14,7 @@ const List<String> catalogImportColumns = [
   'Unit',
   'MRP',
   'Selling Price',
+  'Commerce Mode',
   'Cost Price',
   'Discount',
   'Stock',
