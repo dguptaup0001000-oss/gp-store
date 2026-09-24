@@ -302,6 +302,62 @@ else
   fail=$((fail+1))
 fi
 
+# Read additional bounded pages before comparing shop-filtered results with
+# the ALL feed. Production has a real inventory, not the staging fixture, and
+# nearest-first ordering can put valid secondary-shop items after page zero.
+ALL_FEED_PRODUCT_IDS=$(printf '%s' "$MARKET_ALL_ROWS" | python3 -c '
+import json,sys
+try:
+    rows=json.load(sys.stdin)
+    print(" ".join(str(r.get("productId")) for r in rows if r.get("productId") is not None))
+except Exception:
+    print("")
+' 2>/dev/null || echo "")
+ALL_FEED_PAGE_COUNT=$(printf '%s' "$MARKET_ALL_ROWS" | python3 -c '
+import json,sys
+try:
+    rows=json.load(sys.stdin)
+    print(len(rows) if isinstance(rows,list) else -1)
+except Exception:
+    print(-1)
+' 2>/dev/null || echo -1)
+ALL_FEED_PAGE=0
+ALL_FEED_PAGE_LIMIT=10
+while [ "$ALL_FEED_PAGE" -lt "$ALL_FEED_PAGE_LIMIT" ] && [ "$ALL_FEED_PAGE_COUNT" -eq 50 ]; do
+  ALL_FEED_PAGE=$((ALL_FEED_PAGE+1))
+  check "GET /api/marketplace/feed ALL page $ALL_FEED_PAGE" 200 \
+    "$BASE/api/marketplace/feed?lat=$LAT&lng=$LNG&page=$ALL_FEED_PAGE&size=50"
+  NEXT_ALL_ROWS=$(cat "$BODY")
+  NEXT_ALL_CHECK=$(printf '%s' "$NEXT_ALL_ROWS" | python3 -c '
+import json,sys
+allowed={"ONLINE_PURCHASE","VISIT_TO_BUY","SERVICE_AT_SHOP"}
+try:
+    rows=json.load(sys.stdin)
+    ok=isinstance(rows,list) and all(r.get("commerceMode") in allowed for r in rows)
+    ids=" ".join(str(r.get("productId")) for r in rows if r.get("productId") is not None)
+    print(("ok" if ok else "invalid"), len(rows) if isinstance(rows,list) else -1, ids)
+except Exception:
+    print("invalid -1")
+' 2>/dev/null || echo "invalid -1")
+  NEXT_ALL_STATE=$(printf '%s' "$NEXT_ALL_CHECK" | awk '{print $1}')
+  NEXT_ALL_COUNT=$(printf '%s' "$NEXT_ALL_CHECK" | awk '{print $2}')
+  NEXT_ALL_IDS=$(printf '%s' "$NEXT_ALL_CHECK" | cut -d ' ' -f 3-)
+  if [ "$NEXT_ALL_STATE" != "ok" ]; then
+    printf '  %sFAIL%s  %-58s page=%s\n' "$RED" "$OFF" \
+      "ALL feed page has explicit supported commerce modes" "$ALL_FEED_PAGE"
+    fail=$((fail+1))
+  else
+    printf '  %sPASS%s  %-58s %s listing(s)\n' "$GREEN" "$OFF" \
+      "ALL feed page has explicit supported commerce modes" "$NEXT_ALL_COUNT"
+    pass=$((pass+1))
+  fi
+  ALL_FEED_PRODUCT_IDS="$ALL_FEED_PRODUCT_IDS $NEXT_ALL_IDS"
+  ALL_FEED_PAGE_COUNT="$NEXT_ALL_COUNT"
+done
+if [ "$ALL_FEED_PAGE" -eq "$ALL_FEED_PAGE_LIMIT" ] && [ "$ALL_FEED_PAGE_COUNT" -eq 50 ]; then
+  echo "  NOTE: stopped after $ALL_FEED_PAGE_LIMIT ALL-feed pages (500 listings); pagination check is bounded."
+fi
+
 SAMPLED_SECONDARY_LISTINGS=0
 SAMPLED_SECONDARY_SHOPS=0
 SAMPLE_INDEX=0
@@ -337,11 +393,10 @@ except Exception:
       SAMPLED_SECONDARY_LISTINGS=$((SAMPLED_SECONDARY_LISTINGS+FILTER_COUNT))
       MISSING_FROM_ALL=$(python3 -c '
 import json,sys
-selected=json.loads(sys.argv[1]); combined=json.loads(sys.argv[2])
-combined_ids={str(r.get("productId")) for r in combined}
+selected=json.loads(sys.argv[1]); combined_ids=set(sys.argv[2].split())
 missing=[r for r in selected if str(r.get("productId")) not in combined_ids]
 print(len(missing))
-' "$SELECTED_ROWS" "$MARKET_ALL_ROWS" 2>/dev/null || echo 1)
+' "$SELECTED_ROWS" "$ALL_FEED_PRODUCT_IDS" 2>/dev/null || echo 1)
       if [ "$MISSING_FROM_ALL" -eq 0 ]; then
         printf '  %sPASS%s  %-58s shop=%s products=%s\n' "$GREEN" "$OFF" \
           "ALL feed includes eligible products from a second shop" "$shop_id" "$FILTER_COUNT"
