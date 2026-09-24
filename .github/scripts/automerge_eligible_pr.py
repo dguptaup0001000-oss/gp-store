@@ -202,17 +202,6 @@ def dispatch_production_deploy() -> None:
     )
 
 
-def dispatch_production_apk() -> None:
-    """GITHUB_TOKEN merges do not start push workflows. Dispatch the APK job."""
-    _dispatch_workflow(
-        "build-and-deploy.yml",
-        "Dispatched Build APK and Deploy Web on main so downloadable "
-        "gpstore-customer-release.apk and gpstore-admin-release.apk are produced for this release.",
-        "Could not dispatch Build APK and Deploy Web from GITHUB_TOKEN. "
-        "Run Actions → Build APK and Deploy Web → Run workflow on main.",
-    )
-
-
 def _dispatch_workflow(workflow_file: str, ok_message: str, fail_prefix: str) -> None:
     repo = os.environ["GITHUB_REPOSITORY"]
     proc = gh(
@@ -324,7 +313,6 @@ def merge_eligible_pr(number: int) -> str:
         if refreshed.get("state") == "MERGED":
             dispatch_ssh_access_check()
             dispatch_production_deploy()
-            dispatch_production_apk()
             return "merged"
         log("GitHub will merge when remaining required ruleset checks pass.")
         return "queued"
