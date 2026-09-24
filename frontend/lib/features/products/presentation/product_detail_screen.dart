@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
+import '../../../shared/widgets/action_feedback.dart';
 import '../../marketplace/presentation/compare_shops_sheet.dart';
 import '../../../shared/widgets/horizontal_product_section.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -43,14 +44,16 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     setState(() => _isAdding = true);
 
     try {
-      await ref.read(cartControllerProvider.notifier).addToCart(
+      final added = await ref.read(cartControllerProvider.notifier).addToCart(
             variantId: variant.id,
             quantity: _quantity,
           );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${widget.product.name} added to cart')),
-      );
+      if (added) {
+        showAddedToCartFeedback(context, widget.product.name);
+      } else {
+        showActionFailure(context, "Couldn't add to cart. Please try again.");
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -95,7 +98,15 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   color: isWishlisted ? AppColors.error : null,
                 ),
                 tooltip: isWishlisted ? 'Remove from wishlist' : 'Add to wishlist',
-                onPressed: hapticize(() => ref.read(wishlistControllerProvider.notifier).toggle(product.id)),
+                onPressed: hapticize(() async {
+                  final added = await ref.read(wishlistControllerProvider.notifier).toggle(product.id);
+                  if (!context.mounted) return;
+                  if (added == null) {
+                    showActionFailure(context, "Couldn't update wishlist. Please try again.");
+                  } else {
+                    showWishlistFeedback(context, added: added);
+                  }
+                }),
               );
             },
           ),

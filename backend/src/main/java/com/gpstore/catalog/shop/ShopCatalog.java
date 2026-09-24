@@ -135,7 +135,10 @@ public class ShopCatalog {
             return;
         }
         CommerceMode mode = listing.getCommerceMode();
-        if (mode == null || mode.isBuyableOnline()) {
+        if (mode == null) {
+            throw new ConflictException("This listing has no valid commerce mode and cannot be purchased.");
+        }
+        if (mode.isBuyableOnline()) {
             return;
         }
         String what = variant != null && variant.getProduct() != null
@@ -260,6 +263,11 @@ public class ShopCatalog {
     }
 
     public ShopProductVariant list(ProductVariant variant) {
+        return list(variant, null);
+    }
+
+    /** Creates with an explicit mode, or updates an existing listing without changing its mode. */
+    public ShopProductVariant list(ProductVariant variant, CommerceMode requestedMode) {
         if (variant == null || variant.getId() == null) {
             throw new IllegalArgumentException("A listing needs a catalogue variant.");
         }
@@ -279,6 +287,12 @@ public class ShopCatalog {
 
         ShopProductVariant listing = listings.findByProductVariantId(variant.getId())
                 .orElseGet(ShopProductVariant::new);
+        CommerceMode mode = requestedMode == null ? listing.getCommerceMode() : requestedMode;
+        if (mode == null) {
+            throw new com.gpstore.exception.BadRequestException(
+                    "Choose how customers obtain this item before listing it.");
+        }
+        listing.setCommerceMode(mode);
         listing.setProductVariantId(variant.getId());
         listing.setSellingPrice(price);
         listing.setCostPrice(variant.getCostPrice());

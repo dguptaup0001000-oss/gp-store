@@ -104,4 +104,22 @@ public interface DeliveryRepository
             "and d.deliveryStatus not in ('DELIVERED', 'CANCELLED') " +
             "order by d.assignedAt asc")
     List<Delivery> findActiveByPartnerId(@Param("partnerId") Long partnerId);
+
+    /** Bounded scalar projection for the merchant's Worker 360 history. */
+    @Query("select d.id, d.order.orderNumber, d.deliveryStatus, d.assignedAt, d.deliveredAt "
+            + "from Delivery d where d.batch.deliveryPartner.id = :partnerId "
+            + "order by d.assignedAt desc, d.id desc")
+    List<Object[]> workerHistory(@Param("partnerId") Long partnerId,
+                                 org.springframework.data.domain.Pageable pageable);
+
+    @Query("select d.id, d.order.orderNumber, d.deliveryStatus, d.assignedAt, d.deliveredAt "
+            + "from Delivery d where d.batch.deliveryPartner.id = :partnerId "
+            + "and d.deliveryStatus not in ('DELIVERED', 'CANCELLED') "
+            + "order by d.assignedAt asc, d.id asc")
+    List<Object[]> workerCurrentWork(@Param("partnerId") Long partnerId,
+                                     org.springframework.data.domain.Pageable pageable);
+
+    @Query("select d.deliveryStatus, count(d) from Delivery d "
+            + "where d.batch.deliveryPartner.id = :partnerId group by d.deliveryStatus")
+    List<Object[]> workerDeliveryCounts(@Param("partnerId") Long partnerId);
 }

@@ -37,8 +37,9 @@ class MarketplaceRepository {
   Future<List<MarketplaceCard>> feed({
     required double? latitude,
     required double? longitude,
-    CommerceMode mode = CommerceMode.buyOnline,
+    CommerceMode? mode,
     int? categoryId,
+    int? shopId,
     int page = 0,
     int size = 20,
   }) async {
@@ -48,18 +49,21 @@ class MarketplaceRepository {
       queryParameters: {
         'lat': latitude,
         'lng': longitude,
-        'mode': mode.wire,
+        if (mode != null) 'mode': mode.wire,
+        if (shopId != null) 'shopId': shopId,
         if (categoryId != null) 'categoryId': categoryId,
         'page': page,
         'size': size,
       },
     );
     final data = response.data;
-    if (data is! List) return const [];
-    return data
-        .whereType<Map<String, dynamic>>()
-        .map(MarketplaceCard.fromJson)
-        .toList(growable: false);
+    if (data is! List) throw const FormatException('Marketplace feed must be a JSON array');
+    return data.map((item) {
+      if (item is! Map<String, dynamic>) {
+        throw const FormatException('Marketplace feed contains a non-object listing');
+      }
+      return MarketplaceCard.fromJson(item);
+    }).toList(growable: false);
   }
 
   /// Search the whole marketplace, across every mode.
@@ -73,6 +77,7 @@ class MarketplaceRepository {
     required double? latitude,
     required double? longitude,
     CommerceMode? mode,
+    int? shopId,
     int page = 0,
     int size = 20,
   }) async {
@@ -86,16 +91,19 @@ class MarketplaceRepository {
         'lat': latitude,
         'lng': longitude,
         if (mode != null) 'mode': mode.wire,
+        if (shopId != null) 'shopId': shopId,
         'page': page,
         'size': size,
       },
     );
     final data = response.data;
-    if (data is! List) return const [];
-    return data
-        .whereType<Map<String, dynamic>>()
-        .map(MarketplaceCard.fromJson)
-        .toList(growable: false);
+    if (data is! List) throw const FormatException('Marketplace search must be a JSON array');
+    return data.map((item) {
+      if (item is! Map<String, dynamic>) {
+        throw const FormatException('Marketplace search contains a non-object listing');
+      }
+      return MarketplaceCard.fromJson(item);
+    }).toList(growable: false);
   }
 
   /// Records that a customer did something about an offline listing.

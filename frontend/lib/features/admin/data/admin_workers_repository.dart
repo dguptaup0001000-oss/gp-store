@@ -18,6 +18,12 @@ class AdminWorkersRepository {
         .toList();
   }
 
+  Future<AdminWorkerProfile> profile(int id, {int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get('/api/admin/workers/$id/profile',
+        queryParameters: {'page': page, 'size': size});
+    return AdminWorkerProfile.fromJson(response.data as Map<String, dynamic>);
+  }
+
   /// Hires someone. Email and password are required; the rest is detail.
   Future<AdminWorker> create({
     required String name,

@@ -57,6 +57,12 @@ public class MarketplaceFeedService {
     @Transactional(readOnly = true)
     public List<MarketplaceFeedView> page(Double lat, Double lng, Set<CommerceMode> modes,
                                           Long categoryId, int page, int size) {
+        return page(lat, lng, modes, categoryId, null, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public List<MarketplaceFeedView> page(Double lat, Double lng, Set<CommerceMode> modes,
+                                          Long categoryId, Long selectedShopId, int page, int size) {
         if (lat == null || lng == null) {
             return List.of();
         }
@@ -68,6 +74,12 @@ public class MarketplaceFeedService {
         Map<Long, Double> distanceByShop = new HashMap<>();
         for (ShopDiscovery.NearbyShop near : nearby) {
             distanceByShop.put(near.shop().getId(), near.distanceKm());
+        }
+        if (selectedShopId != null) {
+            Double selectedDistance = distanceByShop.get(selectedShopId);
+            if (selectedDistance == null) return List.of();
+            distanceByShop.clear();
+            distanceByShop.put(selectedShopId, selectedDistance);
         }
 
         int limit = Math.min(Math.max(size, 1), MAX_PAGE);
@@ -98,6 +110,13 @@ public class MarketplaceFeedService {
     @Transactional(readOnly = true)
     public List<MarketplaceFeedView> search(String keyword, Double lat, Double lng,
                                             Set<CommerceMode> modes, int page, int size) {
+        return search(keyword, lat, lng, modes, null, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public List<MarketplaceFeedView> search(String keyword, Double lat, Double lng,
+                                            Set<CommerceMode> modes, Long selectedShopId,
+                                            int page, int size) {
         if (lat == null || lng == null || keyword == null || keyword.isBlank()) {
             return List.of();
         }
@@ -108,6 +127,12 @@ public class MarketplaceFeedService {
         Map<Long, Double> distanceByShop = new HashMap<>();
         for (ShopDiscovery.NearbyShop near : nearby) {
             distanceByShop.put(near.shop().getId(), near.distanceKm());
+        }
+        if (selectedShopId != null) {
+            Double selectedDistance = distanceByShop.get(selectedShopId);
+            if (selectedDistance == null) return List.of();
+            distanceByShop.clear();
+            distanceByShop.put(selectedShopId, selectedDistance);
         }
 
         int limit = Math.min(Math.max(size, 1), MAX_PAGE);

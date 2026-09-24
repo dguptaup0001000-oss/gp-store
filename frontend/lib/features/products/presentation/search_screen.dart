@@ -20,6 +20,7 @@ import 'recent_searches.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../marketplace/domain/marketplace_feed_models.dart';
 import '../../marketplace/presentation/marketplace_card_tile.dart';
+import '../../marketplace/presentation/marketplace_feed_provider.dart';
 import '../../marketplace/presentation/product_offers_screen.dart';
 import 'voice_search_sheet.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
@@ -274,6 +275,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             query: query,
             latitude: pin.lat,
             longitude: pin.lng,
+            shopId: ref.read(marketplaceShopFilterProvider),
             page: 0,
           );
       if (!mounted || seq != _searchSeq) return;
@@ -334,6 +336,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   query: _lastQuery,
                   latitude: pin.lat,
                   longitude: pin.lng,
+                  shopId: ref.read(marketplaceShopFilterProvider),
                   page: nextPage,
                 );
         if (!mounted || seq != _searchSeq) return;

@@ -205,7 +205,7 @@ public class CatalogSeedService {
         variant.setProduct(product);
         applyVariantFields(variant, record);
         variant = variantRepository.save(variant);
-        shopCatalog.list(variant);
+        shopCatalog.list(variant, com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE);
 
         Inventory inventory = new Inventory();
         inventory.setProductVariant(variant);
@@ -223,7 +223,8 @@ public class CatalogSeedService {
             productRepository.save(product);
         }
         applyVariantFields(variant, record);
-        shopCatalog.list(variantRepository.save(variant));
+        shopCatalog.list(variantRepository.save(variant),
+                com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE);
         // Inventory deliberately untouched on update - see the class comment
         // on why re-running must not reset stock.
     }

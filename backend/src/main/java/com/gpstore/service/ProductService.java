@@ -322,7 +322,11 @@ public class ProductService {
 
         com.gpstore.entity.ProductVariant savedVariant = productVariants.save(variant);
 
-        com.gpstore.catalog.shop.ShopProductVariant listing = shopCatalog.list(savedVariant);
+        com.gpstore.catalog.shop.CommerceMode requestedMode = parseOrRefuse(
+                com.gpstore.catalog.shop.CommerceMode.class,
+                first.getCommerceMode(), null, "selling mode");
+        com.gpstore.catalog.shop.ShopProductVariant listing =
+                shopCatalog.list(savedVariant, requestedMode);
         if (insideAShop && listing == null) {
             // Should be unreachable: the request validation already requires a
             // positive selling price and we know a shop is in scope. Loud
@@ -369,7 +373,7 @@ public class ProductService {
             com.gpstore.dto.request.ProductCreateRequest.FirstVariant first) {
         listing.setCommerceMode(parseOrRefuse(
                 com.gpstore.catalog.shop.CommerceMode.class, first.getCommerceMode(),
-                com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE, "selling mode"));
+                null, "selling mode"));
         listing.setPriceMode(parseOrRefuse(
                 com.gpstore.catalog.shop.ListingPriceMode.class, first.getPriceMode(),
                 com.gpstore.catalog.shop.ListingPriceMode.EXACT_PRICE, "price mode"));
@@ -379,8 +383,7 @@ public class ProductService {
                 first.getOfflineAvailability(), null, "availability"));
         listing.setServiceDurationMinutes(first.getServiceDurationMinutes());
 
-        boolean online = listing.getCommerceMode() == null
-                || listing.getCommerceMode().isBuyableOnline();
+        boolean online = listing.getCommerceMode().isBuyableOnline();
 
         // AN ONLINE PRICE IS A PROMISE - a cart totals it and a receipt prints
         // it - so the same rule the edit path enforces applies at creation.

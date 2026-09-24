@@ -9,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -49,6 +50,7 @@ class CatalogImportTest {
     @Autowired private InventoryRepository inventories;
     @Autowired private ProductImageRepository images;
     @Autowired private CategoryRepository categories;
+    @Autowired private JdbcTemplate jdbc;
 
     private String categoryName;
     private String sku;
@@ -76,8 +78,8 @@ class CatalogImportTest {
     /** A product with everything filled in, so we can watch what survives. */
     private ProductVariant seedFullProduct() {
         run("""
-            SKU,Product Name,Brand,Category,Description,MRP,Selling Price,Stock,Image 1
-            %s,Aashirvaad Atta 5 kg,Aashirvaad,%s,Chakki fresh atta,300,270,40,https://res.cloudinary.com/demo/image/upload/a.jpg
+            SKU,Product Name,Brand,Category,Description,MRP,Selling Price,Stock,Image 1,Commerce Mode
+            %s,Aashirvaad Atta 5 kg,Aashirvaad,%s,Chakki fresh atta,300,270,40,https://res.cloudinary.com/demo/image/upload/a.jpg,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
         return variants.findBySku(sku).orElseThrow();
     }
@@ -115,8 +117,8 @@ class CatalogImportTest {
     @DisplayName("a new product arrives with its variant and its stock")
     void importCreatesProductVariantAndInventory() {
         var summary = run("""
-            SKU,Product Name,Brand,Category,Variant Value,Unit,MRP,Selling Price,Cost Price,Stock
-            %s,Tata Salt 1 kg,Tata,%s,1,kg,28,25,20,150
+            SKU,Product Name,Brand,Category,Variant Value,Unit,MRP,Selling Price,Cost Price,Stock,Commerce Mode
+            %s,Tata Salt 1 kg,Tata,%s,1,kg,28,25,20,150,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
 
         assertEquals(1, summary.createdCount());
@@ -136,11 +138,39 @@ class CatalogImportTest {
     }
 
     @Test
+    @DisplayName("a new import cannot silently become Buy Online when its commerce mode is missing")
+    void newListingRequiresExplicitCommerceMode() {
+        var summary = run("""
+            SKU,Product Name,Category,Selling Price
+            %s,Missing Mode,%s,10
+            """.formatted(sku, categoryName), Mode.IMPORT);
+
+        assertEquals(1, summary.errorRows());
+        assertTrue(summary.problems().stream().anyMatch(p -> "Commerce Mode".equals(p.field())));
+        assertTrue(variants.findBySku(sku).isEmpty());
+    }
+
+    @Test
+    @DisplayName("the import round trip preserves Visit to Buy exactly")
+    void importPreservesVisitToBuy() {
+        var summary = run("""
+            SKU,Product Name,Category,Selling Price,Commerce Mode
+            %s,Visit Only Item,%s,10,VISIT_TO_BUY
+            """.formatted(sku, categoryName), Mode.IMPORT);
+
+        assertEquals(1, summary.createdCount());
+        Long variantId = variants.findBySku(sku).orElseThrow().getId();
+        assertEquals("VISIT_TO_BUY", jdbc.queryForObject(
+                "SELECT commerce_mode FROM shop_product_variants WHERE product_variant_id = ?",
+                String.class, variantId));
+    }
+
+    @Test
     @DisplayName("selling above MRP is refused, and the row is not imported")
     void sellingAboveMrpIsRefused() {
         var summary = run("""
-            SKU,Product Name,Category,MRP,Selling Price
-            %s,Overpriced Dal,%s,100,140
+            SKU,Product Name,Category,MRP,Selling Price,Commerce Mode
+            %s,Overpriced Dal,%s,100,140,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
 
         assertEquals(1, summary.errorRows());
@@ -157,8 +187,8 @@ class CatalogImportTest {
     @DisplayName("a negative price and a negative stock are both refused")
     void negativeValuesAreRefused() {
         var summary = run("""
-            SKU,Product Name,Category,Selling Price,Stock
-            %s,Bad Row,%s,-5,-3
+            SKU,Product Name,Category,Selling Price,Stock,Commerce Mode
+            %s,Bad Row,%s,-5,-3,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
 
         assertEquals(1, summary.errorRows());
@@ -170,9 +200,9 @@ class CatalogImportTest {
     @DisplayName("the same SKU twice in one file is refused, naming the first row")
     void duplicateSkuInFileIsRefused() {
         var summary = run("""
-            SKU,Product Name,Category,Selling Price
-            %s,First,%s,10
-            %s,Second,%s,20
+            SKU,Product Name,Category,Selling Price,Commerce Mode
+            %s,First,%s,10,ONLINE_PURCHASE
+            %s,Second,%s,20,ONLINE_PURCHASE
             """.formatted(sku, categoryName, sku, categoryName), Mode.IMPORT);
 
         assertEquals(1, summary.errorRows(), "one of the two rows must be refused");
@@ -185,8 +215,8 @@ class CatalogImportTest {
     @DisplayName("a category that does not exist is refused rather than invented")
     void unknownCategoryIsRefused() {
         var summary = run("""
-            SKU,Product Name,Category,Selling Price
-            %s,Orphan,No Such Category,10
+            SKU,Product Name,Category,Selling Price,Commerce Mode
+            %s,Orphan,No Such Category,10,ONLINE_PURCHASE
             """.formatted(sku), Mode.IMPORT);
 
         assertEquals(1, summary.errorRows());
@@ -199,8 +229,8 @@ class CatalogImportTest {
     @DisplayName("an unknown unit is refused, and the message lists the real ones")
     void unknownUnitIsRefused() {
         var summary = run("""
-            SKU,Product Name,Category,Unit,Selling Price
-            %s,Odd Unit,%s,furlong,10
+            SKU,Product Name,Category,Unit,Selling Price,Commerce Mode
+            %s,Odd Unit,%s,furlong,10,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
 
         var problem = summary.problems().stream()
@@ -212,8 +242,8 @@ class CatalogImportTest {
     @DisplayName("kgs, KG and kilogram all mean kg")
     void unitAliasesAreAccepted() {
         run("""
-            SKU,Product Name,Category,Unit,Selling Price
-            %s,Alias Unit,%s,KGS,10
+            SKU,Product Name,Category,Unit,Selling Price,Commerce Mode
+            %s,Alias Unit,%s,KGS,10,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
 
         assertEquals("kg", variants.findBySku(sku).orElseThrow().getUnit());
@@ -223,8 +253,8 @@ class CatalogImportTest {
     @DisplayName("a product name containing a comma survives the CSV")
     void commasInsideQuotedValuesSurvive() {
         run("""
-            SKU,Product Name,Category,Selling Price
-            %s,"Haldiram's Bhujia, 200 g",%s,55
+            SKU,Product Name,Category,Selling Price,Commerce Mode
+            %s,"Haldiram's Bhujia, 200 g",%s,55,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
 
         ProductVariant variant = variants.findBySku(sku).orElseThrow();
@@ -248,8 +278,8 @@ class CatalogImportTest {
     @DisplayName("a preview writes nothing at all")
     void previewIsReadOnly() {
         byte[] bytes = csv("""
-            SKU,Product Name,Category,Selling Price
-            %s,Preview Only,%s,10
+            SKU,Product Name,Category,Selling Price,Commerce Mode
+            %s,Preview Only,%s,10,ONLINE_PURCHASE
             """.formatted(sku, categoryName));
 
         importService.preview("sheet.csv", bytes, Mode.IMPORT, "admin@example.com");
@@ -262,12 +292,12 @@ class CatalogImportTest {
     @DisplayName("committing a different file than the one previewed is refused")
     void commitMustBeTheFileThatWasPreviewed() {
         byte[] previewed = csv("""
-            SKU,Product Name,Category,Selling Price
-            %s,Honest,%s,10
+            SKU,Product Name,Category,Selling Price,Commerce Mode
+            %s,Honest,%s,10,ONLINE_PURCHASE
             """.formatted(sku, categoryName));
         byte[] swapped = csv("""
-            SKU,Product Name,Category,Selling Price
-            %s,Swapped,%s,1
+            SKU,Product Name,Category,Selling Price,Commerce Mode
+            %s,Swapped,%s,1,ONLINE_PURCHASE
             """.formatted(sku, categoryName));
 
         var preview = importService.preview("sheet.csv", previewed, Mode.IMPORT, "admin@example.com");
@@ -284,8 +314,8 @@ class CatalogImportTest {
     @DisplayName("the same import cannot be applied twice")
     void commitIsNotRepeatable() {
         byte[] bytes = csv("""
-            SKU,Product Name,Category,Selling Price
-            %s,Once,%s,10
+            SKU,Product Name,Category,Selling Price,Commerce Mode
+            %s,Once,%s,10,ONLINE_PURCHASE
             """.formatted(sku, categoryName));
 
         var preview = importService.preview("sheet.csv", bytes, Mode.IMPORT, "admin@example.com");
@@ -299,8 +329,8 @@ class CatalogImportTest {
     @DisplayName("a discount that disagrees with the prices warns but still imports")
     void discountMismatchIsAWarningNotAnError() {
         var summary = run("""
-            SKU,Product Name,Category,MRP,Selling Price,Discount
-            %s,Mismatched,%s,100,90,50
+            SKU,Product Name,Category,MRP,Selling Price,Discount,Commerce Mode
+            %s,Mismatched,%s,100,90,50,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
 
         assertEquals(0, summary.errorRows(), "the two prices are valid on their own");
@@ -314,8 +344,8 @@ class CatalogImportTest {
     @DisplayName("a column claiming to set New is refused with a reason")
     void unsupportedColumnIsExplained() {
         var summary = run("""
-            SKU,Product Name,Category,Selling Price,New
-            %s,Newish,%s,10,TRUE
+            SKU,Product Name,Category,Selling Price,New,Commerce Mode
+            %s,Newish,%s,10,TRUE,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
 
         var problem = summary.problems().stream()
@@ -329,8 +359,8 @@ class CatalogImportTest {
     @DisplayName("an unrecognised column is a warning, and the rest of the row imports")
     void unknownColumnIsOnlyAWarning() {
         var summary = run("""
-            SKU,Product Name,Category,Selling Price,Supplier Notes
-            %s,Fine,%s,10,call Ramesh
+            SKU,Product Name,Category,Selling Price,Supplier Notes,Commerce Mode
+            %s,Fine,%s,10,call Ramesh,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
 
         assertEquals(1, summary.createdCount());
@@ -343,8 +373,8 @@ class CatalogImportTest {
     @DisplayName("history records what was imported, by whom")
     void historyIsRecorded() {
         var summary = run("""
-            SKU,Product Name,Category,Selling Price
-            %s,Historic,%s,10
+            SKU,Product Name,Category,Selling Price,Commerce Mode
+            %s,Historic,%s,10,ONLINE_PURCHASE
             """.formatted(sku, categoryName), Mode.IMPORT);
 
         assertEquals("COMMITTED", summary.status());

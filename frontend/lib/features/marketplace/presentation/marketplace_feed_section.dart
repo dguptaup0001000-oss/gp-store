@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/marketplace/marketplace_providers.dart';
 import '../domain/marketplace_feed_models.dart';
 import 'marketplace_card_tile.dart';
 import 'marketplace_feed_provider.dart';
@@ -30,17 +31,25 @@ class MarketplaceFeedSlivers {
   }) {
     return [
       const SliverToBoxAdapter(child: _Header()),
+      const SliverToBoxAdapter(child: _ShopFilter()),
       feed.when(
         loading: () => const SliverToBoxAdapter(
           child: Padding(
             padding: EdgeInsets.symmetric(vertical: 32),
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(strokeWidth: 2),
+                SizedBox(height: 12),
+                Text('Finding products and services near you…'),
+              ],
+            ),
           ),
         ),
         error: (error, _) => SliverToBoxAdapter(
           child: _Message(
             icon: Icons.wifi_off_rounded,
-            title: 'Could not load the marketplace',
+            title: "Couldn't load nearby marketplace",
             action: 'Try again',
             onAction: () => ref.invalidate(marketplaceFeedProvider),
           ),
@@ -65,9 +74,8 @@ class MarketplaceFeedSlivers {
             return const SliverToBoxAdapter(
               child: _Message(
                 icon: Icons.storefront_outlined,
-                title: 'No shops deliver here yet',
-                body: 'GP-STORE has not reached your area yet. '
-                    'Shops appear here as they join.',
+                title: 'No nearby products or services found',
+                body: 'Try again later or browse the nearby shops list.',
               ),
             );
           }
@@ -81,6 +89,51 @@ class MarketplaceFeedSlivers {
         ),
       ),
     ];
+  }
+}
+
+class _ShopFilter extends ConsumerWidget {
+  const _ShopFilter();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selected = ref.watch(marketplaceShopFilterProvider);
+    final pin = ref.watch(deliveryPinProvider);
+    if (pin == null) return const SizedBox.shrink();
+    final shops = ref.watch(shopsNearProvider(pin));
+    return shops.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Center(child: SizedBox(width: 18, height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2))),
+      ),
+      error: (_, __) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        child: TextButton.icon(
+          onPressed: () => ref.invalidate(shopsNearProvider(pin)),
+          icon: const Icon(Icons.refresh), label: const Text('Retry nearby shops'),
+        ),
+      ),
+      data: (list) => SizedBox(
+        height: 48,
+        child: ListView(scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          children: [
+            ChoiceChip(label: const Text('All'), selected: selected == null,
+              onSelected: (_) => ref.read(marketplaceShopFilterProvider.notifier).state = null),
+            for (final shop in list) Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: ChoiceChip(
+                label: Text(shop.displayName?.trim().isNotEmpty == true
+                    ? shop.displayName! : 'Shop ${shop.shopId}'),
+                selected: selected == shop.shopId,
+                onSelected: (_) => ref.read(marketplaceShopFilterProvider.notifier).state = shop.shopId,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -105,7 +158,7 @@ class _Header extends ConsumerWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              mode == CommerceMode.buyOnline ? 'Near you' : mode.label,
+              mode == null ? 'All nearby shops' : mode.label,
               style: Theme.of(context)
                   .textTheme
                   .titleMedium

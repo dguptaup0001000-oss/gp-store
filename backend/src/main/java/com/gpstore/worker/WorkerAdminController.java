@@ -84,6 +84,13 @@ public class WorkerAdminController {
         return service.get(id);
     }
 
+    @GetMapping("/{id}/profile")
+    public WorkerAdminService.WorkerProfile profile(@PathVariable Long id,
+                                                     @RequestParam(defaultValue = "0") int page,
+                                                     @RequestParam(defaultValue = "20") int size) {
+        return service.profile(id, page, size);
+    }
+
     @PostMapping
     public WorkerAdminService.WorkerView create(@RequestBody WorkerRequest request) {
         return service.create(request.toForm());

@@ -88,9 +88,7 @@ public class ListingEngagement {
         try {
             shopScope.within(shopId, () -> {
                 CommerceMode mode = listings.findByProductVariantId(productVariantId)
-                        .map(listing -> listing.getCommerceMode() == null
-                                ? CommerceMode.ONLINE_PURCHASE : listing.getCommerceMode())
-                        .orElse(null);
+                        .map(listing -> listing.getCommerceMode()).orElse(null);
                 if (mode == null) {
                     // No such listing at that shop. Nothing to record, and
                     // nothing to tell the caller either - which listing ids a

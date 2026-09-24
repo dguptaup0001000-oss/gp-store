@@ -172,6 +172,60 @@ class OpenTheAppAndSeeTheMarketplaceTest {
         }
 
         @Test
+        @DisplayName("the real HTTP JSON keeps every mode and applies a selected shop")
+        void customerFeedWireContract() throws Exception {
+            Long visitVariant = variantOf(productIds.get(1));
+            jdbc.update("UPDATE shop_product_variants SET commerce_mode = 'VISIT_TO_BUY', "
+                            + "price_mode = 'STARTING_FROM' WHERE shop_id = ? AND product_variant_id = ?",
+                    shopIds.get(1), visitVariant);
+            Long serviceVariant = variantOf(productIds.get(2));
+            jdbc.update("UPDATE shop_product_variants SET commerce_mode = 'SERVICE_AT_SHOP', "
+                            + "price_mode = 'STARTING_FROM' WHERE shop_id = ? AND product_variant_id = ?",
+                    shopIds.get(2), serviceVariant);
+
+            String body = mockMvc.perform(get("/api/marketplace/feed")
+                            .param("lat", String.valueOf(LAT))
+                            .param("lng", String.valueOf(LNG))
+                    .param("page", "0").param("size", "20"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            var cards = json.readTree(body);
+            assertTrue(cards.isArray() && cards.size() >= 5,
+                    "the serialized marketplace response did not include the nearby fixture: " + body);
+            Set<Long> represented = new HashSet<>();
+            boolean online = false, visit = false, service = false;
+            for (var card : cards) {
+                represented.add(card.path("shopId").asLong());
+                String mode = card.path("commerceMode").asText();
+                assertTrue(Set.of("ONLINE_PURCHASE", "VISIT_TO_BUY", "SERVICE_AT_SHOP").contains(mode),
+                        "the HTTP contract omitted/changed commerceMode: " + card);
+                if ("ONLINE_PURCHASE".equals(mode)) {
+                    online = true;
+                    assertTrue(card.path("addable").asBoolean(), "Buy Online should be addable: " + card);
+                } else {
+                    assertFalse(card.path("addable").asBoolean(),
+                            "offline modes must not be cartable: " + card);
+                }
+                visit |= "VISIT_TO_BUY".equals(mode);
+                service |= "SERVICE_AT_SHOP".equals(mode);
+            }
+            assertTrue(online && visit && service,
+                    "the three modes were not all serialized: " + body);
+            assertTrue(represented.size() >= 5,
+                    "ALL nearby mode did not span multiple shops: " + represented);
+
+            String filtered = mockMvc.perform(get("/api/marketplace/feed")
+                            .param("lat", String.valueOf(LAT)).param("lng", String.valueOf(LNG))
+                            .param("shopId", String.valueOf(shopIds.get(1)))
+                            .param("page", "0").param("size", "20"))
+                    .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            for (var card : json.readTree(filtered)) {
+                assertEquals(shopIds.get(1).longValue(), card.path("shopId").asLong(),
+                        "selected shop filter leaked another shop's listing: " + filtered);
+            }
+        }
+
+        @Test
         @DisplayName("is not one trade's shelf wearing a marketplace's name")
         void theFeedIsGenuinelyMixed() {
             List<MarketplaceFeedView> cards = feed.page(LAT, LNG,

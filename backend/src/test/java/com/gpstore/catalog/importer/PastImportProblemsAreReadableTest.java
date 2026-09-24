@@ -65,9 +65,9 @@ class PastImportProblemsAreReadableTest {
     private Long runWithOneBadRow() {
         String sku = "PPR-" + System.nanoTime();
         String body = """
-                SKU,Product Name,Category,MRP,Selling Price,Stock
-                %s-A,Good Atta,%s,300,270,10
-                %s-B,Overpriced Atta,%s,100,150,10
+                SKU,Product Name,Category,MRP,Selling Price,Stock,Commerce Mode
+                %s-A,Good Atta,%s,300,270,10,ONLINE_PURCHASE
+                %s-B,Overpriced Atta,%s,100,150,10,ONLINE_PURCHASE
                 """.formatted(sku, categoryName, sku, categoryName);
 
         var preview = importService.preview("sheet.csv",
@@ -105,8 +105,8 @@ class PastImportProblemsAreReadableTest {
     void aCleanRunHasNoProblems() throws Exception {
         String sku = "PPR-CLEAN-" + System.nanoTime();
         var preview = importService.preview("clean.csv", """
-                SKU,Product Name,Category,MRP,Selling Price,Stock
-                %s,Fine Atta,%s,300,270,10
+                SKU,Product Name,Category,MRP,Selling Price,Stock,Commerce Mode
+                %s,Fine Atta,%s,300,270,10,ONLINE_PURCHASE
                 """.formatted(sku, categoryName).getBytes(StandardCharsets.UTF_8),
                 Mode.IMPORT, "admin@example.com");
 

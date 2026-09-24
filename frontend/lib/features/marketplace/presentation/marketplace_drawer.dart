@@ -37,6 +37,11 @@ class MarketplaceDrawer extends ConsumerWidget {
       Navigator.of(context).pop();
     }
 
+    void chooseAll() {
+      ref.read(marketplaceModeFilterProvider.notifier).state = null;
+      Navigator.of(context).pop();
+    }
+
     void open(Widget screen) {
       Navigator.of(context).pop();
       Navigator.of(context)
@@ -51,6 +56,13 @@ class MarketplaceDrawer extends ConsumerWidget {
           children: [
             const _DrawerHeader(),
             const _SectionLabel('Shop'),
+            _ModeTile(
+              icon: Icons.store_mall_directory_outlined,
+              title: 'All nearby shops',
+              subtitle: 'Products and services across the marketplace',
+              selected: active == null,
+              onTap: chooseAll,
+            ),
             _ModeTile(
               icon: Icons.shopping_bag_outlined,
               title: 'Buy Online',

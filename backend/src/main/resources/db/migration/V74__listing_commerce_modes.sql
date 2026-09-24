@@ -33,7 +33,6 @@ ALTER TABLE shop_product_variants ADD COLUMN IF NOT EXISTS price_max NUMERIC(12,
 ALTER TABLE shop_product_variants ADD COLUMN IF NOT EXISTS offline_availability VARCHAR(24);
 ALTER TABLE shop_product_variants ADD COLUMN IF NOT EXISTS service_duration_minutes INTEGER;
 
-ALTER TABLE shop_product_variants ALTER COLUMN commerce_mode SET DEFAULT 'ONLINE_PURCHASE';
 ALTER TABLE shop_product_variants ALTER COLUMN price_mode SET DEFAULT 'EXACT_PRICE';
 
 -- EVERY EXISTING LISTING IS EXACTLY WHAT IT ALWAYS WAS. Not one row changes

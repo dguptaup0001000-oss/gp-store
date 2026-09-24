@@ -80,3 +80,58 @@ class AdminWorker {
     return available ? 'Working' : 'Signed in, not taking deliveries';
   }
 }
+
+class AdminWorkerProfile {
+  const AdminWorkerProfile({
+    required this.worker,
+    this.shopName,
+    required this.totalAssigned,
+    required this.completed,
+    required this.active,
+    required this.exceptions,
+    required this.page,
+    required this.size,
+    required this.hasNext,
+    required this.currentWork,
+    required this.history,
+  });
+
+  final AdminWorker worker;
+  final String? shopName;
+  final int totalAssigned, completed, active, exceptions, page, size;
+  final bool hasNext;
+  final List<AdminWorkerDelivery> currentWork, history;
+
+  factory AdminWorkerProfile.fromJson(Map<String, dynamic> json) {
+    List<AdminWorkerDelivery> deliveries(String key) =>
+        ((json[key] as List?) ?? const [])
+            .map((e) => AdminWorkerDelivery.fromJson(e as Map<String, dynamic>))
+            .toList(growable: false);
+    int number(String key) => (json[key] as num?)?.toInt() ?? 0;
+    return AdminWorkerProfile(
+      worker: AdminWorker.fromJson(json['worker'] as Map<String, dynamic>),
+      shopName: json['shopName'] as String?,
+      totalAssigned: number('totalAssigned'), completed: number('completed'),
+      active: number('active'), exceptions: number('exceptions'),
+      page: number('page'), size: number('size'), hasNext: json['hasNext'] == true,
+      currentWork: deliveries('currentWork'), history: deliveries('history'),
+    );
+  }
+}
+
+class AdminWorkerDelivery {
+  const AdminWorkerDelivery({required this.id, this.orderNumber, this.status,
+    this.assignedAt, this.deliveredAt});
+  final int id;
+  final String? orderNumber, status;
+  final DateTime? assignedAt, deliveredAt;
+
+  factory AdminWorkerDelivery.fromJson(Map<String, dynamic> json) {
+    return AdminWorkerDelivery(
+      id: (json['deliveryId'] as num).toInt(),
+      orderNumber: json['orderNumber'] as String?, status: json['status'] as String?,
+      assignedAt: DateTime.tryParse(json['assignedAt'] as String? ?? ''),
+      deliveredAt: DateTime.tryParse(json['deliveredAt'] as String? ?? ''),
+    );
+  }
+}

@@ -213,6 +213,30 @@ class WorkerLifecycleEndToEndTest {
     }
 
     @Test
+    @DisplayName("Worker 360 is tenant scoped, bounded and never serializes credentials")
+    void workerProfileIsASecretFreePaginatedContract() throws Exception {
+        long workerId = hire("profile-" + unique() + "@gmail.com", null);
+        String body = mvc.perform(get("/api/admin/workers/" + workerId + "/profile")
+                        .param("page", "0").param("size", "1")
+                        .header("Authorization", adminAuth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.worker.id").value(workerId))
+                .andExpect(jsonPath("$.worker.name").exists())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.history").isArray())
+                .andExpect(jsonPath("$.currentWork").isArray())
+                .andReturn().getResponse().getContentAsString();
+        String lower = body.toLowerCase();
+        assertFalse(lower.contains("password"), body);
+        assertFalse(lower.contains("token"), body);
+        assertFalse(lower.contains("otp"), body);
+        mvc.perform(get("/api/admin/workers/" + workerId + "/profile")
+                        .param("size", "51").header("Authorization", adminAuth))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("a wrong password and an unknown worker are refused identically")
     void refusalsDoNotLeakWhoExists() throws Exception {
         String email = "rider-" + unique() + "@gmail.com";

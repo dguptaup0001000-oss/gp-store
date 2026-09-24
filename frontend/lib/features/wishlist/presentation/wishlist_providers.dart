@@ -36,8 +36,8 @@ class WishlistController extends AsyncNotifier<List<WishlistItem>> {
   /// Adds if not already wishlisted, removes if it is - the one call a
   /// heart-icon button actually needs, hiding the add-vs-remove-by-id
   /// distinction from every call site.
-  Future<void> toggle(int productId) async {
-    if (_mutationInFlight) return;
+  Future<bool?> toggle(int productId) async {
+    if (_mutationInFlight) return null;
     _mutationInFlight = true;
     try {
       final current = state.valueOrNull ?? [];
@@ -60,9 +60,11 @@ class WishlistController extends AsyncNotifier<List<WishlistItem>> {
         }
         return repository.getMyWishlist();
       });
+      if (state.hasError) return null;
       if (state.hasValue) {
         AppHaptics.selection();
       }
+      return existing == null;
     } finally {
       _mutationInFlight = false;
     }

@@ -101,6 +101,8 @@ public class CatalogImportValidator {
             boolean exists = sku != null && variants.findBySku(sku).isPresent();
 
             validateMode(row, mode, sku, exists, rowProblems);
+            validateCommerceMode(row, mode == Mode.IMPORT && !exists,
+                    rowProblems, typed);
             validateIdentity(row, mode, exists, rowProblems, typed);
             validateBarcode(row, sku, rowProblems, typed, barcodeFirstSeen);
             validateCategory(row, rowProblems, typed);
@@ -180,6 +182,30 @@ public class CatalogImportValidator {
             problems.add(problem(row, "SKU", Severity.ERROR,
                     "No product has SKU \"" + sku + "\", and this is an update-only import.",
                     "Check the code for a typo, or run a full import if it really is new."));
+        }
+    }
+
+    /** A newly listed item must say how customers obtain it; updates may omit it to preserve mode. */
+    private void validateCommerceMode(SheetRow row, boolean creating,
+                                      List<CatalogImportProblem> problems,
+                                      Map<ImportColumn, Object> typed) {
+        String raw = emptyToNull(row.get(ImportColumn.COMMERCE_MODE));
+        if (raw == null) {
+            if (creating) {
+                problems.add(problem(row, "Commerce Mode", Severity.ERROR,
+                        "A new listing needs a commerce mode.",
+                        "Set ONLINE_PURCHASE, VISIT_TO_BUY or SERVICE_AT_SHOP explicitly."));
+            }
+            return;
+        }
+        try {
+            typed.put(ImportColumn.COMMERCE_MODE,
+                    com.gpstore.catalog.shop.CommerceMode.valueOf(
+                            raw.trim().toUpperCase(Locale.ROOT)));
+        } catch (IllegalArgumentException unknown) {
+            problems.add(problem(row, "Commerce Mode", Severity.ERROR,
+                    "Commerce Mode '" + raw + "' is not supported.",
+                    "Use ONLINE_PURCHASE, VISIT_TO_BUY or SERVICE_AT_SHOP."));
         }
     }
 
