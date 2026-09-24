@@ -541,9 +541,7 @@ jobs:
   release-apks:
     name: Build release APKs for the verified production SHA
     needs: [smoke]
-    if: >-
-      github.event_name != 'pull_request'
-      && needs.smoke.result == 'success'
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
