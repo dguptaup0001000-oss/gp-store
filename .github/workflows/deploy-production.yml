@@ -540,7 +540,14 @@ jobs:
   # with the exact SHA that was deployed and checked above.
   release-apks:
     name: Build release APKs for the verified production SHA
-    needs: [smoke]
+    needs: [deploy, deploy-fallback, smoke]
+    # A fallback deployment is valid even though the primary deploy job failed.
+    # always() is required to evaluate those explicit results after that failure.
+    if: >-
+      always()
+      && github.event_name != 'pull_request'
+      && needs.smoke.result == 'success'
+      && (needs.deploy.result == 'success' || needs['deploy-fallback'].result == 'success')
     runs-on: ubuntu-latest
     permissions:
       actions: write
