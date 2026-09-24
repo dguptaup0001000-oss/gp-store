@@ -226,6 +226,16 @@ class OpenTheAppAndSeeTheMarketplaceTest {
         }
 
         @Test
+        @DisplayName("an unsupported commerce mode is refused rather than guessed as Buy Online")
+        void unknownModeIsBadRequest() throws Exception {
+            mockMvc.perform(get("/api/marketplace/feed")
+                            .param("lat", String.valueOf(LAT))
+                            .param("lng", String.valueOf(LNG))
+                            .param("mode", "BUY_ONLINE"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
         @DisplayName("is not one trade's shelf wearing a marketplace's name")
         void theFeedIsGenuinelyMixed() {
             List<MarketplaceFeedView> cards = feed.page(LAT, LNG,

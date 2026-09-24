@@ -644,7 +644,7 @@ public class PlatformControlTowerService {
 
         Map<String, Object> listings = jdbc.queryForMap("""
                 SELECT COALESCE(sum(CASE WHEN COALESCE(spv.active,true) THEN 1 ELSE 0 END),0) active_listings,
-                       COALESCE(sum(CASE WHEN COALESCE(spv.commerce_mode,'ONLINE_PURCHASE')='ONLINE_PURCHASE'
+                       COALESCE(sum(CASE WHEN spv.commerce_mode='ONLINE_PURCHASE'
                                          THEN 1 ELSE 0 END),0) online_listings,
                        COALESCE(sum(CASE WHEN spv.commerce_mode='VISIT_TO_BUY' THEN 1 ELSE 0 END),0) visit_listings,
                        COALESCE(sum(CASE WHEN spv.commerce_mode='SERVICE_AT_SHOP' THEN 1 ELSE 0 END),0) service_listings,
@@ -1055,13 +1055,13 @@ public class PlatformControlTowerService {
         Map<String, Long> listings = new LinkedHashMap<>();
         Map<String, Long> shopsWith = new LinkedHashMap<>();
         jdbc.query("""
-                SELECT COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE') AS mode,
+                SELECT spv.commerce_mode AS mode,
                        count(*)                       AS listings,
                        count(DISTINCT spv.shop_id)    AS shops
                   FROM shop_product_variants spv
                   JOIN shops s ON s.id = spv.shop_id AND s.deleted_at IS NULL
                  WHERE COALESCE(spv.active, true) = true
-                 GROUP BY COALESCE(spv.commerce_mode, 'ONLINE_PURCHASE')
+                 GROUP BY spv.commerce_mode
                 """, Map.of(), (RowCallbackHandler) rs -> {
             listings.put(rs.getString("mode"), rs.getLong("listings"));
             shopsWith.put(rs.getString("mode"), rs.getLong("shops"));

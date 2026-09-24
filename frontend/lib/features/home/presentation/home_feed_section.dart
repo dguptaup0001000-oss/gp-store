@@ -144,7 +144,7 @@ class _FeedGrid extends ConsumerWidget {
               product: product,
               onTap: hapticize(() => onProductTap(product)),
               isWishlisted: wishlistController.isWishlisted(product.id),
-              onWishlistToggle: () => wishlistController.toggle(product.id),
+              onWishlistMutation: () => wishlistController.toggle(product.id),
               onAddPressed: variant == null
                   ? null
                   : () => _addToCart(context, ref, product, variant),
@@ -170,9 +170,9 @@ Future<void> _addToCart(
   try {
     final added = await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
     if (!context.mounted) return;
-    if (added) {
+    if (added == true) {
       showAddedToCartFeedback(context, product.name);
-    } else {
+    } else if (added == false) {
       showActionFailure(context, "Couldn't add to cart. Please try again.");
     }
   } catch (e) {

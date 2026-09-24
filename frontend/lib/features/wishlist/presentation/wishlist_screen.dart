@@ -8,6 +8,7 @@ import '../../products/presentation/product_detail_screen.dart';
 import 'wishlist_providers.dart';
 import '../../../core/images/gp_network_image.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../../shared/widgets/action_feedback.dart';
 
 class WishlistScreen extends ConsumerWidget {
   const WishlistScreen({super.key});
@@ -98,12 +99,15 @@ class WishlistScreen extends ConsumerWidget {
                           tooltip: 'Add to cart',
                           onPressed: hapticize(() async {
                             try {
-                              await ref
+                              final added = await ref
                                   .read(cartControllerProvider.notifier)
                                   .addToCart(variantId: variant.id, quantity: 1);
                               if (!context.mounted) return;
-                              ScaffoldMessenger.of(context)
-                                  .showSnackBar(SnackBar(content: Text('${product.name} added to cart')));
+                              if (added == true) {
+                                showAddedToCartFeedback(context, product.name);
+                              } else if (added == false) {
+                                showActionFailure(context, "Couldn't add to cart. Please try again.");
+                              }
                             } catch (e) {
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -115,7 +119,15 @@ class WishlistScreen extends ConsumerWidget {
                       IconButton(
                         icon: const Icon(Icons.favorite, color: AppColors.error),
                         tooltip: 'Remove from wishlist',
-                        onPressed: hapticize(() => ref.read(wishlistControllerProvider.notifier).toggle(product.id)),
+                        onPressed: hapticize(() async {
+                          final added = await ref.read(wishlistControllerProvider.notifier).toggle(product.id);
+                          if (!context.mounted) return;
+                          if (added == null) {
+                            showActionFailure(context, "Couldn't update wishlist. Please try again.");
+                          } else {
+                            showWishlistFeedback(context, added: added);
+                          }
+                        }),
                       ),
                     ],
                   ),

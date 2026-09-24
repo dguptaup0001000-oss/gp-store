@@ -8,6 +8,7 @@ import '../../features/products/domain/product_models.dart';
 import '../../features/products/presentation/product_detail_screen.dart';
 import '../../features/wishlist/presentation/wishlist_providers.dart';
 import 'product_card.dart';
+import 'action_feedback.dart';
 import 'scroll_to_top.dart';
 import '../../core/util/haptic_widgets.dart';
 
@@ -43,9 +44,13 @@ class _SeeAllProductsScreenState extends ConsumerState<SeeAllProductsScreen> {
     final variant = product.primaryVariant;
     if (variant == null) return;
     try {
-      await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
+      final added = await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${product.name} added to cart')));
+      if (added == true) {
+        showAddedToCartFeedback(context, product.name);
+      } else if (added == false) {
+        showActionFailure(context, "Couldn't add to cart. Please try again.");
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -110,7 +115,7 @@ class _SeeAllProductsScreenState extends ConsumerState<SeeAllProductsScreen> {
                 )),
                 onAddPressed: () => _addToCart(product),
                 isWishlisted: wishlistController.isWishlisted(product.id),
-                onWishlistToggle: () => wishlistController.toggle(product.id),
+                onWishlistMutation: () => wishlistController.toggle(product.id),
               );
             },
             ),

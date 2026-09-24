@@ -116,9 +116,9 @@ class HomeScreen extends ConsumerWidget {
             .read(cartControllerProvider.notifier)
             .addToCart(variantId: variantId, quantity: 1);
         if (!context.mounted) return;
-        if (added) {
+        if (added == true) {
           showAddedToCartFeedback(context, offer.productName);
-        } else {
+        } else if (added == false) {
           showActionFailure(context, "Couldn't add to cart. Please try again.");
         }
       } catch (e) {
@@ -171,9 +171,9 @@ class HomeScreen extends ConsumerWidget {
             .read(cartControllerProvider.notifier)
             .addToCart(variantId: variantId, quantity: 1);
         if (!context.mounted) return;
-        if (added) {
+        if (added == true) {
           showAddedToCartFeedback(context, card.name);
-        } else {
+        } else if (added == false) {
           showActionFailure(context, "Couldn't add to cart. Please try again.");
         }
       } catch (e) {

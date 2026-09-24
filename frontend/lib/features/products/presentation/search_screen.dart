@@ -9,6 +9,7 @@ import '../../../core/util/app_haptics.dart';
 import '../../../core/voice/voice_query_parser.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/product_card.dart';
+import '../../../shared/widgets/action_feedback.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
@@ -632,7 +633,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           )),
           onAddPressed: () => _addToCart(product),
           isWishlisted: wishlistController.isWishlisted(product.id),
-          onWishlistToggle: () => wishlistController.toggle(product.id),
+          onWishlistMutation: () => wishlistController.toggle(product.id),
         );
       },
       ),
@@ -644,9 +645,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     if (variant == null) return;
 
     try {
-      await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
+      final added = await ref.read(cartControllerProvider.notifier).addToCart(variantId: variant.id, quantity: 1);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${product.name} added to cart')));
+      if (added == true) {
+        showAddedToCartFeedback(context, product.name);
+      } else if (added == false) {
+        showActionFailure(context, "Couldn't add to cart. Please try again.");
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -37,8 +37,8 @@ class CartController extends AsyncNotifier<CartModel> {
     return ref.read(cartRepositoryProvider).getMyCart();
   }
 
-  Future<bool> addToCart({required int variantId, required int quantity}) async {
-    if (_mutationInFlight) return false;
+  Future<bool?> addToCart({required int variantId, required int quantity}) async {
+    if (_mutationInFlight) return null;
     _mutationInFlight = true;
 
     final previous = state.valueOrNull;

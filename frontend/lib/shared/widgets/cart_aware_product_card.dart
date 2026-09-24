@@ -6,6 +6,7 @@ import '../../features/cart/presentation/cart_providers.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../features/wishlist/presentation/wishlist_providers.dart';
 import 'product_card.dart';
+import 'action_feedback.dart';
 import 'variant_picker_sheet.dart';
 
 /// ProductCard with cart and wishlist state already wired.
@@ -46,7 +47,7 @@ class CartAwareProductCard extends ConsumerWidget {
         product: product,
         onTap: onTap,
         isWishlisted: wishlist.isWishlisted(product.id),
-        onWishlistToggle: () => wishlist.toggle(product.id),
+        onWishlistMutation: () => wishlist.toggle(product.id),
         quantityInCart: ref.watch(cartQuantityForProductProvider(product.id)),
         onOptionsPressed: () => showVariantPicker(context, product),
       );
@@ -60,11 +61,17 @@ class CartAwareProductCard extends ConsumerWidget {
       product: product,
       onTap: onTap,
       isWishlisted: wishlist.isWishlisted(product.id),
-      onWishlistToggle: () => wishlist.toggle(product.id),
+      onWishlistMutation: () => wishlist.toggle(product.id),
       quantityInCart: line?.quantity ?? 0,
       onAddPressed: variant == null ? null : () => _guard(context, ref, () async {
-            await ref.read(cartControllerProvider.notifier)
+            final added = await ref.read(cartControllerProvider.notifier)
                 .addToCart(variantId: variant.id, quantity: 1);
+            if (!context.mounted) return;
+            if (added == true) {
+              showAddedToCartFeedback(context, product.name);
+            } else if (added == false) {
+              showActionFailure(context, "Couldn't add to cart. Please try again.");
+            }
           }),
       onIncrement: line == null ? null : () => _guard(context, ref, () async {
             await ref.read(cartControllerProvider.notifier)

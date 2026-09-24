@@ -49,9 +49,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             quantity: _quantity,
           );
       if (!mounted) return;
-      if (added) {
+      if (added == true) {
         showAddedToCartFeedback(context, widget.product.name);
-      } else {
+      } else if (added == false) {
         showActionFailure(context, "Couldn't add to cart. Please try again.");
       }
     } catch (e) {
