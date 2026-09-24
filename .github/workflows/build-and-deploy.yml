@@ -13,20 +13,9 @@
 # GitHub UI zip size is not the APK size; the job summary prints
 # actual bytes, MiB, ABI, and SHA-256.
 #
-# GITHUB_TOKEN merges do not start `on: push` workflows. After a merge,
-# automerge_eligible_pr.py dispatches this workflow on main, and
-# workflow_run also starts it when Deploy Production completes successfully.
-#
-# WHY RUN #420 WAS SKIPPED. build-apk had:
-#   github.event_name != 'workflow_run'
-#   || (head_branch == 'main' && event != 'pull_request')
-# Deploy Production #55 was a pull_request syntax check (28s, success).
-# That fired this workflow_run. The job if saw event == pull_request and
-# skipped in 0s. The Actions UI still showed main@addea27 because a
-# workflow_run listener always runs from the default branch — that is not
-# github.ref of the source deploy and must not be used as a filter.
-# The job now runs for every successful Deploy Production and packages
-# github.event.workflow_run.head_sha. Failed deploys still skip.
+# Production APKs are explicitly dispatched by Deploy Production only after
+# Hostinger deployment and the production smoke succeed, with the deployed SHA.
+# Pull-request builds validate the APK pipeline but are not release artifacts.
 
 # What this gives you, with ZERO extra accounts beyond GitHub itself:
 # - An APK you can download directly from the Actions run's "Artifacts"
@@ -70,14 +59,6 @@ on:
         description: 'Full 40-character git SHA to package (empty = this ref / current main)'
         required: false
         default: ''
-  # GITHUB_TOKEN merges do not start push workflows. Deploy Production is
-  # dispatched after merge; this watches that so every successful deploy
-  # still gets a downloadable APK. Do not filter on github.ref here:
-  # workflow_run always executes this file from the default branch.
-  workflow_run:
-    workflows: ["Deploy Production"]
-    types: [completed]
-
 concurrency:
   group: gpstore-apk-${{ github.event.workflow_run.head_sha || github.sha }}
   cancel-in-progress: true
