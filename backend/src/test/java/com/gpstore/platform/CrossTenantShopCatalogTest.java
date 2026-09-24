@@ -283,6 +283,7 @@ class CrossTenantShopCatalogTest {
         try {
             Long written = TenantContext.runWithin(TenantScope.ofShop(shopB), () -> {
                 ShopProductVariant smuggled = new ShopProductVariant();
+                smuggled.setCommerceMode(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE);
                 smuggled.setProductVariantId(secondVariantId);
                 smuggled.setSellingPrice(new BigDecimal("20.00"));
                 smuggled.setAvailable(Boolean.TRUE);

@@ -274,7 +274,7 @@ class SecondMerchantOnboardingTest {
         perform(put("/api/shop/listings/" + variantId), owner, Role.ADMIN,
                 """
                 {"sellingPrice":95.00,"costPrice":70.00,"mrp":110.00,
-                 "available":true,"active":true}
+                 "commerceMode":"ONLINE_PURCHASE","available":true,"active":true}
                 """, 200);
 
         // ---- 8b. and put stock behind it, THROUGH THE API ------------------

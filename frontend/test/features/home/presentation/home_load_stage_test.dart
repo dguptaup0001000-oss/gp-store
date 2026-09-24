@@ -81,12 +81,13 @@ class RecordingMarketplaceRepository implements MarketplaceRepository {
   Future<List<MarketplaceCard>> feed({
     required double? latitude,
     required double? longitude,
-    CommerceMode mode = CommerceMode.buyOnline,
+    CommerceMode? mode,
     int? categoryId,
+    int? shopId,
     int page = 0,
     int size = 20,
   }) async {
-    calls.add('marketplace-feed:$latitude:$longitude:${mode.wire}:$page:$size');
+    calls.add('marketplace-feed:$latitude:$longitude:${mode?.wire ?? 'ALL'}:$page:$size');
     return const [];
   }
 

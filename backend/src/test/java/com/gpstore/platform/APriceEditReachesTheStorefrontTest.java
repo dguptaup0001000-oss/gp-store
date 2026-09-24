@@ -106,6 +106,7 @@ class APriceEditReachesTheStorefrontTest {
 
         TenantContext.runWithin(TenantScope.ofShop(shopId), () -> {
             ShopProductVariant listing = new ShopProductVariant();
+            listing.setCommerceMode(com.gpstore.catalog.shop.CommerceMode.ONLINE_PURCHASE);
             listing.setProductVariantId(variantId);
             listing.setSellingPrice(new BigDecimal("60.00"));
             listing.setAvailable(Boolean.TRUE);

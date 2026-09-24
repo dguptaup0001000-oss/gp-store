@@ -107,7 +107,7 @@ class _VariantPickerSheet extends ConsumerWidget {
                     itemCount: variants.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (context, index) =>
-                        _VariantRow(variant: variants[index]),
+                        _VariantRow(variant: variants[index], productName: product.name),
                   );
                 },
               ),
@@ -134,9 +134,10 @@ class _VariantPickerSheet extends ConsumerWidget {
 }
 
 class _VariantRow extends ConsumerWidget {
-  const _VariantRow({required this.variant});
+  const _VariantRow({required this.variant, required this.productName});
 
   final ProductVariant variant;
+  final String productName;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -213,7 +214,7 @@ class _VariantRow extends ConsumerWidget {
                               .addToCart(variantId: variant.id, quantity: 1);
                           if (!context.mounted) return;
                           if (added == true) {
-                            showAddedToCartFeedback(context, widget.product.name);
+                            showAddedToCartFeedback(context, productName);
                           } else if (added == false) {
                             showActionFailure(context, "Couldn't add to cart. Please try again.");
                           }
