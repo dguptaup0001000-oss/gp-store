@@ -20,7 +20,13 @@ void main() {
       ],
       child: const MaterialApp(home: CustomerRootScreen()),
     ));
-    await tester.pumpAndSettle();
+    // CustomerShell owns long-lived UI activity (including animated loading
+    // states), so waiting for the entire widget tree to become globally idle
+    // is not a valid routing assertion. Two bounded frames are enough for the
+    // overridden async profile to resolve and for SignedInHome to build the
+    // selected application shell.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.byType(CustomerShell), findsOneWidget);
     expect(find.textContaining('Worker app'), findsNothing);
@@ -35,7 +41,8 @@ void main() {
       ],
       child: const MaterialApp(home: CustomerRootScreen()),
     ));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.byType(CustomerShell), findsNothing);
     expect(find.textContaining('Admin app'), findsOneWidget);
