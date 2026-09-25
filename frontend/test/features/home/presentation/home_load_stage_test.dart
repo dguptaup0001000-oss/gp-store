@@ -10,12 +10,16 @@ import 'package:gpstore/core/store/store_status.dart';
 import 'package:gpstore/core/store/store_status_provider.dart';
 import 'package:gpstore/features/address/domain/address_models.dart';
 import 'package:gpstore/features/address/presentation/address_providers.dart';
+import 'package:gpstore/features/auth/presentation/auth_providers.dart';
 import 'package:gpstore/features/home/presentation/home_screen.dart';
 import 'package:gpstore/features/marketplace/domain/marketplace_feed_models.dart';
+import 'package:gpstore/features/marketplace/presentation/marketplace_feed_provider.dart';
 import 'package:gpstore/features/products/data/products_repository.dart';
 import 'package:gpstore/features/products/domain/brand_models.dart';
 import 'package:gpstore/features/products/domain/product_models.dart';
 import 'package:gpstore/features/products/presentation/products_providers.dart';
+import 'package:gpstore/features/wishlist/domain/wishlist_models.dart';
+import 'package:gpstore/features/wishlist/presentation/wishlist_providers.dart';
 
 import '../../../support/test_api_client.dart';
 
@@ -23,6 +27,7 @@ import '../../../support/test_api_client.dart';
 /// wave be held open so the gate can be observed while it is still shut.
 class RecordingRepository implements ProductsRepository {
   final List<String> calls = [];
+  List<Product> newArrivalProducts = const [];
 
   final categories = Completer<List<Category>>();
   final brands = Completer<List<BrandSummary>>();
@@ -49,7 +54,7 @@ class RecordingRepository implements ProductsRepository {
   @override
   Future<List<Product>> getNewArrivals({int page = 0, int size = 10}) async {
     calls.add('new-arrivals');
-    return const [];
+    return newArrivalProducts;
   }
 
   @override
@@ -76,6 +81,7 @@ class RecordingRepository implements ProductsRepository {
 
 class RecordingMarketplaceRepository implements MarketplaceRepository {
   final List<String> calls = [];
+  final Map<CommerceMode, List<MarketplaceCard>> homeCards = {};
 
   @override
   Future<List<MarketplaceCard>> feed({
@@ -87,8 +93,8 @@ class RecordingMarketplaceRepository implements MarketplaceRepository {
     int page = 0,
     int size = 20,
   }) async {
-    calls.add('marketplace-feed:$latitude:$longitude:${mode?.wire ?? 'ALL'}:$page:$size');
-    return const [];
+    calls.add('marketplace-feed:$latitude:$longitude:${mode?.wire ?? 'ALL'}:${shopId ?? 'ALL'}:$page:$size');
+    return homeCards[mode] ?? const [];
   }
 
   @override
@@ -107,13 +113,33 @@ class RecordingMarketplaceRepository implements MarketplaceRepository {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class TestAuthController extends StateNotifier<AuthState> {
+  TestAuthController({required bool authenticated})
+      : super(AuthState(
+            status: authenticated
+                ? AuthStatus.authenticated
+                : AuthStatus.unauthenticated));
+}
+
+class TestWishlistController extends WishlistController {
+  @override
+  Future<List<WishlistItem>> build() async => const [];
+}
+
 void main() {
   setUpAll(setUpFakeSecureStorage);
 
   late RecordingRepository repository;
   late RecordingMarketplaceRepository marketplaceRepository;
 
-  Future<void> openHome(WidgetTester tester, {bool marketplace = false}) async {
+  Future<void> openHome(
+    WidgetTester tester, {
+    bool marketplace = false,
+    bool authenticated = false,
+    List<Product>? recommendedProducts,
+    List<Product> newArrivalProducts = const [],
+    Map<CommerceMode, List<MarketplaceCard>> modeCards = const {},
+  }) async {
     // CONSTRUCTED HERE, NOT IN setUp, and the reason is worth recording
     // because it costs an afternoon to find. testWidgets runs its body
     // inside a fake-async zone; setUp runs outside it. A Completer built in
@@ -124,7 +150,9 @@ void main() {
     // never appears to resolve, and every "...and then it loads" assertion
     // fails while the code under test is perfectly correct.
     repository = RecordingRepository();
+    repository.newArrivalProducts = newArrivalProducts;
     marketplaceRepository = RecordingMarketplaceRepository();
+    marketplaceRepository.homeCards.addAll(modeCards);
 
     await tester.pumpWidget(
       ProviderScope(
@@ -132,6 +160,11 @@ void main() {
           productsRepositoryProvider.overrideWithValue(repository),
           marketplaceRepositoryProvider
               .overrideWithValue(marketplaceRepository),
+          authControllerProvider.overrideWith((ref) =>
+              TestAuthController(authenticated: authenticated)),
+          wishlistControllerProvider.overrideWith(TestWishlistController.new),
+          if (recommendedProducts != null)
+            recommendedForMeProvider.overrideWith((ref) async => recommendedProducts),
           // The store banner is not what this test measures, but it is on the
           // home screen and it polls. Left real it opens a Dio request that
           // never resolves under the test binding, and the pending timer
@@ -173,7 +206,19 @@ void main() {
                 ]
               : const []),
         ],
-        child: const MaterialApp(home: HomeScreen()),
+        child: MaterialApp(
+          home: Scaffold(
+            body: const HomeScreen(),
+            bottomNavigationBar: BottomNavigationBar(
+              items: const [
+                BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+                BottomNavigationBarItem(icon: Icon(Icons.category), label: 'Categories'),
+                BottomNavigationBarItem(icon: Icon(Icons.receipt), label: 'Orders'),
+                BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+              ],
+            ),
+          ),
+        ),
       ),
     );
     // One frame is all it takes for a provider watched in build() to fire.
@@ -192,9 +237,13 @@ void main() {
 
       expect(
         marketplaceRepository.calls,
-        contains('marketplace-feed:27.16231:83.940468:ALL:0:20'),
-        reason: 'Home must ask the marketplace on startup; waiting for three '
-            'unrelated sections reproduced the real-device empty home.',
+        containsAll([
+          'marketplace-feed:27.16231:83.940468:ONLINE_PURCHASE:ALL:0:12',
+          'marketplace-feed:27.16231:83.940468:VISIT_TO_BUY:ALL:0:12',
+          'marketplace-feed:27.16231:83.940468:SERVICE_AT_SHOP:ALL:0:12',
+        ]),
+        reason: 'Each commerce mode must have an independent bounded request; '
+            'a Buy Online first page must not hide Visit or Service inventory.',
       );
       expect(repository.calls, isNot(contains('feed')),
           reason: 'marketplace Home must never fall back to Shop #1');
@@ -293,6 +342,156 @@ void main() {
       await tester.pump();
 
       expect(repository.calls, isNot(contains('for-me')));
+    });
+
+    testWidgets(
+        'empty Visit section does not stop Services or Recommendations below Buy Online',
+        (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(393, 852);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      await openHome(
+        tester,
+        marketplace: true,
+        authenticated: true,
+        recommendedProducts: const [Product(id: 3, name: 'Recommendation fixture')],
+        modeCards: {
+          CommerceMode.buyOnline: [
+          MarketplaceCard.fromJson(const {
+            'productId': 1,
+            'name': 'Online fixture',
+            'commerceMode': 'ONLINE_PURCHASE',
+            'addable': true,
+            'priceMode': 'EXACT',
+          }),
+          ],
+          CommerceMode.serviceAtShop: [
+          MarketplaceCard.fromJson(const {
+            'productId': 2,
+            'name': 'Service fixture',
+            'commerceMode': 'SERVICE_AT_SHOP',
+            'addable': false,
+            'priceMode': 'STARTING_FROM',
+          }),
+          ],
+        },
+      );
+      repository.categories.complete(const []);
+      repository.brands.complete(const []);
+      repository.offers.complete(const []);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Buy Online near you'), findsOneWidget);
+      expect(find.text('Visit to Buy'), findsNothing);
+      await tester.scrollUntilVisible(
+        find.text('Services at Shop'),
+        find.byType(CustomScrollView),
+        delta: 300,
+      );
+      expect(find.text('Service fixture'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Recommended for you'),
+        find.byType(CustomScrollView),
+        delta: 300,
+      );
+      expect(find.text('Recommendation fixture'), findsOneWidget);
+    });
+
+    testWidgets('Visit and Services both render when Buy Online is empty',
+        (tester) async {
+      await openHome(
+        tester,
+        marketplace: true,
+        modeCards: {
+          CommerceMode.visitToBuy: [
+          MarketplaceCard.fromJson(const {
+            'productId': 4,
+            'name': 'In-store fixture',
+            'commerceMode': 'VISIT_TO_BUY',
+            'addable': false,
+            'priceMode': 'EXACT',
+          }),
+          ],
+          CommerceMode.serviceAtShop: [
+          MarketplaceCard.fromJson(const {
+            'productId': 5,
+            'name': 'Repair fixture',
+            'commerceMode': 'SERVICE_AT_SHOP',
+            'addable': false,
+            'priceMode': 'STARTING_FROM',
+          }),
+          ],
+        },
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Buy Online near you'), findsNothing);
+      expect(find.text('Visit to Buy'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Services at Shop'),
+        find.byType(CustomScrollView),
+        delta: 300,
+      );
+      expect(find.text('Repair fixture'), findsOneWidget);
+    });
+
+    testWidgets('all populated commerce sections remain in one vertically scrollable Home',
+        (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(393, 852);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final modeCards = <CommerceMode, List<MarketplaceCard>>{};
+      for (final mode in CommerceMode.values) {
+        modeCards[mode] = [
+          MarketplaceCard.fromJson({
+            'productId': mode.index + 10,
+            'name': '${mode.label} fixture',
+            'commerceMode': mode.wire,
+            'addable': mode == CommerceMode.buyOnline,
+            'priceMode': 'EXACT',
+          }),
+        ];
+      }
+      await openHome(
+        tester,
+        marketplace: true,
+        authenticated: true,
+        recommendedProducts: const [Product(id: 99, name: 'Final section fixture')],
+        newArrivalProducts: const [Product(id: 98, name: 'New arrival fixture')],
+        modeCards: modeCards,
+      );
+      repository.categories.complete(const []);
+      repository.brands.complete(const []);
+      repository.offers.complete(const []);
+      await tester.pumpAndSettle();
+
+      final scrollable = find.byType(CustomScrollView);
+      final bottomNavigationBefore = tester.getRect(find.byType(BottomNavigationBar));
+      expect(
+        find.byWidgetPredicate(
+            (widget) => widget is ListView && widget.scrollDirection == Axis.horizontal),
+        findsWidgets,
+      );
+      await tester.scrollUntilVisible(
+        find.text('New arrivals'),
+        scrollable,
+        delta: 300,
+      );
+      expect(find.text('New arrival fixture'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Final section fixture'),
+        scrollable,
+        delta: 300,
+      );
+      expect(find.text('Buy Online near you'), findsOneWidget);
+      expect(find.text('Visit to Buy'), findsOneWidget);
+      expect(find.text('Services at Shop'), findsOneWidget);
+      expect(find.text('Recommended for you'), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: 'phone-sized Home must not overflow');
+      expect(tester.getRect(find.byType(BottomNavigationBar)), bottomNavigationBefore,
+          reason: 'the bottom navigation stays fixed while the Home scrolls');
     });
   });
 }
