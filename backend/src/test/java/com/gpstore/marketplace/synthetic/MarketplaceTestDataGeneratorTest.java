@@ -2,6 +2,7 @@ package com.gpstore.marketplace.synthetic;
 
 import com.gpstore.catalog.shop.CommerceMode;
 import com.gpstore.catalog.shop.ListingPriceMode;
+import com.gpstore.catalog.shop.OfflineAvailability;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -70,12 +71,15 @@ class MarketplaceTestDataGeneratorTest {
         for (var listing : dataset.listings()) {
             assertFalse(listing.description().isBlank());
             descriptions.add(listing.description());
-            if (listing.commerceMode() == CommerceMode.ONLINE_PURCHASE && listing.stock() == 0) outOfStock++;
+            if (listing.stock() == 0
+                    || listing.offlineAvailability() == OfflineAvailability.OUT_OF_STOCK) outOfStock++;
             if (listing.sellingPrice().compareTo(listing.mrp()) < 0) discounts++;
             types.add(listing.category());
         }
         assertEquals(dataset.listings().size(), descriptions.size());
-        assertTrue(outOfStock > 0 && outOfStock < 1_000, "expected bounded out-of-stock variation");
+        assertTrue(outOfStock >= dataset.listings().size() * 10 / 100
+                        && outOfStock <= dataset.listings().size() * 20 / 100,
+                "expected approximately 10-20% unavailable listings");
         assertTrue(discounts > 0 && discounts < dataset.listings().size());
         assertTrue(types.size() >= 20);
         assertTrue(dataset.shops().stream().allMatch(shop -> shop.shopName().contains("TEST")));
