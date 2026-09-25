@@ -212,6 +212,7 @@ class HomeScreen extends ConsumerWidget {
                 Future.sync(() {
                   if (onAMarketplace) {
                     ref.invalidate(marketplaceHomeModeFeedProvider);
+                    ref.invalidate(marketplaceHomeAllFeedProvider);
                   } else {
                     ref.invalidate(productFeedProvider);
                   }
@@ -236,6 +237,12 @@ class HomeScreen extends ConsumerWidget {
                       if (belowFoldReady) {
                         ref.read(productFeedProvider.notifier).loadMore();
                       }
+                    }
+                    if (onAMarketplace &&
+                        notification.depth == 0 &&
+                        notification.metrics.axis == Axis.vertical &&
+                        notification.metrics.extentAfter < 700) {
+                      ref.read(marketplaceHomeAllFeedProvider.notifier).loadMore();
                     }
                     // false: this listener observes, it does not consume.
                     return false;
@@ -377,6 +384,11 @@ class HomeScreen extends ConsumerWidget {
                       if (!onAMarketplace)
                         ...HomeFeedSlivers.build(context, ref,
                             feed: feedAsync, onProductTap: openProduct),
+                      if (onAMarketplace)
+                        MarketplaceAllProductsSliver(
+                          onCardTap: openMarketplaceCard,
+                          onAdd: addFromMarketplace,
+                        ),
                     ],
                   ),
                 ),

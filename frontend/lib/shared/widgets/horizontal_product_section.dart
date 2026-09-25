@@ -42,11 +42,10 @@ class HorizontalProductSection extends ConsumerWidget {
     return provider.when(
       loading: () => _SectionShell(
         title: title,
-        // Same height as the loaded carousel below, so the section does not
-        // jump when products arrive - a reserved box is the cheapest
-        // skeleton there is.
+        // A pending request must not reserve a full carousel-sized blank
+        // area. Keep later Home sections close by while it resolves.
         child: SizedBox(
-          height: ProductGrid.carouselHeight(context),
+          height: 56,
           child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         ),
       ),

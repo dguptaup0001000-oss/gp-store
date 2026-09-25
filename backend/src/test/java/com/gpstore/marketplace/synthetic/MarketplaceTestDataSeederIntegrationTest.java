@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gpstore.catalog.shop.CommerceMode;
 import com.gpstore.platform.Shop;
 import com.gpstore.platform.ShopRepository;
+import com.gpstore.platform.ShopDiscovery;
 import com.gpstore.platform.api.MarketplaceFeedService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,7 @@ class MarketplaceTestDataSeederIntegrationTest {
     @Autowired private MarketplaceTestDataSeeder seeder;
     @Autowired private MarketplaceFeedService feed;
     @Autowired private ShopRepository shops;
+    @Autowired private ShopDiscovery discovery;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ObjectMapper objectMapper;
 
@@ -55,6 +57,14 @@ class MarketplaceTestDataSeederIntegrationTest {
         Double anchorLng = anchor.getLongitude();
         long customerCountBefore = jdbc.queryForObject("SELECT count(*) FROM customers", Long.class);
 
+        var inspectionBefore = seeder.execute(new MarketplaceTestDataSeeder.Request(
+                MarketplaceTestDataSeeder.Operation.INSPECT,
+                MarketplaceTestDataGenerator.BATCH_ID, null));
+        assertEquals(0, inspectionBefore.shops());
+        assertEquals(0, inspectionBefore.listings());
+        assertEquals(customerCountBefore, jdbc.queryForObject("SELECT count(*) FROM customers", Long.class),
+                "INSPECT must be read-only");
+
         MarketplaceTestDataSeeder.Request seed = new MarketplaceTestDataSeeder.Request(
                 MarketplaceTestDataSeeder.Operation.SEED,
                 MarketplaceTestDataGenerator.BATCH_ID, null);
@@ -70,6 +80,15 @@ class MarketplaceTestDataSeederIntegrationTest {
         assertTrue(first.serviceAtShop() > 0);
         assertEquals(0, first.withImages());
         assertEquals(6_000, first.withoutImages());
+        assertEquals(100, discovery.shopsServing(anchorLat, anchorLng).stream()
+                        .filter(nearby -> nearby.shop().getCode().startsWith("MKT100V1-SHOP-"))
+                        .count(),
+                "all synthetic shops must be returned by the real nearby-discovery service at the seed anchor");
+        var inspectionAfter = seeder.execute(new MarketplaceTestDataSeeder.Request(
+                MarketplaceTestDataSeeder.Operation.INSPECT,
+                MarketplaceTestDataGenerator.BATCH_ID, null));
+        assertEquals(first.shops(), inspectionAfter.shops());
+        assertEquals(first.listings(), inspectionAfter.listings());
         assertEquals(customerCountBefore, jdbc.queryForObject("SELECT count(*) FROM customers", Long.class));
 
         var repeated = seeder.execute(seed);

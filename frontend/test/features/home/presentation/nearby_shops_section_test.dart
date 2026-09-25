@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/core/marketplace/marketplace_models.dart';
 import 'package:gpstore/core/marketplace/marketplace_providers.dart';
+import 'package:gpstore/core/marketplace/nearby_shop_page.dart';
 import 'package:gpstore/features/address/domain/address_models.dart';
 import 'package:gpstore/features/address/presentation/address_providers.dart';
 import 'package:gpstore/features/home/presentation/home_load_stage.dart';
@@ -47,8 +48,15 @@ void main() {
               ? const MarketplaceMode(mode: 'MULTI_SHOP_PRODUCTION', multiShop: true)
               : MarketplaceMode.singleShop),
           myAddressesProvider.overrideWith((ref) async => addresses),
-          shopsNearProvider((lat: 26.4499, lng: 80.3319))
-              .overrideWith((ref) async => shops),
+          nearbyShopsPageProvider((lat: 26.4499, lng: 80.3319, page: 0, size: 7))
+              .overrideWith((ref) async => NearbyShopPage(
+                    page: 0,
+                    size: 7,
+                    totalElements: shops.length,
+                    totalPages: (shops.length / 7).ceil(),
+                    hasNext: shops.length > 7,
+                    shops: shops.take(7).toList(),
+                  )),
         ],
         child: const MaterialApp(
           home: Scaffold(body: SingleChildScrollView(child: NearbyShopsSection())),
@@ -110,10 +118,12 @@ void main() {
       marketplaceModeProvider.overrideWith((ref) async =>
           const MarketplaceMode(mode: 'MULTI_SHOP_PRODUCTION', multiShop: true)),
       myAddressesProvider.overrideWith((ref) async => [address()]),
-      shopsNearProvider((lat: 26.4499, lng: 80.3319)).overrideWith((ref) async => const [
-            Storefront(shopId: 6, displayName: 'GP Store'),
-            Storefront(shopId: 7, displayName: 'Deepak Hardware'),
-          ]),
+      nearbyShopsPageProvider((lat: 26.4499, lng: 80.3319, page: 0, size: 7))
+              .overrideWith((ref) async => const NearbyShopPage(
+                    page: 0, size: 7, totalElements: 2, totalPages: 1, hasNext: false, shops: [
+                      Storefront(shopId: 6, displayName: 'GP Store'),
+                      Storefront(shopId: 7, displayName: 'Deepak Hardware'),
+                    ])),
     ]);
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
@@ -156,5 +166,18 @@ void main() {
 
     expect(find.text('See all'), findsNothing,
         reason: 'both shops are already on screen, so "See all" leads nowhere new');
+  });
+
+  testWidgets('See all opens for a paginated nearby shop list', (tester) async {
+    await tester.pumpWidget(host(
+      marketplace: true,
+      addresses: [address()],
+      shops: List.generate(
+        13,
+        (index) => Storefront(shopId: index + 1, displayName: 'Test shop ${index + 1}'),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('See all'), findsOneWidget);
   });
 }

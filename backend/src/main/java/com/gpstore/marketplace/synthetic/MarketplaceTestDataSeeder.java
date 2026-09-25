@@ -72,7 +72,7 @@ public class MarketplaceTestDataSeeder {
                          int buyOnline, int visitToBuy, int serviceAtShop,
                          int withImages, int withoutImages, boolean alreadyPresent) { }
 
-    public enum Operation { SEED, CLEANUP }
+    public enum Operation { INSPECT, SEED, CLEANUP }
 
     /** A deliberately explicit command request; no default action is defined. */
     public record Request(Operation operation, String batchId, String expectedCommit) { }
@@ -81,6 +81,11 @@ public class MarketplaceTestDataSeeder {
     public Result execute(Request request) {
         authorize(request);
         acquireBatchLock();
+        if (request.operation() == Operation.INSPECT) {
+            // Read-only verification. It uses the same batch lock as seed and
+            // cleanup so an inspection cannot report a half-written batch.
+            return inspectBatch();
+        }
         if (request.operation() == Operation.CLEANUP) {
             return cleanupBatch();
         }
@@ -133,7 +138,8 @@ public class MarketplaceTestDataSeeder {
                 throw new IllegalStateException("Production test-data operation refused: exact batch "
                         + "confirmation and a matching source/binary commit identity are required.");
             }
-            if (!"true".equalsIgnoreCase(System.getenv("GPSTORE_TEST_DATA_ALLOW_PRODUCTION"))) {
+            if (request.operation() != Operation.INSPECT
+                    && !"true".equalsIgnoreCase(System.getenv("GPSTORE_TEST_DATA_ALLOW_PRODUCTION"))) {
                 throw new IllegalStateException("Production test-data operation requires a one-shot opt-in.");
             }
             String host = jdbcHost();

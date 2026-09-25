@@ -11,7 +11,7 @@ on:
         description: Explicit one-shot action
         required: true
         type: choice
-        options: [SEED, CLEANUP]
+        options: [INSPECT, SEED, CLEANUP]
       confirmation:
         description: Type MARKETPLACE_TEST_100_SHOPS_V1 exactly to confirm this batch
         required: true

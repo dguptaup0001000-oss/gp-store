@@ -1,6 +1,8 @@
 package com.gpstore.platform;
 
 import com.gpstore.support.TestMobileNumbers;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gpstore.entity.Role;
 import com.gpstore.ordergroup.OrderGroup;
 import com.gpstore.ordergroup.OrderGroupRepository;
@@ -59,6 +61,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 class MarketplaceSurfaceTest {
 
     @Autowired private MockMvc mockMvc;
+    @Autowired private ObjectMapper objectMapper;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ShopRepository shops;
     @Autowired private MerchantRepository merchants;
@@ -71,7 +74,9 @@ class MarketplaceSurfaceTest {
 
     private long shopOne;
     private long nearbyShop;
+    private long nearbyShop2;
     private Long merchantId;
+    private Long merchantId2;
     private Long customerId;
     private Long otherCustomerId;
     private Long groupId;
@@ -104,6 +109,28 @@ class MarketplaceSurfaceTest {
         nearby.setIsDemo(Boolean.TRUE);
         nearby.setActive(Boolean.TRUE);
         nearbyShop = shops.save(nearby).getId();
+
+        Merchant secondMerchant = new Merchant();
+        secondMerchant.setLegalName("Surface fixture second " + tag);
+        secondMerchant.setDisplayName("Second nearby shop");
+        secondMerchant.setStatus(MerchantStatus.ACTIVE);
+        secondMerchant.setIsDemo(Boolean.TRUE);
+        secondMerchant.setActive(Boolean.TRUE);
+        merchantId2 = merchants.save(secondMerchant).getId();
+
+        Shop second = new Shop();
+        second.setMerchantId(merchantId2);
+        second.setCode("MKTS2-" + tag);
+        second.setDisplayName("Second nearby shop");
+        second.setStatus(ShopStatus.ACTIVE);
+        second.setLatitude(LAT + 0.006);
+        second.setLongitude(LNG);
+        second.setMaxDeliveryRadiusKm(new BigDecimal("3"));
+        second.setTimeZone("Asia/Kolkata");
+        second.setSupportPhone("9000000001");
+        second.setIsDemo(Boolean.TRUE);
+        second.setActive(Boolean.TRUE);
+        nearbyShop2 = shops.save(second).getId();
 
         customerId = newCustomer("shopper");
         otherCustomerId = newCustomer("stranger");
@@ -160,6 +187,10 @@ class MarketplaceSurfaceTest {
         jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", nearbyShop);
         jdbc.update("DELETE FROM shops WHERE id = ?", nearbyShop);
         jdbc.update("DELETE FROM merchants WHERE id = ?", merchantId);
+        jdbc.update("DELETE FROM store_operations_settings WHERE shop_id = ?", nearbyShop2);
+        jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", nearbyShop2);
+        jdbc.update("DELETE FROM shops WHERE id = ?", nearbyShop2);
+        jdbc.update("DELETE FROM merchants WHERE id = ?", merchantId2);
     }
 
     // ------------------------------------------------ discovery, before a shop
@@ -176,6 +207,34 @@ class MarketplaceSurfaceTest {
                         + "have yet; body: " + result.getResponse().getContentAsString());
         assertTrue(result.getResponse().getContentAsString().contains("MKTS-" + tag),
                 "the nearby shop must be offered");
+    }
+
+    @Test
+    @DisplayName("nearby shop pages are bounded, ordered, and carry continuation metadata")
+    void nearbyShopPagesAreBoundedAndDistinct() throws Exception {
+        JsonNode first = objectMapper.readTree(mockMvc.perform(get("/api/marketplace/shops/page")
+                        .param("lat", String.valueOf(LAT)).param("lng", String.valueOf(LNG))
+                        .param("page", "0").param("size", "1"))
+                .andReturn().getResponse().getContentAsString());
+        JsonNode second = objectMapper.readTree(mockMvc.perform(get("/api/marketplace/shops/page")
+                        .param("lat", String.valueOf(LAT)).param("lng", String.valueOf(LNG))
+                        .param("page", "1").param("size", "1"))
+                .andReturn().getResponse().getContentAsString());
+
+        assertEquals(1, first.path("shops").size());
+        assertEquals(1, second.path("shops").size());
+        assertTrue(first.path("totalElements").asInt() >= 2);
+        assertTrue(first.path("hasNext").asBoolean());
+        assertEquals(first.path("totalElements").asInt() > 2,
+                second.path("hasNext").asBoolean());
+        assertNotEquals(first.path("shops").get(0).path("shopId").asLong(),
+                second.path("shops").get(0).path("shopId").asLong());
+
+        JsonNode capped = objectMapper.readTree(mockMvc.perform(get("/api/marketplace/shops/page")
+                        .param("lat", String.valueOf(LAT)).param("lng", String.valueOf(LNG))
+                        .param("size", "500"))
+                .andReturn().getResponse().getContentAsString());
+        assertEquals(50, capped.path("size").asInt());
     }
 
     @Test

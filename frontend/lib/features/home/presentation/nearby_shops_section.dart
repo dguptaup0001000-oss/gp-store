@@ -5,8 +5,8 @@ import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../marketplace/presentation/market_shop_card.dart';
-import '../../marketplace/presentation/shop_picker_screen.dart';
 import '../../marketplace/presentation/marketplace_feed_provider.dart';
+import '../../marketplace/presentation/nearby_shops_screen.dart';
 
 /// The shops near this customer, on the home screen.
 ///
@@ -38,7 +38,9 @@ class NearbyShopsSection extends ConsumerWidget {
     final pin = ref.watch(deliveryPinProvider);
     if (pin == null) return const SizedBox.shrink();
 
-    final shopsAsync = ref.watch(shopsNearProvider(pin));
+    const previewSize = 7;
+    final query = (lat: pin.lat, lng: pin.lng, page: 0, size: previewSize);
+    final shopsAsync = ref.watch(nearbyShopsPageProvider(query));
     final selected = ref.watch(marketplaceShopFilterProvider);
     if (shopsAsync.isLoading) {
       return const Padding(
@@ -54,13 +56,14 @@ class NearbyShopsSection extends ConsumerWidget {
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
         child: TextButton.icon(
-          onPressed: () => ref.invalidate(shopsNearProvider(pin)),
+          onPressed: () => ref.invalidate(nearbyShopsPageProvider(query)),
           icon: const Icon(Icons.refresh),
           label: const Text("Couldn't load nearby shops. Retry"),
         ),
       );
     }
-    final shops = shopsAsync.valueOrNull ?? const [];
+    final page = shopsAsync.valueOrNull;
+    final shops = page?.shops ?? const [];
     if (shops.isEmpty) return const SizedBox.shrink();
 
     final preview = shops.take(howMany).toList();
@@ -76,10 +79,12 @@ class NearbyShopsSection extends ConsumerWidget {
                 child: Text('All nearby shops',
                     style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
               ),
-              if (shops.length > preview.length)
+              if (page?.hasNext == true || shops.length > preview.length)
                 TextButton(
                   onPressed: hapticize(() => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const ShopPickerScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => NearbyShopsScreen(latitude: pin.lat, longitude: pin.lng),
+                        ),
                       )),
                   child: const Text('See all'),
                 ),

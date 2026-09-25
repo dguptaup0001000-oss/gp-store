@@ -2,6 +2,7 @@ import '../../features/marketplace/domain/marketplace_feed_models.dart';
 import '../../features/marketplace/domain/marketplace_offer.dart';
 import '../api/api_client.dart';
 import 'marketplace_models.dart';
+import 'nearby_shop_page.dart';
 
 /// Reads the public marketplace surface, and the customer's own preferences.
 ///
@@ -181,6 +182,22 @@ class MarketplaceRepository {
         .whereType<Map>()
         .map((e) => Storefront.fromJson(Map<String, dynamic>.from(e)))
         .toList(growable: false);
+  }
+
+  Future<NearbyShopPage> nearbyShopsPage({
+    required double latitude,
+    required double longitude,
+    int page = 0,
+    int size = 12,
+  }) async {
+    final response = await apiClient.dio.get(
+      '/api/marketplace/shops/page',
+      queryParameters: {'lat': latitude, 'lng': longitude, 'page': page, 'size': size},
+    );
+    if (response.data is! Map) {
+      throw const FormatException('Nearby shops page must be a JSON object');
+    }
+    return NearbyShopPage.fromJson(Map<String, dynamic>.from(response.data as Map));
   }
 
   /// The same question with a "search farther" answer attached.

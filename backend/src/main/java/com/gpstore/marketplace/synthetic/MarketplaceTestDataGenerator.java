@@ -135,13 +135,25 @@ public final class MarketplaceTestDataGenerator {
             String shopName = surname + " " + type.label + " TEST " + locality + " "
                     + String.format("%03d", shopNumber);
             String shopCode = String.format("MKT100V1-SHOP-%03d", shopNumber);
-            double distanceKm = shopNumber == 1 ? 0.25 : 0.4 + ((shopNumber * 37) % 300) / 10.0;
+            // Keep every synthetic shop inside the production ladder's
+            // default maximum (historically 25 km), while retaining enough
+            // spread to exercise the nearer/farther rungs. The radius is
+            // chosen from values that actually reach the generated point,
+            // so valid test shops are not silently filtered from the local
+            // marketplace before customers can inspect their listings.
+            double distanceKm = shopNumber == 1 ? 0.25 : 0.4 + ((shopNumber * 37) % 240) / 10.0;
             double bearingRadians = Math.toRadians((shopNumber * 137.507764) % 360.0);
+            List<BigDecimal> eligibleRadii = Arrays.stream(radii)
+                    // Leave a small geodesic rounding margin for the
+                    // repository's persisted decimal coordinates.
+                    .filter(radius -> radius.doubleValue() >= distanceKm + 0.1d)
+                    .toList();
+            BigDecimal shopRadius = eligibleRadii.get((shopNumber - 1) % eligibleRadii.size());
             int[] counts = {type.buyOnline, type.visitToBuy, type.service};
             shops.add(new ShopSpec(shopNumber, shopName,
                     "[" + BATCH_ID + "] Merchant " + String.format("%03d", shopNumber),
                     shopCode, type.label, type.category, locality, distanceKm, bearingRadians,
-                    radii[(shopNumber - 1) % radii.length], counts[0], counts[1], counts[2]));
+                    shopRadius, counts[0], counts[1], counts[2]));
 
             int listingNumber = 0;
             for (int i = 0; i < type.buyOnline; i++) {

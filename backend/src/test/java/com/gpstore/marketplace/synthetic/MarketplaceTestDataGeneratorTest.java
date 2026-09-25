@@ -85,4 +85,19 @@ class MarketplaceTestDataGeneratorTest {
         assertTrue(dataset.shops().stream().allMatch(shop -> shop.shopName().contains("TEST")));
         assertTrue(dataset.listings().stream().allMatch(listing -> listing.sku().startsWith("MKT100V1-")));
     }
+
+    @Test
+    void allSyntheticShopsRemainInsideTheDefaultDiscoveryLadderAndTheirOwnRadius() {
+        var shops = MarketplaceTestDataGenerator.generate(MarketplaceTestDataGenerator.DEFAULT_SEED).shops();
+        assertTrue(shops.stream().allMatch(shop -> shop.distanceKm() <= 25.0),
+                "the default production search ladder reaches every test shop");
+        assertTrue(shops.stream().allMatch(shop -> shop.deliveryRadiusKm().doubleValue() >= shop.distanceKm()),
+                "each shop's own delivery promise reaches its generated test location");
+        assertTrue(shops.stream().map(MarketplaceTestDataGenerator.ShopSpec::distanceKm)
+                        .distinct().count() > 50,
+                "locations still exercise different distance bands");
+        assertTrue(shops.stream().map(MarketplaceTestDataGenerator.ShopSpec::deliveryRadiusKm)
+                        .distinct().count() > 3,
+                "shop delivery radii remain varied");
+    }
 }
