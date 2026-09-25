@@ -11,9 +11,9 @@ import 'package:gpstore/core/store/store_status_provider.dart';
 import 'package:gpstore/features/address/domain/address_models.dart';
 import 'package:gpstore/features/address/presentation/address_providers.dart';
 import 'package:gpstore/features/auth/presentation/auth_providers.dart';
+import 'package:gpstore/features/auth/data/auth_repository.dart';
 import 'package:gpstore/features/home/presentation/home_screen.dart';
 import 'package:gpstore/features/marketplace/domain/marketplace_feed_models.dart';
-import 'package:gpstore/features/marketplace/presentation/marketplace_feed_provider.dart';
 import 'package:gpstore/features/products/data/products_repository.dart';
 import 'package:gpstore/features/products/domain/brand_models.dart';
 import 'package:gpstore/features/products/domain/product_models.dart';
@@ -113,12 +113,17 @@ class RecordingMarketplaceRepository implements MarketplaceRepository {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-class TestAuthController extends StateNotifier<AuthState> {
-  TestAuthController({required bool authenticated})
-      : super(AuthState(
-            status: authenticated
-                ? AuthStatus.authenticated
-                : AuthStatus.unauthenticated));
+class TestAuthRepository extends AuthRepository {
+  TestAuthRepository({required super.apiClient, required super.tokenStorage,
+    required this.authenticated});
+
+  final bool authenticated;
+
+  @override
+  Future<bool> hasStoredSession() async => authenticated;
+
+  @override
+  Future<bool> shouldRestoreSession() async => true;
 }
 
 class TestWishlistController extends WishlistController {
@@ -160,8 +165,11 @@ void main() {
           productsRepositoryProvider.overrideWithValue(repository),
           marketplaceRepositoryProvider
               .overrideWithValue(marketplaceRepository),
-          authControllerProvider.overrideWith((ref) =>
-              TestAuthController(authenticated: authenticated)),
+          authRepositoryProvider.overrideWith((ref) => TestAuthRepository(
+                apiClient: ref.read(apiClientProvider),
+                tokenStorage: ref.read(tokenStorageProvider),
+                authenticated: authenticated,
+              )),
           wishlistControllerProvider.overrideWith(TestWishlistController.new),
           if (recommendedProducts != null)
             recommendedForMeProvider.overrideWith((ref) async => recommendedProducts),
@@ -386,14 +394,14 @@ void main() {
       expect(find.text('Visit to Buy'), findsNothing);
       await tester.scrollUntilVisible(
         find.text('Services at Shop'),
-        find.byType(CustomScrollView),
-        delta: 300,
+        300,
+        scrollable: find.byType(CustomScrollView),
       );
       expect(find.text('Service fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Recommended for you'),
-        find.byType(CustomScrollView),
-        delta: 300,
+        300,
+        scrollable: find.byType(CustomScrollView),
       );
       expect(find.text('Recommendation fixture'), findsOneWidget);
     });
@@ -430,8 +438,8 @@ void main() {
       expect(find.text('Visit to Buy'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Services at Shop'),
-        find.byType(CustomScrollView),
-        delta: 300,
+        300,
+        scrollable: find.byType(CustomScrollView),
       );
       expect(find.text('Repair fixture'), findsOneWidget);
     });
@@ -476,14 +484,14 @@ void main() {
       );
       await tester.scrollUntilVisible(
         find.text('New arrivals'),
-        scrollable,
-        delta: 300,
+        300,
+        scrollable: scrollable,
       );
       expect(find.text('New arrival fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Final section fixture'),
-        scrollable,
-        delta: 300,
+        300,
+        scrollable: scrollable,
       );
       expect(find.text('Buy Online near you'), findsOneWidget);
       expect(find.text('Visit to Buy'), findsOneWidget);
