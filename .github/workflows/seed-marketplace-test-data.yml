@@ -1,0 +1,114 @@
+name: Controlled marketplace test data
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Full merged main SHA that is already running on Hostinger
+        required: true
+        type: string
+      operation:
+        description: Explicit one-shot action
+        required: true
+        type: choice
+        options: [SEED, CLEANUP]
+      confirmation:
+        description: Type MARKETPLACE_TEST_100_SHOPS_V1 exactly to confirm this batch
+        required: true
+        type: string
+
+concurrency:
+  group: gpstore-marketplace-test-data
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate exact merged production release
+    runs-on: ubuntu-latest
+    outputs:
+      target_sha: ${{ steps.validate.outputs.target_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Require current main and exact confirmation
+        id: validate
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMATION" == "MARKETPLACE_TEST_100_SHOPS_V1" ]]
+          git fetch origin main --quiet
+          [[ "$(git rev-parse origin/main)" == "$TARGET_SHA" ]]
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+      - name: Verify public Hostinger runtime and embedded JAR SHA
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --max-time 20 \
+            https://api.gpstore.co.in/v1/api/version > /tmp/gpstore-version.json
+          python3 - "$TARGET_SHA" /tmp/gpstore-version.json <<'PY'
+          import json, sys
+          expected = sys.argv[1]
+          body = json.load(open(sys.argv[2], encoding="utf-8"))
+          assert body.get("environment") == "production", body
+          assert body.get("gitCommit") == expected, body
+          assert body.get("binaryGitCommit") == expected, body
+          print(f"Hostinger source and JAR identity match {expected}")
+          PY
+      - name: Require existing Hostinger SSH secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          for name in PROD_HOST PROD_USER PROD_SSH_PRIVATE_KEY; do
+            [[ -n "${!name}" ]] || { echo "::error::$name is not configured"; exit 1; }
+          done
+    environment: production
+
+  operate:
+    name: Run exact-batch operation on Hostinger
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Run guarded one-shot operation and verify database counts
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          GPSTORE_TEST_DATA_OPERATION: ${{ inputs.operation }}
+          GPSTORE_TEST_DATA_CONFIRMATION: ${{ inputs.confirmation }}
+          GPSTORE_TEST_DATA_TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_PORT || '22' }}
+          command_timeout: 15m
+          envs: GPSTORE_TEST_DATA_OPERATION,GPSTORE_TEST_DATA_CONFIRMATION,GPSTORE_TEST_DATA_TARGET_SHA
+          script: |
+            set -Eeuo pipefail
+            cd /opt/gp-store
+            bash deploy/production/seed-marketplace-test-data.sh
+
+  production-smoke:
+    name: Read-only production marketplace smoke
+    needs: [validate, operate]
+    if: ${{ inputs.operation == 'SEED' }}
+    uses: ./.github/workflows/production-smoke.yml
+    with:
+      expect_sha: ${{ needs.validate.outputs.target_sha }}
+      read_only: true
