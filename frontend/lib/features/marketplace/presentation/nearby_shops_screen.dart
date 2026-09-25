@@ -5,6 +5,7 @@ import '../../../core/marketplace/marketplace_models.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/marketplace/marketplace_repository.dart';
 import '../../../core/theme/app_theme.dart';
+import 'marketplace_feed_provider.dart';
 import 'market_shop_card.dart';
 
 /// Paginated See all view for the nearby shop preview on Customer Home.

@@ -280,6 +280,7 @@ class _ModeSectionMessage extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(title,
+                      key: ValueKey<String>('marketplace-section-$title'),
                       style: Theme.of(context)
                           .textTheme
                           .titleMedium

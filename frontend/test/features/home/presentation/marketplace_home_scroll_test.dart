@@ -36,7 +36,7 @@ void main() {
             ref: ref,
             mode: mode,
             state: MarketplaceHomeModeFeedState(
-              cards: isBuy && buyEmpty ? const [] : [card],
+              cards: isBuy && (buyEmpty || buyError) ? const [] : [card],
               isLoading: isBuy && buyLoading,
               error: isBuy && buyError ? Exception('test failure') : null,
               hasNext: false,
@@ -71,12 +71,27 @@ void main() {
     );
   }
 
-  Future<void> scrollToEnd(WidgetTester tester) async {
-    for (var attempt = 0; attempt < 10; attempt++) {
-      await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
-      await tester.pumpAndSettle();
-      if (find.text('All nearby products and services').evaluate().isNotEmpty) break;
-    }
+  Future<void> reachLowerSections(WidgetTester tester) async {
+    final scrollable = find.byWidgetPredicate(
+      (widget) => widget is Scrollable && widget.axisDirection == AxisDirection.down,
+    ).first;
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey<String>('marketplace-section-Visit to Buy')),
+      220,
+      scrollable: scrollable,
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey<String>('marketplace-section-Services at Shop')),
+      220,
+      scrollable: scrollable,
+    );
+    await tester.scrollUntilVisible(find.text('New arrivals'), 220, scrollable: scrollable);
+    await tester.scrollUntilVisible(find.text('Recommended for you'), 220, scrollable: scrollable);
+    await tester.scrollUntilVisible(
+      find.text('All nearby products and services'),
+      220,
+      scrollable: scrollable,
+    );
   }
 
   testWidgets('one vertical scroll reaches all commerce modes and later discovery', (tester) async {
@@ -85,8 +100,8 @@ void main() {
     await tester.pumpWidget(host());
     await tester.pumpAndSettle();
 
-    await scrollToEnd(tester);
-    expect(find.text('Visit to Buy'), findsWidgets);
+    await reachLowerSections(tester);
+    expect(find.byKey(const ValueKey<String>('marketplace-section-Visit to Buy')), findsOneWidget);
     expect(find.text('Services at Shop'), findsOneWidget);
     expect(find.text('New arrivals'), findsOneWidget);
     expect(find.text('Recommended for you'), findsOneWidget);
@@ -103,7 +118,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     await tester.pumpWidget(host(buyLoading: true));
     await tester.pump();
-    await scrollToEnd(tester);
+    await reachLowerSections(tester);
 
     expect(find.text('Visit to Buy'), findsOneWidget);
     expect(find.text('Services at Shop'), findsOneWidget);
@@ -117,13 +132,13 @@ void main() {
     tester.view.devicePixelRatio = 1;
     await tester.pumpWidget(host(buyEmpty: true));
     await tester.pumpAndSettle();
-    await scrollToEnd(tester);
+    await reachLowerSections(tester);
     expect(find.text('Services at Shop'), findsOneWidget);
     expect(find.text('All nearby products and services'), findsOneWidget);
 
     await tester.pumpWidget(host(buyError: true));
     await tester.pump();
-    await scrollToEnd(tester);
+    await reachLowerSections(tester);
     expect(find.text('Services at Shop'), findsOneWidget);
     expect(find.text('All nearby products and services'), findsOneWidget);
     addTearDown(tester.view.resetPhysicalSize);
