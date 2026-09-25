@@ -14,7 +14,6 @@ import 'package:gpstore/features/auth/presentation/auth_providers.dart';
 import 'package:gpstore/features/auth/data/auth_repository.dart';
 import 'package:gpstore/features/home/presentation/home_screen.dart';
 import 'package:gpstore/features/marketplace/domain/marketplace_feed_models.dart';
-import 'package:gpstore/features/marketplace/presentation/marketplace_card_tile.dart';
 import 'package:gpstore/features/products/data/products_repository.dart';
 import 'package:gpstore/features/products/domain/brand_models.dart';
 import 'package:gpstore/features/products/domain/product_models.dart';
