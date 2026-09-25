@@ -14,6 +14,7 @@ import 'package:gpstore/features/auth/presentation/auth_providers.dart';
 import 'package:gpstore/features/auth/data/auth_repository.dart';
 import 'package:gpstore/features/home/presentation/home_screen.dart';
 import 'package:gpstore/features/marketplace/domain/marketplace_feed_models.dart';
+import 'package:gpstore/features/marketplace/presentation/marketplace_card_tile.dart';
 import 'package:gpstore/features/products/data/products_repository.dart';
 import 'package:gpstore/features/products/domain/brand_models.dart';
 import 'package:gpstore/features/products/domain/product_models.dart';
@@ -237,6 +238,10 @@ void main() {
   const belowFold = ['new-arrivals', 'trending', 'for-me', 'feed'];
 
   group('what opening the home screen puts on the wire', () {
+    Finder get verticalHomeScroll => find.byWidgetPredicate(
+          (widget) =>
+              widget is Scrollable && widget.axisDirection == AxisDirection.down,
+        );
     testWidgets(
         'marketplace feed starts before categories, brands and offers settle',
         (tester) async {
@@ -395,13 +400,13 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Services at Shop'),
         300,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: verticalHomeScroll.first,
       );
       expect(find.text('Service fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Recommended for you'),
         300,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: verticalHomeScroll.first,
       );
       expect(find.text('Recommendation fixture'), findsOneWidget);
     });
@@ -439,7 +444,7 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Services at Shop'),
         300,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: verticalHomeScroll.first,
       );
       expect(find.text('Repair fixture'), findsOneWidget);
     });
@@ -475,6 +480,13 @@ void main() {
       repository.offers.complete(const []);
       await tester.pumpAndSettle();
 
+      final tiles = find.byType(MarketplaceCardTile);
+      for (var i = 0; i < tiles.evaluate().length; i++) {
+        final columns = find.descendant(of: tiles.at(i), matching: find.byType(Column));
+        debugPrint('home card $i: height=${MarketplaceCardTile.carouselHeight(tester.element(tiles.at(i)))} '
+            'columns=${[for (var j = 0; j < columns.evaluate().length; j++) tester.getSize(columns.at(j))}');
+      }
+      expect(repository.calls, contains('new-arrivals'));
       final bottomNavigationBefore = tester.getRect(find.byType(BottomNavigationBar));
       expect(
         find.byWidgetPredicate(
@@ -482,15 +494,15 @@ void main() {
         findsWidgets,
       );
       await tester.scrollUntilVisible(
-        find.text('New arrivals'),
+        find.text('New arrival fixture'),
         300,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: verticalHomeScroll.first,
       );
       expect(find.text('New arrival fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Final section fixture'),
         300,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: verticalHomeScroll.first,
       );
       expect(find.text('Buy Online near you'), findsOneWidget);
       expect(find.text('Visit to Buy'), findsOneWidget);
