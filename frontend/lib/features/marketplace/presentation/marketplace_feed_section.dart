@@ -101,7 +101,7 @@ class MarketplaceHomeModeSection extends ConsumerWidget {
       title: _title,
       subtitle: mode == CommerceMode.visitToBuy ? 'In-store products' : null,
       child: SizedBox(
-        height: 292,
+        height: MarketplaceCardTile.carouselHeight(context),
         child: NotificationListener<ScrollNotification>(
           onNotification: (notification) {
             if (notification.metrics.axis == Axis.horizontal &&
