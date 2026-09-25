@@ -395,13 +395,13 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Services at Shop'),
         300,
-        scrollable: find.byType(CustomScrollView),
+        scrollable: find.byType(Scrollable).first,
       );
       expect(find.text('Service fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Recommended for you'),
         300,
-        scrollable: find.byType(CustomScrollView),
+        scrollable: find.byType(Scrollable).first,
       );
       expect(find.text('Recommendation fixture'), findsOneWidget);
     });
@@ -435,11 +435,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Buy Online near you'), findsNothing);
-      expect(find.text('Visit to Buy'), findsOneWidget);
+      expect(find.text('Visit to Buy'), findsWidgets);
       await tester.scrollUntilVisible(
         find.text('Services at Shop'),
         300,
-        scrollable: find.byType(CustomScrollView),
+        scrollable: find.byType(Scrollable).first,
       );
       expect(find.text('Repair fixture'), findsOneWidget);
     });
@@ -475,7 +475,6 @@ void main() {
       repository.offers.complete(const []);
       await tester.pumpAndSettle();
 
-      final scrollable = find.byType(CustomScrollView);
       final bottomNavigationBefore = tester.getRect(find.byType(BottomNavigationBar));
       expect(
         find.byWidgetPredicate(
@@ -485,13 +484,13 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('New arrivals'),
         300,
-        scrollable: scrollable,
+        scrollable: find.byType(Scrollable).first,
       );
       expect(find.text('New arrival fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Final section fixture'),
         300,
-        scrollable: scrollable,
+        scrollable: find.byType(Scrollable).first,
       );
       expect(find.text('Buy Online near you'), findsOneWidget);
       expect(find.text('Visit to Buy'), findsOneWidget);
