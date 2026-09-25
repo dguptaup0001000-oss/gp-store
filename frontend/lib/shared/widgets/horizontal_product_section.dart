@@ -149,7 +149,14 @@ class _SectionShell extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(title, style: Theme.of(context).textTheme.titleLarge),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
               if (onSeeAllTap != null)
                 TextButton(
                 onPressed: hapticizeOrNull(onSeeAllTap),
