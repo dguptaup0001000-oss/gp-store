@@ -489,17 +489,17 @@ void main() {
       expect(find.text('Buy Online near you'), findsOneWidget);
       expect(find.text('Buy Online fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
-        find.text('Visit-to-Buy fixture'),
+        find.text('${CommerceMode.visitToBuy.label} fixture'),
         300,
         scrollable: verticalHomeScroll().first,
       );
-      expect(find.text('Visit-to-Buy fixture'), findsOneWidget);
+      expect(find.text('${CommerceMode.visitToBuy.label} fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
-        find.text('Service at Shop fixture'),
+        find.text('${CommerceMode.serviceAtShop.label} fixture'),
         300,
         scrollable: verticalHomeScroll().first,
       );
-      expect(find.text('Service at Shop fixture'), findsOneWidget);
+      expect(find.text('${CommerceMode.serviceAtShop.label} fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('New arrival fixture'),
         300,
