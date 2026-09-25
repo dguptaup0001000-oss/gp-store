@@ -5,9 +5,9 @@ import 'package:gpstore/core/marketplace/marketplace_models.dart';
 import 'package:gpstore/core/marketplace/marketplace_providers.dart';
 import 'package:gpstore/features/address/domain/address_models.dart';
 import 'package:gpstore/features/address/presentation/address_providers.dart';
-import 'package:gpstore/features/home/presentation/home_load_stage.dart';
 import 'package:gpstore/features/home/presentation/nearby_shops_section.dart';
 import 'package:gpstore/features/marketplace/presentation/market_shop_card.dart';
+import 'package:gpstore/features/marketplace/presentation/marketplace_feed_provider.dart';
 
 /// The shops on the home screen.
 ///
@@ -64,7 +64,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Shops near you'), findsNothing);
+    expect(find.text('All nearby shops'), findsNothing);
     expect(find.byType(MarketShopCard), findsNothing);
   });
 
@@ -75,7 +75,7 @@ void main() {
     await tester.pumpWidget(host(marketplace: true));
     await tester.pumpAndSettle();
 
-    expect(find.text('Shops near you'), findsNothing);
+    expect(find.text('All nearby shops'), findsNothing);
   });
 
   testWidgets('on a marketplace it lists the shops, nearest first',
@@ -90,7 +90,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Shops near you'), findsOneWidget);
+    expect(find.text('All nearby shops'), findsOneWidget);
     expect(find.text('Gupta Kirana'), findsOneWidget);
     expect(find.text('A to Z Mart'), findsOneWidget);
     // THE ORDER IS THE SERVER'S. Nothing in this widget sorts, and a test that
@@ -103,6 +103,33 @@ void main() {
     expect(drawn.first, 6, reason: 'the closest shop must lead the row');
   });
 
+  testWidgets('All is first and shop selection filters the feed back to All',
+      (tester) async {
+    final container = ProviderContainer(overrides: [
+      marketplaceModeProvider.overrideWith((ref) async =>
+          const MarketplaceMode(mode: 'MULTI_SHOP_PRODUCTION', multiShop: true)),
+      myAddressesProvider.overrideWith((ref) async => [address()]),
+      shopsNearProvider((lat: 26.4499, lng: 80.3319)).overrideWith((ref) async => const [
+            Storefront(shopId: 6, displayName: 'GP Store'),
+            Storefront(shopId: 7, displayName: 'Deepak Hardware'),
+          ]),
+    ]);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(
+        home: Scaffold(body: SingleChildScrollView(child: NearbyShopsSection())),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('All'), findsOneWidget);
+    await tester.tap(find.text('Deepak Hardware'));
+    expect(container.read(marketplaceShopFilterProvider), 7);
+    await tester.tap(find.text('All'));
+    expect(container.read(marketplaceShopFilterProvider), isNull);
+    container.dispose();
+  });
+
   testWidgets('a marketplace with nobody in range draws nothing',
       (tester) async {
     // Empty is an honest answer and the shop picker gives it properly, with
@@ -111,7 +138,7 @@ void main() {
     await tester.pumpWidget(host(marketplace: true, addresses: [address()]));
     await tester.pumpAndSettle();
 
-    expect(find.text('Shops near you'), findsNothing);
+    expect(find.text('All nearby shops'), findsNothing);
   });
 
   testWidgets('See all appears only when there are more than the row shows',

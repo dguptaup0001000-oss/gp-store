@@ -9,6 +9,7 @@ import '../../../core/api/error_messages.dart';
 import '../domain/control_tower_models.dart';
 import 'platform_providers.dart';
 import 'platform_entity_360_screen.dart';
+import 'admin_worker_profile_screen.dart';
 
 /// Reusable paged reader for platform operational projections. It contains no
 /// write controls; sensitive actions continue through their established,
@@ -420,7 +421,7 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
             ),
             title: Text(_title(row), maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text(_subtitle(row), maxLines: 3, overflow: TextOverflow.ellipsis),
-            trailing: const {'orders', 'customers', 'merchants', 'shops'}
+            trailing: const {'orders', 'customers', 'merchants', 'shops', 'workers'}
                     .contains(widget.resource)
                 ? const Icon(Icons.chevron_right_rounded)
                 : null,
@@ -438,6 +439,12 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
 
   void _open(Map<String, dynamic> row) {
     final id = (row['id'] as num).toInt();
+    if (widget.resource == 'workers') {
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => AdminWorkerProfileScreen(workerId: id, platformScope: true),
+      ));
+      return;
+    }
     if (widget.resource == 'orders') {
       Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) => PlatformOrder360Screen(orderId: id),

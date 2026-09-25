@@ -1,7 +1,10 @@
 import '../../../core/images/gp_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/action_feedback.dart';
+import '../../wishlist/presentation/wishlist_providers.dart';
 import '../domain/marketplace_feed_models.dart';
 
 /// One marketplace card, drawn for whichever mode it is.
@@ -17,7 +20,7 @@ import '../domain/marketplace_feed_models.dart';
 /// something can be bought - a screen that worked that out for itself would
 /// eventually disagree with the backend, and the direction it would disagree
 /// in is offering to sell something that cannot be sold.
-class MarketplaceCardTile extends StatelessWidget {
+class MarketplaceCardTile extends ConsumerWidget {
   const MarketplaceCardTile({
     super.key,
     required this.card,
@@ -32,7 +35,10 @@ class MarketplaceCardTile extends StatelessWidget {
   final VoidCallback? onAdd;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isWishlisted = ref.watch(wishlistControllerProvider).valueOrNull
+            ?.any((item) => item.product?.id == card.productId) ??
+        false;
     return Material(
       color: AppColors.cardBackground,
       borderRadius: BorderRadius.circular(14),
@@ -42,7 +48,27 @@ class MarketplaceCardTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Thumbnail(card: card),
+            _Thumbnail(
+              card: card,
+              isWishlisted: isWishlisted,
+              onWishlistTap: () async {
+                try {
+                  final added = await ref
+                      .read(wishlistControllerProvider.notifier)
+                      .toggle(card.productId);
+                  if (!context.mounted) return;
+                  if (added == null) {
+                    showActionFailure(context, "Couldn't update wishlist. Please try again.");
+                  } else {
+                    showWishlistFeedback(context, added: added);
+                  }
+                } catch (_) {
+                  if (context.mounted) {
+                    showActionFailure(context, "Couldn't update wishlist. Please try again.");
+                  }
+                }
+              },
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
               child: Column(
@@ -63,7 +89,7 @@ class MarketplaceCardTile extends StatelessWidget {
                   const SizedBox(height: 4),
                   _Provenance(card: card),
                   const SizedBox(height: 6),
-                  _PriceAndAction(card: card, onAdd: onAdd),
+                  _PriceAndAction(card: card, onAdd: onAdd, onView: onTap),
                 ],
               ),
             ),
@@ -75,9 +101,15 @@ class MarketplaceCardTile extends StatelessWidget {
 }
 
 class _Thumbnail extends StatelessWidget {
-  const _Thumbnail({required this.card});
+  const _Thumbnail({
+    required this.card,
+    required this.isWishlisted,
+    required this.onWishlistTap,
+  });
 
   final MarketplaceCard card;
+  final bool isWishlisted;
+  final VoidCallback onWishlistTap;
 
   @override
   Widget build(BuildContext context) {
@@ -109,6 +141,24 @@ class _Thumbnail extends StatelessWidget {
               top: 6,
               child: _ModeBadge(mode: card.commerceMode),
             ),
+          Positioned(
+            right: 6,
+            top: 6,
+            child: Material(
+              color: Colors.white.withValues(alpha: .94),
+              shape: const CircleBorder(),
+              child: IconButton(
+                tooltip: isWishlisted ? 'Remove from wishlist' : 'Add to wishlist',
+                visualDensity: VisualDensity.compact,
+                onPressed: onWishlistTap,
+                icon: Icon(
+                  isWishlisted ? Icons.favorite : Icons.favorite_border,
+                  size: 20,
+                  color: isWishlisted ? AppColors.error : AppColors.textSecondary,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -201,10 +251,11 @@ class _Provenance extends StatelessWidget {
 }
 
 class _PriceAndAction extends StatelessWidget {
-  const _PriceAndAction({required this.card, this.onAdd});
+  const _PriceAndAction({required this.card, this.onAdd, this.onView});
 
   final MarketplaceCard card;
   final VoidCallback? onAdd;
+  final VoidCallback? onView;
 
   @override
   Widget build(BuildContext context) {
@@ -245,17 +296,18 @@ class _PriceAndAction extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 6),
-        _Action(card: card, onAdd: onAdd),
+        _Action(card: card, onAdd: onAdd, onView: onView),
       ],
     );
   }
 }
 
 class _Action extends StatelessWidget {
-  const _Action({required this.card, this.onAdd});
+  const _Action({required this.card, this.onAdd, this.onView});
 
   final MarketplaceCard card;
   final VoidCallback? onAdd;
+  final VoidCallback? onView;
 
   @override
   Widget build(BuildContext context) {
@@ -263,21 +315,26 @@ class _Action extends StatelessWidget {
     // than the mode. A Visit-to-Buy ring and a service both get VIEW; only
     // something the backend says is addable gets ADD.
     if (!card.addable) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          border: Border.all(color: AppColors.primary, width: 1),
-          borderRadius: BorderRadius.circular(8),
+      final label = switch (card.commerceMode) {
+        CommerceMode.visitToBuy => 'VISIT SHOP',
+        CommerceMode.serviceAtShop => 'VIEW SERVICE',
+        CommerceMode.buyOnline => card.inStock == false ? 'SOLD OUT' : 'VIEW',
+      };
+      return OutlinedButton(
+        onPressed: onView,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.primary,
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          side: const BorderSide(color: AppColors.primary),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-        child: const Text(
-          'VIEW',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: AppColors.primary,
-            letterSpacing: 0.3,
-          ),
-        ),
+        child: Text(label, style: const TextStyle(
+          fontSize: 9.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+        )),
       );
     }
 

@@ -222,6 +222,7 @@ class WorkerLifecycleEndToEndTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.worker.id").value(workerId))
                 .andExpect(jsonPath("$.worker.name").exists())
+                .andExpect(jsonPath("$.shopId").exists())
                 .andExpect(jsonPath("$.page").value(0))
                 .andExpect(jsonPath("$.size").value(1))
                 .andExpect(jsonPath("$.history").isArray())

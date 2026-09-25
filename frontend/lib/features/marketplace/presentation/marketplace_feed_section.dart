@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../../core/marketplace/marketplace_providers.dart';
 import '../domain/marketplace_feed_models.dart';
 import 'marketplace_card_tile.dart';
 import 'marketplace_feed_provider.dart';
 
-/// The marketplace feed at the foot of the home screen: what is for sale
+/// The nearby marketplace feed on the home screen: what is available
 /// NEAR THIS CUSTOMER, across every shop that would serve them.
 ///
 /// Replaces the shop-scoped feed on a marketplace deployment. That one asks
@@ -31,7 +30,6 @@ class MarketplaceFeedSlivers {
   }) {
     return [
       const SliverToBoxAdapter(child: _Header()),
-      const SliverToBoxAdapter(child: _ShopFilter()),
       feed.when(
         loading: () => const SliverToBoxAdapter(
           child: Padding(
@@ -79,7 +77,14 @@ class MarketplaceFeedSlivers {
               ),
             );
           }
-          return _Grid(state: state, onCardTap: onCardTap, onAdd: onAdd);
+          return SliverToBoxAdapter(
+            child: _ModeSections(
+              state: state,
+              selectedMode: ref.watch(marketplaceModeFilterProvider),
+              onCardTap: onCardTap,
+              onAdd: onAdd,
+            ),
+          );
         },
       ),
       SliverToBoxAdapter(
@@ -89,51 +94,6 @@ class MarketplaceFeedSlivers {
         ),
       ),
     ];
-  }
-}
-
-class _ShopFilter extends ConsumerWidget {
-  const _ShopFilter();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final selected = ref.watch(marketplaceShopFilterProvider);
-    final pin = ref.watch(deliveryPinProvider);
-    if (pin == null) return const SizedBox.shrink();
-    final shops = ref.watch(shopsNearProvider(pin));
-    return shops.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
-        child: Center(child: SizedBox(width: 18, height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2))),
-      ),
-      error: (_, __) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: TextButton.icon(
-          onPressed: () => ref.invalidate(shopsNearProvider(pin)),
-          icon: const Icon(Icons.refresh), label: const Text('Retry nearby shops'),
-        ),
-      ),
-      data: (list) => SizedBox(
-        height: 48,
-        child: ListView(scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          children: [
-            ChoiceChip(label: const Text('All'), selected: selected == null,
-              onSelected: (_) => ref.read(marketplaceShopFilterProvider.notifier).state = null),
-            for (final shop in list) Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: ChoiceChip(
-                label: Text(shop.displayName?.trim().isNotEmpty == true
-                    ? shop.displayName! : 'Shop ${shop.shopId}'),
-                selected: selected == shop.shopId,
-                onSelected: (_) => ref.read(marketplaceShopFilterProvider.notifier).state = shop.shopId,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
@@ -158,7 +118,7 @@ class _Header extends ConsumerWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              mode == null ? 'All nearby shops' : mode.label,
+              mode == null ? 'Nearby marketplace' : mode.label,
               style: Theme.of(context)
                   .textTheme
                   .titleMedium
@@ -171,45 +131,65 @@ class _Header extends ConsumerWidget {
   }
 }
 
-class _Grid extends StatelessWidget {
-  const _Grid({
+class _ModeSections extends StatelessWidget {
+  const _ModeSections({
     required this.state,
+    required this.selectedMode,
     required this.onCardTap,
     required this.onAdd,
   });
 
   final MarketplaceFeedState state;
+  final CommerceMode? selectedMode;
   final void Function(MarketplaceCard card) onCardTap;
   final void Function(MarketplaceCard card) onAdd;
 
   @override
   Widget build(BuildContext context) {
-    return SliverPadding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      sliver: SliverGrid(
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 0.62,
-        ),
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            final card = state.cards[index];
-            return MarketplaceCardTile(
-              // Keyed by product so Flutter can tell two cards apart; a
-              // duplicate key is a crash rather than a cosmetic problem,
-              // which is why the controller dedupes as well.
-              key: ValueKey<int>(card.productId),
-              card: card,
-              onTap: () => onCardTap(card),
-              onAdd: card.addable ? () => onAdd(card) : null,
+    final modes = selectedMode == null
+        ? CommerceMode.values
+        : [selectedMode!];
+    final groups = <Widget>[];
+    for (final mode in modes) {
+      final cards = state.cards.where((card) => card.commerceMode == mode).toList();
+      if (cards.isEmpty) continue;
+      final title = switch (mode) {
+        CommerceMode.buyOnline => 'Buy Online near you',
+        CommerceMode.visitToBuy => 'Visit to Buy',
+        CommerceMode.serviceAtShop => 'Services at Shop',
+      };
+      groups.add(Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: Row(children: [
+          Expanded(child: Text(title,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700))),
+          if (mode == CommerceMode.visitToBuy)
+            const Text('In-store products', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        ]),
+      ));
+      groups.add(SizedBox(
+        height: 292,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          itemCount: cards.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 10),
+          itemBuilder: (context, index) {
+            final card = cards[index];
+            return SizedBox(
+              width: 176,
+              child: MarketplaceCardTile(
+                key: ValueKey<String>(card.feedKey),
+                card: card,
+                onTap: () => onCardTap(card),
+                onAdd: card.addable ? () => onAdd(card) : null,
+              ),
             );
           },
-          childCount: state.cards.length,
         ),
-      ),
-    );
+      ));
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: groups);
   }
 }
 

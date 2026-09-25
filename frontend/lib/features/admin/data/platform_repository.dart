@@ -2,6 +2,7 @@ import '../../../core/api/api_client.dart';
 import '../domain/platform_models.dart';
 import '../domain/control_tower_models.dart';
 import '../domain/directory_models.dart';
+import '../domain/worker_models.dart';
 
 /// The platform's own surface: merchants, shops, and the market.
 ///
@@ -85,6 +86,16 @@ class PlatformRepository {
     final response = await apiClient.dio
         .get('/api/platform/control/customers/$customerId/profile');
     return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<AdminWorkerProfile> workerProfile(int workerId,
+      {int page = 0, int size = 20}) async {
+    final response = await apiClient.dio.get(
+      '/api/platform/control/workers/$workerId/profile',
+      queryParameters: {'page': page, 'size': size},
+    );
+    return AdminWorkerProfile.fromJson(
+        Map<String, dynamic>.from(response.data as Map));
   }
 
   Future<PlatformDashboardSummary> controlTowerDashboard({

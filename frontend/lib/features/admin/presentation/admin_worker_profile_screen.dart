@@ -4,10 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/error_messages.dart';
 import '../domain/worker_models.dart';
 import 'admin_providers.dart';
+import 'platform_providers.dart';
 
 class AdminWorkerProfileScreen extends ConsumerStatefulWidget {
-  const AdminWorkerProfileScreen({super.key, required this.workerId});
+  const AdminWorkerProfileScreen({super.key, required this.workerId, this.platformScope = false});
   final int workerId;
+  final bool platformScope;
 
   @override
   ConsumerState<AdminWorkerProfileScreen> createState() => _AdminWorkerProfileScreenState();
@@ -28,12 +30,15 @@ class _AdminWorkerProfileScreenState extends ConsumerState<AdminWorkerProfileScr
   Future<void> _load({int page = 0, bool append = false}) async {
     setState(() { if (append) { _loadingMore = true; } else { _loading = true; _error = null; } });
     try {
-      final next = await ref.read(adminWorkersRepositoryProvider)
-          .profile(widget.workerId, page: page);
+      final next = widget.platformScope
+          ? await ref.read(platformRepositoryProvider)
+              .workerProfile(widget.workerId, page: page)
+          : await ref.read(adminWorkersRepositoryProvider)
+              .profile(widget.workerId, page: page);
       if (!mounted) return;
       setState(() {
         _profile = append && _profile != null
-            ? AdminWorkerProfile(worker: next.worker, shopName: next.shopName,
+            ? AdminWorkerProfile(worker: next.worker, shopId: next.shopId, shopName: next.shopName,
                 totalAssigned: next.totalAssigned,
                 completed: next.completed, active: next.active, exceptions: next.exceptions,
                 page: next.page, size: next.size, hasNext: next.hasNext,
@@ -71,9 +76,10 @@ class _AdminWorkerProfileScreenState extends ConsumerState<AdminWorkerProfileScr
                           ListTile(contentPadding: EdgeInsets.zero,
                             leading: const CircleAvatar(child: Icon(Icons.person_outline)),
                             title: Text(profile.worker.name), subtitle: Text('Worker #${profile.worker.id}')),
-                          _detail('Phone', profile.worker.mobile),
+                          _detail('Phone', _maskedPhone(profile.worker.mobile)),
                           _detail('Email', profile.worker.loginEmail),
                           _detail('Assigned shop', profile.shopName),
+                          _detail('Shop ID', profile.shopId?.toString()),
                           _detail('Role', 'Delivery worker'),
                           _detail('Status', profile.worker.active ? 'Active' : 'Inactive'),
                           _detail('Availability', profile.worker.available ? 'Available' : 'Unavailable'),
@@ -131,6 +137,12 @@ class _AdminWorkerProfileScreenState extends ConsumerState<AdminWorkerProfileScr
       )).toList());
 
   static String? _date(DateTime? date) => date == null ? null : '${date.day}/${date.month}/${date.year}';
+  static String? _maskedPhone(String? value) {
+    if (value == null || value.isEmpty) return value;
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length <= 4) return '••••';
+    return '••••••${digits.substring(digits.length - 4)}';
+  }
   static String _vehicle(String? value) => switch (value?.toUpperCase()) {
     'BIKE' => 'Bike', 'SCOOTER' => 'Scooter', 'CYCLE' => 'Cycle', 'VAN' => 'Van',
     null || '' => 'Not provided', _ => value!,

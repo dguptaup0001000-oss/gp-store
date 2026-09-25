@@ -9,6 +9,7 @@ import '../../marketplace/presentation/marketplace_feed_section.dart';
 import '../../../shared/widgets/action_feedback.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:dio/dio.dart';
 
 import '../../../shared/widgets/brands_row.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
@@ -123,8 +124,7 @@ class HomeScreen extends ConsumerWidget {
         }
       } catch (e) {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+        showActionFailure(context, "Couldn't add the item to your cart. Please try again.");
       }
     }
 
@@ -149,13 +149,16 @@ class HomeScreen extends ConsumerWidget {
       try {
         final product = await ref
             .read(productsRepositoryProvider)
-            .fetchProductDetail(card.productId);
+            .fetchProductDetail(card.productId, shopId: card.shopId);
         if (!context.mounted) return;
         openProduct(product);
       } catch (e) {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+        final unavailable = e is DioException && e.response?.statusCode == 404;
+        if (unavailable) ref.invalidate(marketplaceFeedProvider);
+        showActionFailure(context, unavailable
+            ? 'Product is no longer available. Nearby products have been refreshed.'
+            : "Couldn't open this product right now. Please try again.");
       }
     }
 
@@ -178,8 +181,7 @@ class HomeScreen extends ConsumerWidget {
         }
       } catch (e) {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+        showActionFailure(context, "Couldn't add the item to your cart. Please try again.");
       }
     }
 
@@ -251,27 +253,19 @@ class HomeScreen extends ConsumerWidget {
                           // the widget. At 20:50 "closes in 10 min" is the
                           // most useful thing on this screen.
                           const StoreStatusBanner(),
-                          const PopularCategories(),
+                          const MainCategoryShortcuts(),
                           const NearbyShopsSection(),
-
-                          Consumer(
-                            builder: (context, ref, _) => ref.watch(activeOffersProvider).when(
-                                  loading: () => const SizedBox.shrink(),
-                                  error: (e, s) => SectionLoadError(
-                                    message: "Couldn't load offers",
-                                    onRetry: () => ref.invalidate(activeOffersProvider),
-                                  ),
-                                  data: (offers) => offers.isEmpty
-                                      // §8: no section for data that is not
-                                      // there. An empty offers banner is a
-                                      // heading over a blank strip.
-                                      ? const SizedBox.shrink()
-                                      : Padding(
-                                          padding: const EdgeInsets.only(top: 8),
-                                          child: OffersBanner(offers: offers),
-                                        ),
-                                ),
-                          ),
+                          const PopularCategories(),
+                          const SizedBox(height: 8),
+                        ]),
+                      ),
+                      if (onAMarketplace)
+                        ...MarketplaceFeedSlivers.build(context, ref,
+                            feed: marketplaceAsync,
+                            onCardTap: openMarketplaceCard,
+                            onAdd: addFromMarketplace),
+                      SliverList(
+                        delegate: SliverChildListDelegate([
 
                           // SECOND WAVE, from here down. Each section is a
                           // Consumer that watches its provider only once the
@@ -279,6 +273,21 @@ class HomeScreen extends ConsumerWidget {
                           // builder is genuinely conditional, so an unwatched
                           // provider is never built and never issues its
                           // request.
+                          Consumer(
+                            builder: (context, ref, _) => ref.watch(activeOffersProvider).when(
+                              loading: () => const SizedBox.shrink(),
+                              error: (_, __) => SectionLoadError(
+                                message: "Couldn't load offers",
+                                onRetry: () => ref.invalidate(activeOffersProvider),
+                              ),
+                              data: (offers) => offers.isEmpty
+                                  ? const SizedBox.shrink()
+                                  : Padding(
+                                      padding: const EdgeInsets.only(top: 10),
+                                      child: OffersBanner(offers: offers),
+                                    ),
+                            ),
+                          ),
                           if (isLoggedIn)
                             Consumer(
                               builder: (context, ref, _) => HorizontalProductSection(
@@ -368,16 +377,7 @@ class HomeScreen extends ConsumerWidget {
                           const SizedBox(height: 8),
                         ]),
                       ),
-                      // Everything above is the curated part of the home
-                      // screen. This is where it stops ending after New
-                      // arrivals and keeps going through the whole catalogue,
-                      // one page at a time.
-                      if (onAMarketplace)
-                        ...MarketplaceFeedSlivers.build(context, ref,
-                            feed: marketplaceAsync,
-                            onCardTap: openMarketplaceCard,
-                            onAdd: addFromMarketplace)
-                      else
+                      if (!onAMarketplace)
                         ...HomeFeedSlivers.build(context, ref,
                             feed: feedAsync, onProductTap: openProduct),
                     ],

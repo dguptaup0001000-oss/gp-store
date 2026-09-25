@@ -6,7 +6,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../marketplace/presentation/market_shop_card.dart';
 import '../../marketplace/presentation/shop_picker_screen.dart';
-import 'home_load_stage.dart';
+import '../../marketplace/presentation/marketplace_feed_provider.dart';
 
 /// The shops near this customer, on the home screen.
 ///
@@ -33,20 +33,35 @@ class NearbyShopsSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // BEHIND THE GATE, with the rest of the below-the-fold work: this is one
-    // more request, and under a single shop - which is every deployment today
-    // - it can never draw anything.
-    if (!ref.watch(homeBelowFoldReadyProvider)) return const SizedBox.shrink();
     if (!ref.watch(isMarketplaceProvider)) return const SizedBox.shrink();
 
     final pin = ref.watch(deliveryPinProvider);
     if (pin == null) return const SizedBox.shrink();
 
-    final shops = ref.watch(shopsNearProvider(pin)).valueOrNull;
-    // Loading and error both draw nothing rather than a spinner or a red
-    // strip: this is a discovery aid, not the page, and a customer whose
-    // shop list is slow should still get their offers and their feed.
-    if (shops == null || shops.isEmpty) return const SizedBox.shrink();
+    final shopsAsync = ref.watch(shopsNearProvider(pin));
+    final selected = ref.watch(marketplaceShopFilterProvider);
+    if (shopsAsync.isLoading) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: Row(children: [
+          SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+          SizedBox(width: 10),
+          Text('Finding shops near you…'),
+        ]),
+      );
+    }
+    if (shopsAsync.hasError) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: TextButton.icon(
+          onPressed: () => ref.invalidate(shopsNearProvider(pin)),
+          icon: const Icon(Icons.refresh),
+          label: const Text("Couldn't load nearby shops. Retry"),
+        ),
+      );
+    }
+    final shops = shopsAsync.valueOrNull ?? const [];
+    if (shops.isEmpty) return const SizedBox.shrink();
 
     final preview = shops.take(howMany).toList();
 
@@ -58,7 +73,7 @@ class NearbyShopsSection extends ConsumerWidget {
           child: Row(
             children: [
               const Expanded(
-                child: Text('Shops near you',
+                child: Text('All nearby shops',
                     style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
               ),
               if (shops.length > preview.length)
@@ -82,17 +97,43 @@ class NearbyShopsSection extends ConsumerWidget {
             // Lazily built even at six: the same list becomes twenty in a
             // dense city, and a builder that is lazy at six is lazy at twenty
             // without anybody remembering to change it.
-            itemCount: preview.length,
+            itemCount: preview.length + 1,
             separatorBuilder: (_, __) => const SizedBox(width: 10),
             itemBuilder: (context, index) => SizedBox(
               // Wide enough for a name, a rating and a distance; narrow enough
               // that the next card peeks, which is what tells a customer the
               // row scrolls.
-              width: 260,
-              child: MarketShopCard(
-                shop: preview[index],
-                nearest: index == 0,
-                selected: preview[index].shopId == ref.watch(selectedShopIdProvider),
+              width: index == 0 ? 116 : 260,
+              child: index == 0
+                  ? Material(
+                      color: selected == null
+                          ? AppColors.primary.withValues(alpha: .10)
+                          : AppColors.cardBackground,
+                      borderRadius: BorderRadius.circular(14),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () => ref.read(marketplaceShopFilterProvider.notifier).state = null,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: selected == null ? AppColors.primary : AppColors.divider),
+                          ),
+                          child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.store_mall_directory_outlined,
+                                color: AppColors.primary, size: 28),
+                            const SizedBox(height: 7),
+                            const Text('All', style: TextStyle(fontWeight: FontWeight.w700)),
+                            const Text('nearby shops', style: TextStyle(fontSize: 11)),
+                          ])),
+                        ),
+                      ),
+                    )
+                  : MarketShopCard(
+                shop: preview[index - 1],
+                nearest: index == 1,
+                selected: preview[index - 1].shopId == selected,
+                onTap: () => ref.read(marketplaceShopFilterProvider.notifier).state =
+                    preview[index - 1].shopId,
               ),
             ),
           ),

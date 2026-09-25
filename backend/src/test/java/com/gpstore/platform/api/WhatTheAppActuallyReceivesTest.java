@@ -80,7 +80,8 @@ class WhatTheAppActuallyReceivesTest {
         // is exactly the class of bug this file is here to catch.
         for (String field : new String[]{
                 "productId", "name", "brand", "categoryId", "categoryName",
-                "productVariantId", "variantQuantity", "variantUnit",
+                "productVariantId", "variantQuantity", "variantUnit", "inStock",
+                "imageUrl",
                 "sellingPrice", "mrp", "priceMax", "priceMode",
                 "commerceMode", "commerceLabel", "offlineAvailability",
                 "serviceDurationMinutes", "shopId", "shopName", "distanceKm",
@@ -93,7 +94,7 @@ class WhatTheAppActuallyReceivesTest {
 
     private static MarketplaceFeedView card(CommerceMode mode) {
         return new MarketplaceFeedView(
-                1L, "Thing", "Brand", 2L, "Category", null,
+                1L, "Thing", "Brand", 2L, "Category", "https://images.example/item.jpg", true,
                 3L, 1.0, "each",
                 new BigDecimal("100"), new BigDecimal("120"), null,
                 ListingPriceMode.EXACT_PRICE, mode, mode.customerLabel(),

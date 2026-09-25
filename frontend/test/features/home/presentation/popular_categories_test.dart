@@ -33,6 +33,7 @@ void main() {
     required List<Category> catalogue,
     bool marketplace = false,
     List<MarketCategory> nearby = const [],
+    Widget child = const PopularCategories(),
   }) =>
       ProviderScope(
         overrides: [
@@ -42,8 +43,8 @@ void main() {
               : MarketplaceMode.singleShop),
           marketCategoriesProvider.overrideWith((ref) async => nearby),
         ],
-        child: const MaterialApp(
-          home: Scaffold(body: SingleChildScrollView(child: PopularCategories())),
+        child: MaterialApp(
+          home: Scaffold(body: SingleChildScrollView(child: child)),
         ),
       );
 
@@ -57,6 +58,20 @@ void main() {
     expect(find.text('Category 1'), findsOneWidget);
     expect(find.text('Category 7'), findsOneWidget);
     expect(find.text('Category 8'), findsNothing);
+    expect(find.text('All'), findsOneWidget);
+  });
+
+  testWidgets('compact shortcuts use the actual category data and include More',
+      (tester) async {
+    await tester.pumpWidget(host(
+      catalogue: catalogueOf(12),
+      marketplace: true,
+      child: const MainCategoryShortcuts(),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Category 1'), findsOneWidget);
+    expect(find.text('Category 7'), findsOneWidget);
     expect(find.text('All'), findsOneWidget);
   });
 
