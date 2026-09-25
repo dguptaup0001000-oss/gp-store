@@ -249,7 +249,7 @@ public class MarketplaceTestDataSeeder {
 
         Map<String, Long> productIds = new HashMap<>(specs.size());
         jdbc.query("SELECT id, name FROM products WHERE is_test_data = TRUE AND data_source = ?",
-                rs -> productIds.put(rs.getString("name"), rs.getLong("id")), BATCH);
+                rs -> { productIds.put(rs.getString("name"), rs.getLong("id")); }, BATCH);
         if (productIds.size() != specs.size()) {
             throw new IllegalStateException("Product batch identity mismatch.");
         }
@@ -266,7 +266,7 @@ public class MarketplaceTestDataSeeder {
                                    Map<String, Long> shopIds) {
         Map<String, Long> variantIds = new HashMap<>(specs.size());
         jdbc.query("SELECT id, sku FROM product_variants WHERE sku LIKE 'MKT100V1-%'",
-                rs -> variantIds.put(rs.getString("sku"), rs.getLong("id")));
+                rs -> { variantIds.put(rs.getString("sku"), rs.getLong("id")); });
         if (variantIds.size() != specs.size()) {
             throw new IllegalStateException("Variant batch identity mismatch.");
         }
@@ -322,7 +322,7 @@ public class MarketplaceTestDataSeeder {
                         + "JOIN product_variants v ON v.id = spv.product_variant_id "
                         + "JOIN products p ON p.id = v.product_id "
                         + "WHERE p.is_test_data = TRUE AND p.data_source = ? GROUP BY spv.commerce_mode",
-                rs -> modes.put(rs.getString(1), rs.getInt(2)), BATCH);
+                rs -> { modes.put(rs.getString(1), rs.getInt(2)); }, BATCH);
         int withImages = jdbc.queryForObject("SELECT count(DISTINCT p.id) FROM products p "
                         + "JOIN product_variants v ON v.product_id = p.id LEFT JOIN product_images pi ON pi.product_id = p.id "
                         + "WHERE p.is_test_data = TRUE AND p.data_source = ? "
