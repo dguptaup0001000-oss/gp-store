@@ -364,7 +364,7 @@ class OpenTheAppAndSeeTheMarketplaceTest {
 
         @Test
         @DisplayName("omitting the mode filter includes all three commerce modes")
-        void unfilteredHomeContainsEveryMode() {
+        void unfilteredHomeContainsEveryMode() throws Exception {
             stock("Visit shop", "Visit fixture", "Grocery", CommerceMode.VISIT_TO_BUY, "90");
             stock("Service shop", "Service fixture", "Grocery", CommerceMode.SERVICE_AT_SHOP, "90");
             String body = mockMvc.perform(get("/api/marketplace/feed")
