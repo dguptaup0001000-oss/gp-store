@@ -63,19 +63,13 @@ class MarketplaceCardTile extends ConsumerWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final cardWidth = constraints.maxWidth.isFinite
-                ? constraints.maxWidth
-                : 176.0;
-            return Column(
-              // A horizontal list gives children the whole rail height as a
-              // maximum. Keep this vertical card at its natural content
-              // height; the rail reserves space for the largest card, while
-              // shorter cards should not stretch into that unused space.
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+        child: Column(
+          // A horizontal list gives children the whole rail height as a
+          // maximum. Keep this vertical card at its natural content height;
+          // the rail reserves space for the largest card.
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
                 Flexible(
                   fit: FlexFit.loose,
                   child: AspectRatio(
@@ -127,9 +121,7 @@ class MarketplaceCardTile extends ConsumerWidget {
                     ],
                   ),
                 ),
-              ],
-            );
-          },
+          ],
         ),
       ),
     );
