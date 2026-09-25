@@ -200,6 +200,15 @@ class ShopScopeIsNotOptionalTest {
             // no private merchant data is reachable through it.
             "MarketplaceFeedRepository",
 
+            // THE CONTROLLED SYNTHETIC TEST-DATA RUNNER. It is only available
+            // through an explicit one-shot CLI profile and exact production
+            // commit/batch confirmation. Writes to shop-owned listing and
+            // inventory tables carry the generated shop_id on every row;
+            // shop settings are addressed by the exact generated shop IDs;
+            // cleanup is further restricted to generated variant/product
+            // markers and first refuses any customer/order references.
+            "MarketplaceTestDataSeeder",
+
             // RECONCILIATION, which exists precisely to compare what the
             // central catalogue says against what shops have listed. It runs
             // as maintenance rather than on a request, so there is no customer

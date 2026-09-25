@@ -21,4 +21,4 @@ exec java \
   -XX:+UseContainerSupport \
   -Djava.security.egd=file:/dev/./urandom \
   ${JAVA_OPTS:-} \
-  -jar /app/app.jar
+  -jar /app/app.jar "$@"
