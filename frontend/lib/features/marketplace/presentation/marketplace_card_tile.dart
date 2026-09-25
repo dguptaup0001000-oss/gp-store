@@ -34,6 +34,24 @@ class MarketplaceCardTile extends ConsumerWidget {
   /// Called only when the server said this is addable. Null is fine.
   final VoidCallback? onAdd;
 
+  /// Height for this card's horizontal rail, derived from the image geometry
+  /// and text scale so the image and all mode-specific details fit together.
+  /// Reserving the extra detail rows covers starting prices and service
+  /// duration without relying on a one-size-fits-all viewport height.
+  static double carouselHeight(BuildContext context, {double cardWidth = 176}) {
+    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    const detailsAtScaleOne = 18 + // body padding
+        (13 * 1.25 * 2) + // two-line product name
+        4 +
+        (11 * 1.2) + // shop and distance
+        6 +
+        (14 * 1.2) + // price
+        (9.5 * 1.2) + // confirm-at-shop note
+        (9.5 * 1.2) + // service duration
+        26; // compact action and breathing room
+    return (cardWidth / 1.25) + (detailsAtScaleOne * scale) + 8;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isWishlisted = ref.watch(wishlistControllerProvider).valueOrNull
