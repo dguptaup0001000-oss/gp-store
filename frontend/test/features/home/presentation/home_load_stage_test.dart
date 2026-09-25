@@ -14,6 +14,7 @@ import 'package:gpstore/features/auth/presentation/auth_providers.dart';
 import 'package:gpstore/features/auth/data/auth_repository.dart';
 import 'package:gpstore/features/home/presentation/home_screen.dart';
 import 'package:gpstore/features/marketplace/domain/marketplace_feed_models.dart';
+import 'package:gpstore/features/marketplace/presentation/marketplace_card_tile.dart';
 import 'package:gpstore/features/products/data/products_repository.dart';
 import 'package:gpstore/features/products/domain/brand_models.dart';
 import 'package:gpstore/features/products/domain/product_models.dart';
@@ -488,17 +489,17 @@ void main() {
       expect(find.text('Buy Online near you'), findsOneWidget);
       expect(find.text('Buy Online fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
-        find.text('${CommerceMode.visitToBuy.label} fixture'),
+        find.text('Visit-to-Buy fixture'),
         300,
         scrollable: verticalHomeScroll().first,
       );
-      expect(find.text('${CommerceMode.visitToBuy.label} fixture'), findsOneWidget);
+      expect(find.text('Visit-to-Buy fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
-        find.text('${CommerceMode.serviceAtShop.label} fixture'),
+        find.text('Service at Shop fixture'),
         300,
         scrollable: verticalHomeScroll().first,
       );
-      expect(find.text('${CommerceMode.serviceAtShop.label} fixture'), findsOneWidget);
+      expect(find.text('Service at Shop fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('New arrival fixture'),
         300,

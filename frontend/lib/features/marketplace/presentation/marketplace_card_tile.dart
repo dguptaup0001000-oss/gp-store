@@ -69,37 +69,38 @@ class MarketplaceCardTile extends ConsumerWidget {
                 ? constraints.maxWidth
                 : 176.0;
             return Column(
-              // The horizontal viewport supplies its full rail height as a
-              // maximum. Keep each card at its content height instead of
-              // stretching it to that viewport: transient/provider updates
-              // can otherwise lay out the body against the old rail extent
-              // and report a false vertical flex overflow.
+              // A horizontal list gives children the whole rail height as a
+              // maximum. Keep this vertical card at its natural content
+              // height; the rail reserves space for the largest card, while
+              // shorter cards should not stretch into that unused space.
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(
-                  width: cardWidth,
-                  height: cardWidth / 1.25,
-                  child: _Thumbnail(
-                    card: card,
-                    isWishlisted: isWishlisted,
-                    onWishlistTap: () async {
-                      try {
-                        final added = await ref
-                            .read(wishlistControllerProvider.notifier)
-                            .toggle(card.productId);
-                        if (!context.mounted) return;
-                        if (added == null) {
-                          showActionFailure(context, "Couldn't update wishlist. Please try again.");
-                        } else {
-                          showWishlistFeedback(context, added: added);
+                Flexible(
+                  fit: FlexFit.loose,
+                  child: AspectRatio(
+                    aspectRatio: 1.25,
+                    child: _Thumbnail(
+                      card: card,
+                      isWishlisted: isWishlisted,
+                      onWishlistTap: () async {
+                        try {
+                          final added = await ref
+                              .read(wishlistControllerProvider.notifier)
+                              .toggle(card.productId);
+                          if (!context.mounted) return;
+                          if (added == null) {
+                            showActionFailure(context, "Couldn't update wishlist. Please try again.");
+                          } else {
+                            showWishlistFeedback(context, added: added);
+                          }
+                        } catch (_) {
+                          if (context.mounted) {
+                            showActionFailure(context, "Couldn't update wishlist. Please try again.");
+                          }
                         }
-                      } catch (_) {
-                        if (context.mounted) {
-                          showActionFailure(context, "Couldn't update wishlist. Please try again.");
-                        }
-                      }
-                    },
+                      },
+                    ),
                   ),
                 ),
                 Padding(
