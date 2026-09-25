@@ -100,6 +100,7 @@ class OpenTheAppAndSeeTheMarketplaceTest {
     void tidyUp() {
         TenantContext.clear();
         for (Long shopId : shopIds) {
+            jdbc.update("DELETE FROM inventory WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM shop_product_variants WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM shop_business_hours WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", shopId);

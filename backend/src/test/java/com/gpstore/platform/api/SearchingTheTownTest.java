@@ -86,6 +86,7 @@ class SearchingTheTownTest {
     void tidyUp() {
         TenantContext.clear();
         for (Long shopId : shopIds) {
+            jdbc.update("DELETE FROM inventory WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM shop_product_variants WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM shops WHERE id = ?", shopId);
         }
@@ -239,5 +240,9 @@ class SearchingTheTownTest {
                         + "VALUES (?, ?, ?, ?, true, true, ?, ?, now(), now())",
                 shopId, variantId, new BigDecimal(price), new BigDecimal(price), mode.name(),
                 mode.isBuyableOnline() ? "EXACT_PRICE" : "STARTING_FROM");
+        jdbc.update("INSERT INTO inventory (shop_id, product_variant_id, stock, reserved_stock) "
+                        + "VALUES (?, ?, ?, 0) ON CONFLICT (shop_id, product_variant_id) "
+                        + "DO UPDATE SET stock = EXCLUDED.stock, reserved_stock = 0",
+                shopId, variantId, mode.isBuyableOnline() ? 10 : 0);
     }
 }
