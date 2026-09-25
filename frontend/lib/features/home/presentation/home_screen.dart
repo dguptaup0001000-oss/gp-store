@@ -82,17 +82,10 @@ class HomeScreen extends ConsumerWidget {
     // Browsing one storefront on purpose is unaffected either way: that is
     // the shop screen, and it is still there.
     final onAMarketplace = ref.watch(isMarketplaceProvider);
+    final selectedMarketplaceMode = ref.watch(marketplaceModeFilterProvider);
     final feedAsync = belowFoldReady && !onAMarketplace
         ? ref.watch(productFeedProvider)
         : const AsyncValue<ProductFeedState>.loading();
-    // The marketplace feed is the screen's primary answer, not a decorative
-    // below-the-fold carousel. It must start on the first build. Holding it
-    // behind categories + brands + offers made a slow production phone wait
-    // for those three requests (or their 15-second timeouts) before the feed
-    // request even existed, which looked exactly like an empty Home.
-    final marketplaceAsync = onAMarketplace
-        ? ref.watch(marketplaceFeedProvider)
-        : const AsyncValue<MarketplaceFeedState>.loading();
     final isLoggedIn = ref.watch(authControllerProvider).status == AuthStatus.authenticated;
 
     void openProduct(Product product) => Navigator.of(context).push(
@@ -155,7 +148,9 @@ class HomeScreen extends ConsumerWidget {
       } catch (e) {
         if (!context.mounted) return;
         final unavailable = e is DioException && e.response?.statusCode == 404;
-        if (unavailable) ref.invalidate(marketplaceFeedProvider);
+        if (unavailable) {
+          ref.invalidate(marketplaceHomeModeFeedProvider(card.commerceMode));
+        }
         showActionFailure(context, unavailable
             ? 'Product is no longer available. Nearby products have been refreshed.'
             : "Couldn't open this product right now. Please try again.");
@@ -214,9 +209,13 @@ class HomeScreen extends ConsumerWidget {
                 Future.sync(() => ref.invalidate(newArrivalsProvider)),
                 Future.sync(() => ref.invalidate(trendingProvider)),
                 Future.sync(() => ref.invalidate(recommendedForMeProvider)),
-                Future.sync(() => ref.invalidate(onAMarketplace
-                    ? marketplaceFeedProvider
-                    : productFeedProvider)),
+                Future.sync(() {
+                  if (onAMarketplace) {
+                    ref.invalidate(marketplaceHomeModeFeedProvider);
+                  } else {
+                    ref.invalidate(productFeedProvider);
+                  }
+                }),
               ]),
               child: ScrollToTop(
                 builder: (context, scrollController) => NotificationListener<ScrollNotification>(
@@ -225,19 +224,16 @@ class HomeScreen extends ConsumerWidget {
                     // the next products are usually already there by the time
                     // they arrive.
                     //
-                    // Only depth 0: a horizontal carousel inside the page also
-                    // emits ScrollNotifications, and without this check
-                    // flicking "Trending now" sideways would request another
-                    // page of the vertical feed. belowFoldReady as well:
-                    // reading .notifier would BUILD the feed provider and fire
-                    // its first page, which is what the gate exists to hold
-                    // back.
-                    if (notification.depth == 0 &&
+                    // Only the single-shop catalogue is an endless vertical
+                    // feed. Marketplace Home uses three bounded horizontal
+                    // mode rails, so an empty first rail cannot prevent the
+                    // other commerce modes or later discovery sections from
+                    // being built.
+                    if (!onAMarketplace &&
+                        notification.depth == 0 &&
                         notification.metrics.axis == Axis.vertical &&
                         notification.metrics.extentAfter < 600) {
-                      if (onAMarketplace) {
-                        ref.read(marketplaceFeedProvider.notifier).loadMore();
-                      } else if (belowFoldReady) {
+                      if (belowFoldReady) {
                         ref.read(productFeedProvider.notifier).loadMore();
                       }
                     }
@@ -260,10 +256,11 @@ class HomeScreen extends ConsumerWidget {
                         ]),
                       ),
                       if (onAMarketplace)
-                        ...MarketplaceFeedSlivers.build(context, ref,
-                            feed: marketplaceAsync,
-                            onCardTap: openMarketplaceCard,
-                            onAdd: addFromMarketplace),
+                        ...MarketplaceFeedSlivers.homeSections(
+                          selectedMode: selectedMarketplaceMode,
+                          onCardTap: openMarketplaceCard,
+                          onAdd: addFromMarketplace,
+                        ),
                       SliverList(
                         delegate: SliverChildListDelegate([
 

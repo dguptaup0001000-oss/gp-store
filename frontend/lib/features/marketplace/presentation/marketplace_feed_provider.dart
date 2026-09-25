@@ -1,52 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../domain/marketplace_feed_models.dart';
-
-/// State of the marketplace feed: what is for sale near this customer.
-class MarketplaceFeedState {
-  const MarketplaceFeedState({
-    this.cards = const [],
-    this.nextPage = 0,
-    this.hasNext = true,
-    this.isLoadingMore = false,
-    this.needsAddress = false,
-    this.error,
-  });
-
-  final List<MarketplaceCard> cards;
-  final int nextPage;
-  final bool hasNext;
-  final bool isLoadingMore;
-
-  /// The customer has no placeable address, so nobody can be told which shops
-  /// deliver to them. A real state on a fresh install, and a different screen
-  /// from "nothing is nearby" - one asks for an address, the other does not.
-  final bool needsAddress;
-
-  final Object? error;
-
-  bool get isEmpty => cards.isEmpty;
-
-  MarketplaceFeedState copyWith({
-    List<MarketplaceCard>? cards,
-    int? nextPage,
-    bool? hasNext,
-    bool? isLoadingMore,
-    bool? needsAddress,
-    Object? error,
-    bool clearError = false,
-  }) {
-    return MarketplaceFeedState(
-      cards: cards ?? this.cards,
-      nextPage: nextPage ?? this.nextPage,
-      hasNext: hasNext ?? this.hasNext,
-      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
-      needsAddress: needsAddress ?? this.needsAddress,
-      error: clearError ? null : (error ?? this.error),
-    );
-  }
-}
 
 /// Which mode the marketplace screens are currently showing.
 ///
@@ -60,98 +17,150 @@ final marketplaceModeFilterProvider =
 /// Null means ALL shops near the selected customer address.
 final marketplaceShopFilterProvider = StateProvider<int?>((ref) => null);
 
-/// Drives the marketplace feed, one server page at a time.
+/// A bounded first page for one commerce-mode rail on Customer Home.
 ///
-/// Keeps the three guards the shop feed already learned it needed: an
-/// in-flight flag so a scroll flick does not issue a dozen identical
-/// requests, a seen-id set because Flutter throws on duplicate keys, and the
-/// server's own "is there more" rather than inferring it from a short page.
-class MarketplaceFeedController
-    extends AutoDisposeAsyncNotifier<MarketplaceFeedState> {
-  static const _pageSize = 20;
+/// Home must not infer that a mode has no nearby listings just because the
+/// first page of the combined feed happened to contain only another mode.
+/// Each of the three rails asks the server for its own mode (and the current
+/// shop filter), so one rail can be empty without suppressing its siblings.
+/// Twelve cards per rail keeps startup bounded; each rail fetches later pages
+/// as the customer scrolls horizontally.
+class MarketplaceHomeModeFeedState {
+  const MarketplaceHomeModeFeedState({
+    this.cards = const [],
+    this.nextPage = 0,
+    this.hasNext = true,
+    this.isLoading = true,
+    this.isLoadingMore = false,
+    this.needsAddress = false,
+    this.error,
+  });
 
-  final Set<String> _seenIds = <String>{};
+  final List<MarketplaceCard> cards;
+  final int nextPage;
+  final bool hasNext;
+  final bool isLoading;
+  final bool isLoadingMore;
+  final bool needsAddress;
+  final Object? error;
+}
+
+class MarketplaceHomeModeFeedController
+    extends StateNotifier<MarketplaceHomeModeFeedState> {
+  MarketplaceHomeModeFeedController({
+    required Ref ref,
+    required CommerceMode mode,
+    required ({double lat, double lng})? pin,
+    required int? shopId,
+  })  : _ref = ref,
+        _mode = mode,
+        _pin = pin,
+        _shopId = shopId,
+        super(MarketplaceHomeModeFeedState(
+            isLoading: pin != null, needsAddress: pin == null)) {
+    if (pin != null) unawaited(_loadInitial());
+  }
+
+  static const _pageSize = 12;
+  final Ref _ref;
+  final CommerceMode _mode;
+  final ({double lat, double lng})? _pin;
+  final int? _shopId;
+  final Set<String> _seen = <String>{};
+  bool _disposed = false;
 
   @override
-  Future<MarketplaceFeedState> build() async {
-    _seenIds.clear();
-    final pin = ref.watch(deliveryPinProvider);
-    final mode = ref.watch(marketplaceModeFilterProvider);
-    final shopId = ref.watch(marketplaceShopFilterProvider);
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 
-    if (pin == null) {
-      return const MarketplaceFeedState(
-          hasNext: false, needsAddress: true);
-    }
-
-    final cards = await ref.read(marketplaceRepositoryProvider).feed(
+  Future<List<MarketplaceCard>> _fetch(int page) {
+    final pin = _pin;
+    if (pin == null) return Future.value(const []);
+    return _ref.read(marketplaceRepositoryProvider).feed(
           latitude: pin.lat,
           longitude: pin.lng,
-          mode: mode,
-          shopId: shopId,
-          page: 0,
+          mode: _mode,
+          shopId: _shopId,
+          page: page,
           size: _pageSize,
         );
-    return MarketplaceFeedState(
-      cards: _dedupe(cards),
-      nextPage: 1,
-      // The endpoint returns a bare list, so a short page is the end of it.
-      hasNext: cards.length >= _pageSize,
-    );
+  }
+
+  Future<void> _loadInitial() async {
+    try {
+      final cards = await _fetch(0);
+      if (_disposed) return;
+      final unique = _dedupe(cards);
+      state = MarketplaceHomeModeFeedState(
+        cards: unique,
+        nextPage: 1,
+        hasNext: cards.length >= _pageSize,
+        isLoading: false,
+      );
+    } catch (error) {
+      if (_disposed) return;
+      state = MarketplaceHomeModeFeedState(isLoading: false, error: error);
+    }
   }
 
   Future<void> loadMore() async {
-    final current = state.valueOrNull;
-    if (current == null || current.isLoadingMore || !current.hasNext) return;
-
-    final pin = ref.read(deliveryPinProvider);
-    if (pin == null) return;
-
-    state = AsyncData(current.copyWith(isLoadingMore: true, clearError: true));
+    final current = state;
+    if (current.isLoading || current.isLoadingMore || !current.hasNext) return;
+    state = MarketplaceHomeModeFeedState(
+      cards: current.cards,
+      nextPage: current.nextPage,
+      hasNext: current.hasNext,
+      isLoadingMore: true,
+      needsAddress: current.needsAddress,
+    );
     try {
-      final cards = await ref.read(marketplaceRepositoryProvider).feed(
-            latitude: pin.lat,
-            longitude: pin.lng,
-            mode: ref.read(marketplaceModeFilterProvider),
-            shopId: ref.read(marketplaceShopFilterProvider),
-            page: current.nextPage,
-            size: _pageSize,
-          );
-      state = AsyncData(current.copyWith(
-        // Append, never replace: replacing resets the customer's scroll
-        // position to the top on every page.
+      final cards = await _fetch(current.nextPage);
+      if (_disposed) return;
+      state = MarketplaceHomeModeFeedState(
         cards: [...current.cards, ..._dedupe(cards)],
         nextPage: current.nextPage + 1,
         hasNext: cards.length >= _pageSize,
-        isLoadingMore: false,
-        clearError: true,
-      ));
-    } catch (e) {
-      // What is already on screen stays on screen; a failed page 7 must not
-      // blank out pages 1-6 the customer is reading.
-      state = AsyncData(current.copyWith(isLoadingMore: false, error: e));
+      );
+    } catch (error) {
+      if (_disposed) return;
+      state = MarketplaceHomeModeFeedState(
+        cards: current.cards,
+        nextPage: current.nextPage,
+        hasNext: current.hasNext,
+        error: error,
+      );
     }
   }
 
-  Future<void> retryLoadMore() async {
-    final current = state.valueOrNull;
-    if (current == null || current.isLoadingMore) return;
-    state = AsyncData(current.copyWith(clearError: true));
-    await loadMore();
+  Future<void> retry() async {
+    if (state.cards.isEmpty) {
+      state = const MarketplaceHomeModeFeedState();
+      await _loadInitial();
+    } else {
+      await loadMore();
+    }
   }
 
   List<MarketplaceCard> _dedupe(List<MarketplaceCard> incoming) {
-    final out = <MarketplaceCard>[];
+    final unique = <MarketplaceCard>[];
     for (final card in incoming) {
-      if (_seenIds.add(card.feedKey)) {
-        out.add(card);
-      }
+      if (_seen.add(card.feedKey)) unique.add(card);
     }
-    return out;
+    return unique;
   }
 }
 
-final marketplaceFeedProvider = AutoDisposeAsyncNotifierProvider<
-    MarketplaceFeedController, MarketplaceFeedState>(
-  MarketplaceFeedController.new,
-);
+final marketplaceHomeModeFeedProvider = StateNotifierProvider.autoDispose
+    .family<MarketplaceHomeModeFeedController, MarketplaceHomeModeFeedState,
+        CommerceMode>((ref, mode) {
+  final pin = ref.watch(deliveryPinProvider);
+  final shopId = ref.watch(marketplaceShopFilterProvider);
+  return MarketplaceHomeModeFeedController(
+    ref: ref,
+    mode: mode,
+    pin: pin,
+    shopId: shopId,
+  );
+});
