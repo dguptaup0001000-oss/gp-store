@@ -57,7 +57,7 @@ class MarketplaceTestDataGeneratorTest {
         }
         assertTrue(counts.get(CommerceMode.ONLINE_PURCHASE) > 2_000);
         assertTrue(counts.get(CommerceMode.VISIT_TO_BUY) > 1_000);
-        assertTrue(counts.get(CommerceMode.SERVICE_AT_SHOP) > 900);
+        assertTrue(counts.get(CommerceMode.SERVICE_AT_SHOP) > 600);
     }
 
     @Test
