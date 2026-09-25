@@ -14,6 +14,7 @@ import 'package:gpstore/features/auth/presentation/auth_providers.dart';
 import 'package:gpstore/features/auth/data/auth_repository.dart';
 import 'package:gpstore/features/home/presentation/home_screen.dart';
 import 'package:gpstore/features/marketplace/domain/marketplace_feed_models.dart';
+import 'package:gpstore/features/marketplace/presentation/marketplace_card_tile.dart';
 import 'package:gpstore/features/products/data/products_repository.dart';
 import 'package:gpstore/features/products/domain/brand_models.dart';
 import 'package:gpstore/features/products/domain/product_models.dart';
@@ -479,6 +480,11 @@ void main() {
       repository.offers.complete(const []);
       await tester.pumpAndSettle();
 
+      final firstCard = find.byType(MarketplaceCardTile).first;
+      for (final type in [SizedBox, Stack, Padding, Column, LayoutBuilder]) {
+        final widgets = find.descendant(of: firstCard, matching: find.byType(type));
+        debugPrint('home card ${type}: ${[for (var i = 0; i < widgets.evaluate().length; i++) tester.getSize(widgets.at(i))]}');
+      }
       final bottomNavigationBefore = tester.getRect(find.byType(BottomNavigationBar));
       expect(
         find.byWidgetPredicate(
