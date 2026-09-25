@@ -132,15 +132,6 @@ class TestWishlistController extends WishlistController {
   Future<List<WishlistItem>> build() async => const [];
 }
 
-void dumpFirstMarketplaceCard(WidgetTester tester, String label) {
-  final card = find.byType(MarketplaceCardTile).first;
-  debugPrint('$label card:');
-  for (final type in [SizedBox, Stack, Padding, Column, LayoutBuilder]) {
-    final widgets = find.descendant(of: card, matching: find.byType(type));
-    debugPrint('  $type ${[for (var i = 0; i < widgets.evaluate().length; i++) tester.getSize(widgets.at(i))]}');
-  }
-}
-
 void main() {
   setUpAll(setUpFakeSecureStorage);
 
@@ -404,8 +395,6 @@ void main() {
       repository.offers.complete(const []);
       await tester.pumpAndSettle();
 
-      dumpFirstMarketplaceCard(tester, 'Buy and Service');
-
       expect(find.text('Buy Online near you'), findsOneWidget);
       expect(find.text('Visit to Buy'), findsNothing);
       await tester.scrollUntilVisible(
@@ -450,8 +439,6 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      dumpFirstMarketplaceCard(tester, 'Visit and Service');
-
       expect(find.text('Buy Online near you'), findsNothing);
       expect(find.text('Visit to Buy'), findsWidgets);
       await tester.scrollUntilVisible(
@@ -493,17 +480,26 @@ void main() {
       repository.offers.complete(const []);
       await tester.pumpAndSettle();
 
-      final firstCard = find.byType(MarketplaceCardTile).first;
-      for (final type in [SizedBox, Stack, Padding, Column, LayoutBuilder]) {
-        final widgets = find.descendant(of: firstCard, matching: find.byType(type));
-        debugPrint('home card ${type}: ${[for (var i = 0; i < widgets.evaluate().length; i++) tester.getSize(widgets.at(i))]}');
-      }
       final bottomNavigationBefore = tester.getRect(find.byType(BottomNavigationBar));
       expect(
         find.byWidgetPredicate(
             (widget) => widget is ListView && widget.scrollDirection == Axis.horizontal),
         findsWidgets,
       );
+      expect(find.text('Buy Online near you'), findsOneWidget);
+      expect(find.text('Buy Online fixture'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Visit-to-Buy fixture'),
+        300,
+        scrollable: verticalHomeScroll().first,
+      );
+      expect(find.text('Visit-to-Buy fixture'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Service at Shop fixture'),
+        300,
+        scrollable: verticalHomeScroll().first,
+      );
+      expect(find.text('Service at Shop fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('New arrival fixture'),
         300,
@@ -516,9 +512,6 @@ void main() {
         300,
         scrollable: verticalHomeScroll().first,
       );
-      expect(find.text('Buy Online near you'), findsOneWidget);
-      expect(find.text('Visit to Buy'), findsOneWidget);
-      expect(find.text('Services at Shop'), findsOneWidget);
       expect(find.text('Recommended for you'), findsOneWidget);
       expect(tester.takeException(), isNull, reason: 'phone-sized Home must not overflow');
       expect(tester.getRect(find.byType(BottomNavigationBar)), bottomNavigationBefore,

@@ -69,6 +69,12 @@ class MarketplaceCardTile extends ConsumerWidget {
                 ? constraints.maxWidth
                 : 176.0;
             return Column(
+              // The horizontal viewport supplies its full rail height as a
+              // maximum. Keep each card at its content height instead of
+              // stretching it to that viewport: transient/provider updates
+              // can otherwise lay out the body against the old rail extent
+              // and report a false vertical flex overflow.
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SizedBox(
