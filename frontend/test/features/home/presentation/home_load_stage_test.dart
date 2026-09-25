@@ -132,6 +132,15 @@ class TestWishlistController extends WishlistController {
   Future<List<WishlistItem>> build() async => const [];
 }
 
+void dumpFirstMarketplaceCard(WidgetTester tester, String label) {
+  final card = find.byType(MarketplaceCardTile).first;
+  debugPrint('$label card:');
+  for (final type in [SizedBox, Stack, Padding, Column, LayoutBuilder]) {
+    final widgets = find.descendant(of: card, matching: find.byType(type));
+    debugPrint('  $type ${[for (var i = 0; i < widgets.evaluate().length; i++) tester.getSize(widgets.at(i))]}');
+  }
+}
+
 void main() {
   setUpAll(setUpFakeSecureStorage);
 
@@ -395,6 +404,8 @@ void main() {
       repository.offers.complete(const []);
       await tester.pumpAndSettle();
 
+      dumpFirstMarketplaceCard(tester, 'Buy and Service');
+
       expect(find.text('Buy Online near you'), findsOneWidget);
       expect(find.text('Visit to Buy'), findsNothing);
       await tester.scrollUntilVisible(
@@ -438,6 +449,8 @@ void main() {
         },
       );
       await tester.pumpAndSettle();
+
+      dumpFirstMarketplaceCard(tester, 'Visit and Service');
 
       expect(find.text('Buy Online near you'), findsNothing);
       expect(find.text('Visit to Buy'), findsWidgets);
