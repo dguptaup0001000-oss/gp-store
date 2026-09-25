@@ -63,55 +63,66 @@ class MarketplaceCardTile extends ConsumerWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _Thumbnail(
-              card: card,
-              isWishlisted: isWishlisted,
-              onWishlistTap: () async {
-                try {
-                  final added = await ref
-                      .read(wishlistControllerProvider.notifier)
-                      .toggle(card.productId);
-                  if (!context.mounted) return;
-                  if (added == null) {
-                    showActionFailure(context, "Couldn't update wishlist. Please try again.");
-                  } else {
-                    showWishlistFeedback(context, added: added);
-                  }
-                } catch (_) {
-                  if (context.mounted) {
-                    showActionFailure(context, "Couldn't update wishlist. Please try again.");
-                  }
-                }
-              },
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    card.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      height: 1.25,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
-                    ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final cardWidth = constraints.maxWidth.isFinite
+                ? constraints.maxWidth
+                : 176.0;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: cardWidth,
+                  height: cardWidth / 1.25,
+                  child: _Thumbnail(
+                    card: card,
+                    isWishlisted: isWishlisted,
+                    onWishlistTap: () async {
+                      try {
+                        final added = await ref
+                            .read(wishlistControllerProvider.notifier)
+                            .toggle(card.productId);
+                        if (!context.mounted) return;
+                        if (added == null) {
+                          showActionFailure(context, "Couldn't update wishlist. Please try again.");
+                        } else {
+                          showWishlistFeedback(context, added: added);
+                        }
+                      } catch (_) {
+                        if (context.mounted) {
+                          showActionFailure(context, "Couldn't update wishlist. Please try again.");
+                        }
+                      }
+                    },
                   ),
-                  const SizedBox(height: 4),
-                  _Provenance(card: card),
-                  const SizedBox(height: 6),
-                  _PriceAndAction(card: card, onAdd: onAdd, onView: onTap),
-                ],
-              ),
-            ),
-          ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        card.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          height: 1.25,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      _Provenance(card: card),
+                      const SizedBox(height: 6),
+                      _PriceAndAction(card: card, onAdd: onAdd, onView: onTap),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -131,11 +142,9 @@ class _Thumbnail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 1.25,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
+    return Stack(
+      fit: StackFit.expand,
+      children: [
           // GpNetworkImage RATHER THAN Image.network, which the repository
           // enforces with a test - and rightly: a raw Image.network caches
           // nothing between scrolls, downloads the full original to draw a
@@ -177,8 +186,7 @@ class _Thumbnail extends StatelessWidget {
               ),
             ),
           ),
-        ],
-      ),
+      ],
     );
   }
 }
