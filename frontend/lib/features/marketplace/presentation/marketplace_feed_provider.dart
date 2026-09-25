@@ -70,7 +70,7 @@ class MarketplaceFeedController
     extends AutoDisposeAsyncNotifier<MarketplaceFeedState> {
   static const _pageSize = 20;
 
-  final Set<int> _seenIds = <int>{};
+  final Set<String> _seenIds = <String>{};
 
   @override
   Future<MarketplaceFeedState> build() async {
@@ -143,7 +143,7 @@ class MarketplaceFeedController
   List<MarketplaceCard> _dedupe(List<MarketplaceCard> incoming) {
     final out = <MarketplaceCard>[];
     for (final card in incoming) {
-      if (_seenIds.add(card.productId)) {
+      if (_seenIds.add(card.feedKey)) {
         out.add(card);
       }
     }

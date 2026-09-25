@@ -103,6 +103,34 @@ class PopularCategories extends ConsumerWidget {
   }
 }
 
+/// Compact first-row shortcuts, drawn from the same live category catalogue.
+/// The full image grid below remains the browsable category surface.
+class MainCategoryShortcuts extends ConsumerWidget {
+  const MainCategoryShortcuts({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final categories = ref.watch(categoriesProvider).valueOrNull;
+    if (categories == null || categories.isEmpty) return const SizedBox.shrink();
+    final marketplace = ref.watch(isMarketplaceProvider);
+    return SizedBox(
+      height: 106,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        children: [
+          for (final category in categories.take(7))
+            SizedBox(
+              width: 78,
+              child: CategoryTile(category: category, marketplace: marketplace),
+            ),
+          const SizedBox(width: 78, child: _AllCategoriesTile()),
+        ],
+      ),
+    );
+  }
+}
+
 /// The eighth cell: everything this row did not have room for.
 ///
 /// A TILE RATHER THAN A "See all" LINK beside the heading, because it sits

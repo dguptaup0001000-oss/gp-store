@@ -1,6 +1,9 @@
 package com.gpstore.platform.api;
 
 import com.gpstore.platform.PlatformControlTowerService;
+import com.gpstore.platform.TenantContext;
+import com.gpstore.platform.TenantScope;
+import com.gpstore.worker.WorkerAdminService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,9 +15,12 @@ import java.time.LocalDate;
 public class PlatformControlTowerController {
 
     private final PlatformControlTowerService service;
+    private final WorkerAdminService workers;
 
-    public PlatformControlTowerController(PlatformControlTowerService service) {
+    public PlatformControlTowerController(PlatformControlTowerService service,
+                                          WorkerAdminService workers) {
         this.service = service;
+        this.workers = workers;
     }
 
     @GetMapping("/search")
@@ -151,6 +157,16 @@ public class PlatformControlTowerController {
     @GetMapping("/shops/{id}")
     public PlatformControlTowerService.Shop360 shop(@PathVariable Long id) {
         return service.shop(id);
+    }
+
+    /** Platform-wide Worker 360. Authorization comes from the /api/platform/** rule. */
+    @GetMapping("/workers/{id}/profile")
+    public WorkerAdminService.WorkerProfile workerProfile(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return TenantContext.runWithin(TenantScope.platform(),
+                () -> workers.profile(id, page, size));
     }
 
     @GetMapping("/{resource:customers|merchants|shops|orders|workers|products|payments|refunds|returns|reviews|shop-reviews|security|audit}")

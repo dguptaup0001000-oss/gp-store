@@ -579,15 +579,20 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     try {
       final product = await ref
           .read(productsRepositoryProvider)
-          .fetchProductDetail(card.productId);
+          .fetchProductDetail(card.productId, shopId: card.shopId);
       if (!mounted) return;
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ProductDetailScreen(product: product),
       ));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+      final unavailable = e is DioException && e.response?.statusCode == 404;
+      if (unavailable) {
+        setState(() => _marketCards.removeWhere((candidate) => candidate.feedKey == card.feedKey));
+      }
+      showActionFailure(context, unavailable
+          ? 'Product is no longer available and has been removed from these results.'
+          : "Couldn't open this product right now. Please try again.");
     }
   }
 
@@ -595,17 +600,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final variantId = card.productVariantId;
     if (variantId == null) return;
     try {
-      await ref
+      final added = await ref
           .read(cartControllerProvider.notifier)
           .addToCart(variantId: variantId, quantity: 1);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${card.name} added to cart')),
-      );
+      if (added == true) {
+        showAddedToCartFeedback(context, card.name);
+      } else if (added == false) {
+        showActionFailure(context, "Couldn't add the item to your cart. Please try again.");
+      }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(extractErrorMessage(e))));
+      showActionFailure(context, "Couldn't add the item to your cart. Please try again.");
     }
   }
 

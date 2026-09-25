@@ -100,6 +100,7 @@ class OpenTheAppAndSeeTheMarketplaceTest {
     void tidyUp() {
         TenantContext.clear();
         for (Long shopId : shopIds) {
+            jdbc.update("DELETE FROM inventory WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM shop_product_variants WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM shop_business_hours WHERE shop_id = ?", shopId);
             jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", shopId);
@@ -107,6 +108,7 @@ class OpenTheAppAndSeeTheMarketplaceTest {
             jdbc.update("DELETE FROM shops WHERE id = ?", shopId);
         }
         for (Long productId : productIds) {
+            jdbc.update("DELETE FROM product_images WHERE product_id = ?", productId);
             jdbc.update("DELETE FROM product_variants WHERE product_id = ?", productId);
             jdbc.update("DELETE FROM products WHERE id = ?", productId);
         }
@@ -299,6 +301,85 @@ class OpenTheAppAndSeeTheMarketplaceTest {
     @Nested
     @DisplayName("Modes")
     class Modes {
+
+        @Test
+        @DisplayName("the marketplace card carries the stored product image across HTTP JSON")
+        void feedImageAndSelectedShopSurviveTheWire() throws Exception {
+            stock("Image shop", "Feed image product", "Grocery", CommerceMode.ONLINE_PURCHASE, "90");
+            Long productId = productIds.get(productIds.size() - 1);
+            Long shopId = shopIds.get(shopIds.size() - 1);
+            jdbc.update("INSERT INTO product_images (product_id, image_url, sort_order, created_at) "
+                            + "VALUES (?, ?, 0, now())",
+                    productId, "https://images.example.test/feed-product.jpg");
+
+            String body = mockMvc.perform(get("/api/marketplace/feed")
+                            .param("lat", String.valueOf(LAT))
+                            .param("lng", String.valueOf(LNG))
+                            .param("mode", "ONLINE_PURCHASE")
+                            .param("shopId", String.valueOf(shopId)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            var cards = json.readTree(body);
+            var card = java.util.stream.StreamSupport.stream(cards.spliterator(), false)
+                    .filter(value -> value.path("productId").asLong() == productId)
+                    .findFirst().orElseThrow();
+            assertEquals("https://images.example.test/feed-product.jpg",
+                    card.path("imageUrl").asText());
+            assertEquals(shopId, card.path("shopId").asLong());
+            assertTrue(card.path("inStock").asBoolean());
+            assertTrue(card.path("addable").asBoolean());
+
+            // Product detail is a shop-scoped API. A marketplace card must
+            // carry the seller's shop through the detail request; without
+            // this header an address/default shop may not list this product.
+            mockMvc.perform(get("/api/products/" + productId)
+                            .header("X-Shop-Id", shopId))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("a listed online item with no stock stays visible but is not addable")
+        void soldOutListingDoesNotOfferCartPurchase() throws Exception {
+            stock("Sold out shop", "Sold out fixture", "Grocery", CommerceMode.ONLINE_PURCHASE, "90");
+            Long productId = productIds.get(productIds.size() - 1);
+            Long shopId = shopIds.get(shopIds.size() - 1);
+            Long variantId = variantOf(productId);
+            jdbc.update("UPDATE inventory SET stock = 2, reserved_stock = 2 "
+                            + "WHERE shop_id = ? AND product_variant_id = ?",
+                    shopId, variantId);
+
+            String body = mockMvc.perform(get("/api/marketplace/feed")
+                            .param("lat", String.valueOf(LAT))
+                            .param("lng", String.valueOf(LNG))
+                            .param("mode", "ONLINE_PURCHASE")
+                            .param("shopId", String.valueOf(shopId)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            var cards = json.readTree(body);
+            var card = java.util.stream.StreamSupport.stream(cards.spliterator(), false)
+                    .filter(value -> value.path("productId").asLong() == productId)
+                    .findFirst().orElseThrow();
+            assertFalse(card.path("inStock").asBoolean());
+            assertFalse(card.path("addable").asBoolean());
+        }
+
+        @Test
+        @DisplayName("omitting the mode filter includes all three commerce modes")
+        void unfilteredHomeContainsEveryMode() throws Exception {
+            stock("Visit shop", "Visit fixture", "Grocery", CommerceMode.VISIT_TO_BUY, "90");
+            stock("Service shop", "Service fixture", "Grocery", CommerceMode.SERVICE_AT_SHOP, "90");
+            String body = mockMvc.perform(get("/api/marketplace/feed")
+                            .param("lat", String.valueOf(LAT))
+                            .param("lng", String.valueOf(LNG)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            var all = json.readTree(body);
+            Set<String> modes = new HashSet<>();
+            for (var card : all) modes.add(card.path("commerceMode").asText());
+            assertTrue(modes.contains(CommerceMode.ONLINE_PURCHASE.name()));
+            assertTrue(modes.contains(CommerceMode.VISIT_TO_BUY.name()));
+            assertTrue(modes.contains(CommerceMode.SERVICE_AT_SHOP.name()));
+        }
 
         @Test
         @DisplayName("a Visit-to-Buy listing never appears in the Buy Online feed")
@@ -500,5 +581,9 @@ class OpenTheAppAndSeeTheMarketplaceTest {
                 shopId, variantId, price, price,
                 mode.name(),
                 mode.isBuyableOnline() ? "EXACT_PRICE" : "STARTING_FROM");
+        jdbc.update("INSERT INTO inventory (shop_id, product_variant_id, stock, reserved_stock) "
+                        + "VALUES (?, ?, 25, 0) ON CONFLICT (shop_id, product_variant_id) "
+                        + "DO UPDATE SET stock = 25, reserved_stock = 0",
+                shopId, variantId);
     }
 }

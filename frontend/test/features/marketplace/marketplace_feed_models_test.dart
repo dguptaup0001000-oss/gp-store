@@ -83,4 +83,25 @@ void main() {
       expect(priced('PRICE_RANGE').priceLabel(), 'Ask at shop');
     });
   });
+
+  test('feed JSON carries the image URL and keeps the commerce mode in card identity', () {
+    final online = MarketplaceCard.fromJson(const {
+      'productId': 41,
+      'name': 'Tata Salt',
+      'commerceMode': 'ONLINE_PURCHASE',
+      'imageUrl': 'https://images.example.test/tata-salt.jpg',
+      'inStock': true,
+      'addable': true,
+    });
+    final visit = MarketplaceCard.fromJson(const {
+      'productId': 41,
+      'name': 'Tata Salt',
+      'commerceMode': 'VISIT_TO_BUY',
+      'addable': false,
+    });
+
+    expect(online.imageUrl, 'https://images.example.test/tata-salt.jpg');
+    expect(online.inStock, isTrue);
+    expect(online.feedKey, isNot(visit.feedKey));
+  });
 }

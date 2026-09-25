@@ -36,6 +36,7 @@ public record MarketplaceFeedView(
         Long categoryId,
         String categoryName,
         String imageUrl,
+        boolean inStock,
 
         Long productVariantId,
         Double variantQuantity,
@@ -72,6 +73,6 @@ public record MarketplaceFeedView(
     // the endpoint against the seeded marketplace.
     @com.fasterxml.jackson.annotation.JsonProperty("addable")
     public boolean addable() {
-        return commerceMode != null && commerceMode.isBuyableOnline();
+        return commerceMode != null && commerceMode.isBuyableOnline() && inStock;
     }
 }

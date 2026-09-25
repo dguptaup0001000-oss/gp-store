@@ -59,7 +59,7 @@ public class MarketplaceFeedRepository {
     }
 
     /**
-     * A page of the marketplace, newest-and-nearest first, one row per product.
+     * A page of the marketplace, nearest first, one row per product and commerce mode.
      *
      * <p>DISTINCT ON PICKS THE CARD'S SELLER, and the inner ORDER BY is what
      * decides which one: nearest first, then cheaper, then lowest listing id
@@ -111,7 +111,7 @@ public class MarketplaceFeedRepository {
         String sql = """
                 WITH near AS (SELECT * FROM (VALUES %s) AS d(shop_id, distance_km)),
                 picked AS (
-                  SELECT DISTINCT ON (p.id)
+                  SELECT DISTINCT ON (p.id, spv.commerce_mode)
                          p.id                AS product_id,
                          p.name              AS product_name,
                          p.brand             AS brand,
@@ -129,13 +129,26 @@ public class MarketplaceFeedRepository {
                          spv.service_duration_minutes AS service_duration_minutes,
                          s.id                AS shop_id,
                          s.display_name      AS shop_name,
-                         near.distance_km    AS distance_km
+                         near.distance_km    AS distance_km,
+                         COALESCE(inv.stock, 0) - COALESCE(inv.reserved_stock, 0) > 0 AS in_stock,
+                         COALESCE(product_image.image_url, NULLIF(v.image_url, '')) AS image_url
                     FROM shop_product_variants spv
                     JOIN near            ON near.shop_id = spv.shop_id
                     JOIN shops s         ON s.id = spv.shop_id
                     JOIN product_variants v ON v.id = spv.product_variant_id
                     JOIN products p      ON p.id = v.product_id
+                    LEFT JOIN inventory inv ON inv.shop_id = spv.shop_id
+                                            AND inv.product_variant_id = spv.product_variant_id
                     LEFT JOIN categories c ON c.id = p.category_id
+                    LEFT JOIN LATERAL (
+                      SELECT pi.image_url
+                        FROM product_images pi
+                       WHERE pi.product_id = p.id
+                         AND (pi.product_variant_id = v.id OR pi.product_variant_id IS NULL)
+                       ORDER BY (pi.product_variant_id IS NULL) DESC,
+                                (pi.product_variant_id = v.id) DESC, pi.sort_order ASC, pi.id ASC
+                       LIMIT 1
+                    ) product_image ON true
                    WHERE spv.shop_id IN (%s)
                      AND spv.commerce_mode IN (%s)
                      AND spv.available = true
@@ -146,10 +159,11 @@ public class MarketplaceFeedRepository {
                      AND COALESCE(v.active, true) = true
                      AND p.active = true
                      AND (CAST(? AS bigint) IS NULL OR p.category_id = CAST(? AS bigint))
-                   ORDER BY p.id, near.distance_km ASC, spv.selling_price ASC, spv.id ASC
+                   ORDER BY p.id, spv.commerce_mode, near.distance_km ASC, spv.selling_price ASC, spv.id ASC
                 ),
                 sellers AS (
-                  SELECT p2.id AS product_id, count(DISTINCT spv2.shop_id) AS seller_count
+                    SELECT p2.id AS product_id, spv2.commerce_mode,
+                           count(DISTINCT spv2.shop_id) AS seller_count
                     FROM shop_product_variants spv2
                     JOIN product_variants v2 ON v2.id = spv2.product_variant_id
                     JOIN products p2 ON p2.id = v2.product_id
@@ -157,12 +171,13 @@ public class MarketplaceFeedRepository {
                      AND spv2.commerce_mode IN (%s)
                      AND spv2.available = true
                      AND COALESCE(spv2.active, true) = true
-                   GROUP BY p2.id
+                   GROUP BY p2.id, spv2.commerce_mode
                 )
                 SELECT picked.*, COALESCE(sellers.seller_count, 1) AS seller_count
                   FROM picked
                   LEFT JOIN sellers ON sellers.product_id = picked.product_id
-                 ORDER BY picked.distance_km ASC, picked.product_id ASC
+                                   AND sellers.commerce_mode = picked.commerce_mode
+                 ORDER BY picked.distance_km ASC, picked.product_id ASC, picked.commerce_mode ASC
                  LIMIT ? OFFSET ?
                 """.formatted(distances, shopPlaceholders, modePlaceholders,
                 shopPlaceholders, modePlaceholders);
@@ -248,7 +263,7 @@ public class MarketplaceFeedRepository {
         String sql = """
                 WITH near AS (SELECT * FROM (VALUES %s) AS d(shop_id, distance_km)),
                 picked AS (
-                  SELECT DISTINCT ON (p.id)
+                  SELECT DISTINCT ON (p.id, spv.commerce_mode)
                          p.id                AS product_id,
                          p.name              AS product_name,
                          p.brand             AS brand,
@@ -266,13 +281,26 @@ public class MarketplaceFeedRepository {
                          spv.service_duration_minutes AS service_duration_minutes,
                          s.id                AS shop_id,
                          s.display_name      AS shop_name,
-                         near.distance_km    AS distance_km
+                         near.distance_km    AS distance_km,
+                         COALESCE(inv.stock, 0) - COALESCE(inv.reserved_stock, 0) > 0 AS in_stock,
+                         COALESCE(product_image.image_url, NULLIF(v.image_url, '')) AS image_url
                     FROM shop_product_variants spv
                     JOIN near            ON near.shop_id = spv.shop_id
                     JOIN shops s         ON s.id = spv.shop_id
                     JOIN product_variants v ON v.id = spv.product_variant_id
                     JOIN products p      ON p.id = v.product_id
+                    LEFT JOIN inventory inv ON inv.shop_id = spv.shop_id
+                                            AND inv.product_variant_id = spv.product_variant_id
                     LEFT JOIN categories c ON c.id = p.category_id
+                    LEFT JOIN LATERAL (
+                      SELECT pi.image_url
+                        FROM product_images pi
+                       WHERE pi.product_id = p.id
+                         AND (pi.product_variant_id = v.id OR pi.product_variant_id IS NULL)
+                       ORDER BY (pi.product_variant_id IS NULL) DESC,
+                                (pi.product_variant_id = v.id) DESC, pi.sort_order ASC, pi.id ASC
+                       LIMIT 1
+                    ) product_image ON true
                    WHERE spv.shop_id IN (%s)
                      AND spv.commerce_mode IN (%s)
                      AND spv.available = true
@@ -283,10 +311,11 @@ public class MarketplaceFeedRepository {
                      AND COALESCE(v.active, true) = true
                      AND p.active = true
                      AND (%s)
-                   ORDER BY p.id, near.distance_km ASC, spv.selling_price ASC, spv.id ASC
+                   ORDER BY p.id, spv.commerce_mode, near.distance_km ASC, spv.selling_price ASC, spv.id ASC
                 ),
                 sellers AS (
-                  SELECT p2.id AS product_id, count(DISTINCT spv2.shop_id) AS seller_count
+                    SELECT p2.id AS product_id, spv2.commerce_mode,
+                           count(DISTINCT spv2.shop_id) AS seller_count
                     FROM shop_product_variants spv2
                     JOIN product_variants v2 ON v2.id = spv2.product_variant_id
                     JOIN products p2 ON p2.id = v2.product_id
@@ -294,12 +323,13 @@ public class MarketplaceFeedRepository {
                      AND spv2.commerce_mode IN (%s)
                      AND spv2.available = true
                      AND COALESCE(spv2.active, true) = true
-                   GROUP BY p2.id
+                   GROUP BY p2.id, spv2.commerce_mode
                 )
                 SELECT picked.*, COALESCE(sellers.seller_count, 1) AS seller_count
                   FROM picked
                   LEFT JOIN sellers ON sellers.product_id = picked.product_id
-                 ORDER BY picked.distance_km ASC, picked.product_id ASC
+                                   AND sellers.commerce_mode = picked.commerce_mode
+                 ORDER BY picked.distance_km ASC, picked.product_id ASC, picked.commerce_mode ASC
                  LIMIT ? OFFSET ?
                 """.formatted(distances, placeholders(shopIds.size()),
                 placeholders(modes.size()), matches,
@@ -466,7 +496,7 @@ public class MarketplaceFeedRepository {
                 rs.getString("price_mode"), rs.getString("commerce_mode"),
                 rs.getString("offline_availability"), rs.getObject("service_duration_minutes"),
                 rs.getLong("shop_id"), rs.getString("shop_name"), rs.getDouble("distance_km"),
-                rs.getInt("seller_count")
+                rs.getInt("seller_count"), rs.getString("image_url"), rs.getBoolean("in_stock")
         };
     }
 

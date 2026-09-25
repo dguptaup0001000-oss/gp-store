@@ -84,6 +84,7 @@ class AdminWorker {
 class AdminWorkerProfile {
   const AdminWorkerProfile({
     required this.worker,
+    this.shopId,
     this.shopName,
     required this.totalAssigned,
     required this.completed,
@@ -97,6 +98,7 @@ class AdminWorkerProfile {
   });
 
   final AdminWorker worker;
+  final int? shopId;
   final String? shopName;
   final int totalAssigned, completed, active, exceptions, page, size;
   final bool hasNext;
@@ -110,6 +112,7 @@ class AdminWorkerProfile {
     int number(String key) => (json[key] as num?)?.toInt() ?? 0;
     return AdminWorkerProfile(
       worker: AdminWorker.fromJson(json['worker'] as Map<String, dynamic>),
+      shopId: (json['shopId'] as num?)?.toInt(),
       shopName: json['shopName'] as String?,
       totalAssigned: number('totalAssigned'), completed: number('completed'),
       active: number('active'), exceptions: number('exceptions'),

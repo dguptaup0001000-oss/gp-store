@@ -87,7 +87,7 @@ public class MarketplaceFeedService {
 
         List<MarketplaceFeedView> cards = new ArrayList<>();
         for (Object[] row : feed.page(distanceByShop.keySet(),
-                modes == null || modes.isEmpty() ? Set.of(CommerceMode.ONLINE_PURCHASE) : modes,
+                modes == null || modes.isEmpty() ? Set.of(CommerceMode.values()) : modes,
                 categoryId, distanceByShop, limit, offset)) {
             cards.add(toCard(row));
         }
@@ -201,7 +201,8 @@ public class MarketplaceFeedService {
         return new MarketplaceFeedView(
                 (Long) r[0], (String) r[1], (String) r[2],
                 asLong(r[3]), (String) r[4],
-                null,
+                (String) r[19],
+                (Boolean) r[20],
                 (Long) r[5], asDouble(r[6]), (String) r[7],
                 (BigDecimal) r[8], (BigDecimal) r[9], (BigDecimal) r[10],
                 enumOf(ListingPriceMode.class, (String) r[11], ListingPriceMode.EXACT_PRICE),

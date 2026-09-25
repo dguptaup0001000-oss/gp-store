@@ -88,6 +88,7 @@ class MarketplaceCard {
     this.categoryId,
     this.categoryName,
     this.imageUrl,
+    this.inStock,
     this.productVariantId,
     this.variantQuantity,
     this.variantUnit,
@@ -108,6 +109,7 @@ class MarketplaceCard {
   final int? categoryId;
   final String? categoryName;
   final String? imageUrl;
+  final bool? inStock;
 
   final int? productVariantId;
   final double? variantQuantity;
@@ -137,6 +139,10 @@ class MarketplaceCard {
   /// without a second request.
   final int sellerCount;
 
+  /// A product can be offered locally under distinct visit/service modes.
+  /// They must stay separate cards because each mode has a different action.
+  String get feedKey => '$productId:${commerceMode.wire}';
+
   factory MarketplaceCard.fromJson(Map<String, dynamic> json) {
     return MarketplaceCard(
       productId: (json['productId'] as num).toInt(),
@@ -145,6 +151,7 @@ class MarketplaceCard {
       categoryId: (json['categoryId'] as num?)?.toInt(),
       categoryName: json['categoryName'] as String?,
       imageUrl: json['imageUrl'] as String?,
+      inStock: json['inStock'] is bool ? json['inStock'] as bool : null,
       productVariantId: (json['productVariantId'] as num?)?.toInt(),
       variantQuantity: (json['variantQuantity'] as num?)?.toDouble(),
       variantUnit: json['variantUnit'] as String?,

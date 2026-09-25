@@ -90,7 +90,7 @@ public class WorkerAdminService {
     public record DeliverySummary(Long deliveryId, String orderNumber, String status,
                                   LocalDateTime assignedAt, LocalDateTime deliveredAt) { }
 
-    public record WorkerProfile(WorkerView worker, String shopName,
+    public record WorkerProfile(WorkerView worker, Long shopId, String shopName,
                                 long totalAssigned, long completed,
                                 long active, long exceptions, int page, int size,
                                 boolean hasNext, List<DeliverySummary> currentWork,
@@ -125,7 +125,7 @@ public class WorkerAdminService {
         }
         String shopName = worker.getShopId() == null ? null
                 : shops.findById(worker.getShopId()).map(shop -> shop.getDisplayName()).orElse(null);
-        return new WorkerProfile(describe(worker), shopName, total, completed, active, exceptions,
+        return new WorkerProfile(describe(worker), worker.getShopId(), shopName, total, completed, active, exceptions,
                 page, size, hasNext, current, history);
     }
 

@@ -160,8 +160,13 @@ class ProductsRepository {
   /// from a grid has no images to show beyond the variant thumbnail. This is
   /// the "load the full gallery when the detail page opens" half of that
   /// trade.
-  Future<Product> fetchProductDetail(int productId) async {
-    final response = await apiClient.dio.get('/api/products/$productId');
+  Future<Product> fetchProductDetail(int productId, {int? shopId}) async {
+    final response = await apiClient.dio.get(
+      '/api/products/$productId',
+      options: shopId == null
+          ? null
+          : Options(headers: {shopHeaderName: shopId.toString()}),
+    );
     return Product.fromJson(response.data as Map<String, dynamic>);
   }
 

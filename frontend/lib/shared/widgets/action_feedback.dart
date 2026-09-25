@@ -21,14 +21,18 @@ void showWishlistFeedback(BuildContext context, {required bool added}) {
 }
 
 void showActionFailure(BuildContext context, String message) {
-  ScaffoldMessenger.of(context).showSnackBar(
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(
     SnackBar(content: Text(message), duration: const Duration(seconds: 4)),
   );
 }
 
 void _showAction(BuildContext context, {required String message, String? action,
   VoidCallback? onPressed}) {
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(SnackBar(
     duration: const Duration(seconds: 2),
     content: Row(children: [
       const Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
