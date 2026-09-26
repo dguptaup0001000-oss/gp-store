@@ -56,6 +56,29 @@ void main() {
     });
   });
 
+  group('CartRepository.addToCart', () {
+    test('scopes a marketplace card to the shop that supplied its price and stock',
+        () async {
+      final adapter = FakeHttpClientAdapter();
+      Map<String, dynamic>? headers;
+      adapter.on('POST', '/api/carts/add', (options) {
+        headers = Map<String, dynamic>.from(options.headers);
+        return const FakeResponse({
+          'cartId': 7,
+          'totalAmount': 99.0,
+          'totalItems': 1,
+          'items': [],
+        });
+      });
+
+      final repository =
+          CartRepository(apiClient: buildTestApiClient(adapter));
+      await repository.addToCart(variantId: 81, quantity: 1, shopId: 42);
+
+      expect(headers, containsPair('X-Shop-Id', '42'));
+    });
+  });
+
   group('CartRepository.updateItemQuantity', () {
     test('sends the exact new quantity, not an additive delta', () async {
       final adapter = FakeHttpClientAdapter();

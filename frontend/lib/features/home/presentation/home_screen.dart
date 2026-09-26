@@ -1,6 +1,7 @@
 import '../../marketplace/presentation/marketplace_drawer.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../marketplace/domain/marketplace_feed_models.dart';
 import '../../marketplace/domain/marketplace_offer.dart';
 import '../../marketplace/presentation/product_offers_screen.dart';
@@ -108,7 +109,11 @@ class HomeScreen extends ConsumerWidget {
       try {
         final added = await ref
             .read(cartControllerProvider.notifier)
-            .addToCart(variantId: variantId, quantity: 1);
+            .addToCart(
+              variantId: variantId,
+              quantity: 1,
+              shopId: offer.shopId,
+            );
         if (!context.mounted) return;
         if (added == true) {
           showAddedToCartFeedback(context, offer.productName);
@@ -167,7 +172,11 @@ class HomeScreen extends ConsumerWidget {
       try {
         final added = await ref
             .read(cartControllerProvider.notifier)
-            .addToCart(variantId: variantId, quantity: 1);
+            .addToCart(
+              variantId: variantId,
+              quantity: 1,
+              shopId: card.shopId,
+            );
         if (!context.mounted) return;
         if (added == true) {
           showAddedToCartFeedback(context, card.name);
@@ -181,6 +190,8 @@ class HomeScreen extends ConsumerWidget {
     }
 
     return Scaffold(
+      backgroundColor:
+          onAMarketplace ? AppColors.marketplaceGround : null,
       // THE DRAWER IS ONLY ON A MARKETPLACE. Under a single shop there are no
       // modes to switch between, and an entry labelled "Visit to Buy" that
       // leads to an empty feed is the dead end this app is careful not to

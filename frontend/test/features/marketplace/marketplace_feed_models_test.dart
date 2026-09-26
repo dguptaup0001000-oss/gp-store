@@ -87,6 +87,8 @@ void main() {
   test('feed JSON carries the image URL and keeps the commerce mode in card identity', () {
     final online = MarketplaceCard.fromJson(const {
       'productId': 41,
+      'productVariantId': 410,
+      'shopId': 1,
       'name': 'Tata Salt',
       'commerceMode': 'ONLINE_PURCHASE',
       'imageUrl': 'https://images.example.test/tata-salt.jpg',
@@ -95,6 +97,8 @@ void main() {
     });
     final visit = MarketplaceCard.fromJson(const {
       'productId': 41,
+      'productVariantId': 411,
+      'shopId': 2,
       'name': 'Tata Salt',
       'commerceMode': 'VISIT_TO_BUY',
       'addable': false,
@@ -103,5 +107,21 @@ void main() {
     expect(online.imageUrl, 'https://images.example.test/tata-salt.jpg');
     expect(online.inStock, isTrue);
     expect(online.feedKey, isNot(visit.feedKey));
+  });
+
+  test('append identity keeps the same product from different shops distinct',
+      () {
+    MarketplaceCard card(int shopId, int variantId) =>
+        MarketplaceCard.fromJson({
+          'productId': 51,
+          'productVariantId': variantId,
+          'shopId': shopId,
+          'name': 'Shared catalogue item',
+          'commerceMode': 'ONLINE_PURCHASE',
+          'addable': true,
+        });
+
+    expect(card(7, 501).feedKey, isNot(card(8, 502).feedKey));
+    expect(card(7, 501).feedKey, card(7, 501).feedKey);
   });
 }

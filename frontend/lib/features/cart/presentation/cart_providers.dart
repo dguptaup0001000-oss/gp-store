@@ -37,7 +37,11 @@ class CartController extends AsyncNotifier<CartModel> {
     return ref.read(cartRepositoryProvider).getMyCart();
   }
 
-  Future<bool?> addToCart({required int variantId, required int quantity}) async {
+  Future<bool?> addToCart({
+    required int variantId,
+    required int quantity,
+    int? shopId,
+  }) async {
     if (_mutationInFlight) return null;
     _mutationInFlight = true;
 
@@ -66,7 +70,11 @@ class CartController extends AsyncNotifier<CartModel> {
         state = AsyncData(_withQuantity(previous, existing.cartItemId, existing.quantity + quantity));
       }
 
-      final result = await repository.addToCart(variantId: variantId, quantity: quantity);
+      final result = await repository.addToCart(
+        variantId: variantId,
+        quantity: quantity,
+        shopId: shopId,
+      );
       state = AsyncData(result);
       // Physical confirmation the tap registered. Fires on success only, so
       // a failed add never feels like it worked.

@@ -226,13 +226,16 @@ public class MarketplaceTestDataSeeder {
             shopRepository.save(shop);
             shopLifecycle.transitionAsPlatform(shop.getId(), ShopStatus.ACTIVE,
                     BATCH + " visible for marketplace testing");
-            // The marketplace feed deliberately includes PAUSED shops; both this lifecycle
-            // state and the separate order switch keep these unattended demos non-purchasable.
-            merchantLifecycle.transition(merchant.getId(), MerchantStatus.PAUSED,
-                    BATCH + " browse-only test shop; no fulfilment staff");
-            jdbc.update("UPDATE store_operations_settings SET order_acceptance = 'OFF', "
-                            + "closure_message = ?, updated_by = ? WHERE shop_id = ?",
-                    "Synthetic test shop: browsing only; ordering is disabled.", BATCH, shop.getId());
+            // These are explicit production TEST shops, but BUY_ONLINE still
+            // has to exercise the real basket path. A browse-only PAUSED/OFF
+            // shop can advertise an ADD button that TenantContextFilter then
+            // correctly refuses, which makes the generated marketplace a
+            // misleading test fixture. Keep the merchant active and the
+            // order switch on; the TEST names and batch markers remain the
+            // isolation/cleanup boundary.
+            jdbc.update("UPDATE store_operations_settings SET order_acceptance = 'ON', "
+                            + "closure_message = NULL, updated_by = ? WHERE shop_id = ?",
+                    BATCH, shop.getId());
             ids.put(spec.shopCode(), shop.getId());
         }
         return ids;
@@ -271,8 +274,11 @@ public class MarketplaceTestDataSeeder {
     private void insertListingRows(List<MarketplaceTestDataGenerator.ListingSpec> specs,
                                    Map<String, Long> shopIds) {
         Map<String, Long> variantIds = new HashMap<>(specs.size());
-        jdbc.query("SELECT id, sku FROM product_variants WHERE sku LIKE 'MKT100V1-%'",
-                rs -> { variantIds.put(rs.getString("sku"), rs.getLong("id")); });
+        jdbc.query("SELECT v.id, v.sku FROM product_variants v "
+                        + "JOIN products p ON p.id = v.product_id "
+                        + "WHERE p.is_test_data = TRUE AND p.data_source = ? AND v.sku ~ ?",
+                rs -> { variantIds.put(rs.getString("sku"), rs.getLong("id")); },
+                BATCH, SKU_PATTERN);
         if (variantIds.size() != specs.size()) {
             throw new IllegalStateException("Variant batch identity mismatch.");
         }

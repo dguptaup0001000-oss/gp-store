@@ -139,9 +139,14 @@ class MarketplaceCard {
   /// without a second request.
   final int sellerCount;
 
-  /// A product can be offered locally under distinct visit/service modes.
-  /// They must stay separate cards because each mode has a different action.
-  String get feedKey => '$productId:${commerceMode.wire}';
+  /// Exact listing identity used while appending marketplace pages.
+  ///
+  /// Product alone is not enough: the same catalogue product can be offered
+  /// by another shop, with another variant, and each commerce mode has a
+  /// different action. Keeping every authoritative identity field prevents a
+  /// repeated page from duplicating a card without hiding a legitimate offer.
+  String get feedKey =>
+      '$productId:${productVariantId ?? 'none'}:${shopId ?? 'none'}:${commerceMode.wire}';
 
   factory MarketplaceCard.fromJson(Map<String, dynamic> json) {
     return MarketplaceCard(

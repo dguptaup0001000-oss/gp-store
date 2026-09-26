@@ -93,7 +93,7 @@ SELECT json_build_object(
       'shops_inside_configured_max_radius_from_anchor', (SELECT count(*) FROM shops s WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND s.active = TRUE AND s.status IN ('ACTIVE','PAUSED') AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND 6371 * acos(least(1.0, greatest(-1.0, cos(radians(:'anchor_lat')) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(:'anchor_lng')) + sin(radians(:'anchor_lat')) * sin(radians(s.latitude))))) <= :'max_radius'::double precision),
       'shops_excluded_by_distance_from_anchor', (SELECT count(*) FROM shops s WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND s.active = TRUE AND s.status IN ('ACTIVE','PAUSED') AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND 6371 * acos(least(1.0, greatest(-1.0, cos(radians(:'anchor_lat')) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(:'anchor_lng')) + sin(radians(:'anchor_lat')) * sin(radians(s.latitude))))) > :'max_radius'::double precision),
       'shops_excluded_by_status_or_active', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND NOT (active = TRUE AND status IN ('ACTIVE','PAUSED'))),
-      'shops_order_acceptance_off_but_browsable', (SELECT count(*) FROM shops s JOIN store_operations_settings o ON o.shop_id = s.id WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND o.order_acceptance = 'OFF' AND s.active = TRUE AND s.status IN ('ACTIVE','PAUSED')),
+      'shops_order_acceptance_on', (SELECT count(*) FROM shops s JOIN store_operations_settings o ON o.shop_id = s.id WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND o.order_acceptance = 'ON' AND s.active = TRUE AND s.status = 'ACTIVE'),
       'merchants_not_trading', (SELECT count(*) FROM merchants WHERE is_demo = TRUE AND left(legal_name, length('[MARKETPLACE_TEST_100_SHOPS_V1] Merchant ')) = '[MARKETPLACE_TEST_100_SHOPS_V1] Merchant ' AND status <> 'ACTIVE'),
       'products', (SELECT count(*) FROM products WHERE is_test_data = TRUE AND data_source = 'MARKETPLACE_TEST_100_SHOPS_V1'),
       'variants', (SELECT count(*) FROM product_variants v JOIN products p ON p.id = v.product_id WHERE p.is_test_data = TRUE AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1'),
@@ -121,6 +121,8 @@ assert m["undersized_shops"] == 0, m
 assert m["image_products"] == 0, m
 assert m["customer_visible_shops"] == 100, m
 assert m["shops_inside_configured_max_radius_from_anchor"] == 100, m
+assert m["shops_order_acceptance_on"] == 100, m
+assert m["merchants_not_trading"] == 0, m
 print(json.dumps(m, sort_keys=True))
 PY
 else
@@ -164,6 +166,7 @@ if operation == "SEED":
     assert shop0["totalElements"] >= 100, shop0
     assert len(buy0) and len(visit0) and len(service0), {
         "buy_online": len(buy0), "visit_to_buy": len(visit0), "service_at_shop": len(service0)}
+    assert len({x.get("shopId") for x in buy0}) > 1, buy0
     keys0 = {(x.get("productId"), x.get("commerceMode"), x.get("shopId"), x.get("productVariantId")) for x in buy0}
     keys1 = {(x.get("productId"), x.get("commerceMode"), x.get("shopId"), x.get("productVariantId")) for x in buy1}
     assert not keys0.intersection(keys1), "marketplace feed pages overlap"

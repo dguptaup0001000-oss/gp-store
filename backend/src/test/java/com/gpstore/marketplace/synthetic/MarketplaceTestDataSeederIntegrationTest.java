@@ -5,7 +5,10 @@ import com.gpstore.catalog.shop.CommerceMode;
 import com.gpstore.platform.Shop;
 import com.gpstore.platform.ShopRepository;
 import com.gpstore.platform.ShopDiscovery;
+import com.gpstore.platform.TenantContext;
+import com.gpstore.platform.TenantScope;
 import com.gpstore.platform.api.MarketplaceFeedService;
+import com.gpstore.service.CartService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +45,7 @@ class MarketplaceTestDataSeederIntegrationTest {
     @Autowired private ShopDiscovery discovery;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private CartService cartService;
 
     @AfterEach
     void clearLocalSeedOptIn() {
@@ -100,11 +104,19 @@ class MarketplaceTestDataSeederIntegrationTest {
         assertEquals(anchor.getId(), shops.findByCode("SHOP-1").orElseThrow().getId());
         assertEquals(anchorLat, shops.findByCode("SHOP-1").orElseThrow().getLatitude());
         assertEquals(anchorLng, shops.findByCode("SHOP-1").orElseThrow().getLongitude());
-        assertEquals("PAUSED", firstTestShop.getStatus().name());
+        assertEquals("ACTIVE", firstTestShop.getStatus().name());
+        assertEquals(100, jdbc.queryForObject("""
+                SELECT count(*) FROM store_operations_settings o
+                JOIN shops s ON s.id = o.shop_id
+                WHERE s.code ~ '^MKT100V1-SHOP-[0-9]{3}$'
+                  AND o.order_acceptance = 'ON'
+                """, Integer.class));
 
         var firstPage = feed.page(anchorLat, anchorLng, Set.of(CommerceMode.values()), null,
                 null, 0, 50);
         assertFalse(firstPage.isEmpty());
+        assertTrue(firstPage.stream().map(row -> row.shopId()).distinct().count() > 1,
+                "the first marketplace page must not be monopolized by one deep catalogue");
         var wireJson = objectMapper.valueToTree(firstPage);
         assertTrue(wireJson.get(0).has("commerceMode"));
         assertTrue(wireJson.get(0).has("addable"));
@@ -135,6 +147,43 @@ class MarketplaceTestDataSeederIntegrationTest {
         assertTrue(serviceRows.stream().allMatch(row -> row.commerceMode() == CommerceMode.SERVICE_AT_SHOP));
         var serviceJson = objectMapper.valueToTree(serviceRows);
         for (var row : serviceJson) assertFalse(row.get("addable").asBoolean());
+
+        Object[] purchasable = jdbc.queryForObject("""
+                SELECT spv.shop_id, spv.product_variant_id
+                  FROM shop_product_variants spv
+                  JOIN product_variants v ON v.id = spv.product_variant_id
+                  JOIN products p ON p.id = v.product_id
+                  JOIN inventory i ON i.shop_id = spv.shop_id
+                                  AND i.product_variant_id = spv.product_variant_id
+                 WHERE p.data_source = ?
+                   AND spv.commerce_mode = 'ONLINE_PURCHASE'
+                   AND i.stock - i.reserved_stock > 0
+                 ORDER BY spv.id
+                 LIMIT 1
+                """, (rs, rowNum) -> new Object[]{
+                rs.getLong("shop_id"), rs.getLong("product_variant_id")
+        }, MarketplaceTestDataGenerator.BATCH_ID);
+        String buyerEmail = "marketplace-seed-cart@example.test";
+        jdbc.update("""
+                INSERT INTO customers
+                    (full_name,email,mobile_number,password,role,enabled,active,verified,created_at)
+                VALUES ('Marketplace Seed Buyer',?,'9000000199','not-a-real-hash',
+                        'CUSTOMER',true,true,true,CURRENT_TIMESTAMP)
+                """, buyerEmail);
+        Long buyerId = jdbc.queryForObject(
+                "SELECT id FROM customers WHERE email = ?", Long.class, buyerEmail);
+        Long buyShopId = (Long) purchasable[0];
+        Long buyVariantId = (Long) purchasable[1];
+        var cart = TenantContext.runWithin(TenantScope.ofShop(buyShopId),
+                () -> cartService.addToCartResponse(buyerId, buyVariantId, 1));
+        assertEquals(1, cart.getItems().size());
+        assertEquals(buyVariantId, cart.getItems().get(0).getVariantId());
+        assertEquals(buyShopId, cart.getItems().get(0).getShopId(),
+                "generated ADD must retain the exact shop/variant identity from the feed");
+        jdbc.update("DELETE FROM cart_items WHERE cart_id IN "
+                + "(SELECT id FROM carts WHERE customer_id = ?)", buyerId);
+        jdbc.update("DELETE FROM carts WHERE customer_id = ?", buyerId);
+        jdbc.update("DELETE FROM customers WHERE id = ?", buyerId);
 
         var cleanup = seeder.execute(new MarketplaceTestDataSeeder.Request(
                 MarketplaceTestDataSeeder.Operation.CLEANUP,
