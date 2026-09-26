@@ -81,6 +81,9 @@ class MarketplaceTestDataWorkflowGuardsTest {
         assertTrue(verifier.contains("--ipv4"),
                 "a connect failure that returns in milliseconds means an address with no route, "
                         + "so the remaining attempts must ask for IPv4 only");
+        assertTrue(verifier.contains("is_non_public_ipv4"),
+                "a hostname parked on a loopback or private address must be named as a DNS "
+                        + "problem; retrying cannot cure a held domain");
 
         String workflow = read(".github/workflows/seed-marketplace-test-data.yml");
         assertTrue(workflow.contains("exit \"$status\""),

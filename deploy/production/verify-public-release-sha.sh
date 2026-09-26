@@ -173,7 +173,38 @@ PY
   printf '%s' "$address"
 }
 
-# ONE REQUEST, AND THE TRUTH ABOUT IT.
+# IS THIS EVEN PRODUCTION'S ADDRESS?
+#
+# Written after the failure that taught it. On 2026-09-26 at 10:00 UTC the
+# registry record for gpstore.co.in was changed to
+# ns1/ns2.verification-hold.suspended-domain.com - a registrar hold - and
+# those nameservers answer A 127.0.0.1 with a 30-second TTL for every name in
+# the zone. From a runner that produces two symptoms with one cause: resolvers
+# that refuse the private-NS delegation give `curl: (6) Could not resolve
+# host`, and resolvers that hand back 127.0.0.1 make curl dial the runner's
+# OWN loopback and fail in ten milliseconds. Both look exactly like the flaky
+# network they are not.
+#
+# So when a request fails, say whether the name still points anywhere real.
+# The check only ever adds a diagnosis to a failure; it cannot pass anything.
+is_non_public_ipv4() {
+  case "$1" in
+    127.*|0.0.0.0|0.*|10.*|192.168.*|169.254.*|\
+    172.1[6-9].*|172.2[0-9].*|172.3[01].*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The addresses this machine would actually use, from the system resolver
+# first and DoH only if that said nothing.
+addresses_for() {
+  local host="$1" addrs=""
+  addrs="$(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+  if [[ -z "${addrs// /}" ]]; then
+    addrs="$(resolve_over_doh "$host" 2>/dev/null || true)"
+  fi
+  printf '%s' "$addrs"
+}
 #
 # smoke_api.sh paid for these two details already: truncate the body file
 # first, so a failed attempt cannot show the PREVIOUS attempt's body as its
@@ -258,6 +289,7 @@ verify_public_release_sha() {
   local use_doh="${VERIFY_FORCE_DOH:-0}" ipv4_only="${VERIFY_FORCE_IPV4:-0}"
   local pinned_ip="" gap="$VERIFY_BACKOFF_SECONDS"
   local attempt result rc status extra=() answered_at_all=0 last=""
+  local diagnosed=0 parked_at=""
 
   for ((attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt++)); do
     extra=()
@@ -291,6 +323,24 @@ verify_public_release_sha() {
       return "$WRONG_RELEASE"
     fi
 
+    # Once, on the first network failure: does the name still point at
+    # anything public? A parked or held domain is not a flaky network and
+    # re-running will not cure it.
+    if [[ "$rc" != "0" && "$diagnosed" == "0" ]]; then
+      diagnosed=1
+      local resolved addr
+      resolved="$(addresses_for "$host")"
+      for addr in $resolved; do
+        if is_non_public_ipv4 "$addr"; then
+          parked_at="$addr"
+          log "  !! DNS answers $addr for $host, which is not a public address."
+          log "     The hostname is not pointing at production. A registrar hold or a"
+          log "     parked zone does exactly this, and no amount of retrying will fix it."
+          break
+        fi
+      done
+    fi
+
     if [[ "$rc" == "0" ]]; then
       answered_at_all=1
       last="HTTP $status"
@@ -303,7 +353,8 @@ verify_public_release_sha() {
         use_doh=1
         log "  -> next attempt resolves over DNS-over-HTTPS at $VERIFY_DOH_URL"
       elif [[ -z "$pinned_ip" ]]; then
-        if pinned_ip="$(resolve_over_doh "$host")" && [[ -n "$pinned_ip" ]]; then
+        if pinned_ip="$(resolve_over_doh "$host")" && [[ -n "$pinned_ip" ]] \
+           && ! is_non_public_ipv4 "$pinned_ip"; then
           log "  -> next attempt pins $host to $pinned_ip (TLS still verifies the certificate)"
         else
           pinned_ip=""
@@ -331,7 +382,11 @@ verify_public_release_sha() {
 
   log "NOT VERIFIED: $PUBLIC_VERSION_URL did not confirm $EXPECT_SHA in $VERIFY_ATTEMPTS attempts."
   log "Last result: $last"
-  if [[ "$answered_at_all" == "1" ]]; then
+  if [[ -n "$parked_at" ]]; then
+    log "THE NAME IS THE PROBLEM, NOT THE NETWORK: $host resolves to $parked_at."
+    log "Production cannot be reached at this hostname by anybody - including customers -"
+    log "until its DNS is restored. Check the domain's registry status and nameservers."
+  elif [[ "$answered_at_all" == "1" ]]; then
     log "The host answered but never with 200, so the deployed commit is still unknown."
   else
     log "No HTTP response arrived at all, so this is NOT a verdict on the deployed code -"
@@ -490,7 +545,54 @@ JSON
     note FAIL "a connect failure escalates to IPv4-only on the next attempt (code=$code)"
   fi
 
-  # 6. The wrong build is a verdict, delivered at once. Retrying it would only
+  # 6. THE FAILURE OF 2026-09-26. The registrar pointed the zone at
+  # verification-hold nameservers answering 127.0.0.1, so the hostname stopped
+  # meaning production. That must be NAMED, not reported as a flaky network,
+  # because re-running cures a blip and cannot cure a held domain.
+  cat > "$SELFTEST_DIR/getent" <<'FAKEGETENT'
+#!/usr/bin/env bash
+printf '%s  %s\n' "${FAKE_GETENT_ADDRESS:-203.0.113.10}" "${2:-host}"
+FAKEGETENT
+  chmod +x "$SELFTEST_DIR/getent"
+  code=0
+  out="$(fake_verify env EXPECT_SHA="$GOOD_SHA" VERIFY_ATTEMPTS=2 \
+           FAKE_GETENT_ADDRESS=127.0.0.1 \
+           FAKE_CURL_FAIL_TIMES=99 FAKE_CURL_FAIL_CODE=7 bash "$0")" || code=$?
+  if [[ "$code" == "2" ]] && grep -q "THE NAME IS THE PROBLEM" <<<"$out" \
+     && grep -q "not a public address" <<<"$out"; then
+    note ok "a hostname parked on 127.0.0.1 is named as a DNS problem, not a flaky network"
+  else
+    note FAIL "a hostname parked on 127.0.0.1 is named as a DNS problem, not a flaky network (code=$code)"
+  fi
+
+  # A real address must NOT trigger that diagnosis, or it would cry wolf on
+  # every ordinary outage.
+  code=0
+  out="$(fake_verify env EXPECT_SHA="$GOOD_SHA" VERIFY_ATTEMPTS=2 \
+           FAKE_GETENT_ADDRESS=203.0.113.10 \
+           FAKE_CURL_FAIL_TIMES=99 FAKE_CURL_FAIL_CODE=7 bash "$0")" || code=$?
+  if [[ "$code" == "2" ]] && ! grep -q "THE NAME IS THE PROBLEM" <<<"$out"; then
+    note ok "an ordinary unreachable production is not blamed on DNS"
+  else
+    note FAIL "an ordinary unreachable production is not blamed on DNS (code=$code)"
+  fi
+
+  # The predicate itself, since everything above rests on it.
+  bad_addresses=0
+  for addr in 127.0.0.1 127.1.2.3 0.0.0.0 10.1.2.3 192.168.1.1 169.254.1.1 \
+              172.16.0.1 172.31.255.255; do
+    is_non_public_ipv4 "$addr" || bad_addresses=$((bad_addresses + 1))
+  done
+  for addr in 203.0.113.10 104.21.5.6 172.15.0.1 172.32.0.1 8.8.8.8 11.0.0.1; do
+    is_non_public_ipv4 "$addr" && bad_addresses=$((bad_addresses + 1))
+  done
+  if [[ "$bad_addresses" == "0" ]]; then
+    note ok "loopback and private ranges are recognised and public ones are not"
+  else
+    note FAIL "loopback and private ranges are recognised and public ones are not ($bad_addresses wrong)"
+  fi
+
+  # 7. The wrong build is a verdict, delivered at once. Retrying it would only
   # delay the refusal, and a seed must never run against another release.
   write_body production "$OTHER_SHA" "$OTHER_SHA"
   code=0
@@ -502,7 +604,7 @@ JSON
     note FAIL "a live deployment on another commit fails immediately as the wrong release (code=$code attempts=$(attempts_used))"
   fi
 
-  # 7. gitCommit alone is not identity. A JAR that disagrees with its own
+  # 8. gitCommit alone is not identity. A JAR that disagrees with its own
   # environment variable is the exact thing VersionGuard refuses on the box.
   write_body production "$GOOD_SHA" "$OTHER_SHA"
   code=0
@@ -513,7 +615,7 @@ JSON
     note FAIL "a running JAR whose embedded commit differs is refused (code=$code)"
   fi
 
-  # 8. A staging box answering on this name cannot satisfy a production guard.
+  # 9. A staging box answering on this name cannot satisfy a production guard.
   write_body staging "$GOOD_SHA" "$GOOD_SHA"
   code=0
   out="$(fake_verify env EXPECT_SHA="$GOOD_SHA" VERIFY_ATTEMPTS=2 bash "$0")" || code=$?
@@ -523,7 +625,7 @@ JSON
     note FAIL "a non-production environment is refused (code=$code)"
   fi
 
-  # 9. A body that is not JSON at all is not a pass either.
+  # 10. A body that is not JSON at all is not a pass either.
   printf '<html>504 Gateway Time-out</html>\n' > "$SELFTEST_DIR/body.json"
   code=0
   out="$(fake_verify env EXPECT_SHA="$GOOD_SHA" VERIFY_ATTEMPTS=2 bash "$0")" || code=$?
@@ -533,7 +635,7 @@ JSON
     note FAIL "an HTML error page served with HTTP 200 is refused (code=$code)"
   fi
 
-  # 10. A non-200 is retried, then reported as an unknown commit - never as a
+  # 11. A non-200 is retried, then reported as an unknown commit - never as a
   # verified one.
   write_body production "$GOOD_SHA" "$GOOD_SHA"
   code=0
@@ -546,7 +648,7 @@ JSON
     note FAIL "HTTP 503 is retried and then reported as an unknown deployed commit (code=$code attempts=$(attempts_used))"
   fi
 
-  # 11. A guard asked to verify nothing must refuse, not pass.
+  # 12. A guard asked to verify nothing must refuse, not pass.
   for bad in "" "f17767d" "F17767D498253706FB65E1E681F598B8DFE54530" "not-a-sha"; do
     code=0
     out="$(fake_verify env EXPECT_SHA="$bad" VERIFY_ATTEMPTS=2 bash "$0")" || code=$?
@@ -557,7 +659,7 @@ JSON
     fi
   done
 
-  # 12. The verified body can be handed on, and is only written on success.
+  # 13. The verified body can be handed on, and is only written on success.
   write_body production "$GOOD_SHA" "$GOOD_SHA"
   rm -f "$SELFTEST_DIR/kept.json"
   fake_verify env EXPECT_SHA="$GOOD_SHA" VERIFY_ATTEMPTS=2 \
@@ -577,7 +679,7 @@ JSON
     note FAIL "nothing is written when the release was not verified"
   fi
 
-  # 13. THE REAL curl, WITH THE REAL FLAGS, at a port nothing listens on.
+  # 14. THE REAL curl, WITH THE REAL FLAGS, at a port nothing listens on.
   # Proves this runner's curl accepts every option used above - including
   # --doh-url, which is the DNS workaround and would otherwise be a usage
   # error discovered only in production. Expect the unreachable verdict (2),

@@ -58,6 +58,38 @@ take the shop off Traefik. GitHub **Backup alert** emails on a red run.
 | Memory | `docker stats`; backend `mem_limit` 2560m |
 | Backup failure | `ops/status` backups.healthy=false; sidecar logs |
 | Deploy failure | GitHub Actions Deploy Production; VPS `/var/lib/gp-store/deployment-state` |
+| **Domain not resolving** | every public check fails at once while the VPS is healthy; see below |
+
+### When the whole shop is unreachable but nothing on the box is wrong
+
+This happened on 2026-09-26. The registry record for `gpstore.co.in` was
+changed at 10:00 UTC to `ns1/ns2.verification-hold.suspended-domain.com` - a
+registrar hold, not an expiry; the domain's paid term ran to 2027-06-28 - and
+those nameservers answer `A 127.0.0.1` with a 30-second TTL for every name in
+the zone. The backend was perfectly healthy throughout and the deploy that ran
+during the incident succeeded.
+
+It presents as two different-looking failures with one cause, so recognise
+both:
+
+* `curl: (6) Could not resolve host: api.gpstore.co.in` - a resolver that
+  refuses to query nameservers whose addresses are private (Google's public
+  resolver returns REFUSED with EDE 22 "At delegation gpstore.co.in").
+* `curl: (7) Failed to connect ... after 10 ms` or a smoke test reporting
+  `000` for everything instantly - a resolver that DOES return `127.0.0.1`, so
+  the client dials its own loopback. Ten milliseconds is the tell: a real
+  outage times out, it does not refuse instantly.
+
+Confirm it in one request, from anywhere, without needing the VPS:
+
+    curl -s 'https://dns.google/resolve?name=api.gpstore.co.in&type=A'
+    curl -s 'https://rdap.org/domain/gpstore.co.in' | python3 -m json.tool
+
+Look at `nameservers` and the `last changed` event in the RDAP output. If the
+nameservers are a hold/parking service, no code change and no re-run will help
+and **customers cannot reach the app either** - the fix is with the registrar
+(currently OVI HOSTING PVT LTD / HostingRaja). `verify-public-release-sha.sh`
+detects and names this case rather than reporting a flaky network.
 
 Prometheus scrape (`/v1/actuator/prometheus`) is **admin-only**. Do not
 make it public. Gauges that exist without extra infrastructure:
