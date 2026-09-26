@@ -52,7 +52,18 @@ PY
 # Compose supplies the existing production DB, Redis, secret mount and network.
 # The dedicated profile disables HTTP and scheduled jobs; the runner exits after
 # the single explicit operation. Ordinary backend startup never activates it.
+#
+# Select the immutable image that the verified live container is already
+# running. Without these exports Compose falls back to :latest/unknown and may
+# rebuild a different jar from the checkout. VersionGuard must see the same SHA
+# both inside that jar and in the one-shot process environment.
+TARGET_IMAGE="gp-store-backend:$TARGET_SHA"
+docker image inspect "$TARGET_IMAGE" >/dev/null \
+  || die "The verified deployed backend image $TARGET_IMAGE is not present."
+export BACKEND_IMAGE_TAG="$TARGET_SHA"
+export GIT_COMMIT="$TARGET_SHA"
 compose run --rm --no-deps \
+  -e "GIT_COMMIT=$TARGET_SHA" \
   -e "GPSTORE_TEST_DATA_CONFIRMATION=$BATCH_ID" \
   -e "GPSTORE_TEST_DATA_ALLOW_PRODUCTION=true" \
   -e "GPSTORE_TEST_DATA_EXPECTED_SHA=$TARGET_SHA" \
