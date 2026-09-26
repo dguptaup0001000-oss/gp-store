@@ -98,6 +98,12 @@ jobs:
           bash -n deploy/production/evaluate-offbox-result.sh
           bash -n deploy/production/backup-restore-drill.sh
           bash -n deploy/production/probe-public-health.sh
+          # The gate in front of a script that writes to the live database.
+          # Its whole value is that it fails closed when it cannot reach
+          # production, so its decisions are proved, not just its syntax.
+          bash -n deploy/production/verify-public-release-sha.sh
+          chmod +x deploy/production/verify-public-release-sha.sh
+          VERIFY_RELEASE_SHA_SELFTEST=1 deploy/production/verify-public-release-sha.sh
           # Runs under /bin/sh in a postgres container, so check both.
           bash -n deploy/production/seed-rehearsal-rows.sh
           bash -n deploy/production/seed-marketplace-test-data.sh

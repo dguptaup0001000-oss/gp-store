@@ -1,3 +1,26 @@
+# Put a known 100-shop test dataset into the live database, or take it out.
+#
+# THE GUARD CHAIN, IN ORDER, AND WHY EACH LINK IS THERE. This workflow writes
+# to the database a real shop trades on, so `operate` may only start after
+# `validate` has proved every one of these:
+#
+#   1. the requested SHA is 40 lowercase hex characters - a short SHA looks
+#      right and matches nothing;
+#   2. the confirmation is exactly MARKETPLACE_TEST_100_SHOPS_V1 - the batch
+#      identity the cleanup later keys on, so a typo here would orphan rows;
+#   3. the requested SHA is the current tip of origin/main - not a branch, not
+#      a reverted commit;
+#   4. the LIVE public deployment reports that same SHA, as both its source
+#      commit and the commit baked into the running JAR. The second half is
+#      VersionGuard's refusal, made from outside: an environment variable
+#      claiming one build while another is on disk fails here too.
+#
+# NOTHING BELOW MAY TURN "I COULD NOT CHECK" INTO "CHECKED". A single bare
+# curl used to do step 4, and a runner that could not resolve the hostname
+# failed the job in twelve seconds having learned nothing. The fix was to
+# retry properly and to work around a broken resolver - NOT to soften the
+# check, because a gate that opens when it cannot see is worse than no gate.
+# See deploy/production/verify-public-release-sha.sh.
 name: Controlled marketplace test data
 
 on:
@@ -47,22 +70,79 @@ jobs:
           git fetch origin main --quiet
           [[ "$(git rev-parse origin/main)" == "$TARGET_SHA" ]]
           echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
-      - name: Verify public Hostinger runtime and embedded JAR SHA
+      # A base without /v1 makes every route 404, and this guard would then
+      # read "production is down" when only the URL was wrong.
+      - name: Refuse a version URL that is not the public versioned API
         env:
-          TARGET_SHA: ${{ inputs.target_sha }}
+          PUBLIC_VERSION_URL: ${{ vars.PUBLIC_API_BASE_URL && format('{0}/api/version', vars.PUBLIC_API_BASE_URL) || 'https://api.gpstore.co.in/v1/api/version' }}
         run: |
           set -Eeuo pipefail
-          curl --fail --silent --show-error --max-time 20 \
-            https://api.gpstore.co.in/v1/api/version > /tmp/gpstore-version.json
-          python3 - "$TARGET_SHA" /tmp/gpstore-version.json <<'PY'
-          import json, sys
-          expected = sys.argv[1]
-          body = json.load(open(sys.argv[2], encoding="utf-8"))
-          assert body.get("environment") == "production", body
-          assert body.get("gitCommit") == expected, body
-          assert body.get("binaryGitCommit") == expected, body
-          print(f"Hostinger source and JAR identity match {expected}")
-          PY
+          case "$PUBLIC_VERSION_URL" in
+            https://*/v1/api/version) : ;;
+            *) echo "::error::PUBLIC_VERSION_URL must be https and end in /v1/api/version (got '$PUBLIC_VERSION_URL')"; exit 1 ;;
+          esac
+          echo "PUBLIC_VERSION_URL=$PUBLIC_VERSION_URL" >> "$GITHUB_ENV"
+
+      # WHY THIS IS A SCRIPT AND NOT A curl.
+      #
+      # It was a single bare curl, and a runner answered `curl: (6) Could not
+      # resolve host: api.gpstore.co.in` half a second later - twice, failing
+      # this job in twelve seconds while the uptime probe reached the same
+      # hostname every ten minutes and the deploy's own smoke test passed 141
+      # checks against it. One resolver hiccup on one ephemeral runner is not
+      # a fact about the release.
+      #
+      # The verifier retries with backoff, and after a DNS-class failure stops
+      # trusting this runner's resolver at all: DoH first, then an address
+      # pinned with --resolve. TLS still verifies the certificate, so pinning
+      # cannot be used to point the check at something else.
+      #
+      # IT STILL FAILS CLOSED, WHICH IS THE POINT. exit 1 = production is a
+      # different release; exit 2 = production never answered. Both are
+      # non-zero, so `operate` - the job that writes to the live database -
+      # cannot start on either. A DNS failure is never a pass.
+      - name: Verify public Hostinger runtime and embedded JAR SHA
+        id: live_release
+        env:
+          EXPECT_SHA: ${{ inputs.target_sha }}
+          VERIFY_ATTEMPTS: '6'
+          VERIFY_BODY_OUTPUT: /tmp/gpstore-version.json
+        run: |
+          set -Eeuo pipefail
+          chmod +x deploy/production/verify-public-release-sha.sh
+          set +e
+          deploy/production/verify-public-release-sha.sh
+          status=$?
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Say which kind of failure this was
+        if: failure() && steps.live_release.outputs.status != ''
+        run: |
+          set -Eeuo pipefail
+          if [ "${{ steps.live_release.outputs.status }}" = "2" ]; then
+            echo "::error::The live API never answered, so the deployed release is UNKNOWN - this is NOT a verdict on it, and NOT a pass. Nothing has been seeded. Either production is unreachable or THIS RUNNER cannot reach it while others can; re-run to tell the two apart."
+          else
+            echo "::error::The live API answered and is NOT the release you asked to seed against. Deploy the exact merged main first, then run this workflow with that SHA."
+          fi
+
+      - name: Record what was verified
+        if: always()
+        run: |
+          {
+            echo "## Controlled marketplace test data - validation"
+            echo
+            echo "- Requested SHA: \`${{ inputs.target_sha }}\`"
+            echo "- Operation: \`${{ inputs.operation }}\`"
+            echo "- Version URL: \`${PUBLIC_VERSION_URL:-unset}\`"
+            echo "- Live release check exit: \`${{ steps.live_release.outputs.status || 'did not run' }}\` (0 verified, 1 wrong release, 2 never answered)"
+            echo
+            echo '```json'
+            cat /tmp/gpstore-version.json 2>/dev/null || echo '{"note":"the live deployment was never positively verified"}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Require existing Hostinger SSH secrets
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
