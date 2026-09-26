@@ -95,7 +95,8 @@ public class ShopDiscovery {
                 serving.add(new NearbyShop(shop, distance, true));
             }
         }
-        serving.sort(Comparator.comparingDouble(NearbyShop::distanceKm));
+        serving.sort(Comparator.comparingDouble(NearbyShop::distanceKm)
+                .thenComparing(near -> near.shop().getId()));
         return List.copyOf(serving);
     }
 
@@ -142,7 +143,8 @@ public class ShopDiscovery {
                 nearby.add(new NearbyShop(shop, distance, deliversTo(shop, distance)));
             }
         }
-        nearby.sort(Comparator.comparingDouble(NearbyShop::distanceKm));
+        nearby.sort(Comparator.comparingDouble(NearbyShop::distanceKm)
+                .thenComparing(near -> near.shop().getId()));
         return List.copyOf(nearby);
     }
 

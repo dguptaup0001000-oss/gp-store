@@ -164,3 +164,111 @@ final marketplaceHomeModeFeedProvider = StateNotifierProvider.autoDispose
     shopId: shopId,
   );
 });
+
+/// The pageable mixed-mode tail of Marketplace Home. The three compact
+/// carousels answer "what is nearby in each mode?"; this feed lets the
+/// customer keep browsing the entire eligible marketplace without fetching
+/// thousands of records at startup.
+class MarketplaceHomeAllFeedState {
+  const MarketplaceHomeAllFeedState({
+    this.cards = const [],
+    this.nextPage = 0,
+    this.hasNext = true,
+    this.isLoading = true,
+    this.isLoadingMore = false,
+    this.error,
+  });
+
+  final List<MarketplaceCard> cards;
+  final int nextPage;
+  final bool hasNext;
+  final bool isLoading;
+  final bool isLoadingMore;
+  final Object? error;
+}
+
+class MarketplaceHomeAllFeedController
+    extends StateNotifier<MarketplaceHomeAllFeedState> {
+  MarketplaceHomeAllFeedController({
+    required Ref ref,
+    required ({double lat, double lng})? pin,
+    required int? shopId,
+  })  : _ref = ref,
+        _pin = pin,
+        _shopId = shopId,
+        super(MarketplaceHomeAllFeedState(isLoading: pin != null)) {
+    if (pin != null) unawaited(_load(0, replace: true));
+  }
+
+  static const pageSize = 24;
+  final Ref _ref;
+  final ({double lat, double lng})? _pin;
+  final int? _shopId;
+  final Set<String> _seen = {};
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  Future<void> _load(int page, {required bool replace}) async {
+    final before = state;
+    if (replace) {
+      state = const MarketplaceHomeAllFeedState();
+    } else {
+      if (before.isLoading || before.isLoadingMore || !before.hasNext) return;
+      state = MarketplaceHomeAllFeedState(
+        cards: before.cards,
+        nextPage: before.nextPage,
+        hasNext: before.hasNext,
+        isLoadingMore: true,
+      );
+    }
+
+    try {
+      final pin = _pin;
+      final cards = pin == null
+          ? const <MarketplaceCard>[]
+          : await _ref.read(marketplaceRepositoryProvider).feed(
+                latitude: pin.lat,
+                longitude: pin.lng,
+                shopId: _shopId,
+                page: page,
+                size: pageSize,
+              );
+      if (_disposed) return;
+      final unique = <MarketplaceCard>[];
+      for (final card in cards) {
+        if (_seen.add(card.feedKey)) unique.add(card);
+      }
+      final merged = replace ? unique : [...before.cards, ...unique];
+      state = MarketplaceHomeAllFeedState(
+        cards: merged,
+        nextPage: page + 1,
+        hasNext: cards.length == pageSize,
+      );
+    } catch (error) {
+      if (_disposed) return;
+      state = MarketplaceHomeAllFeedState(
+        cards: replace ? const [] : before.cards,
+        nextPage: page,
+        hasNext: replace ? true : before.hasNext,
+        error: error,
+      );
+    }
+  }
+
+  Future<void> loadMore() => _load(state.nextPage, replace: false);
+
+  Future<void> retry() => _load(state.cards.isEmpty ? 0 : state.nextPage,
+      replace: state.cards.isEmpty);
+}
+
+final marketplaceHomeAllFeedProvider = StateNotifierProvider.autoDispose<
+    MarketplaceHomeAllFeedController, MarketplaceHomeAllFeedState>((ref) {
+  final pin = ref.watch(deliveryPinProvider);
+  final shopId = ref.watch(marketplaceShopFilterProvider);
+  return MarketplaceHomeAllFeedController(ref: ref, pin: pin, shopId: shopId);
+});

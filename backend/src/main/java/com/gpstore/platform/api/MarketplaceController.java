@@ -170,6 +170,11 @@ public class MarketplaceController {
         }
     }
 
+    /** A bounded page of shops that can serve a customer's selected address. */
+    public record NearbyShopPageView(int page, int size, long totalElements,
+                                     int totalPages, boolean hasNext,
+                                     List<StorefrontView> shops) {}
+
     /**
      * Shops that will deliver to a point, nearest first.
      *
@@ -194,6 +199,32 @@ public class MarketplaceController {
             return List.of();
         }
         return viewAll(discovery.shopsServing(lat, lng));
+    }
+
+    /**
+     * Paginated counterpart used by the Home preview and its See all screen.
+     * The existing bare-list route remains unchanged for released clients.
+     */
+    @Transactional(readOnly = true)
+    @GetMapping("/shops/page")
+    public NearbyShopPageView nearbyShopsPage(
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "12") int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(Math.max(1, size), 50);
+        if (lat == null || lng == null) {
+            return new NearbyShopPageView(safePage, safeSize, 0, 0, false, List.of());
+        }
+        List<ShopDiscovery.NearbyShop> all = discovery.shopsServing(lat, lng);
+        long offset = (long) safePage * safeSize;
+        int from = offset >= all.size() ? all.size() : (int) offset;
+        int to = Math.min(all.size(), from + safeSize);
+        List<ShopDiscovery.NearbyShop> slice = all.subList(from, to);
+        int totalPages = all.isEmpty() ? 0 : (int) ((all.size() + (long) safeSize - 1) / safeSize);
+        return new NearbyShopPageView(safePage, safeSize, all.size(), totalPages,
+                safePage + 1 < totalPages, viewAll(slice));
     }
 
     /**

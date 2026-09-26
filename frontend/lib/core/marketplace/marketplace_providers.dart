@@ -9,6 +9,7 @@ import '../../features/products/presentation/products_providers.dart';
 import '../store/store_status_provider.dart';
 import 'marketplace_models.dart';
 import 'marketplace_repository.dart';
+import 'nearby_shop_page.dart';
 import 'shop_context.dart';
 
 final marketplaceRepositoryProvider = Provider<MarketplaceRepository>((ref) {
@@ -63,6 +64,16 @@ final shopsNearProvider =
   return ref
       .watch(marketplaceRepositoryProvider)
       .shopsNear(latitude: point.lat, longitude: point.lng);
+        });
+
+final nearbyShopsPageProvider = FutureProvider.autoDispose.family<NearbyShopPage,
+    ({double lat, double lng, int page, int size})>((ref, query) {
+  return ref.watch(marketplaceRepositoryProvider).nearbyShopsPage(
+        latitude: query.lat,
+        longitude: query.lng,
+        page: query.page,
+        size: query.size,
+      );
 });
 
 /// The pin the app asks "which shops deliver here?" with.

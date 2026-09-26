@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../domain/marketplace_feed_models.dart';
 import 'marketplace_card_tile.dart';
@@ -72,7 +73,7 @@ class MarketplaceHomeModeSection extends ConsumerWidget {
       return _ModeSectionMessage(
         title: _title,
         child: const SizedBox(
-          height: 132,
+          height: 56,
           child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
         ),
       );
@@ -150,6 +151,113 @@ class MarketplaceHomeModeSection extends ConsumerWidget {
   }
 }
 
+/// The pageable continuation of the three short Home rails. It is part of
+/// the same CustomScrollView and therefore shares its only vertical viewport.
+/// Each API request is bounded; scrolling close to the end loads one more
+/// page without dropping the selected shop filter.
+class MarketplaceAllProductsSliver extends ConsumerWidget {
+  const MarketplaceAllProductsSliver({
+    super.key,
+    required this.onCardTap,
+    required this.onAdd,
+  });
+
+  final void Function(MarketplaceCard card) onCardTap;
+  final void Function(MarketplaceCard card) onAdd;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (ref.watch(deliveryPinProvider) == null) return const SliverToBoxAdapter(child: SizedBox.shrink());
+    final feed = ref.watch(marketplaceHomeAllFeedProvider);
+    final children = <Widget>[
+      const SliverToBoxAdapter(child: _AllProductsHeader()),
+    ];
+
+    if (feed.isLoading && feed.cards.isEmpty) {
+      children.add(const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(16, 4, 16, 20),
+          child: SizedBox(
+            height: 56,
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          ),
+        ),
+      ));
+    } else if (feed.error != null && feed.cards.isEmpty) {
+      children.add(SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: TextButton.icon(
+            onPressed: () => ref.read(marketplaceHomeAllFeedProvider.notifier).retry(),
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text("Couldn't load nearby listings. Retry"),
+          ),
+        ),
+      ));
+    } else if (feed.cards.isEmpty) {
+      children.add(const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 18),
+          child: Text('No nearby products or services found.'),
+        ),
+      ));
+    } else {
+      children.add(SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        sliver: SliverGrid(
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 10,
+            childAspectRatio: .73,
+          ),
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final card = feed.cards[index];
+              return MarketplaceCardTile(
+                key: ValueKey<String>('all:${card.feedKey}'),
+                card: card,
+                onTap: () => onCardTap(card),
+                onAdd: card.addable ? () => onAdd(card) : null,
+              );
+            },
+            childCount: feed.cards.length,
+          ),
+        ),
+      ));
+      if (feed.error != null || feed.isLoadingMore || feed.hasNext) {
+        children.add(SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Center(
+              child: feed.isLoadingMore
+                  ? const SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                  : feed.error != null
+                      ? TextButton(
+                          onPressed: () => ref.read(marketplaceHomeAllFeedProvider.notifier).retry(),
+                          child: const Text('Retry nearby listings'),
+                        )
+                      : const SizedBox(height: 8),
+            ),
+          ),
+        ));
+      }
+    }
+    return SliverMainAxisGroup(slivers: children);
+  }
+}
+
+class _AllProductsHeader extends StatelessWidget {
+  const _AllProductsHeader();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.fromLTRB(16, 24, 16, 12),
+        child: Text('All nearby products and services',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+      );
+}
+
 class _ModeSectionMessage extends StatelessWidget {
   const _ModeSectionMessage({
     required this.title,
@@ -172,6 +280,7 @@ class _ModeSectionMessage extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(title,
+                      key: ValueKey<String>('marketplace-section-$title'),
                       style: Theme.of(context)
                           .textTheme
                           .titleMedium

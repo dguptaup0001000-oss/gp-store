@@ -392,7 +392,12 @@ void main() {
       repository.categories.complete(const []);
       repository.brands.complete(const []);
       repository.offers.complete(const []);
-      await tester.pumpAndSettle();
+      // Home intentionally contains live loading/polling surfaces, so waiting
+      // for every animation to settle can never be a reliable readiness
+      // signal. These fixture futures complete synchronously; two frames are
+      // enough to publish their values and rebuild the affected sections.
+      await tester.pump();
+      await tester.pump();
 
       expect(find.text('Buy Online near you'), findsOneWidget);
       expect(find.text('Visit to Buy'), findsNothing);
@@ -436,7 +441,8 @@ void main() {
           ],
         },
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump();
 
       expect(find.text('Buy Online near you'), findsNothing);
       expect(find.text('Visit to Buy'), findsWidgets);
@@ -477,7 +483,8 @@ void main() {
       repository.categories.complete(const []);
       repository.brands.complete(const []);
       repository.offers.complete(const []);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump();
 
       final bottomNavigationBefore = tester.getRect(find.byType(BottomNavigationBar));
       expect(
