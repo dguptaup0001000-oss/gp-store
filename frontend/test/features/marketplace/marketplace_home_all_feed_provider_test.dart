@@ -26,8 +26,14 @@ void main() {
     ]);
     addTearDown(container.dispose);
 
-    container.read(marketplaceHomeAllFeedProvider);
-    await _flush();
+    final subscription = container.listen(
+      marketplaceHomeAllFeedProvider,
+      (_, __) {},
+      fireImmediately: true,
+    );
+    addTearDown(subscription.close);
+    await _until(() =>
+        container.read(marketplaceHomeAllFeedProvider).cards.length == 24);
     expect(container.read(marketplaceHomeAllFeedProvider).cards, hasLength(24));
 
     await container
@@ -63,11 +69,19 @@ void main() {
     ]);
     addTearDown(container.dispose);
 
-    container.read(marketplaceHomeAllFeedProvider);
-    await _flush();
+    final subscription = container.listen(
+      marketplaceHomeAllFeedProvider,
+      (_, __) {},
+      fireImmediately: true,
+    );
+    addTearDown(subscription.close);
+    await _until(() =>
+        container.read(marketplaceHomeAllFeedProvider).cards.length == 24);
     await container
         .read(marketplaceHomeAllFeedProvider.notifier)
         .loadMore();
+    await _until(
+        () => container.read(marketplaceHomeAllFeedProvider).error != null);
     var state = container.read(marketplaceHomeAllFeedProvider);
     expect(state.cards, hasLength(24));
     expect(state.error, isNotNull);
@@ -81,9 +95,11 @@ void main() {
   });
 }
 
-Future<void> _flush() async {
-  await Future<void>.delayed(Duration.zero);
-  await Future<void>.delayed(Duration.zero);
+Future<void> _until(bool Function() condition) async {
+  for (var attempt = 0; attempt < 50 && !condition(); attempt++) {
+    await Future<void>.delayed(Duration.zero);
+  }
+  expect(condition(), isTrue, reason: 'asynchronous provider state did not settle');
 }
 
 MarketplaceCard _card(int id, {required int shopId}) => MarketplaceCard(
