@@ -120,8 +120,15 @@ void main() {
     await tester.pump();
     await reachLowerSections(tester);
 
-    expect(find.text('Visit to Buy'), findsOneWidget);
-    expect(find.text('Services at Shop'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('marketplace-section-Visit to Buy')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+          const ValueKey<String>('marketplace-section-Services at Shop')),
+      findsOneWidget,
+    );
     expect(find.text('Recommended for you'), findsOneWidget);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
