@@ -51,6 +51,9 @@ jobs:
   validate:
     name: Validate exact merged production release
     runs-on: ubuntu-latest
+    # The retry budget is bounded, so this job is too: a validation that hangs
+    # is a validation nobody gets an answer from.
+    timeout-minutes: 15
     outputs:
       target_sha: ${{ steps.validate.outputs.target_sha }}
     steps:
@@ -97,6 +100,11 @@ jobs:
       # pinned with --resolve. TLS still verifies the certificate, so pinning
       # cannot be used to point the check at something else.
       #
+      # EIGHT ATTEMPTS, ABOUT 135 SECONDS, AND THAT NUMBER IS EVIDENCE-BASED.
+      # The uptime probe hit the same hostname during the same window and gave
+      # up after three attempts across 40 seconds - so a budget of 40 seconds
+      # is demonstrably too small to outlast one of these blips.
+      #
       # IT STILL FAILS CLOSED, WHICH IS THE POINT. exit 1 = production is a
       # different release; exit 2 = production never answered. Both are
       # non-zero, so `operate` - the job that writes to the live database -
@@ -105,7 +113,8 @@ jobs:
         id: live_release
         env:
           EXPECT_SHA: ${{ inputs.target_sha }}
-          VERIFY_ATTEMPTS: '6'
+          VERIFY_ATTEMPTS: '8'
+          VERIFY_BACKOFF_CAP_SECONDS: '30'
           VERIFY_BODY_OUTPUT: /tmp/gpstore-version.json
         run: |
           set -Eeuo pipefail

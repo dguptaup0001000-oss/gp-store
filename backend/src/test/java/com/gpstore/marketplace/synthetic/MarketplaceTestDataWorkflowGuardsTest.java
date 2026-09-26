@@ -78,6 +78,9 @@ class MarketplaceTestDataWorkflowGuardsTest {
                 "the retry must be bounded and must back off between attempts");
         assertTrue(verifier.contains("--doh-url") && verifier.contains("--resolve"),
                 "a resolver that keeps failing must be worked around, not only asked again");
+        assertTrue(verifier.contains("--ipv4"),
+                "a connect failure that returns in milliseconds means an address with no route, "
+                        + "so the remaining attempts must ask for IPv4 only");
 
         String workflow = read(".github/workflows/seed-marketplace-test-data.yml");
         assertTrue(workflow.contains("exit \"$status\""),
