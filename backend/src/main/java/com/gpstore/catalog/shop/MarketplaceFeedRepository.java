@@ -68,11 +68,12 @@ public class MarketplaceFeedRepository {
      * changes between page 1 and page 2 shows the customer the same product
      * twice or skips one entirely.
      *
-     * <p>THE ORDER IS NOT A RECOMMENDATION AND NOT A SALE. It is distance,
-     * which is the thing a local marketplace can honestly claim to know.
-     * Nothing here reads a payment, a promotion or a sponsorship, and if
-     * promoted placement is ever added it must arrive as a visibly separate,
-     * labelled thing rather than as a thumb on this scale.
+     * <p>THE ORDER IS A FAIR WALK AROUND THE NEARBY SHOPS. The first eligible
+     * card from each shop is shown before a second card from any shop; distance
+     * orders shops inside each round. Without that round-robin layer, one
+     * nearby supermarket with a deep catalogue fills dozens of pages before
+     * the customer sees the phone shop next door. Nothing here reads a
+     * payment, promotion or sponsorship.
      *
      * @param shopIds the shops this customer may see, from ShopDiscovery.
      *                Empty means no shop serves them, which is a real answer
@@ -161,6 +162,14 @@ public class MarketplaceFeedRepository {
                      AND (CAST(? AS bigint) IS NULL OR p.category_id = CAST(? AS bigint))
                    ORDER BY p.id, spv.commerce_mode, near.distance_km ASC, spv.selling_price ASC, spv.id ASC
                 ),
+                spread AS (
+                    SELECT picked.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY picked.shop_id
+                               ORDER BY picked.product_id ASC, picked.commerce_mode ASC
+                           ) AS shop_row
+                      FROM picked
+                ),
                 sellers AS (
                     SELECT p2.id AS product_id, spv2.commerce_mode,
                            count(DISTINCT spv2.shop_id) AS seller_count
@@ -173,11 +182,12 @@ public class MarketplaceFeedRepository {
                      AND COALESCE(spv2.active, true) = true
                    GROUP BY p2.id, spv2.commerce_mode
                 )
-                SELECT picked.*, COALESCE(sellers.seller_count, 1) AS seller_count
-                  FROM picked
-                  LEFT JOIN sellers ON sellers.product_id = picked.product_id
-                                   AND sellers.commerce_mode = picked.commerce_mode
-                 ORDER BY picked.distance_km ASC, picked.product_id ASC, picked.commerce_mode ASC
+                SELECT spread.*, COALESCE(sellers.seller_count, 1) AS seller_count
+                  FROM spread
+                  LEFT JOIN sellers ON sellers.product_id = spread.product_id
+                                   AND sellers.commerce_mode = spread.commerce_mode
+                 ORDER BY spread.shop_row ASC, spread.distance_km ASC,
+                          spread.shop_id ASC, spread.product_id ASC, spread.commerce_mode ASC
                  LIMIT ? OFFSET ?
                 """.formatted(distances, shopPlaceholders, modePlaceholders,
                 shopPlaceholders, modePlaceholders);
@@ -313,6 +323,14 @@ public class MarketplaceFeedRepository {
                      AND (%s)
                    ORDER BY p.id, spv.commerce_mode, near.distance_km ASC, spv.selling_price ASC, spv.id ASC
                 ),
+                spread AS (
+                    SELECT picked.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY picked.shop_id
+                               ORDER BY picked.product_id ASC, picked.commerce_mode ASC
+                           ) AS shop_row
+                      FROM picked
+                ),
                 sellers AS (
                     SELECT p2.id AS product_id, spv2.commerce_mode,
                            count(DISTINCT spv2.shop_id) AS seller_count
@@ -325,11 +343,12 @@ public class MarketplaceFeedRepository {
                      AND COALESCE(spv2.active, true) = true
                    GROUP BY p2.id, spv2.commerce_mode
                 )
-                SELECT picked.*, COALESCE(sellers.seller_count, 1) AS seller_count
-                  FROM picked
-                  LEFT JOIN sellers ON sellers.product_id = picked.product_id
-                                   AND sellers.commerce_mode = picked.commerce_mode
-                 ORDER BY picked.distance_km ASC, picked.product_id ASC, picked.commerce_mode ASC
+                SELECT spread.*, COALESCE(sellers.seller_count, 1) AS seller_count
+                  FROM spread
+                  LEFT JOIN sellers ON sellers.product_id = spread.product_id
+                                   AND sellers.commerce_mode = spread.commerce_mode
+                 ORDER BY spread.shop_row ASC, spread.distance_km ASC,
+                          spread.shop_id ASC, spread.product_id ASC, spread.commerce_mode ASC
                  LIMIT ? OFFSET ?
                 """.formatted(distances, placeholders(shopIds.size()),
                 placeholders(modes.size()), matches,

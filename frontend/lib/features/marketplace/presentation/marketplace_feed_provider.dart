@@ -96,7 +96,7 @@ class MarketplaceHomeModeFeedController
       state = MarketplaceHomeModeFeedState(
         cards: unique,
         nextPage: 1,
-        hasNext: cards.length >= _pageSize,
+        hasNext: cards.length == _pageSize,
         isLoading: false,
       );
     } catch (error) {
@@ -216,6 +216,7 @@ class MarketplaceHomeAllFeedController
   Future<void> _load(int page, {required bool replace}) async {
     final before = state;
     if (replace) {
+      _seen.clear();
       state = const MarketplaceHomeAllFeedState();
     } else {
       if (before.isLoading || before.isLoadingMore || !before.hasNext) return;

@@ -98,7 +98,9 @@ class _NearbyShopsScreenState extends ConsumerState<NearbyShopsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+        backgroundColor: AppColors.marketplaceGround,
         appBar: AppBar(
+          backgroundColor: AppColors.marketplaceGround,
           title: const Text('All nearby shops'),
           actions: [
             TextButton(

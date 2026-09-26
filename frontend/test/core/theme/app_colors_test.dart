@@ -82,6 +82,24 @@ void main() {
       expect(AppColors.cardBackground.g, AppColors.cardBackground.b);
     });
 
+    test('marketplace ground is a soft accessible warm yellow', () {
+      expect(AppColors.marketplaceGround.r,
+          greaterThan(AppColors.marketplaceGround.b));
+      expect(_luminance(AppColors.marketplaceGround), greaterThan(0.9));
+      expect(
+        _contrast(AppColors.textPrimary, AppColors.marketplaceGround),
+        greaterThanOrEqualTo(4.5),
+      );
+      expect(
+        _contrast(AppColors.textSecondary, AppColors.marketplaceGround),
+        greaterThanOrEqualTo(4.5),
+      );
+      expect(
+        _luminance(AppColors.cardBackground),
+        greaterThan(_luminance(AppColors.marketplaceGround)),
+      );
+    });
+
     test('section bands lift toward the light rather than darkening', () {
       // Depth from a section brightening, not from it casting a shadow
       // across the products.

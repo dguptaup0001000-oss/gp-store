@@ -82,6 +82,12 @@ class AppColors {
   /// like paper rather than a tint.
   static const ivory = Color(0xFFFFFAF2);
 
+  /// Customer marketplace ground: a restrained warm cream, not a yellow UI.
+  ///
+  /// Product cards remain neutral white so photos keep their real colour;
+  /// this tint belongs only behind discovery/content surfaces.
+  static const marketplaceGround = Color(0xFFFFF8E1);
+
   /// Pale violet wash, the lavender-side counterpart to [peach].
   static const mist = Color(0xFFEDE7FA);
 

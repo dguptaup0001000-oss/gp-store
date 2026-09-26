@@ -1,4 +1,7 @@
+import 'package:dio/dio.dart';
+
 import '../../../core/api/api_client.dart';
+import '../../../core/marketplace/shop_context.dart';
 import '../domain/cart_models.dart';
 
 class CartRepository {
@@ -11,10 +14,17 @@ class CartRepository {
     return CartModel.fromJson(response.data as Map<String, dynamic>);
   }
 
-  Future<CartModel> addToCart({required int variantId, required int quantity}) async {
+  Future<CartModel> addToCart({
+    required int variantId,
+    required int quantity,
+    int? shopId,
+  }) async {
     final response = await apiClient.dio.post(
       '/api/carts/add',
       queryParameters: {'variantId': variantId, 'quantity': quantity},
+      options: shopId == null
+          ? null
+          : Options(headers: {shopHeaderName: shopId.toString()}),
     );
     return CartModel.fromJson(response.data as Map<String, dynamic>);
   }

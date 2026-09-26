@@ -448,8 +448,8 @@ class OpenTheAppAndSeeTheMarketplaceTest {
         }
 
         @Test
-        @DisplayName("a secondary-shop product survives ALL-feed offset pagination over real HTTP JSON")
-        void secondaryShopProductAppearsOnLaterAllPage() throws Exception {
+        @DisplayName("a deep first-shop catalogue cannot hide another shop from the first page")
+        void marketplacePagesInterleaveShopsOverRealHttpJson() throws Exception {
             Long firstShopId = shopIds.get(0);
             for (int i = 0; i < 50; i++) {
                 Long filler = newProduct("Pagination filler " + i, "Grocery");
@@ -471,10 +471,13 @@ class OpenTheAppAndSeeTheMarketplaceTest {
                     .andExpect(status().isOk())
                     .andReturn().getResponse().getContentAsString();
             var firstPage = json.readTree(firstBody);
-            assertEquals(50, firstPage.size(), "the first page should be filled by nearer/equal fixtures");
-            assertFalse(java.util.stream.StreamSupport.stream(firstPage.spliterator(), false)
+            assertEquals(50, firstPage.size(), "the first page should still be full");
+            assertTrue(java.util.stream.StreamSupport.stream(firstPage.spliterator(), false)
                             .anyMatch(card -> card.path("productId").asLong() == secondaryProductId),
-                    "the last inserted product should require the next page in this stable fixture");
+                    "one nearby shop's deep catalogue must not postpone another shop until a later page");
+            assertTrue(java.util.stream.StreamSupport.stream(firstPage.spliterator(), false)
+                            .map(card -> card.path("shopId").asLong()).distinct().count() > 1,
+                    "marketplace discovery should interleave eligible shops on its first page");
 
             String nextBody = mockMvc.perform(get("/api/marketplace/feed")
                             .param("lat", String.valueOf(LAT))
@@ -485,11 +488,20 @@ class OpenTheAppAndSeeTheMarketplaceTest {
                     .andExpect(status().isOk())
                     .andReturn().getResponse().getContentAsString();
             var nextPage = json.readTree(nextBody);
-            assertTrue(java.util.stream.StreamSupport.stream(nextPage.spliterator(), false)
-                            .anyMatch(card -> card.path("productId").asLong() == secondaryProductId),
-                    "the combined ALL feed must retain the eligible secondary-shop item after offset paging: "
-                            + nextBody);
+            Set<String> firstKeys = new HashSet<>();
+            for (var card : firstPage) {
+                firstKeys.add(card.path("productId").asLong() + ":"
+                        + card.path("productVariantId").asLong() + ":"
+                        + card.path("shopId").asLong() + ":"
+                        + card.path("commerceMode").asText());
+            }
             for (var card : nextPage) {
+                String key = card.path("productId").asLong() + ":"
+                        + card.path("productVariantId").asLong() + ":"
+                        + card.path("shopId").asLong() + ":"
+                        + card.path("commerceMode").asText();
+                assertFalse(firstKeys.contains(key),
+                        "page 2 repeated an identity already returned on page 1: " + key);
                 assertEquals("ONLINE_PURCHASE", card.path("commerceMode").asText(),
                         "the serialized page changed the listing's commerce mode: " + card);
             }
