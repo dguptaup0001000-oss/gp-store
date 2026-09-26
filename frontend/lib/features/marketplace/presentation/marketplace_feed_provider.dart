@@ -30,7 +30,7 @@ class MarketplaceHomeModeFeedState {
     this.cards = const [],
     this.nextPage = 0,
     this.hasNext = true,
-    this.isLoading = true,
+    this.isLoading = false,
     this.isLoadingMore = false,
     this.needsAddress = false,
     this.error,
@@ -136,7 +136,7 @@ class MarketplaceHomeModeFeedController
 
   Future<void> retry() async {
     if (state.cards.isEmpty) {
-      state = const MarketplaceHomeModeFeedState();
+      state = const MarketplaceHomeModeFeedState(isLoading: true);
       await _loadInitial();
     } else {
       await loadMore();
@@ -174,7 +174,7 @@ class MarketplaceHomeAllFeedState {
     this.cards = const [],
     this.nextPage = 0,
     this.hasNext = true,
-    this.isLoading = true,
+    this.isLoading = false,
     this.isLoadingMore = false,
     this.error,
   });
@@ -217,7 +217,7 @@ class MarketplaceHomeAllFeedController
     final before = state;
     if (replace) {
       _seen.clear();
-      state = const MarketplaceHomeAllFeedState();
+      state = const MarketplaceHomeAllFeedState(isLoading: true);
     } else {
       if (before.isLoading || before.isLoadingMore || !before.hasNext) return;
       state = MarketplaceHomeAllFeedState(
