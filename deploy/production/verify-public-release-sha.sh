@@ -36,7 +36,9 @@
 # failed request is a blip and an unbounded wait is an outage nobody is told
 # about. This adds backoff that doubles to a cap, so a resolver that is
 # briefly confused gets several widely-spaced chances inside a couple of
-# minutes without the job idling for its whole budget.
+# minutes without the job idling for its whole budget. The default eight
+# attempts spend about 135 seconds of waiting, chosen because the retrying
+# uptime probe once gave up on this same hostname after only 40.
 #
 # AND WHY IT DOES NOT ONLY RETRY. Retrying a broken resolver just asks the
 # same broken resolver again. After a DNS-class failure the next attempts
@@ -45,6 +47,15 @@
 # `--resolve`. Pinning the address changes nothing about trust - TLS still
 # verifies the certificate for the real hostname, so a wrong or hostile
 # address fails the handshake instead of being believed.
+#
+# A CONNECT FAILURE ESCALATES TOO, and the uptime probe's log is why. During
+# the same incident it recorded exit 6 once and then `Failed to connect ...
+# after 272 ms` and `after 10 ms` - a TCP connect that fails in ten
+# milliseconds did not time out, it had nowhere to go, which is what an
+# address of an unroutable family looks like from a runner. Production is
+# fronted by A records and every runner that reaches it does so over IPv4, so
+# after a connect-class failure the remaining attempts ask for IPv4 only. That
+# removes a failure mode; it cannot invent a passing answer.
 #
 # IT WEAKENS NOTHING. No secret, no token, no header: /api/version is public.
 # It cannot make VersionGuard more permissive, it does not run on the VPS, and
@@ -59,11 +70,11 @@
 #   PUBLIC_VERSION_URL                 default https://api.gpstore.co.in/v1/api/version
 #   EXPECT_SHA                         the 40-character commit that must be live
 #   EXPECT_ENVIRONMENT                 default production
-#   VERIFY_ATTEMPTS                    total attempts, default 6
+#   VERIFY_ATTEMPTS                    total attempts, default 8
 #   VERIFY_CONNECT_TIMEOUT_SECONDS     default 10
 #   VERIFY_TIMEOUT_SECONDS             default 25
 #   VERIFY_BACKOFF_SECONDS             first gap, doubling, default 3
-#   VERIFY_BACKOFF_CAP_SECONDS         gap ceiling, default 24
+#   VERIFY_BACKOFF_CAP_SECONDS         gap ceiling, default 30
 #   VERIFY_DOH_URL                     IP-literal DoH resolver, default https://1.1.1.1/dns-query
 #   VERIFY_BODY_OUTPUT                 copy the verified body here
 set -Eeuo pipefail
@@ -71,11 +82,11 @@ set -Eeuo pipefail
 PUBLIC_VERSION_URL="${PUBLIC_VERSION_URL:-https://api.gpstore.co.in/v1/api/version}"
 EXPECT_SHA="${EXPECT_SHA:-${1:-}}"
 EXPECT_ENVIRONMENT="${EXPECT_ENVIRONMENT:-production}"
-VERIFY_ATTEMPTS="${VERIFY_ATTEMPTS:-6}"
+VERIFY_ATTEMPTS="${VERIFY_ATTEMPTS:-8}"
 VERIFY_CONNECT_TIMEOUT_SECONDS="${VERIFY_CONNECT_TIMEOUT_SECONDS:-10}"
 VERIFY_TIMEOUT_SECONDS="${VERIFY_TIMEOUT_SECONDS:-25}"
 VERIFY_BACKOFF_SECONDS="${VERIFY_BACKOFF_SECONDS:-3}"
-VERIFY_BACKOFF_CAP_SECONDS="${VERIFY_BACKOFF_CAP_SECONDS:-24}"
+VERIFY_BACKOFF_CAP_SECONDS="${VERIFY_BACKOFF_CAP_SECONDS:-30}"
 VERIFY_DOH_URL="${VERIFY_DOH_URL:-https://1.1.1.1/dns-query}"
 VERIFY_BODY_OUTPUT="${VERIFY_BODY_OUTPUT:-}"
 
@@ -94,9 +105,12 @@ log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 is_dns_failure() { [[ "$1" == "6" || "$1" == "5" ]]; }
 
 # 2, 3 and 4 mean curl refused the command itself - a malformed URL, an
-# unknown option, a protocol this build cannot speak. Retrying a typo six
+# unknown option, a protocol this build cannot speak. Retrying a typo several
 # times just hides it, so these stop at once and are reported as OUR bug.
 is_usage_failure() { [[ "$1" == "2" || "$1" == "3" || "$1" == "4" ]]; }
+
+# 7 is "could not connect": an address was known and led nowhere.
+is_connect_failure() { [[ "$1" == "7" ]]; }
 
 host_of() {
   python3 - "$1" <<'PY'
@@ -241,12 +255,14 @@ verify_public_release_sha() {
 
   log "verifying $PUBLIC_VERSION_URL reports $EXPECT_SHA (up to $VERIFY_ATTEMPTS attempts)"
 
-  local use_doh="${VERIFY_FORCE_DOH:-0}" pinned_ip="" gap="$VERIFY_BACKOFF_SECONDS"
+  local use_doh="${VERIFY_FORCE_DOH:-0}" ipv4_only="${VERIFY_FORCE_IPV4:-0}"
+  local pinned_ip="" gap="$VERIFY_BACKOFF_SECONDS"
   local attempt result rc status extra=() answered_at_all=0 last=""
 
   for ((attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt++)); do
     extra=()
     [[ "$use_doh" == "1" ]] && extra+=(--doh-url "$VERIFY_DOH_URL")
+    [[ "$ipv4_only" == "1" ]] && extra+=(--ipv4)
     [[ -n "$pinned_ip" ]] && extra+=(--resolve "$host:$port:$pinned_ip")
 
     result="$(fetch_once "$body_file" "${extra[@]+"${extra[@]}"}")"
@@ -297,6 +313,11 @@ verify_public_release_sha() {
     else
       last="no HTTP response (curl exit $rc)"
       log "attempt $attempt/$VERIFY_ATTEMPTS: $last"
+      if is_connect_failure "$rc" && [[ "$ipv4_only" != "1" ]]; then
+        ipv4_only=1
+        log "  -> next attempt asks for IPv4 only; an address that refuses in milliseconds"
+        log "     is usually one this runner has no route to"
+      fi
     fi
 
     # No sleep after the final attempt; it would only delay the failure.
@@ -457,7 +478,19 @@ JSON
     note FAIL "repeated DNS failures escalate to DoH and then to a pinned address"
   fi
 
-  # 5. The wrong build is a verdict, delivered at once. Retrying it would only
+  # 5. A connect failure that fails in milliseconds is an address with nowhere
+  # to go, which the uptime probe saw during the same incident. The remaining
+  # attempts must ask for IPv4 only rather than repeating it.
+  code=0
+  out="$(fake_verify env EXPECT_SHA="$GOOD_SHA" VERIFY_ATTEMPTS=3 \
+           FAKE_CURL_FAIL_TIMES=99 FAKE_CURL_FAIL_CODE=7 bash "$0")" || code=$?
+  if [[ "$code" == "2" ]] && grep -q -- '--ipv4' "$SELFTEST_DIR/args"; then
+    note ok "a connect failure escalates to IPv4-only on the next attempt"
+  else
+    note FAIL "a connect failure escalates to IPv4-only on the next attempt (code=$code)"
+  fi
+
+  # 6. The wrong build is a verdict, delivered at once. Retrying it would only
   # delay the refusal, and a seed must never run against another release.
   write_body production "$OTHER_SHA" "$OTHER_SHA"
   code=0
@@ -469,7 +502,7 @@ JSON
     note FAIL "a live deployment on another commit fails immediately as the wrong release (code=$code attempts=$(attempts_used))"
   fi
 
-  # 6. gitCommit alone is not identity. A JAR that disagrees with its own
+  # 7. gitCommit alone is not identity. A JAR that disagrees with its own
   # environment variable is the exact thing VersionGuard refuses on the box.
   write_body production "$GOOD_SHA" "$OTHER_SHA"
   code=0
@@ -480,7 +513,7 @@ JSON
     note FAIL "a running JAR whose embedded commit differs is refused (code=$code)"
   fi
 
-  # 7. A staging box answering on this name cannot satisfy a production guard.
+  # 8. A staging box answering on this name cannot satisfy a production guard.
   write_body staging "$GOOD_SHA" "$GOOD_SHA"
   code=0
   out="$(fake_verify env EXPECT_SHA="$GOOD_SHA" VERIFY_ATTEMPTS=2 bash "$0")" || code=$?
@@ -490,7 +523,7 @@ JSON
     note FAIL "a non-production environment is refused (code=$code)"
   fi
 
-  # 8. A body that is not JSON at all is not a pass either.
+  # 9. A body that is not JSON at all is not a pass either.
   printf '<html>504 Gateway Time-out</html>\n' > "$SELFTEST_DIR/body.json"
   code=0
   out="$(fake_verify env EXPECT_SHA="$GOOD_SHA" VERIFY_ATTEMPTS=2 bash "$0")" || code=$?
@@ -500,7 +533,7 @@ JSON
     note FAIL "an HTML error page served with HTTP 200 is refused (code=$code)"
   fi
 
-  # 9. A non-200 is retried, then reported as an unknown commit - never as a
+  # 10. A non-200 is retried, then reported as an unknown commit - never as a
   # verified one.
   write_body production "$GOOD_SHA" "$GOOD_SHA"
   code=0
@@ -513,7 +546,7 @@ JSON
     note FAIL "HTTP 503 is retried and then reported as an unknown deployed commit (code=$code attempts=$(attempts_used))"
   fi
 
-  # 10. A guard asked to verify nothing must refuse, not pass.
+  # 11. A guard asked to verify nothing must refuse, not pass.
   for bad in "" "f17767d" "F17767D498253706FB65E1E681F598B8DFE54530" "not-a-sha"; do
     code=0
     out="$(fake_verify env EXPECT_SHA="$bad" VERIFY_ATTEMPTS=2 bash "$0")" || code=$?
@@ -524,7 +557,7 @@ JSON
     fi
   done
 
-  # 11. The verified body can be handed on, and is only written on success.
+  # 12. The verified body can be handed on, and is only written on success.
   write_body production "$GOOD_SHA" "$GOOD_SHA"
   rm -f "$SELFTEST_DIR/kept.json"
   fake_verify env EXPECT_SHA="$GOOD_SHA" VERIFY_ATTEMPTS=2 \
@@ -544,23 +577,25 @@ JSON
     note FAIL "nothing is written when the release was not verified"
   fi
 
-  # 12. THE REAL curl, WITH THE REAL FLAGS, at a port nothing listens on.
+  # 13. THE REAL curl, WITH THE REAL FLAGS, at a port nothing listens on.
   # Proves this runner's curl accepts every option used above - including
   # --doh-url, which is the DNS workaround and would otherwise be a usage
   # error discovered only in production. Expect the unreachable verdict (2),
   # never the "curl rejected the request itself" one.
-  for forced_doh in 0 1; do
+  for forced in "0 0" "1 0" "0 1" "1 1"; do
+    read -r forced_doh forced_ipv4 <<<"$forced"
     code=0
     out="$(EXPECT_SHA="$GOOD_SHA" \
            PUBLIC_VERSION_URL="https://127.0.0.1:1/v1/api/version" \
            VERIFY_RELEASE_SHA_SELFTEST=0 \
            VERIFY_ATTEMPTS=1 VERIFY_CONNECT_TIMEOUT_SECONDS=2 \
            VERIFY_TIMEOUT_SECONDS=3 VERIFY_FORCE_DOH="$forced_doh" \
+           VERIFY_FORCE_IPV4="$forced_ipv4" \
            bash "$0" 2>&1)" || code=$?
     if [[ "$code" == "2" ]] && ! grep -q "curl rejected the request itself" <<<"$out"; then
-      note ok "the real curl accepts the flag set (DoH forced=$forced_doh) and reports unreachable"
+      note ok "the real curl accepts the flag set (DoH=$forced_doh IPv4=$forced_ipv4) and reports unreachable"
     else
-      note FAIL "the real curl accepts the flag set (DoH forced=$forced_doh) and reports unreachable (code=$code): $out"
+      note FAIL "the real curl accepts the flag set (DoH=$forced_doh IPv4=$forced_ipv4) and reports unreachable (code=$code): $out"
     fi
   done
 
