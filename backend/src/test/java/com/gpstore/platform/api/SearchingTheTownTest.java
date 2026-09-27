@@ -209,6 +209,19 @@ class SearchingTheTownTest {
         assertEquals(CommerceMode.VISIT_TO_BUY, results.get(0).commerceMode());
     }
 
+    @Test
+    @DisplayName("shop names participate in the unified town search")
+    void shopNamesAreSearchable() {
+        sell("Sharma Salon", 0.0008, "Mens Haircut", "House",
+                "250", CommerceMode.SERVICE_AT_SHOP);
+
+        List<MarketplaceFeedView> results =
+                marketplace.search("Sharma", LAT, LNG, null, 0, 20);
+
+        assertEquals(1, results.size());
+        assertEquals("Sharma Salon " + tag, results.get(0).shopName());
+    }
+
     // ------------------------------------------------------------- fixture
 
     private Long sell(String shopName, double latOffset, String product, String brand,

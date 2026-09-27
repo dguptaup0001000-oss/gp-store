@@ -267,7 +267,12 @@ public class MarketplaceFeedRepository {
             if (i > 0) {
                 matches.append(" AND ");
             }
-            matches.append("(p.name ILIKE ? OR p.brand ILIKE ? OR c.name ILIKE ?)");
+            matches.append("""
+                    (p.name ILIKE ? OR p.brand ILIKE ? OR c.name ILIKE ?
+                     OR p.search_keywords ILIKE ? OR p.subcategory ILIKE ?
+                     OR v.sku ILIKE ? OR v.barcode ILIKE ? OR v.unit ILIKE ?
+                     OR s.display_name ILIKE ?)
+                    """);
         }
 
         String sql = """
@@ -360,6 +365,12 @@ public class MarketplaceFeedRepository {
         }
         for (String word : words) {
             String like = "%" + word + "%";
+            args.add(like);
+            args.add(like);
+            args.add(like);
+            args.add(like);
+            args.add(like);
+            args.add(like);
             args.add(like);
             args.add(like);
             args.add(like);
