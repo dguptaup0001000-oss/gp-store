@@ -206,10 +206,12 @@ class DemandRequestCard extends StatelessWidget {
     required this.request,
     this.onClose,
     this.onCancel,
+    this.onReportResponse,
   });
   final DemandRequest request;
   final VoidCallback? onClose;
   final VoidCallback? onCancel;
+  final ValueChanged<DemandResponse>? onReportResponse;
 
   @override
   Widget build(BuildContext context) {
@@ -234,7 +236,18 @@ class DemandRequestCard extends StatelessWidget {
                     response.commerceMode!.replaceAll('_', ' '),
                   if (response.note != null) response.note!,
                 ].join(' • ')),
-                trailing: response.price == null ? null : Text('₹${response.price}'),
+                trailing: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (response.price != null) Text('₹${response.price}'),
+                    if (onReportResponse != null)
+                      IconButton(
+                        tooltip: 'Report or block this response',
+                        onPressed: () => onReportResponse!(response),
+                        icon: const Icon(Icons.flag_outlined),
+                      ),
+                  ],
+                ),
               ),
             if (onClose != null || onCancel != null)
               Row(

@@ -20,6 +20,7 @@ void main() {
           'expiresAt': '2026-09-30T10:00:00',
           'responses': [
             {
+              'id': 91,
               'shopName': 'Local Tractor Parts',
               'status': 'AVAILABLE',
               'price': 850,
@@ -110,5 +111,31 @@ void main() {
     );
 
     expect(request.id, 18);
+  });
+
+  test('report response can block future demand from that shop', () async {
+    final adapter = FakeHttpClientAdapter();
+    adapter.on('POST', '/api/demand-responses/91/report', (options) {
+      expect(options.data, {
+        'reason': 'MISLEADING',
+        'detail': 'Price changed after response',
+        'blockShop': true,
+      });
+      return const FakeResponse({
+        'id': 3,
+        'responseId': 91,
+        'reason': 'MISLEADING',
+        'status': 'OPEN',
+        'shopBlocked': true,
+      });
+    });
+
+    final repository =
+        DemandRepository(apiClient: buildTestApiClient(adapter));
+    await repository.reportResponse(
+      91,
+      reason: 'MISLEADING',
+      detail: 'Price changed after response',
+    );
   });
 }

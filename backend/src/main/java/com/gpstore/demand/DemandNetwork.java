@@ -52,6 +52,9 @@ public class DemandNetwork {
     public record ResponseView(Long id, Long shopId, String shopName, String status,
                                BigDecimal price, Integer quantity, Integer readyMinutes,
                                String commerceMode, String note, LocalDateTime createdAt) {}
+    public record ReportRequest(String reason, String detail, Boolean blockShop) {}
+    public record ReportView(Long id, Long responseId, String reason, String status,
+                             boolean shopBlocked, LocalDateTime createdAt) {}
     public record MerchantDemand(Long id, String description, String photoUrl, int quantity,
                                  Long categoryId, BigDecimal budget, LocalDateTime requiredBy,
                                  BigDecimal radiusKm, String preferredMode,
@@ -113,7 +116,7 @@ public class DemandNetwork {
                         request.latitude(), request.longitude(), radius).stream()
                 .map(near -> near.shop().getId()).limit(MAX_RECIPIENTS).toList();
         if (!candidates.isEmpty()) {
-            Set<Long> eligible = eligible(candidates, request.categoryId(), mode);
+            Set<Long> eligible = eligible(candidates, request.categoryId(), mode, customerId);
             for (Long shopId : eligible) {
                 jdbc.update("""
                         INSERT INTO demand_request_recipients(request_id, shop_id)
@@ -221,12 +224,56 @@ public class DemandNetwork {
         return response(id, requestId, shopId);
     }
 
-    private Set<Long> eligible(List<Long> shops, Long categoryId, CommerceMode mode) {
+    @Transactional
+    public ReportView report(long responseId, ReportRequest request) {
+        long customerId = currentUser.customerId();
+        String reason = request == null ? "" : upper(request.reason());
+        if (!Set.of("SPAM", "MISLEADING", "INAPPROPRIATE", "OTHER").contains(reason)) {
+            throw new BadRequestException("Choose a valid report reason.");
+        }
+        java.util.Map<String, Object> owned = jdbc.query("""
+                SELECT r.shop_id
+                  FROM demand_responses r
+                  JOIN demand_requests d ON d.id=r.request_id
+                 WHERE r.id=? AND d.customer_id=?
+                """, rs -> {
+            if (!rs.next()) throw new ResourceNotFoundException("Demand response not found.");
+            return java.util.Map.of("shopId", rs.getLong("shop_id"));
+        }, responseId, customerId);
+        long shopId = ((Number) owned.get("shopId")).longValue();
+        Long reportId = jdbc.queryForObject("""
+                INSERT INTO demand_response_reports
+                    (response_id, customer_id, reason, detail)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (response_id, customer_id) DO UPDATE SET
+                    reason=excluded.reason, detail=excluded.detail,
+                    status='OPEN', updated_at=now()
+                RETURNING id
+                """, Long.class, responseId, customerId, reason,
+                clean(request.detail(), 500));
+        boolean block = Boolean.TRUE.equals(request.blockShop());
+        if (block) {
+            jdbc.update("""
+                    INSERT INTO customer_demand_shop_blocks(customer_id, shop_id)
+                    VALUES (?, ?) ON CONFLICT DO NOTHING
+                    """, customerId, shopId);
+        }
+        LocalDateTime created = jdbc.queryForObject(
+                "SELECT created_at FROM demand_response_reports WHERE id=?",
+                Timestamp.class, reportId).toLocalDateTime();
+        return new ReportView(reportId, responseId, reason, "OPEN", block, created);
+    }
+
+    private Set<Long> eligible(List<Long> shops, Long categoryId, CommerceMode mode,
+                               long customerId) {
         String ids = String.join(",", java.util.Collections.nCopies(shops.size(), "?"));
         String sql = """
                 SELECT s.id
                   FROM shops s
                  WHERE s.id IN (%s)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM customer_demand_shop_blocks blocked
+                        WHERE blocked.customer_id=? AND blocked.shop_id=s.id)
                    AND (?::bigint IS NULL OR EXISTS (
                        SELECT 1 FROM shop_categories sc
                         WHERE sc.shop_id=s.id AND sc.active=true
@@ -243,6 +290,7 @@ public class DemandNetwork {
                           AND mode_spv.commerce_mode=?::varchar))
                 """.formatted(ids);
         java.util.ArrayList<Object> args = new java.util.ArrayList<>(shops);
+        args.add(customerId);
         args.add(categoryId); args.add(categoryId); args.add(categoryId);
         args.add(mode == null ? null : mode.name()); args.add(mode == null ? null : mode.name());
         return new java.util.LinkedHashSet<>(jdbc.queryForList(sql, Long.class, args.toArray()));
@@ -276,6 +324,12 @@ public class DemandNetwork {
         return jdbc.query("""
                 SELECT r.*, s.display_name FROM demand_responses r
                   JOIN shops s ON s.id=r.shop_id WHERE r.request_id=?
+                   AND NOT EXISTS (
+                       SELECT 1 FROM demand_requests d
+                       JOIN customer_demand_shop_blocks blocked
+                         ON blocked.customer_id=d.customer_id
+                        AND blocked.shop_id=r.shop_id
+                        WHERE d.id=r.request_id)
                  ORDER BY r.created_at, r.id
                 """, (rs, n) -> new ResponseView(rs.getLong("id"), rs.getLong("shop_id"),
                 rs.getString("display_name"), rs.getString("status"), rs.getBigDecimal("price"),

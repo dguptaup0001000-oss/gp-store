@@ -338,6 +338,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 // ADMIN bucket.
                 || path.startsWith("/api/returns")
                 || path.startsWith("/api/demand-requests")
+                || path.startsWith("/api/demand-responses")
                 // Same category as app-session above: something the app posts
                 // about itself, not something a person chose to do. It FAILS
                 // OPEN, and that is the right way round here - the reporter

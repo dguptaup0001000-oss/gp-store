@@ -61,4 +61,13 @@ class DemandNetworkValidationTest {
         TenantContext.runWithin(TenantScope.ofShop(9L), () ->
                 assertThrows(BadRequestException.class, () -> demand.respond(44L, response)));
     }
+
+    @Test
+    void customerCannotSubmitAnUnknownReportReason() {
+        DemandNetwork demand = new DemandNetwork(jdbc, currentUser, discovery);
+        DemandNetwork.ReportRequest report =
+                new DemandNetwork.ReportRequest("DELETE_SHOP", null, true);
+
+        assertThrows(BadRequestException.class, () -> demand.report(91L, report));
+    }
 }

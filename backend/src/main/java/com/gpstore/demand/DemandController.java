@@ -34,6 +34,12 @@ public class DemandController {
         return demand.close(id, true);
     }
 
+    @PostMapping("/api/demand-responses/{id}/report")
+    public DemandNetwork.ReportView report(
+            @PathVariable long id, @RequestBody DemandNetwork.ReportRequest request) {
+        return demand.report(id, request);
+    }
+
     @GetMapping("/api/shop/demand-requests")
     public List<DemandNetwork.MerchantDemand> merchantRequests(
             @RequestParam(defaultValue = "0") int page,

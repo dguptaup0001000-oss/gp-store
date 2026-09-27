@@ -333,6 +333,7 @@ public class SecurityConfig {
                 // Customer demand is private account data. The customer id is
                 // always derived from the token; no route accepts one.
                 .requestMatchers("/api/demand-requests", "/api/demand-requests/**").authenticated()
+                .requestMatchers(HttpMethod.POST, "/api/demand-responses/*/report").authenticated()
 
                 // THE PLATFORM SURFACE. Merchants, shop lifecycle, and looking
                 // into any shop - the only routes whose scope spans merchants.

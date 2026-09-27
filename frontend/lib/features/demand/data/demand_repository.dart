@@ -52,6 +52,22 @@ class DemandRepository {
         await apiClient.dio.post('/api/demand-requests/$id/cancel');
     return DemandRequest.fromJson(response.data as Map<String, dynamic>);
   }
+
+  Future<void> reportResponse(
+    int responseId, {
+    required String reason,
+    String? detail,
+    bool blockShop = true,
+  }) async {
+    await apiClient.dio.post(
+      '/api/demand-responses/$responseId/report',
+      data: {
+        'reason': reason,
+        if (detail != null && detail.trim().isNotEmpty) 'detail': detail.trim(),
+        'blockShop': blockShop,
+      },
+    );
+  }
 }
 
 class DemandRequest {
@@ -85,6 +101,7 @@ class DemandRequest {
 
 class DemandResponse {
   const DemandResponse({
+    required this.id,
     required this.shopName,
     required this.status,
     required this.price,
@@ -94,6 +111,7 @@ class DemandResponse {
     required this.note,
   });
 
+  final int id;
   final String shopName;
   final String status;
   final double? price;
@@ -103,6 +121,7 @@ class DemandResponse {
   final String? note;
 
   factory DemandResponse.fromJson(Map<String, dynamic> json) => DemandResponse(
+        id: (json['id'] as num).toInt(),
         shopName: json['shopName'] as String? ?? 'Local shop',
         status: json['status'] as String? ?? '',
         price: (json['price'] as num?)?.toDouble(),
