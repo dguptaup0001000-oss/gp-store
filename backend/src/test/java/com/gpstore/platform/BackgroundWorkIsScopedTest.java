@@ -117,7 +117,10 @@ class BackgroundWorkIsScopedTest {
             // Expires demand requests across the marketplace and deletes old
             // anonymized search signals. Both operations are deliberately
             // platform-wide retention sweeps, not work for one shop.
-            "IntelligenceRetentionJob.clean");
+            "IntelligenceRetentionJob.clean",
+            // Claims globally queued extraction jobs, then writes each row
+            // using the explicit shop id materialized on that job.
+            "AiCatalogJobWorker.process");
 
     @AfterEach
     void tidyUp() {
