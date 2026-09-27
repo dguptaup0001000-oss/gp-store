@@ -11,6 +11,8 @@ class DemandRepository {
     int quantity = 1,
     double radiusKm = 8,
     double? budget,
+    int? categoryId,
+    DateTime? requiredBy,
     String? preferredMode,
   }) async {
     final response = await apiClient.dio.post(
@@ -22,6 +24,8 @@ class DemandRepository {
         'longitude': longitude,
         'radiusKm': radiusKm,
         if (budget != null) 'budget': budget,
+        if (categoryId != null) 'categoryId': categoryId,
+        if (requiredBy != null) 'requiredBy': requiredBy.toIso8601String(),
         if (preferredMode != null) 'preferredMode': preferredMode,
       },
     );

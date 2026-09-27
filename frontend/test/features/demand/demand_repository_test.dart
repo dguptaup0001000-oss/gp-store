@@ -70,4 +70,45 @@ void main() {
     expect((await repository.close(17)).status, 'CLOSED');
     expect((await repository.cancel(17)).status, 'CANCELLED');
   });
+
+  test('create sends optional routing and expiry constraints', () async {
+    final adapter = FakeHttpClientAdapter();
+    final requiredBy = DateTime(2026, 10, 2, 23, 59);
+    adapter.on('POST', '/api/demand-requests', (options) {
+      expect(options.data, {
+        'description': 'tractor brake pad',
+        'quantity': 2,
+        'latitude': 22.3,
+        'longitude': 78.4,
+        'radiusKm': 12.0,
+        'budget': 1000.0,
+        'categoryId': 44,
+        'requiredBy': requiredBy.toIso8601String(),
+        'preferredMode': 'VISIT_TO_BUY',
+      });
+      return const FakeResponse({
+        'id': 18,
+        'description': 'tractor brake pad',
+        'quantity': 2,
+        'status': 'OPEN',
+        'responses': <dynamic>[],
+      });
+    });
+
+    final repository =
+        DemandRepository(apiClient: buildTestApiClient(adapter));
+    final request = await repository.create(
+      description: 'tractor brake pad',
+      latitude: 22.3,
+      longitude: 78.4,
+      quantity: 2,
+      radiusKm: 12,
+      budget: 1000,
+      categoryId: 44,
+      requiredBy: requiredBy,
+      preferredMode: 'VISIT_TO_BUY',
+    );
+
+    expect(request.id, 18);
+  });
 }
