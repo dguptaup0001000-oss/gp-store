@@ -30,6 +30,9 @@ class MerchantIntelligenceScreen extends ConsumerWidget {
           final data = snapshot.data!;
           final unmet = data['unmetDemand'] as List? ?? const [];
           final frequent = data['frequentSearches'] as List? ?? const [];
+          final notStocked = data['searchedButNotStocked'] as List? ?? const [];
+          final trend = data['orderTrend'] as List? ?? const [];
+          final popular = data['popularPeriods'] as List? ?? const [];
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -47,9 +50,24 @@ class MerchantIntelligenceScreen extends ConsumerWidget {
                   _Metric('Merchant responses', data['demandResponses']),
                   _Metric('Visit interest', data['visitInterest']),
                   _Metric('Service interest', data['serviceInterest']),
+                  _Metric('Delivered orders', data['completedOrders']),
+                  _Metric('Current out of stock', data['currentOutOfStockListings']),
+                  _Metric('Repeat customers*', data['repeatCustomers']),
+                  _Metric('Gross sales', '₹${data['grossSales'] ?? 0}'),
                 ],
               ),
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  '*Hidden when the aggregate privacy threshold is not met.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
               const SizedBox(height: 24),
+              const Text('Searched but not stocked', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+              for (final raw in notStocked)
+                _DemandRow(Map<String, dynamic>.from(raw as Map)),
+              const SizedBox(height: 20),
               const Text('Unmet local demand', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
               for (final raw in unmet)
                 _DemandRow(Map<String, dynamic>.from(raw as Map)),
@@ -57,6 +75,23 @@ class MerchantIntelligenceScreen extends ConsumerWidget {
               const Text('Frequently searched', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
               for (final raw in frequent)
                 _DemandRow(Map<String, dynamic>.from(raw as Map)),
+              const SizedBox(height: 20),
+              const Text('Daily sales trend', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+              for (final raw in trend)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('${(raw as Map)['period']}'),
+                  subtitle: Text('${raw['orders']} delivered orders'),
+                  trailing: Text('₹${raw['sales']}'),
+                ),
+              const SizedBox(height: 20),
+              const Text('Popular shopping hours', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+              for (final raw in popular)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('${(raw as Map)['hour']}:00–${((raw['hour'] as num).toInt() + 1) % 24}:00'),
+                  trailing: Text('${raw['orders']} orders'),
+                ),
             ],
           );
         },

@@ -27,12 +27,19 @@ public class CommerceIntelligenceService {
     }
 
     public record DemandTerm(String query, long searches, long zeroResultSearches) {}
+    public record TrendPoint(String period, long orders, BigDecimal sales) {}
+    public record PopularPeriod(int hour, long orders) {}
     public record MerchantInsight(LocalDateTime from, LocalDateTime to,
                                   long searchesNearby, long zeroResultSearchesNearby,
                                   long openDemandRequests, long demandResponses,
                                   long visitInterest, long serviceInterest,
-                                  long completedOrders, List<DemandTerm> frequentSearches,
-                                  List<DemandTerm> unmetDemand) {}
+                                  long completedOrders, long currentOutOfStockListings,
+                                  long repeatCustomers, BigDecimal grossSales,
+                                  List<DemandTerm> frequentSearches,
+                                  List<DemandTerm> unmetDemand,
+                                  List<DemandTerm> searchedButNotStocked,
+                                  List<TrendPoint> orderTrend,
+                                  List<PopularPeriod> popularPeriods) {}
     public record ModeUsage(String commerceMode, long listings, long engagementEvents) {}
     public record MarketplaceInsight(LocalDateTime from, LocalDateTime to,
                                      long searches, long zeroResultSearches,
@@ -85,8 +92,48 @@ public class CommerceIntelligenceService {
                 SELECT count(*) FROM orders
                  WHERE shop_id=? AND order_date>=? AND order_status='DELIVERED'
                 """, shopId, from);
+        long outOfStock = count("""
+                SELECT count(*) FROM shop_product_variants spv
+                  LEFT JOIN inventory i
+                    ON i.shop_id=spv.shop_id AND i.product_variant_id=spv.product_variant_id
+                 WHERE spv.shop_id=? AND spv.active=true
+                   AND COALESCE(i.stock, 0)<=0
+                """, shopId);
+        long repeatCustomers = count("""
+                SELECT count(*) FROM (
+                    SELECT customer_id FROM orders
+                     WHERE shop_id=? AND order_date>=? AND order_status='DELIVERED'
+                     GROUP BY customer_id HAVING count(*)>1
+                ) repeat_buyers
+                """, shopId, from);
+        if (repeatCustomers < privacyThreshold) repeatCustomers = 0;
+        BigDecimal grossSales = jdbc.queryForObject("""
+                SELECT COALESCE(sum(total_amount),0) FROM orders
+                 WHERE shop_id=? AND order_date>=? AND order_status='DELIVERED'
+                """, BigDecimal.class, shopId, from);
+        List<DemandTerm> notStocked = searchedButNotStocked(
+                shopId, from, latCell, lngCell);
+        List<TrendPoint> trend = jdbc.query("""
+                SELECT to_char(date_trunc('day', order_date), 'YYYY-MM-DD') period,
+                       count(*) orders, COALESCE(sum(total_amount),0) sales
+                  FROM orders
+                 WHERE shop_id=? AND order_date>=? AND order_status='DELIVERED'
+                 GROUP BY date_trunc('day', order_date)
+                 ORDER BY date_trunc('day', order_date)
+                """, (rs, n) -> new TrendPoint(rs.getString("period"), rs.getLong("orders"),
+                rs.getBigDecimal("sales")), shopId, from);
+        List<PopularPeriod> popular = jdbc.query("""
+                SELECT extract(hour from order_date)::int hour, count(*) orders
+                  FROM orders WHERE shop_id=? AND order_date>=?
+                 GROUP BY extract(hour from order_date)
+                 HAVING count(*)>=?
+                 ORDER BY orders DESC, hour LIMIT 8
+                """, (rs, n) -> new PopularPeriod(rs.getInt("hour"), rs.getLong("orders")),
+                shopId, from, privacyThreshold);
         return new MerchantInsight(from, to, searches, zero, requests, responses, visit, service,
-                orders, frequent, unmet);
+                orders, outOfStock, repeatCustomers,
+                grossSales == null ? BigDecimal.ZERO : grossSales,
+                frequent, unmet, notStocked, trend, popular);
     }
 
     @Transactional(readOnly = true)
@@ -150,6 +197,30 @@ public class CommerceIntelligenceService {
                  ORDER BY zero_count DESC, searches DESC LIMIT 30
                 """, (rs, n) -> new DemandTerm(rs.getString("normalized_query"),
                 rs.getLong("searches"), rs.getLong("zero_count")), from, privacyThreshold);
+    }
+
+    private List<DemandTerm> searchedButNotStocked(long shopId, LocalDateTime from,
+                                                    BigDecimal lat, BigDecimal lng) {
+        return jdbc.query("""
+                SELECT e.normalized_query, count(*) searches,
+                       count(*) FILTER (WHERE e.result_count=0) zero_count
+                  FROM marketplace_search_events e
+                 WHERE e.created_at>=?
+                   AND (?::numeric IS NULL OR abs(e.latitude_cell-?)<=0.10)
+                   AND (?::numeric IS NULL OR abs(e.longitude_cell-?)<=0.10)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM shop_product_variants spv
+                       JOIN product_variants v ON v.id=spv.product_variant_id
+                       JOIN products p ON p.id=v.product_id
+                        WHERE spv.shop_id=? AND spv.active=true
+                          AND (lower(p.name) LIKE '%%' || e.normalized_query || '%%'
+                               OR lower(COALESCE(p.brand,'')) LIKE '%%' || e.normalized_query || '%%'
+                               OR lower(COALESCE(p.search_keywords,'')) LIKE '%%' || e.normalized_query || '%%'))
+                 GROUP BY e.normalized_query HAVING count(*)>=?
+                 ORDER BY searches DESC, e.normalized_query LIMIT 20
+                """, (rs, n) -> new DemandTerm(rs.getString("normalized_query"),
+                rs.getLong("searches"), rs.getLong("zero_count")),
+                from, lat, lat, lng, lng, shopId, privacyThreshold);
     }
 
     private long count(String sql, Object... args) {

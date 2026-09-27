@@ -176,21 +176,65 @@ class _PlatformControlTowerScreenState
             FutureBuilder<Map<String, dynamic>>(
               future: _marketplace,
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const SizedBox.shrink();
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const AdminSectionCard(
+                    title: 'Demand → Discovery → Supply (30 days)',
+                    child: LinearProgressIndicator(),
+                  );
+                }
+                if (snapshot.hasError || !snapshot.hasData) {
+                  return AdminSectionCard(
+                    title: 'Demand → Discovery → Supply (30 days)',
+                    child: TextButton.icon(
+                      onPressed: _reloadDashboard,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Could not load marketplace intelligence. Retry'),
+                    ),
+                  );
+                }
                 final data = snapshot.data!;
+                final unmet = data['unmetDemand'] as List? ?? const [];
+                final modes = data['commerceModeUsage'] as List? ?? const [];
                 return AdminSectionCard(
                   title: 'Demand → Discovery → Supply (30 days)',
-                  child: Wrap(
-                    spacing: AdminSpacing.lg,
-                    runSpacing: AdminSpacing.md,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _LoopMetric('Searches', data['searches']),
-                      _LoopMetric('Zero-result rate', '${data['zeroResultRate']}%'),
-                      _LoopMetric('Demand requests', data['demandRequests']),
-                      _LoopMetric('Merchant responses', data['merchantResponses']),
-                      _LoopMetric('Matched requests', data['matchedRequests']),
-                      _LoopMetric('Approved AI drafts', data['approvedAiDrafts']),
-                      _LoopMetric('AI failures', data['failedAiJobs']),
+                      Wrap(
+                        spacing: AdminSpacing.lg,
+                        runSpacing: AdminSpacing.md,
+                        children: [
+                          _LoopMetric('Searches', data['searches']),
+                          _LoopMetric('Zero-result rate', '${data['zeroResultRate']}%'),
+                          _LoopMetric('Demand requests', data['demandRequests']),
+                          _LoopMetric('Merchant responses', data['merchantResponses']),
+                          _LoopMetric('Response rate', '${data['responseRate']}%'),
+                          _LoopMetric('Matched requests', data['matchedRequests']),
+                          _LoopMetric('Approved AI drafts', data['approvedAiDrafts']),
+                          _LoopMetric('AI failures', data['failedAiJobs']),
+                        ],
+                      ),
+                      const SizedBox(height: AdminSpacing.md),
+                      const Text('Top unmet demand',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      for (final raw in unmet.take(10))
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('${(raw as Map)['query']}'),
+                          trailing: Text('${raw['zeroResultSearches']} unmet'),
+                        ),
+                      const SizedBox(height: AdminSpacing.md),
+                      const Text('Commerce-mode usage',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      for (final raw in modes)
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('${(raw as Map)['commerceMode']}'.replaceAll('_', ' ')),
+                          subtitle: Text('${raw['listings']} active listings'),
+                          trailing: Text('${raw['engagementEvents']} engagements'),
+                        ),
                     ],
                   ),
                 );
