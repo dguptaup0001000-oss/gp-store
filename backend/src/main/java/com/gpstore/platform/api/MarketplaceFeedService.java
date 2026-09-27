@@ -149,8 +149,8 @@ public class MarketplaceFeedService {
 
         List<MarketplaceFeedView> results = new ArrayList<>();
         if (!distanceByShop.isEmpty()) {
-            for (Object[] row : feed.search(interpreted, distanceByShop.keySet(),
-                    requestedModes, distanceByShop, limit, offset)) {
+            for (Object[] row : searchWithOriginalFallback(
+                    interpreted, keyword, distanceByShop, requestedModes, limit, offset)) {
                 results.add(toCard(row));
             }
         }
@@ -162,14 +162,15 @@ public class MarketplaceFeedService {
                     lat, lng, null, rung -> {
                         if (rung.isEmpty()) return List.of();
                         Map<Long, Double> rungDistances = distances(rung);
-                        return feed.search(interpreted, rungDistances.keySet(), requestedModes,
-                                rungDistances, 1, 0).isEmpty() ? List.of() : rung;
+                        return searchWithOriginalFallback(
+                                interpreted, keyword, rungDistances, requestedModes, 1, 0)
+                                .isEmpty() ? List.of() : rung;
                     });
             Map<Long, Double> expandedDistances = distances(expanded.shops());
             if (!expandedDistances.isEmpty()
                     && !expandedDistances.keySet().equals(distanceByShop.keySet())) {
-                for (Object[] row : feed.search(interpreted, expandedDistances.keySet(),
-                        requestedModes, expandedDistances, limit, offset)) {
+                for (Object[] row : searchWithOriginalFallback(
+                        interpreted, keyword, expandedDistances, requestedModes, limit, offset)) {
                     results.add(toCard(row));
                 }
             }
@@ -180,6 +181,21 @@ public class MarketplaceFeedService {
             signals.search(keyword, lat, lng, modes, results.size());
         }
         return results;
+    }
+
+    private List<Object[]> searchWithOriginalFallback(
+            String interpreted, String original, Map<Long, Double> distances,
+            Set<CommerceMode> modes, int limit, int offset) {
+        List<Object[]> rows = feed.search(
+                interpreted, distances.keySet(), modes, distances, limit, offset);
+        // Phonetic synonym keys are deliberately lossy: for example, an
+        // English catalogue word can sound like a Hindi vocabulary term.
+        // Translation gets first chance, but it must never erase a literal
+        // town-wide match such as "gold chain".
+        if (rows.isEmpty() && !interpreted.equalsIgnoreCase(original.trim())) {
+            return feed.search(original, distances.keySet(), modes, distances, limit, offset);
+        }
+        return rows;
     }
 
     private String normalizeSearch(String keyword) {

@@ -102,7 +102,19 @@ class ShopScopeIsNotOptionalTest {
      * All three are asserted by MultiShopCheckoutTest.
      */
     private static final Set<String> SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY =
-            Set.of("audit_logs", "cart_items", "outbox_events", "order_alerts_sent");
+            Set.of("audit_logs", "cart_items", "outbox_events", "order_alerts_sent",
+                    "customer_demand_shop_blocks", "demand_audit_events");
+
+    /*
+     * customer_demand_shop_blocks is customer-owned: shop_id identifies the
+     * shop that customer chose to block, not the tenant that owns the row.
+     * Every read is paired with the authenticated customer id.
+     *
+     * demand_audit_events is an append-only lifecycle trail. Its nullable
+     * shop_id records which shop an event concerned; it does not authorize a
+     * merchant read. Merchant authorization remains the materialized
+     * demand_request_recipients boundary.
+     */
 
     /**
      * Shop-owned workflow tables intentionally implemented through bounded
