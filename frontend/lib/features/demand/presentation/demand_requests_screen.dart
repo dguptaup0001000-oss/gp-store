@@ -47,9 +47,9 @@ class DemandRequestsScreen extends ConsumerWidget {
           await ref.read(myDemandRequestsProvider.future);
         },
         child: requests.when(
-          loading: () => const ListView(
-            physics: AlwaysScrollableScrollPhysics(),
-            children: [
+          loading: () => ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: const [
               SizedBox(height: 240),
               Center(child: CircularProgressIndicator()),
             ],
