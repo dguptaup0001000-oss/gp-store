@@ -119,6 +119,38 @@ public class ConfiguredMarketplaceAiProvider implements MarketplaceAiProvider {
         return configured() ? "OPENAI_COMPATIBLE_WITH_FALLBACK" : fallback.name();
     }
 
+    @Override
+    public List<CatalogCandidate> extractCatalog(String sourceType, String controlledUrl) {
+        if (!configured() || controlledUrl == null || !controlledUrl.startsWith("https://")) {
+            return List.of();
+        }
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+                    .timeout(timeout)
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            json.writeValueAsString(catalogBody(sourceType, controlledUrl))))
+                    .build();
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                HttpResponse<String> response =
+                        http.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                    List<CatalogCandidate> candidates = parseCatalog(response.body());
+                    if (!candidates.isEmpty()) return candidates;
+                } else if (response.statusCode() < 500 && response.statusCode() != 429) {
+                    break;
+                }
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } catch (Exception failure) {
+            log.warn("Marketplace AI catalogue extraction failed: {}",
+                    failure.getClass().getSimpleName());
+        }
+        return List.of();
+    }
+
     private boolean configured() {
         return enabled && "OPENAI_COMPATIBLE".equalsIgnoreCase(providerName)
                 && !endpoint.isBlank() && !apiKey.isBlank() && !model.isBlank();
@@ -154,6 +186,115 @@ public class ConfiguredMarketplaceAiProvider implements MarketplaceAiProvider {
                         "type", "json_schema",
                         "json_schema", Map.of("name", "marketplace_intent",
                                 "strict", true, "schema", schema)));
+    }
+
+    private Map<String, Object> catalogBody(String sourceType, String controlledUrl) {
+        Map<String, Object> nullableString = Map.of("type", List.of("string", "null"));
+        Map<String, Object> nullableNumber = Map.of("type", List.of("number", "null"));
+        Map<String, Object> candidate = Map.of(
+                "type", "object",
+                "additionalProperties", false,
+                "required", List.of("name", "brand", "description", "variantLabel",
+                        "quantity", "unit", "mrp", "sellingPrice", "stock", "barcode",
+                        "confidence", "generatedFields", "uncertainFields"),
+                "properties", Map.ofEntries(
+                        Map.entry("name", nullableString),
+                        Map.entry("brand", nullableString),
+                        Map.entry("description", nullableString),
+                        Map.entry("variantLabel", nullableString),
+                        Map.entry("quantity", nullableNumber),
+                        Map.entry("unit", nullableString),
+                        Map.entry("mrp", nullableNumber),
+                        Map.entry("sellingPrice", nullableNumber),
+                        Map.entry("stock", Map.of("type", List.of("integer", "null"))),
+                        Map.entry("barcode", nullableString),
+                        Map.entry("confidence", nullableNumber),
+                        Map.entry("generatedFields", Map.of("type", "array",
+                                "items", Map.of("type", "string"))),
+                        Map.entry("uncertainFields", Map.of("type", "array",
+                                "items", Map.of("type", "string")))));
+        Map<String, Object> schema = Map.of(
+                "type", "object",
+                "additionalProperties", false,
+                "required", List.of("candidates"),
+                "properties", Map.of("candidates", Map.of(
+                        "type", "array", "maxItems", 50, "items", candidate)));
+        return Map.of(
+                "model", model,
+                "temperature", 0,
+                "messages", List.of(
+                        Map.of("role", "system", "content",
+                                "Extract only text visibly supported by the image. Use null for missing values. Never infer a category id, price, stock, barcode, brand, pack size, or product that is not visible."),
+                        Map.of("role", "user", "content", List.of(
+                                Map.of("type", "text", "text",
+                                        "Source type: " + sourceType
+                                                + ". Return separate candidates for clearly distinct products."),
+                                Map.of("type", "image_url",
+                                        "image_url", Map.of("url", controlledUrl))))),
+                "response_format", Map.of(
+                        "type", "json_schema",
+                        "json_schema", Map.of("name", "catalog_candidates",
+                                "strict", true, "schema", schema)));
+    }
+
+    private List<CatalogCandidate> parseCatalog(String responseBody) {
+        try {
+            JsonNode content = json.readTree(responseBody)
+                    .path("choices").path(0).path("message").path("content");
+            if (!content.isTextual()) return List.of();
+            JsonNode candidates = json.readTree(content.textValue()).path("candidates");
+            if (!candidates.isArray()) return List.of();
+            List<CatalogCandidate> result = new ArrayList<>();
+            for (JsonNode row : candidates) {
+                if (result.size() == 50) break;
+                String name = text(row, "name");
+                List<String> generated = strings(row.path("generatedFields"));
+                List<String> uncertain = strings(row.path("uncertainFields"));
+                if (name == null && uncertain.isEmpty()) uncertain = List.of("name");
+                result.add(new CatalogCandidate(
+                        name, text(row, "brand"), text(row, "description"),
+                        text(row, "variantLabel"),
+                        row.path("quantity").isNumber() ? row.path("quantity").doubleValue() : null,
+                        text(row, "unit"),
+                        positiveOrNull(row.path("mrp")),
+                        positiveOrNull(row.path("sellingPrice")),
+                        row.path("stock").canConvertToInt() && row.path("stock").intValue() >= 0
+                                ? row.path("stock").intValue() : null,
+                        text(row, "barcode"),
+                        confidence(row.path("confidence")),
+                        generated, uncertain));
+            }
+            return List.copyOf(result);
+        } catch (Exception malformed) {
+            log.warn("Marketplace AI returned malformed catalogue output");
+            return List.of();
+        }
+    }
+
+    private static BigDecimal positiveOrNull(JsonNode value) {
+        if (!value.isNumber()) return null;
+        BigDecimal number = value.decimalValue();
+        return number.signum() > 0 ? number : null;
+    }
+
+    private static BigDecimal confidence(JsonNode value) {
+        if (!value.isNumber()) return BigDecimal.ZERO;
+        BigDecimal number = value.decimalValue();
+        if (number.signum() < 0 || number.compareTo(BigDecimal.ONE) > 0) {
+            return BigDecimal.ZERO;
+        }
+        return number;
+    }
+
+    private static List<String> strings(JsonNode array) {
+        if (!array.isArray()) return List.of();
+        List<String> values = new ArrayList<>();
+        for (JsonNode value : array) {
+            if (value.isTextual() && !value.textValue().isBlank() && values.size() < 30) {
+                values.add(value.textValue().trim());
+            }
+        }
+        return List.copyOf(values);
     }
 
     private Optional<Intent> parse(String responseBody) {

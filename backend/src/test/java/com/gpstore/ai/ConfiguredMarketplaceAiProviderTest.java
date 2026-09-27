@@ -9,6 +9,7 @@ import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -60,6 +61,38 @@ class ConfiguredMarketplaceAiProviderTest {
                 .interpret("iPhone repair nearby").orElseThrow();
 
         assertThat(intent.commerceMode()).isEqualTo("SERVICE_AT_SHOP");
+    }
+
+    @Test
+    void structuredProviderExtractsReviewOnlyCatalogueCandidates() throws Exception {
+        String content = """
+                {"candidates":[{"name":"Tata Salt","brand":"Tata","description":null,
+                "variantLabel":"1 kg","quantity":1,"unit":"kg","mrp":30,
+                "sellingPrice":-1,"stock":20,"barcode":"8901234567890",
+                "confidence":0.92,"generatedFields":["name","brand","mrp","stock"],
+                "uncertainFields":["sellingPrice"]}]}
+                """.replace("\n", "");
+        start("{\"choices\":[{\"message\":{\"content\":"
+                + new ObjectMapper().writeValueAsString(content) + "}}]}");
+
+        List<MarketplaceAiProvider.CatalogCandidate> candidates = provider(true)
+                .extractCatalog("LABEL_PHOTO", "https://images.gpstore.co.in/gpstore/products/salt.jpg");
+
+        assertThat(candidates).hasSize(1);
+        MarketplaceAiProvider.CatalogCandidate candidate = candidates.getFirst();
+        assertThat(candidate.name()).isEqualTo("Tata Salt");
+        assertThat(candidate.mrp()).isEqualByComparingTo("30");
+        assertThat(candidate.sellingPrice()).isNull();
+        assertThat(candidate.uncertainFields()).contains("sellingPrice");
+    }
+
+    @Test
+    void malformedCatalogueResponseProducesNoCandidates() throws Exception {
+        start("{\"choices\":[{\"message\":{\"content\":\"not-json\"}}]}");
+
+        assertThat(provider(true).extractCatalog(
+                "INVOICE", "https://images.gpstore.co.in/gpstore/products/invoice.jpg"))
+                .isEmpty();
     }
 
     private ConfiguredMarketplaceAiProvider provider(boolean enabled) {

@@ -8,6 +8,9 @@ import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.platform.TenantContext;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.ProductService;
+import com.gpstore.upload.CatalogImageRefs;
+import com.gpstore.upload.R2ObjectStorageService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
@@ -34,11 +37,21 @@ public class AiCatalogService {
     private final JdbcTemplate jdbc;
     private final CurrentUser currentUser;
     private final ProductService products;
+    private final MarketplaceAiProvider aiProvider;
+    private final R2ObjectStorageService storage;
 
     public AiCatalogService(JdbcTemplate jdbc, CurrentUser currentUser, ProductService products) {
+        this(jdbc, currentUser, products, new FallbackAiProvider(), null);
+    }
+
+    @Autowired
+    public AiCatalogService(JdbcTemplate jdbc, CurrentUser currentUser, ProductService products,
+                            MarketplaceAiProvider aiProvider, R2ObjectStorageService storage) {
         this.jdbc = jdbc;
         this.currentUser = currentUser;
         this.products = products;
+        this.aiProvider = aiProvider;
+        this.storage = storage;
     }
 
     public record StartRequest(String sourceType, String objectKey, String manualText) {}
@@ -138,13 +151,41 @@ public class AiCatalogService {
         long userId = ((Number) claimed.get("userId")).longValue();
         String type = (String) claimed.get("type");
         String objectKey = (String) claimed.get("objectKey");
+        String canonicalRef = CatalogImageRefs.canonicalize(objectKey);
         String associatedImage = Set.of("PRODUCT_PHOTO", "LABEL_PHOTO", "SHELF_PHOTO")
-                .contains(type) && CatalogUrlValidator.isAllowedImageUrl(objectKey)
-                ? objectKey : null;
-        createDraft(jobId, shopId, userId,
-                new DraftInput(null, null, null, null, null, null, null,
-                        null, null, null, null, associatedImage, null),
-                BigDecimal.ZERO, "", "name,brand,categoryId,sellingPrice,unit,commerceMode");
+                .contains(type) && CatalogUrlValidator.isAllowedImageUrl(canonicalRef)
+                ? canonicalRef : null;
+        List<MarketplaceAiProvider.CatalogCandidate> candidates = List.of();
+        try {
+            String providerUrl = providerUrl(canonicalRef);
+            if (providerUrl != null) {
+                candidates = aiProvider.extractCatalog(type, providerUrl);
+            }
+        } catch (RuntimeException unavailable) {
+            // A provider or object-storage outage must still produce a
+            // merchant-editable review draft and must never stop the worker.
+            candidates = List.of();
+        }
+        if (candidates.isEmpty()) {
+            createDraft(jobId, shopId, userId,
+                    new DraftInput(null, null, null, null, null, null, null,
+                            null, null, null, null, associatedImage, null),
+                    BigDecimal.ZERO, "", "name,brand,categoryId,sellingPrice,unit,commerceMode");
+        } else {
+            for (MarketplaceAiProvider.CatalogCandidate candidate : candidates) {
+                DraftInput extracted = new DraftInput(
+                        clean(candidate.name(), 255), clean(candidate.brand(), 255),
+                        clean(candidate.description(), 4000), null,
+                        clean(candidate.variantLabel(), 120), candidate.quantity(),
+                        clean(candidate.unit(), 40), candidate.mrp(), candidate.sellingPrice(),
+                        candidate.stock(), clean(candidate.barcode(), 120),
+                        associatedImage, null);
+                createDraft(jobId, shopId, userId, extracted,
+                        candidate.confidence() == null ? BigDecimal.ZERO : candidate.confidence(),
+                        fields(candidate.generatedFields(), false, extracted),
+                        fields(candidate.uncertainFields(), true, extracted));
+            }
+        }
         jdbc.update("""
                 UPDATE ai_extraction_jobs SET status='REVIEW_READY',
                     completed_at=now(), updated_at=now()
@@ -460,6 +501,31 @@ public class AiCatalogService {
         if (input.brand() == null) fields.add("brand");
         return String.join(",", fields);
     }
+    private String providerUrl(String canonicalRef) {
+        String key = CatalogImageRefs.objectKeyFrom(canonicalRef);
+        if (key != null) {
+            return storage == null ? null : storage.signGet(key);
+        }
+        return CatalogUrlValidator.isAllowedImageUrl(canonicalRef) ? canonicalRef : null;
+    }
+    private static String fields(List<String> providerFields, boolean uncertain,
+                                 DraftInput input) {
+        Set<String> allowed = Set.of("name", "brand", "description", "variantLabel",
+                "quantity", "unit", "mrp", "sellingPrice", "stock", "barcode",
+                "imageUrl", "categoryId", "commerceMode");
+        java.util.LinkedHashSet<String> fields = new java.util.LinkedHashSet<>();
+        if (providerFields != null) {
+            providerFields.stream().filter(allowed::contains).limit(30).forEach(fields::add);
+        }
+        if (uncertain) {
+            if (input.name() == null) fields.add("name");
+            if (input.categoryId() == null) fields.add("categoryId");
+            if (input.sellingPrice() == null) fields.add("sellingPrice");
+            if (input.unit() == null) fields.add("unit");
+            if (input.commerceMode() == null) fields.add("commerceMode");
+        }
+        return String.join(",", fields);
+    }
     private static String requiredMode(String raw) {
         try {
             return com.gpstore.catalog.shop.CommerceMode.valueOf(upper(raw)).name();
@@ -470,11 +536,11 @@ public class AiCatalogService {
     private static String controlledKey(String raw) {
         String key = clean(raw, 1000);
         if (key == null) return null;
-        if (key.contains("..") || key.startsWith("/")
-                || !(key.startsWith("catalog/") || CatalogUrlValidator.isAllowedImageUrl(key))) {
+        String canonical = CatalogImageRefs.canonicalize(key);
+        if (!CatalogUrlValidator.isAllowedImageUrl(canonical)) {
             throw new BadRequestException("Use a GP-STORE controlled upload.");
         }
-        return key;
+        return canonical;
     }
     private static String controlledImage(String raw) {
         String value = clean(raw, 1000);
