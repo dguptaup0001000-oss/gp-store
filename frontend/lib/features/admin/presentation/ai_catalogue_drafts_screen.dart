@@ -77,8 +77,9 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
       ),
     );
     if (save != true) return;
+    final draftId = draft['id'];
     await ref.read(apiClientProvider).dio.put(
-      '/api/shop/ai-catalog/drafts/${draft['id']}',
+      '/api/shop/ai-catalog/drafts/$draftId',
       data: {
         'name': name.text.trim(),
         'brand': draft['brand'],
@@ -99,8 +100,9 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
   }
 
   Future<void> _approve(Map<String, dynamic> draft) async {
+    final draftId = draft['id'];
     await ref.read(apiClientProvider).dio.post(
-      '/api/shop/ai-catalog/drafts/${draft['id']}/approve',
+      '/api/shop/ai-catalog/drafts/$draftId/approve',
     );
     if (mounted) setState(() => _jobs = _load());
   }

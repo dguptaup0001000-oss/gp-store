@@ -60,8 +60,9 @@ class _MerchantDemandRequestsScreenState
     );
     if (accepted != true) return;
     final parsedPrice = double.tryParse(price.text);
+    final requestId = request['id'];
     await ref.read(apiClientProvider).dio.put(
-      '/api/shop/demand-requests/${request['id']}/response',
+      '/api/shop/demand-requests/$requestId/response',
       data: {
         'status': available ? 'AVAILABLE' : 'NOT_AVAILABLE',
         if (parsedPrice != null) 'price': parsedPrice,

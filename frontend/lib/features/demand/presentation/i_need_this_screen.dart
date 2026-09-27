@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/api/error_messages.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../shared/widgets/action_feedback.dart';
 import '../data/demand_repository.dart';
@@ -99,7 +100,7 @@ class _INeedThisScreenState extends ConsumerState<INeedThisScreen> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
-            value: _mode,
+            initialValue: _mode,
             decoration: const InputDecoration(labelText: 'Preferred way to buy'),
             items: const [
               DropdownMenuItem(value: null, child: Text('Any supported mode')),

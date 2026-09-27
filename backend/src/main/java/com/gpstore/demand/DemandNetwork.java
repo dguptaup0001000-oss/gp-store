@@ -204,7 +204,7 @@ public class DemandNetwork {
                 RETURNING id
                 """, Long.class, requestId, shopId, status, request.price(), request.quantity(),
                 request.readyMinutes(), mode == null ? null : mode.name(), clean(request.note(), 500));
-        return response(id, requestId);
+        return response(id, requestId, shopId);
     }
 
     private Set<Long> eligible(List<Long> shops, Long categoryId, CommerceMode mode) {
@@ -264,9 +264,19 @@ public class DemandNetwork {
                 local(rs.getTimestamp("created_at"))), requestId);
     }
 
-    private ResponseView response(long responseId, long requestId) {
-        return responses(requestId).stream().filter(r -> r.id().equals(responseId)).findFirst()
-                .orElseThrow(() -> new IllegalStateException("Saved response was not readable."));
+    private ResponseView response(long responseId, long requestId, long shopId) {
+        return jdbc.query("""
+                SELECT r.*, s.display_name FROM demand_responses r
+                  JOIN shops s ON s.id=r.shop_id
+                 WHERE r.id=? AND r.request_id=? AND r.shop_id=?
+                """, rs -> {
+            if (!rs.next()) throw new IllegalStateException("Saved response was not readable.");
+            return new ResponseView(rs.getLong("id"), rs.getLong("shop_id"),
+                    rs.getString("display_name"), rs.getString("status"),
+                    rs.getBigDecimal("price"), (Integer) rs.getObject("quantity"),
+                    (Integer) rs.getObject("ready_minutes"), rs.getString("commerce_mode"),
+                    rs.getString("merchant_note"), local(rs.getTimestamp("created_at")));
+        }, responseId, requestId, shopId);
     }
 
     private static CommerceMode mode(String raw, boolean optional) {
