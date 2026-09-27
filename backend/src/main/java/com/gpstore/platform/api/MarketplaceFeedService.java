@@ -32,10 +32,13 @@ public class MarketplaceFeedService {
 
     private final ShopDiscovery discovery;
     private final MarketplaceFeedRepository feed;
+    private final com.gpstore.intelligence.MarketplaceSignals signals;
 
-    public MarketplaceFeedService(ShopDiscovery discovery, MarketplaceFeedRepository feed) {
+    public MarketplaceFeedService(ShopDiscovery discovery, MarketplaceFeedRepository feed,
+                                  com.gpstore.intelligence.MarketplaceSignals signals) {
         this.discovery = discovery;
         this.feed = feed;
+        this.signals = signals;
     }
 
     /**
@@ -122,6 +125,7 @@ public class MarketplaceFeedService {
         }
         List<ShopDiscovery.NearbyShop> nearby = discovery.shopsServing(lat, lng);
         if (nearby.isEmpty()) {
+            if (page <= 0) signals.search(keyword, lat, lng, modes, 0);
             return List.of();
         }
         Map<Long, Double> distanceByShop = new HashMap<>();
@@ -130,7 +134,10 @@ public class MarketplaceFeedService {
         }
         if (selectedShopId != null) {
             Double selectedDistance = distanceByShop.get(selectedShopId);
-            if (selectedDistance == null) return List.of();
+            if (selectedDistance == null) {
+                if (page <= 0) signals.search(keyword, lat, lng, modes, 0);
+                return List.of();
+            }
             distanceByShop.clear();
             distanceByShop.put(selectedShopId, selectedDistance);
         }
@@ -143,6 +150,11 @@ public class MarketplaceFeedService {
                 modes == null || modes.isEmpty() ? Set.of(CommerceMode.values()) : modes,
                 distanceByShop, limit, offset)) {
             results.add(toCard(row));
+        }
+        // One event per customer search, not per card or shop. Page two is
+        // continuation traffic and must not inflate demand.
+        if (page <= 0) {
+            signals.search(keyword, lat, lng, modes, results.size());
         }
         return results;
     }
