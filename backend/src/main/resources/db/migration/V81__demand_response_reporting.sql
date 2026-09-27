@@ -28,3 +28,22 @@ CREATE TABLE IF NOT EXISTS customer_demand_shop_blocks (
 );
 CREATE INDEX IF NOT EXISTS idx_demand_shop_block_shop
     ON customer_demand_shop_blocks (shop_id, customer_id);
+
+CREATE INDEX IF NOT EXISTS idx_demand_response_shop_time
+    ON demand_responses (shop_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS demand_audit_events (
+    id              BIGSERIAL PRIMARY KEY,
+    request_id      BIGINT NOT NULL REFERENCES demand_requests(id),
+    response_id     BIGINT REFERENCES demand_responses(id),
+    actor_type      VARCHAR(24) NOT NULL,
+    actor_id        BIGINT,
+    shop_id         BIGINT REFERENCES shops(id),
+    event_type      VARCHAR(32) NOT NULL,
+    details         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMP NOT NULL DEFAULT now(),
+    CONSTRAINT ck_demand_audit_actor
+        CHECK (actor_type IN ('CUSTOMER','MERCHANT','SYSTEM'))
+);
+CREATE INDEX IF NOT EXISTS idx_demand_audit_request_time
+    ON demand_audit_events (request_id, created_at DESC, id DESC);

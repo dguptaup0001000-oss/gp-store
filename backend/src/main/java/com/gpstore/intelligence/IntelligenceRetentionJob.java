@@ -27,6 +27,13 @@ public class IntelligenceRetentionJob {
             lockAtMostFor = "PT30M", lockAtLeastFor = "PT1M")
     public void clean() {
         jdbc.update("""
+                INSERT INTO demand_audit_events
+                    (request_id, actor_type, event_type, details)
+                SELECT id, 'SYSTEM', 'REQUEST_EXPIRED', '{}'::jsonb
+                  FROM demand_requests
+                 WHERE status='OPEN' AND expires_at<=now()
+                """);
+        jdbc.update("""
                 UPDATE demand_requests SET status='EXPIRED', updated_at=now()
                  WHERE status='OPEN' AND expires_at<=now()
                 """);

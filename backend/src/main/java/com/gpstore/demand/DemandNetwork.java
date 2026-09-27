@@ -26,6 +26,7 @@ import java.util.Set;
 public class DemandNetwork {
     private static final int MAX_OPEN_PER_CUSTOMER = 5;
     private static final int MAX_RECIPIENTS = 50;
+    private static final int MAX_NEW_RESPONSES_PER_SHOP_PER_DAY = 500;
     private static final BigDecimal MAX_RADIUS_KM = new BigDecimal("50");
 
     private final JdbcTemplate jdbc;
@@ -124,6 +125,10 @@ public class DemandNetwork {
                         """, id, shopId);
             }
         }
+        audit(id, null, "CUSTOMER", customerId, null, "REQUEST_CREATED",
+                "{\"recipientCount\":" + jdbc.queryForObject(
+                        "SELECT count(*) FROM demand_request_recipients WHERE request_id=?",
+                        Integer.class, id) + "}");
         return mine(id, customerId);
     }
 
@@ -151,12 +156,18 @@ public class DemandNetwork {
                  WHERE id=? AND customer_id=? AND status='OPEN'
                 """, cancel ? "CANCELLED" : "CLOSED", requestId, customerId);
         if (changed == 0) throw new ResourceNotFoundException("Open request not found.");
+        audit(requestId, null, "CUSTOMER", customerId, null,
+                cancel ? "REQUEST_CANCELLED" : "REQUEST_CLOSED", "{}");
         return mine(requestId, customerId);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<MerchantDemand> forCurrentShop(int page, int size) {
         long shopId = TenantContext.require().requireShopId();
+        jdbc.update("""
+                UPDATE demand_request_recipients SET viewed_at=COALESCE(viewed_at, now())
+                 WHERE shop_id=? AND viewed_at IS NULL
+                """, shopId);
         int limit = Math.min(Math.max(size, 1), 50);
         return jdbc.query("""
                 SELECT d.*, r.id response_id, r.status response_status, r.price response_price,
@@ -191,6 +202,18 @@ public class DemandNetwork {
                    WHERE dr.request_id=? AND dr.shop_id=? AND d.status='OPEN' AND d.expires_at > now())
                 """, Boolean.class, requestId, shopId);
         if (!Boolean.TRUE.equals(eligible)) throw new ResourceNotFoundException("Demand request not found.");
+        Boolean hasResponse = jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM demand_responses WHERE request_id=? AND shop_id=?)
+                """, Boolean.class, requestId, shopId);
+        if (!Boolean.TRUE.equals(hasResponse)) {
+            Integer recent = jdbc.queryForObject("""
+                    SELECT count(*) FROM demand_responses
+                     WHERE shop_id=? AND created_at>=now()-interval '24 hours'
+                    """, Integer.class, shopId);
+            if (recent != null && recent >= MAX_NEW_RESPONSES_PER_SHOP_PER_DAY) {
+                throw new BadRequestException("Daily demand response limit reached.");
+            }
+        }
         String status = request == null ? "" : upper(request.status());
         if (!Set.of("AVAILABLE", "NOT_AVAILABLE").contains(status)) {
             throw new BadRequestException("Choose Available or Not available.");
@@ -221,6 +244,8 @@ public class DemandNetwork {
                 RETURNING id
                 """, Long.class, requestId, shopId, status, request.price(), request.quantity(),
                 request.readyMinutes(), mode == null ? null : mode.name(), clean(request.note(), 500));
+        audit(requestId, id, "MERCHANT", currentUser.customerId(), shopId,
+                "RESPONSE_" + status, "{}");
         return response(id, requestId, shopId);
     }
 
@@ -258,6 +283,12 @@ public class DemandNetwork {
                     VALUES (?, ?) ON CONFLICT DO NOTHING
                     """, customerId, shopId);
         }
+        Long requestId = jdbc.queryForObject(
+                "SELECT request_id FROM demand_responses WHERE id=?",
+                Long.class, responseId);
+        audit(requestId, responseId, "CUSTOMER", customerId, shopId,
+                block ? "RESPONSE_REPORTED_AND_BLOCKED" : "RESPONSE_REPORTED",
+                "{\"reason\":\"" + reason + "\"}");
         LocalDateTime created = jdbc.queryForObject(
                 "SELECT created_at FROM demand_response_reports WHERE id=?",
                 Timestamp.class, reportId).toLocalDateTime();
@@ -393,5 +424,14 @@ public class DemandNetwork {
     private static String effectiveStatus(String stored, LocalDateTime expires) {
         return "OPEN".equals(stored) && expires != null && !expires.isAfter(LocalDateTime.now())
                 ? "EXPIRED" : stored;
+    }
+
+    private void audit(Long requestId, Long responseId, String actorType, Long actorId,
+                       Long shopId, String eventType, String details) {
+        jdbc.update("""
+                INSERT INTO demand_audit_events
+                    (request_id, response_id, actor_type, actor_id, shop_id, event_type, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)
+                """, requestId, responseId, actorType, actorId, shopId, eventType, details);
     }
 }

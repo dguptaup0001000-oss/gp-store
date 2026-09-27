@@ -164,7 +164,7 @@ public class MarketplaceFeedService {
     }
 
     private String normalizeSearch(String keyword) {
-        List<String> tokens = com.gpstore.search.SearchNormalizer.words(keyword);
+        List<String> tokens = com.gpstore.search.SearchNormalizer.tokenize(keyword);
         if (tokens.isEmpty()) return keyword.trim();
         return tokens.stream()
                 .map(token -> synonyms.canonicalFor(token).orElse(token))
