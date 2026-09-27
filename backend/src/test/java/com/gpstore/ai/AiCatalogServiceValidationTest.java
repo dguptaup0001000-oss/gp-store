@@ -1,6 +1,8 @@
 package com.gpstore.ai;
 
 import com.gpstore.exception.BadRequestException;
+import com.gpstore.platform.TenantContext;
+import com.gpstore.platform.TenantScope;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.ProductService;
 import org.junit.jupiter.api.Test;
@@ -31,7 +33,8 @@ class AiCatalogServiceValidationTest {
         AiCatalogService.DraftInput invalid = input(
                 new BigDecimal("100"), new BigDecimal("120"), null);
 
-        assertThrows(BadRequestException.class, () -> service.update(8L, invalid));
+        TenantContext.runWithin(TenantScope.ofShop(2L), () ->
+                assertThrows(BadRequestException.class, () -> service.update(8L, invalid)));
         verify(products, never()).createProduct(
                 org.mockito.ArgumentMatchers.any());
     }
@@ -44,7 +47,8 @@ class AiCatalogServiceValidationTest {
                 new BigDecimal("120"), new BigDecimal("100"),
                 "https://tracking.example/merchant.png");
 
-        assertThrows(BadRequestException.class, () -> service.update(8L, invalid));
+        TenantContext.runWithin(TenantScope.ofShop(2L), () ->
+                assertThrows(BadRequestException.class, () -> service.update(8L, invalid)));
         verify(products, never()).createProduct(
                 org.mockito.ArgumentMatchers.any());
     }
@@ -54,8 +58,9 @@ class AiCatalogServiceValidationTest {
         when(jdbc.queryForObject(anyString(), eq(Boolean.class), eq(4L))).thenReturn(false);
         AiCatalogService service = new AiCatalogService(jdbc, currentUser, products);
 
-        assertThrows(BadRequestException.class, () -> service.update(
-                8L, input(new BigDecimal("120"), new BigDecimal("100"), null)));
+        TenantContext.runWithin(TenantScope.ofShop(2L), () ->
+                assertThrows(BadRequestException.class, () -> service.update(
+                        8L, input(new BigDecimal("120"), new BigDecimal("100"), null))));
         verify(products, never()).createProduct(
                 org.mockito.ArgumentMatchers.any());
     }
