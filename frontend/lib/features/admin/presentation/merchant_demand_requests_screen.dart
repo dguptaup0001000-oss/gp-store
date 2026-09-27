@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/images/gp_network_image.dart';
 import '../../auth/presentation/auth_providers.dart';
 
 class MerchantDemandRequestsScreen extends ConsumerStatefulWidget {
@@ -150,12 +151,19 @@ class _MerchantDemandRequestsScreenState
           if (requests.isEmpty) {
             return const Center(child: Text('No eligible open requests nearby.'));
           }
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: requests.length,
-            itemBuilder: (context, index) {
-              final request = requests[index];
-              return Card(
+          return RefreshIndicator(
+            onRefresh: () async {
+              setState(() => _requests = _load());
+              await _requests;
+            },
+            child: ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(12),
+              itemCount: requests.length,
+              itemBuilder: (context, index) {
+                final request = requests[index];
+                final myResponse = request['myResponse'] as Map?;
+                return Card(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(
@@ -165,25 +173,56 @@ class _MerchantDemandRequestsScreenState
                           style: const TextStyle(fontWeight: FontWeight.w700)),
                       Text('Quantity ${request['quantity']} • within ${request['radiusKm']} km'),
                       if (request['budget'] != null) Text('Approx. budget ₹${request['budget']}'),
+                      if (request['preferredMode'] != null)
+                        Text('Preferred: ${request['preferredMode'].toString().replaceAll('_', ' ')}'),
+                      if (request['requiredBy'] != null)
+                        Text('Required by: ${request['requiredBy']}'),
+                      if (request['photoUrl'] != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: SizedBox(
+                            height: 120,
+                            width: 120,
+                            child: GpNetworkImage(
+                              url: request['photoUrl'] as String?,
+                              renderWidth: 120,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                      if (myResponse != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            'Your response: ${myResponse['status']}'
+                            '${myResponse['price'] == null ? '' : ' • ₹${myResponse['price']}'}',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           OutlinedButton(
                             onPressed: () => _respond(request, false),
-                            child: const Text('Not available'),
+                            child: Text(myResponse == null
+                                ? 'Not available'
+                                : 'Update: not available'),
                           ),
                           const SizedBox(width: 8),
                           FilledButton(
                             onPressed: () => _respond(request, true),
-                            child: const Text('Available'),
+                            child: Text(myResponse == null
+                                ? 'Available'
+                                : 'Update response'),
                           ),
                         ],
                       ),
                     ],
                   ),
                 ),
-              );
-            },
+                );
+              },
+            ),
           );
         },
       ),

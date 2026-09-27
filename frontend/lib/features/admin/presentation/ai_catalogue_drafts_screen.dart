@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
+import 'category_picker_sheet.dart';
 
 class AiCatalogueDraftsScreen extends ConsumerStatefulWidget {
   const AiCatalogueDraftsScreen({super.key});
@@ -49,31 +50,62 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
     final price = TextEditingController(text: '${draft['sellingPrice'] ?? ''}');
     final mrp = TextEditingController(text: '${draft['mrp'] ?? ''}');
     final stock = TextEditingController(text: '${draft['stock'] ?? ''}');
+    String mode = draft['commerceMode'] as String? ?? 'ONLINE_PURCHASE';
     final save = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Review AI-detected information'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: name, decoration: const InputDecoration(labelText: 'Product name')),
-              TextField(controller: category, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Category ID')),
-              TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Selling price')),
-              TextField(controller: mrp, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'MRP')),
-              TextField(controller: stock, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Opening stock')),
-              if ((draft['uncertainFields'] as String? ?? '').isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text('Verify: ${draft['uncertainFields']}'),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Review AI-detected information'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: name, decoration: const InputDecoration(labelText: 'Product name')),
+                TextField(
+                  controller: category,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    suffixIcon: Icon(Icons.search),
+                  ),
+                  onTap: () async {
+                    final chosen = await CategoryPickerSheet.show(
+                      context,
+                      selectedId: int.tryParse(category.text),
+                    );
+                    if (chosen != null) {
+                      setDialogState(() => category.text = '${chosen.id}');
+                    }
+                  },
                 ),
-            ],
+                TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Selling price')),
+                TextField(controller: mrp, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'MRP')),
+                TextField(controller: stock, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Opening stock')),
+                DropdownButtonFormField<String>(
+                  initialValue: mode,
+                  decoration: const InputDecoration(labelText: 'Commerce mode'),
+                  items: const [
+                    DropdownMenuItem(value: 'ONLINE_PURCHASE', child: Text('Buy Online')),
+                    DropdownMenuItem(value: 'VISIT_TO_BUY', child: Text('Visit to Buy')),
+                    DropdownMenuItem(value: 'SERVICE_AT_SHOP', child: Text('Service at Shop')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setDialogState(() => mode = value);
+                  },
+                ),
+                if ((draft['uncertainFields'] as String? ?? '').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text('Verify: ${draft['uncertainFields']}'),
+                  ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save for approval')),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save for approval')),
-        ],
       ),
     );
     if (save != true) return;
@@ -93,7 +125,7 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
         'stock': int.tryParse(stock.text),
         'barcode': draft['barcode'],
         'imageUrl': draft['imageUrl'],
-        'commerceMode': draft['commerceMode'] ?? 'ONLINE_PURCHASE',
+        'commerceMode': mode,
       },
     );
     if (mounted) setState(() => _jobs = _load());
@@ -103,6 +135,14 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
     final draftId = draft['id'];
     await ref.read(apiClientProvider).dio.post(
       '/api/shop/ai-catalog/drafts/$draftId/approve',
+    );
+    if (mounted) setState(() => _jobs = _load());
+  }
+
+  Future<void> _reject(Map<String, dynamic> draft) async {
+    final draftId = draft['id'];
+    await ref.read(apiClientProvider).dio.post(
+      '/api/shop/ai-catalog/drafts/$draftId/reject',
     );
     if (mounted) setState(() => _jobs = _load());
   }
@@ -153,11 +193,19 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
                         subtitle: Text('${draft['status']} • confidence ${draft['confidence'] ?? 'unknown'}'),
                         onTap: draft['status'] == 'REVIEW' ? () => _review(draft) : null,
                         trailing: draft['status'] == 'REVIEW'
-                            ? FilledButton(
-                                onPressed: draft['categoryId'] != null && draft['sellingPrice'] != null
-                                    ? () => _approve(draft)
-                                    : null,
-                                child: const Text('Approve'),
+                            ? Wrap(
+                                children: [
+                                  TextButton(
+                                    onPressed: () => _reject(draft),
+                                    child: const Text('Reject'),
+                                  ),
+                                  FilledButton(
+                                    onPressed: draft['categoryId'] != null && draft['sellingPrice'] != null
+                                        ? () => _approve(draft)
+                                        : null,
+                                    child: const Text('Approve'),
+                                  ),
+                                ],
                               )
                             : null,
                       ),
