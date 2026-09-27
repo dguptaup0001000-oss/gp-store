@@ -214,8 +214,8 @@ public class CommerceIntelligenceService {
                        JOIN products p ON p.id=v.product_id
                         WHERE spv.shop_id=? AND spv.active=true
                           AND (lower(p.name) LIKE '%%' || e.normalized_query || '%%'
-                               OR lower(COALESCE(p.brand,'')) LIKE '%%' || e.normalized_query || '%%'
-                               OR lower(COALESCE(p.search_keywords,'')) LIKE '%%' || e.normalized_query || '%%'))
+                               OR lower(p.brand) LIKE '%%' || e.normalized_query || '%%'
+                               OR lower(p.search_keywords) LIKE '%%' || e.normalized_query || '%%'))
                  GROUP BY e.normalized_query HAVING count(*)>=?
                  ORDER BY searches DESC, e.normalized_query LIMIT 20
                 """, (rs, n) -> new DemandTerm(rs.getString("normalized_query"),
