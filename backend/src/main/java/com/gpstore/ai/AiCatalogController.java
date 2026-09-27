@@ -36,6 +36,12 @@ public class AiCatalogController {
         return catalog.approve(id);
     }
 
+    @PostMapping("/drafts/batch-approve")
+    public List<AiCatalogService.DraftView> approveBatch(
+            @RequestBody AiCatalogService.BatchApproveRequest request) {
+        return catalog.approveBatch(request);
+    }
+
     @PostMapping("/drafts/{id}/reject")
     public AiCatalogService.DraftView reject(@PathVariable long id) {
         return catalog.reject(id);

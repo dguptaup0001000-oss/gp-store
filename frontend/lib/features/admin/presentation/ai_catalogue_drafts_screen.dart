@@ -147,6 +147,23 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
     if (mounted) setState(() => _jobs = _load());
   }
 
+  Future<void> _approveBatch(List<Map<String, dynamic>> drafts) async {
+    final ids = drafts
+        .where((draft) =>
+            draft['status'] == 'REVIEW' &&
+            draft['categoryId'] != null &&
+            draft['sellingPrice'] != null)
+        .map((draft) => draft['id'])
+        .take(50)
+        .toList();
+    if (ids.isEmpty) return;
+    await ref.read(apiClientProvider).dio.post(
+      '/api/shop/ai-catalog/drafts/batch-approve',
+      data: {'draftIds': ids},
+    );
+    if (mounted) setState(() => _jobs = _load());
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -186,6 +203,18 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
               if (drafts.isEmpty) return const Text('No catalogue drafts yet.');
               return Column(
                 children: [
+                  if (drafts.where((draft) =>
+                      draft['status'] == 'REVIEW' &&
+                      draft['categoryId'] != null &&
+                      draft['sellingPrice'] != null).length > 1)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.tonalIcon(
+                        onPressed: () => _approveBatch(drafts),
+                        icon: const Icon(Icons.done_all),
+                        label: const Text('Approve reviewed batch'),
+                      ),
+                    ),
                   for (final draft in drafts)
                     Card(
                       child: ListTile(

@@ -41,6 +41,7 @@ public class AiCatalogService {
     }
 
     public record StartRequest(String sourceType, String objectKey, String manualText) {}
+    public record BatchApproveRequest(List<Long> draftIds) {}
     public record JobView(Long id, String sourceType, String status, String errorCode,
                           LocalDateTime createdAt, List<DraftView> drafts) {}
     public record DraftInput(String name, String brand, String description, Long categoryId,
@@ -197,6 +198,26 @@ public class AiCatalogService {
                 """, id, shopId);
         if (changed == 0) throw new ResourceNotFoundException("Review draft not found.");
         return draft(id);
+    }
+
+    @Transactional
+    public List<DraftView> approveBatch(BatchApproveRequest request) {
+        if (request == null || request.draftIds() == null || request.draftIds().isEmpty()) {
+            throw new BadRequestException("Choose at least one reviewed draft.");
+        }
+        List<Long> ids = request.draftIds().stream()
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .limit(51)
+                .toList();
+        if (ids.isEmpty() || ids.size() > 50) {
+            throw new BadRequestException("Approve between 1 and 50 drafts at a time.");
+        }
+        java.util.ArrayList<DraftView> approved = new java.util.ArrayList<>(ids.size());
+        for (Long id : ids) {
+            approved.add(approve(id));
+        }
+        return List.copyOf(approved);
     }
 
     private Long createDraft(Long jobId, long shopId, long userId, DraftInput input,

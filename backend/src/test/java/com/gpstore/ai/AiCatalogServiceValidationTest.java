@@ -12,6 +12,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
+import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -61,6 +62,17 @@ class AiCatalogServiceValidationTest {
         TenantContext.runWithin(TenantScope.ofShop(2L), () ->
                 assertThrows(BadRequestException.class, () -> service.update(
                         8L, input(new BigDecimal("120"), new BigDecimal("100"), null))));
+        verify(products, never()).createProduct(
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void batchApprovalIsBounded() {
+        AiCatalogService service = new AiCatalogService(jdbc, currentUser, products);
+        AiCatalogService.BatchApproveRequest tooLarge = new AiCatalogService.BatchApproveRequest(
+                LongStream.rangeClosed(1, 51).boxed().toList());
+
+        assertThrows(BadRequestException.class, () -> service.approveBatch(tooLarge));
         verify(products, never()).createProduct(
                 org.mockito.ArgumentMatchers.any());
     }
