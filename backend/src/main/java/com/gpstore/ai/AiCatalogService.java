@@ -2,6 +2,7 @@ package com.gpstore.ai;
 
 import com.gpstore.dto.request.ProductCreateRequest;
 import com.gpstore.dto.response.ProductResponse;
+import com.gpstore.catalog.CatalogUrlValidator;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.platform.TenantContext;
@@ -328,7 +329,7 @@ public class AiCatalogService {
     private static String controlledImage(String raw) {
         String value = clean(raw, 1000);
         if (value == null) return null;
-        if (!(value.startsWith("https://") || value.startsWith("catalog/"))) {
+        if (!(value.startsWith("catalog/") || CatalogUrlValidator.isAllowedImageUrl(value))) {
             throw new BadRequestException("Use a GP-STORE controlled image.");
         }
         return value;

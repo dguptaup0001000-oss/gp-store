@@ -21,7 +21,7 @@ public class ShoppingAssistantService {
     private final MarketplaceFeedService marketplace;
     private final boolean enabled;
 
-    public ShoppingAssistantService(FallbackAiProvider provider,
+    public ShoppingAssistantService(MarketplaceAiProvider provider,
                                     MarketplaceFeedService marketplace,
                                     @Value("${marketplace.ai.enabled:false}") boolean enabled) {
         this.provider = provider;
