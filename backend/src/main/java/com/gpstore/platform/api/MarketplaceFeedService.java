@@ -32,10 +32,16 @@ public class MarketplaceFeedService {
 
     private final ShopDiscovery discovery;
     private final MarketplaceFeedRepository feed;
+    private final com.gpstore.intelligence.MarketplaceSignals signals;
+    private final com.gpstore.search.SynonymDictionary synonyms;
 
-    public MarketplaceFeedService(ShopDiscovery discovery, MarketplaceFeedRepository feed) {
+    public MarketplaceFeedService(ShopDiscovery discovery, MarketplaceFeedRepository feed,
+                                  com.gpstore.intelligence.MarketplaceSignals signals,
+                                  com.gpstore.search.SynonymDictionary synonyms) {
         this.discovery = discovery;
         this.feed = feed;
+        this.signals = signals;
+        this.synonyms = synonyms;
     }
 
     /**
@@ -120,17 +126,20 @@ public class MarketplaceFeedService {
         if (lat == null || lng == null || keyword == null || keyword.isBlank()) {
             return List.of();
         }
+        Set<CommerceMode> requestedModes =
+                modes == null || modes.isEmpty() ? Set.of(CommerceMode.values()) : modes;
+        String interpreted = normalizeSearch(keyword);
         List<ShopDiscovery.NearbyShop> nearby = discovery.shopsServing(lat, lng);
-        if (nearby.isEmpty()) {
-            return List.of();
-        }
         Map<Long, Double> distanceByShop = new HashMap<>();
         for (ShopDiscovery.NearbyShop near : nearby) {
             distanceByShop.put(near.shop().getId(), near.distanceKm());
         }
         if (selectedShopId != null) {
             Double selectedDistance = distanceByShop.get(selectedShopId);
-            if (selectedDistance == null) return List.of();
+            if (selectedDistance == null) {
+                if (page <= 0) signals.search(keyword, lat, lng, modes, 0);
+                return List.of();
+            }
             distanceByShop.clear();
             distanceByShop.put(selectedShopId, selectedDistance);
         }
@@ -139,12 +148,70 @@ public class MarketplaceFeedService {
         int offset = Math.max(page, 0) * limit;
 
         List<MarketplaceFeedView> results = new ArrayList<>();
-        for (Object[] row : feed.search(keyword, distanceByShop.keySet(),
-                modes == null || modes.isEmpty() ? Set.of(CommerceMode.values()) : modes,
-                distanceByShop, limit, offset)) {
-            results.add(toCard(row));
+        if (!distanceByShop.isEmpty()) {
+            for (Object[] row : searchWithOriginalFallback(
+                    interpreted, keyword, distanceByShop, requestedModes, limit, offset)) {
+                results.add(toCard(row));
+            }
+        }
+        // Local-first expansion uses the same radius ladder as shop discovery.
+        // It runs only for the first unscoped page and only when local supply
+        // produced no result; a caller-selected shop is never silently changed.
+        if (results.isEmpty() && page <= 0 && selectedShopId == null) {
+            ShopDiscovery.RadiusSearch expanded = discovery.searchOutwards(
+                    lat, lng, null, rung -> {
+                        if (rung.isEmpty()) return List.of();
+                        Map<Long, Double> rungDistances = distances(rung);
+                        return searchWithOriginalFallback(
+                                interpreted, keyword, rungDistances, requestedModes, 1, 0)
+                                .isEmpty() ? List.of() : rung;
+                    });
+            Map<Long, Double> expandedDistances = distances(expanded.shops());
+            if (!expandedDistances.isEmpty()
+                    && !expandedDistances.keySet().equals(distanceByShop.keySet())) {
+                for (Object[] row : searchWithOriginalFallback(
+                        interpreted, keyword, expandedDistances, requestedModes, limit, offset)) {
+                    results.add(toCard(row));
+                }
+            }
+        }
+        // One event per customer search, not per card or shop. Page two is
+        // continuation traffic and must not inflate demand.
+        if (page <= 0) {
+            signals.search(keyword, lat, lng, modes, results.size());
         }
         return results;
+    }
+
+    private List<Object[]> searchWithOriginalFallback(
+            String interpreted, String original, Map<Long, Double> distances,
+            Set<CommerceMode> modes, int limit, int offset) {
+        List<Object[]> rows = feed.search(
+                interpreted, distances.keySet(), modes, distances, limit, offset);
+        // Phonetic synonym keys are deliberately lossy: for example, an
+        // English catalogue word can sound like a Hindi vocabulary term.
+        // Translation gets first chance, but it must never erase a literal
+        // town-wide match such as "gold chain".
+        if (rows.isEmpty() && !interpreted.equalsIgnoreCase(original.trim())) {
+            return feed.search(original, distances.keySet(), modes, distances, limit, offset);
+        }
+        return rows;
+    }
+
+    private String normalizeSearch(String keyword) {
+        List<String> tokens = com.gpstore.search.SearchNormalizer.tokenize(keyword);
+        if (tokens.isEmpty()) return keyword.trim();
+        return tokens.stream()
+                .map(token -> synonyms.canonicalFor(token).orElse(token))
+                .collect(java.util.stream.Collectors.joining(" "));
+    }
+
+    private static Map<Long, Double> distances(List<ShopDiscovery.NearbyShop> nearby) {
+        Map<Long, Double> result = new HashMap<>();
+        for (ShopDiscovery.NearbyShop near : nearby) {
+            result.put(near.shop().getId(), near.distanceKm());
+        }
+        return result;
     }
 
     /**
@@ -161,6 +228,16 @@ public class MarketplaceFeedService {
      */
     @Transactional(readOnly = true)
     public List<MarketplaceOfferView> offersOf(Long productId, Double lat, Double lng) {
+        return offersOf(productId, null, lat, lng);
+    }
+
+    /**
+     * Variant-safe offer comparison. New clients always provide variantId so
+     * 500 g and 1 kg packs can never appear as equivalent offers.
+     */
+    @Transactional(readOnly = true)
+    public List<MarketplaceOfferView> offersOf(Long productId, Long variantId,
+                                               Double lat, Double lng) {
         if (productId == null || lat == null || lng == null) {
             return List.of();
         }
@@ -174,7 +251,8 @@ public class MarketplaceFeedService {
         }
 
         List<MarketplaceOfferView> offers = new ArrayList<>();
-        for (Object[] row : feed.offersOf(productId, distanceByShop.keySet(), distanceByShop)) {
+        for (Object[] row : feed.offersOf(
+                productId, variantId, distanceByShop.keySet(), distanceByShop)) {
             offers.add(toOffer(row));
         }
         return offers;

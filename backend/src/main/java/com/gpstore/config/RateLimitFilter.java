@@ -289,6 +289,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         if (path.startsWith("/api/products/search")
+                || path.equals("/api/marketplace/search")
+                || path.equals("/api/marketplace/assistant")
                 || path.equals("/api/platform/control/search")) {
             return Bucket.SEARCH;
         }
@@ -335,6 +337,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 // approval does that, and approval is a staff route in the
                 // ADMIN bucket.
                 || path.startsWith("/api/returns")
+                || path.startsWith("/api/demand-requests")
+                || path.startsWith("/api/demand-responses")
                 // Same category as app-session above: something the app posts
                 // about itself, not something a person chose to do. It FAILS
                 // OPEN, and that is the right way round here - the reporter
@@ -350,7 +354,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return Bucket.WEBHOOK;
         }
 
-        if (isWrite && path.startsWith("/api/uploads")) {
+        if (isWrite && (path.startsWith("/api/uploads")
+                || path.equals("/api/customers/me/photo/sign"))) {
             return Bucket.UPLOAD;
         }
 
@@ -363,6 +368,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/products")
                 || path.startsWith("/api/categories")
                 || path.startsWith("/api/product-variants")
+                || path.startsWith("/api/shop/ai-catalog")
+                || path.startsWith("/api/shop/demand-requests")
                 || (path.startsWith("/api/orders") && !path.equals("/api/orders/place")))) {
             return Bucket.ADMIN;
         }

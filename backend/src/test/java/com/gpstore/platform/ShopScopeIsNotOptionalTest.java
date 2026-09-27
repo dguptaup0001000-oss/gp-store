@@ -102,7 +102,35 @@ class ShopScopeIsNotOptionalTest {
      * All three are asserted by MultiShopCheckoutTest.
      */
     private static final Set<String> SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY =
-            Set.of("audit_logs", "cart_items", "outbox_events", "order_alerts_sent");
+            Set.of("audit_logs", "cart_items", "outbox_events", "order_alerts_sent",
+                    "customer_demand_shop_blocks", "demand_audit_events");
+
+    /*
+     * customer_demand_shop_blocks is customer-owned: shop_id identifies the
+     * shop that customer chose to block, not the tenant that owns the row.
+     * Every read is paired with the authenticated customer id.
+     *
+     * demand_audit_events is an append-only lifecycle trail. Its nullable
+     * shop_id records which shop an event concerned; it does not authorize a
+     * merchant read. Merchant authorization remains the materialized
+     * demand_request_recipients boundary.
+     */
+
+    /**
+     * Shop-owned workflow tables intentionally implemented through bounded
+     * JdbcTemplate statements instead of JPA entities.
+     *
+     * Every merchant-facing statement against these tables includes the shop
+     * id obtained from TenantContext; demand_request_recipients is also the
+     * materialized authorization boundary created by server-side eligibility.
+     * DemandNetwork and AiCatalogService are listed and reviewed below, so a
+     * new JdbcTemplate owner still fails the structural guard.
+     */
+    private static final Set<String> JDBC_ENFORCED_SHOP_BOUNDARIES = Set.of(
+            "ai_catalog_drafts",
+            "ai_extraction_jobs",
+            "demand_request_recipients",
+            "demand_responses");
 
     /*
      * audit_logs is the third deliberate context column. The stream contains
@@ -270,7 +298,26 @@ class ShopScopeIsNotOptionalTest {
             // shop-owned value crosses the boundary even when the scope is
             // absent, which is why a null shop is allowed here and refused in
             // ShopCatalogueBrowse.
-            "CategoryFinder");
+            "CategoryFinder",
+
+            // DEMAND AUTHORIZATION IS MATERIALIZED, not inferred from a shop
+            // id supplied by the app. Customer creation writes recipients
+            // selected by ShopDiscovery and category/mode eligibility.
+            // Merchant list/respond paths require TenantContext's shop id;
+            // customer response reads first prove ownership of the request.
+            "DemandNetwork",
+
+            // AI CATALOGUE DRAFTS belong to the current merchant shop. Every
+            // read, update, approve and reject statement carries the shop id
+            // from TenantContext, never one supplied in a request. Approval
+            // alone invokes ProductService to publish.
+            "AiCatalogService",
+
+            // MERCHANT INTELLIGENCE explicitly predicates all shop-owned
+            // tables with TenantContext's shop id. The platform-wide method is
+            // separately protected by PLATFORM_ADMIN and returns aggregates,
+            // never customer identities or raw coordinates.
+            "CommerceIntelligenceService");
 
     private static final Set<String> REVIEWED_NATIVE_QUERIES = Set.of(
             "OrderRepository.revenueByDayBetween",
@@ -491,7 +538,8 @@ class ShopScopeIsNotOptionalTest {
         for (String table : tenantTables) {
             if (!enforced.contains(table)
                     && !SETTINGS_SINGLETONS_NOT_YET_SPLIT.contains(table)
-                    && !SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY.contains(table)) {
+                    && !SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY.contains(table)
+                    && !JDBC_ENFORCED_SHOP_BOUNDARIES.contains(table)) {
                 unenforced.add(table);
             }
         }
@@ -539,6 +587,7 @@ class ShopScopeIsNotOptionalTest {
 
         defaulted.removeIf(SETTINGS_SINGLETONS_NOT_YET_SPLIT::contains);
         defaulted.removeIf(SHOP_ID_AS_DATA_NOT_AS_A_BOUNDARY::contains);
+        defaulted.removeIf(JDBC_ENFORCED_SHOP_BOUNDARIES::contains);
 
         assertTrue(defaulted.isEmpty(),
                 "a shop_id default files a forgotten insert under Shop #1 instead of failing, "

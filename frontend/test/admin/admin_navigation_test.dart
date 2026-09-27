@@ -89,6 +89,11 @@ void main() {
       // asserts their position in the drawer and not just their existence.
       'Visit to Buy',
       'Services at Shop',
+      // Reviewed catalogue extraction and the two demand-loop work queues.
+      // All remain merchant-scoped and use the existing admin shell.
+      'AI Add & Bulk Digitize',
+      'Demand Requests',
+      'Marketplace Intelligence',
       // Safe installed-APK and backend identity used to distinguish a real
       // release from a stale/corrupt sideload during phone acceptance.
       'Release Diagnostics',

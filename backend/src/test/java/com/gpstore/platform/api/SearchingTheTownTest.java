@@ -186,6 +186,42 @@ class SearchingTheTownTest {
                 "with no pin there is no town to search");
     }
 
+    @Test
+    @DisplayName("Hindi and typo synonyms use the same town-wide inventory")
+    void synonymsWorkAcrossTheTown() {
+        sell("Sugar shop", 0.0008, "Sugar", "Local",
+                "50", CommerceMode.ONLINE_PURCHASE);
+
+        assertEquals(1, marketplace.search("chini", LAT, LNG, null, 0, 20).size());
+        assertEquals(1, marketplace.search("sogar", LAT, LNG, null, 0, 20).size());
+    }
+
+    @Test
+    @DisplayName("an empty local result expands using the marketplace radius ladder")
+    void searchExpandsOnlyWhenLocalSupplyIsEmpty() {
+        sell("Distant tractor parts", 0.18, "Tractor Brake Pad", "Local",
+                "850", CommerceMode.VISIT_TO_BUY);
+
+        List<MarketplaceFeedView> results =
+                marketplace.search("tractor brake pad", LAT, LNG, null, 0, 20);
+
+        assertEquals(1, results.size());
+        assertEquals(CommerceMode.VISIT_TO_BUY, results.get(0).commerceMode());
+    }
+
+    @Test
+    @DisplayName("shop names participate in the unified town search")
+    void shopNamesAreSearchable() {
+        sell("Sharma Salon", 0.0008, "Mens Haircut", "House",
+                "250", CommerceMode.SERVICE_AT_SHOP);
+
+        List<MarketplaceFeedView> results =
+                marketplace.search("Sharma", LAT, LNG, null, 0, 20);
+
+        assertEquals(1, results.size());
+        assertEquals("Sharma Salon " + tag, results.get(0).shopName());
+    }
+
     // ------------------------------------------------------------- fixture
 
     private Long sell(String shopName, double latOffset, String product, String brand,

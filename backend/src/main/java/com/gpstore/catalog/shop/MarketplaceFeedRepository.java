@@ -59,7 +59,7 @@ public class MarketplaceFeedRepository {
     }
 
     /**
-     * A page of the marketplace, nearest first, one row per product and commerce mode.
+     * A page of the marketplace, nearest first, one row per variant and commerce mode.
      *
      * <p>DISTINCT ON PICKS THE CARD'S SELLER, and the inner ORDER BY is what
      * decides which one: nearest first, then cheaper, then lowest listing id
@@ -112,7 +112,7 @@ public class MarketplaceFeedRepository {
         String sql = """
                 WITH near AS (SELECT * FROM (VALUES %s) AS d(shop_id, distance_km)),
                 picked AS (
-                  SELECT DISTINCT ON (p.id, spv.commerce_mode)
+                  SELECT DISTINCT ON (v.id, spv.commerce_mode)
                          p.id                AS product_id,
                          p.name              AS product_name,
                          p.brand             AS brand,
@@ -160,7 +160,7 @@ public class MarketplaceFeedRepository {
                      AND COALESCE(v.active, true) = true
                      AND p.active = true
                      AND (CAST(? AS bigint) IS NULL OR p.category_id = CAST(? AS bigint))
-                   ORDER BY p.id, spv.commerce_mode, near.distance_km ASC, spv.selling_price ASC, spv.id ASC
+                   ORDER BY v.id, spv.commerce_mode, near.distance_km ASC, spv.selling_price ASC, spv.id ASC
                 ),
                 spread AS (
                     SELECT picked.*,
@@ -171,7 +171,7 @@ public class MarketplaceFeedRepository {
                       FROM picked
                 ),
                 sellers AS (
-                    SELECT p2.id AS product_id, spv2.commerce_mode,
+                    SELECT v2.id AS variant_id, spv2.commerce_mode,
                            count(DISTINCT spv2.shop_id) AS seller_count
                     FROM shop_product_variants spv2
                     JOIN product_variants v2 ON v2.id = spv2.product_variant_id
@@ -180,11 +180,11 @@ public class MarketplaceFeedRepository {
                      AND spv2.commerce_mode IN (%s)
                      AND spv2.available = true
                      AND COALESCE(spv2.active, true) = true
-                   GROUP BY p2.id, spv2.commerce_mode
+                   GROUP BY v2.id, spv2.commerce_mode
                 )
                 SELECT spread.*, COALESCE(sellers.seller_count, 1) AS seller_count
                   FROM spread
-                  LEFT JOIN sellers ON sellers.product_id = spread.product_id
+                  LEFT JOIN sellers ON sellers.variant_id = spread.variant_id
                                    AND sellers.commerce_mode = spread.commerce_mode
                  ORDER BY spread.shop_row ASC, spread.distance_km ASC,
                           spread.shop_id ASC, spread.product_id ASC, spread.commerce_mode ASC
@@ -225,7 +225,7 @@ public class MarketplaceFeedRepository {
      * what can be put in a cart. The mode rides on every row so the results
      * can be labelled; it is not a reason to drop one.
      *
-     * <p>ONE CARD PER PRODUCT, like the feed, and for the same reason: five
+     * <p>ONE CARD PER VARIANT, like the feed, and for the same reason: five
      * shops stocking the same painkiller is one result. The seller count says
      * how many, and tapping it opens the rest.
      *
@@ -267,13 +267,18 @@ public class MarketplaceFeedRepository {
             if (i > 0) {
                 matches.append(" AND ");
             }
-            matches.append("(p.name ILIKE ? OR p.brand ILIKE ? OR c.name ILIKE ?)");
+            matches.append("""
+                    (p.name ILIKE ? OR p.brand ILIKE ? OR c.name ILIKE ?
+                     OR p.search_keywords ILIKE ? OR p.subcategory ILIKE ?
+                     OR v.sku ILIKE ? OR v.barcode ILIKE ? OR v.unit ILIKE ?
+                     OR s.display_name ILIKE ?)
+                    """);
         }
 
         String sql = """
                 WITH near AS (SELECT * FROM (VALUES %s) AS d(shop_id, distance_km)),
                 picked AS (
-                  SELECT DISTINCT ON (p.id, spv.commerce_mode)
+                  SELECT DISTINCT ON (v.id, spv.commerce_mode)
                          p.id                AS product_id,
                          p.name              AS product_name,
                          p.brand             AS brand,
@@ -321,7 +326,7 @@ public class MarketplaceFeedRepository {
                      AND COALESCE(v.active, true) = true
                      AND p.active = true
                      AND (%s)
-                   ORDER BY p.id, spv.commerce_mode, near.distance_km ASC, spv.selling_price ASC, spv.id ASC
+                   ORDER BY v.id, spv.commerce_mode, near.distance_km ASC, spv.selling_price ASC, spv.id ASC
                 ),
                 spread AS (
                     SELECT picked.*,
@@ -332,7 +337,7 @@ public class MarketplaceFeedRepository {
                       FROM picked
                 ),
                 sellers AS (
-                    SELECT p2.id AS product_id, spv2.commerce_mode,
+                    SELECT v2.id AS variant_id, spv2.commerce_mode,
                            count(DISTINCT spv2.shop_id) AS seller_count
                     FROM shop_product_variants spv2
                     JOIN product_variants v2 ON v2.id = spv2.product_variant_id
@@ -341,11 +346,11 @@ public class MarketplaceFeedRepository {
                      AND spv2.commerce_mode IN (%s)
                      AND spv2.available = true
                      AND COALESCE(spv2.active, true) = true
-                   GROUP BY p2.id, spv2.commerce_mode
+                   GROUP BY v2.id, spv2.commerce_mode
                 )
                 SELECT spread.*, COALESCE(sellers.seller_count, 1) AS seller_count
                   FROM spread
-                  LEFT JOIN sellers ON sellers.product_id = spread.product_id
+                  LEFT JOIN sellers ON sellers.variant_id = spread.variant_id
                                    AND sellers.commerce_mode = spread.commerce_mode
                  ORDER BY spread.shop_row ASC, spread.distance_km ASC,
                           spread.shop_id ASC, spread.product_id ASC, spread.commerce_mode ASC
@@ -360,6 +365,12 @@ public class MarketplaceFeedRepository {
         }
         for (String word : words) {
             String like = "%" + word + "%";
+            args.add(like);
+            args.add(like);
+            args.add(like);
+            args.add(like);
+            args.add(like);
+            args.add(like);
             args.add(like);
             args.add(like);
             args.add(like);
@@ -424,6 +435,7 @@ public class MarketplaceFeedRepository {
      * shop and the question spans the town.
      */
     public List<Object[]> offersOf(Long productId,
+                                   Long variantId,
                                    Collection<Long> shopIds,
                                    Map<Long, Double> distanceByShop) {
         if (productId == null || shopIds == null || shopIds.isEmpty()) {
@@ -472,6 +484,7 @@ public class MarketplaceFeedRepository {
                   JOIN products p      ON p.id = v.product_id
                  WHERE spv.shop_id IN (%s)
                    AND v.product_id = ?
+                   AND (?::bigint IS NULL OR v.id = ?::bigint)
                    AND spv.available = true
                    AND COALESCE(spv.active, true) = true
                    AND spv.selling_price IS NOT NULL
@@ -484,6 +497,8 @@ public class MarketplaceFeedRepository {
 
         args.addAll(shopIds);
         args.add(productId);
+        args.add(variantId);
+        args.add(variantId);
 
         return jdbc.query(sql, (rs, rowNum) -> new Object[] {
                 rs.getLong("variant_id"), rs.getObject("variant_quantity"),

@@ -330,6 +330,11 @@ public class SecurityConfig {
                 // count. It is rate-limited with the rest of /api/**.
                 .requestMatchers(HttpMethod.POST, "/api/marketplace/engagement").permitAll()
 
+                // Customer demand is private account data. The customer id is
+                // always derived from the token; no route accepts one.
+                .requestMatchers("/api/demand-requests", "/api/demand-requests/**").authenticated()
+                .requestMatchers(HttpMethod.POST, "/api/demand-responses/*/report").authenticated()
+
                 // THE PLATFORM SURFACE. Merchants, shop lifecycle, and looking
                 // into any shop - the only routes whose scope spans merchants.
                 // Above everything else so nothing below can widen it.
@@ -423,6 +428,16 @@ public class SecurityConfig {
                 // WHO IN THE SHOP may read it, not which shop.
                 .requestMatchers("/api/shop/governance", "/api/shop/governance/**")
                     .hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
+
+                // Intelligence is aggregate but still commercially sensitive.
+                .requestMatchers(HttpMethod.GET, "/api/shop/intelligence")
+                    .hasAuthority(AdminPermission.ANALYTICS_VIEW.authority())
+                .requestMatchers(HttpMethod.GET, "/api/shop/demand-requests")
+                    .hasAuthority(AdminPermission.CATALOG_VIEW.authority())
+                .requestMatchers(HttpMethod.PUT, "/api/shop/demand-requests/*/response")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
+                .requestMatchers("/api/shop/ai-catalog/**")
+                    .hasAuthority(AdminPermission.CATALOG_MANAGE.authority())
 
                 .requestMatchers("/api/shop/**").hasAuthority(AdminPermission.CATALOG_VIEW.authority())
 

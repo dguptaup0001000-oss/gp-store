@@ -13,6 +13,9 @@ import '../../../shared/widgets/action_feedback.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
+import '../../demand/presentation/demand_requests_screen.dart';
+import '../../demand/presentation/i_need_this_screen.dart';
+import '../../assistant/presentation/shopping_assistant_screen.dart';
 import '../domain/product_models.dart';
 import 'product_detail_screen.dart';
 import 'products_providers.dart';
@@ -435,6 +438,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       return _RecentSearches(
         terms: _recentTerms,
         onTap: hapticizeValue(_runTerm),
+        onAssistant: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ShoppingAssistantScreen()),
+        ),
+        onDemandRequests: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const DemandRequestsScreen()),
+        ),
         onClear: () async {
           await _recent.clear();
           if (mounted) setState(() => _recentTerms = const []);
@@ -473,6 +482,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             query: _controller.text.trim(),
             recentTerms: _recentTerms,
             onTap: hapticizeValue(_runTerm),
+            onNeedThis: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => INeedThisScreen(
+                  initialDescription: _controller.text.trim(),
+                ),
+              ),
+            ),
             shrinkWrap: true,
           ),
         ],
@@ -572,7 +588,29 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Future<void> _openMarketCard(MarketplaceCard card) async {
     if (!card.addable) {
       await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ProductOffersScreen(card: card),
+        builder: (_) => ProductOffersScreen(
+          card: card,
+          onAdd: (offer) async {
+            final variantId = offer.productVariantId;
+            if (variantId == null || !offer.addable) return;
+            final added = await ref
+                .read(cartControllerProvider.notifier)
+                .addToCart(
+                  variantId: variantId,
+                  quantity: 1,
+                  shopId: offer.shopId,
+                );
+            if (!mounted) return;
+            if (added == true) {
+              showAddedToCartFeedback(context, offer.productName);
+            } else {
+              showActionFailure(
+                context,
+                "Couldn't add the item to your cart. Please try again.",
+              );
+            }
+          },
+        ),
       ));
       return;
     }
@@ -602,7 +640,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     try {
       final added = await ref
           .read(cartControllerProvider.notifier)
-          .addToCart(variantId: variantId, quantity: 1);
+          .addToCart(
+            variantId: variantId,
+            quantity: 1,
+            shopId: card.shopId,
+          );
       if (!mounted) return;
       if (added == true) {
         showAddedToCartFeedback(context, card.name);
@@ -868,23 +910,56 @@ class _AlsoHeard extends StatelessWidget {
 
 /// The screen before anything has been typed.
 class _RecentSearches extends StatelessWidget {
-  const _RecentSearches({required this.terms, required this.onTap, required this.onClear});
+  const _RecentSearches({
+    required this.terms,
+    required this.onTap,
+    required this.onAssistant,
+    required this.onDemandRequests,
+    required this.onClear,
+  });
 
   final List<String> terms;
   final ValueChanged<String> onTap;
+  final VoidCallback onAssistant;
+  final VoidCallback onDemandRequests;
   final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
     if (terms.isEmpty) {
-      return const Center(
-        child: Text('Search for products', style: TextStyle(color: AppColors.textSecondary)),
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilledButton.icon(
+              onPressed: onAssistant,
+              icon: const Icon(Icons.auto_awesome_outlined),
+              label: const Text('Ask Shopping Assistant'),
+            ),
+            TextButton.icon(
+              onPressed: onDemandRequests,
+              icon: const Icon(Icons.inbox_outlined),
+              label: const Text('My I Need This requests'),
+            ),
+          ],
+        ),
       );
     }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       children: [
+        OutlinedButton.icon(
+          onPressed: onAssistant,
+          icon: const Icon(Icons.auto_awesome_outlined),
+          label: const Text('Ask Shopping Assistant'),
+        ),
+        TextButton.icon(
+          onPressed: onDemandRequests,
+          icon: const Icon(Icons.inbox_outlined),
+          label: const Text('My I Need This requests'),
+        ),
+        const SizedBox(height: 12),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -925,12 +1000,14 @@ class _NoResults extends StatelessWidget {
     required this.query,
     required this.recentTerms,
     required this.onTap,
+    required this.onNeedThis,
     this.shrinkWrap = false,
   });
 
   final String query;
   final List<String> recentTerms;
   final ValueChanged<String> onTap;
+  final VoidCallback onNeedThis;
 
   /// True when this sits inside another scroll view - under the shop and
   /// category matches, which are a result even when no product is.
@@ -958,6 +1035,12 @@ class _NoResults extends StatelessWidget {
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
           ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: onNeedThis,
+          icon: const Icon(Icons.campaign_outlined),
+          label: const Text('I Need This'),
         ),
         if (recentTerms.isNotEmpty) ...[
           const SizedBox(height: 28),

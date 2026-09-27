@@ -28,6 +28,10 @@ void showActionFailure(BuildContext context, String message) {
   );
 }
 
+void showActionSuccess(BuildContext context, String message) {
+  _showAction(context, message: message);
+}
+
 void _showAction(BuildContext context, {required String message, String? action,
   VoidCallback? onPressed}) {
   final messenger = ScaffoldMessenger.of(context);

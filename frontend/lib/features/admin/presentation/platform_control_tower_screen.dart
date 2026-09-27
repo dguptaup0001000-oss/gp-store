@@ -24,11 +24,36 @@ class PlatformControlTowerScreen extends ConsumerStatefulWidget {
       _PlatformControlTowerScreenState();
 }
 
+class _LoopMetric extends StatelessWidget {
+  const _LoopMetric(this.label, this.value);
+  final String label;
+  final Object? value;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 145,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${value ?? 0}',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: AdminColors.primaryDark,
+                  )),
+          Text(label),
+        ],
+      ),
+    );
+  }
+}
+
 class _PlatformControlTowerScreenState
     extends ConsumerState<PlatformControlTowerScreen> {
   final _search = TextEditingController();
   Timer? _debounce;
   Future<PlatformDashboardSummary>? _dashboard;
+  Future<Map<String, dynamic>>? _marketplace;
   PlatformSearchPage? _results;
   Object? _searchError;
   bool _searching = false;
@@ -62,6 +87,8 @@ class _PlatformControlTowerScreenState
             from: range.start,
             to: range.end,
           );
+      _marketplace =
+          ref.read(platformRepositoryProvider).marketplaceIntelligence(days: 30);
     });
   }
 
@@ -143,6 +170,81 @@ class _PlatformControlTowerScreenState
                   return const Text('No platform summary is available.');
                 }
                 return _Dashboard(summary: summary);
+              },
+            ),
+            const SizedBox(height: AdminSpacing.lg),
+            FutureBuilder<Map<String, dynamic>>(
+              future: _marketplace,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const AdminSectionCard(
+                    title: 'Demand → Discovery → Supply (30 days)',
+                    child: LinearProgressIndicator(),
+                  );
+                }
+                if (snapshot.hasError || !snapshot.hasData) {
+                  return AdminSectionCard(
+                    title: 'Demand → Discovery → Supply (30 days)',
+                    child: TextButton.icon(
+                      onPressed: _reloadDashboard,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Could not load marketplace intelligence. Retry'),
+                    ),
+                  );
+                }
+                final data = snapshot.data!;
+                final unmet = data['unmetDemand'] as List? ?? const [];
+                final modes = data['commerceModeUsage'] as List? ?? const [];
+                return AdminSectionCard(
+                  title: 'Demand → Discovery → Supply (30 days)',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: AdminSpacing.lg,
+                        runSpacing: AdminSpacing.md,
+                        children: [
+                          _LoopMetric('Searches', data['searches']),
+                          _LoopMetric('Low-result searches', data['lowResultSearches']),
+                          _LoopMetric('Zero-result rate', '${data['zeroResultRate']}%'),
+                          _LoopMetric('Demand requests', data['demandRequests']),
+                          _LoopMetric('Merchant responses', data['merchantResponses']),
+                          _LoopMetric('Response rate', '${data['responseRate']}%'),
+                          _LoopMetric('Matched requests', data['matchedRequests']),
+                          _LoopMetric('Approved AI drafts', data['approvedAiDrafts']),
+                          _LoopMetric('AI failures', data['failedAiJobs']),
+                          _LoopMetric('Product discovery events', data['productDiscoveryEvents']),
+                          _LoopMetric('Directions requested', data['directionRequests']),
+                          _LoopMetric('Shop calls', data['shopCalls']),
+                          _LoopMetric('Completed orders', data['completedOrders']),
+                          _LoopMetric('Active supply shops', data['activeSupplyShops']),
+                          _LoopMetric('Covered categories', data['coveredCategories']),
+                        ],
+                      ),
+                      const SizedBox(height: AdminSpacing.md),
+                      const Text('Top unmet demand',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      for (final raw in unmet.take(10))
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('${(raw as Map)['query']}'),
+                          trailing: Text('${raw['zeroResultSearches']} unmet'),
+                        ),
+                      const SizedBox(height: AdminSpacing.md),
+                      const Text('Commerce-mode usage',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      for (final raw in modes)
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('${(raw as Map)['commerceMode']}'.replaceAll('_', ' ')),
+                          subtitle: Text('${raw['listings']} active listings'),
+                          trailing: Text('${raw['engagementEvents']} engagements'),
+                        ),
+                    ],
+                  ),
+                );
               },
             ),
           ],

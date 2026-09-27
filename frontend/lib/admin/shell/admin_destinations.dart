@@ -29,6 +29,9 @@ import '../../features/admin/presentation/platform_resource_screen.dart';
 import '../../features/admin/presentation/platform_directory_screen.dart';
 import '../../features/admin/domain/selling_mode.dart';
 import '../../features/admin/presentation/merchant_mode_catalogue_screen.dart';
+import '../../features/admin/presentation/merchant_demand_requests_screen.dart';
+import '../../features/admin/presentation/merchant_intelligence_screen.dart';
+import '../../features/admin/presentation/ai_catalogue_drafts_screen.dart';
 import '../../features/admin/presentation/platform_system_health_screen.dart';
 import '../../features/admin/presentation/shop_earnings_screen.dart';
 import '../../features/support/presentation/release_diagnostics_screen.dart';
@@ -164,6 +167,22 @@ class AdminNav {
       title: 'Operations',
       destinations: [
         AdminDestination(
+          id: 'merchant-intelligence',
+          requires: AdminPermission.analyticsView,
+          label: 'Marketplace Intelligence',
+          icon: Icons.insights_outlined,
+          description: 'Nearby searches, unmet demand, and discovery interest',
+          builder: _merchantIntelligence,
+        ),
+        AdminDestination(
+          id: 'demand-requests',
+          requires: AdminPermission.catalogView,
+          label: 'Demand Requests',
+          icon: Icons.campaign_outlined,
+          description: 'Respond to eligible nearby “I Need This” requests',
+          builder: _demandRequests,
+        ),
+        AdminDestination(
           id: 'orders',
           requires: AdminPermission.ordersView,
           label: 'Orders',
@@ -233,6 +252,14 @@ class AdminNav {
           icon: Icons.inventory_2_outlined,
           description: 'Add, edit, and manage stock',
           builder: _products,
+        ),
+        AdminDestination(
+          id: 'ai-catalogue',
+          requires: AdminPermission.catalogManage,
+          label: 'AI Add & Bulk Digitize',
+          icon: Icons.auto_awesome_outlined,
+          description: 'Extract drafts, review values, then publish',
+          builder: _aiCatalogue,
         ),
         // VISIT TO BUY AND SERVICES SIT NEXT TO PRODUCTS, because to a
         // merchant they are the same question - what do I sell - answered
@@ -570,6 +597,12 @@ class AdminNav {
   static Widget _reviews(BuildContext context) => const AdminReviewsScreen();
   static Widget _broadcast(BuildContext context) => const AdminBroadcastScreen();
   static Widget _analytics(BuildContext context) => const AdminAnalyticsScreen();
+  static Widget _aiCatalogue(BuildContext context) =>
+      const AiCatalogueDraftsScreen();
+  static Widget _merchantIntelligence(BuildContext context) =>
+      const MerchantIntelligenceScreen();
+  static Widget _demandRequests(BuildContext context) =>
+      const MerchantDemandRequestsScreen();
   static Widget _audit(BuildContext context) => const AdminAuditLogScreen();
   static Widget _announcements(BuildContext context) =>
       const AdminVoiceSettingsScreen();

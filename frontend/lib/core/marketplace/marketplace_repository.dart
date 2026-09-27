@@ -143,6 +143,7 @@ class MarketplaceRepository {
   /// answer than the question they actually have.
   Future<ProductOffers> offersOf({
     required int productId,
+    required int variantId,
     required double? latitude,
     required double? longitude,
   }) async {
@@ -151,7 +152,11 @@ class MarketplaceRepository {
     }
     final response = await apiClient.dio.get(
       '/api/marketplace/products/$productId/offers',
-      queryParameters: {'lat': latitude, 'lng': longitude},
+      queryParameters: {
+        'variantId': variantId,
+        'lat': latitude,
+        'lng': longitude,
+      },
     );
     final data = response.data;
     if (data is! List) return const ProductOffers([]);

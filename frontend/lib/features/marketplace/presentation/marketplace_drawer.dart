@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
+import '../../assistant/presentation/shopping_assistant_screen.dart';
+import '../../demand/presentation/demand_requests_screen.dart';
 import '../../orders/presentation/order_history_screen.dart';
 import '../../support/presentation/contact_us_screen.dart';
 import '../../wishlist/presentation/wishlist_screen.dart';
@@ -83,6 +85,18 @@ class MarketplaceDrawer extends ConsumerWidget {
               subtitle: 'Find local services',
               selected: active == CommerceMode.serviceAtShop,
               onTap: () => chooseMode(CommerceMode.serviceAtShop),
+            ),
+            const Divider(height: 24, color: AppColors.divider),
+            const _SectionLabel('Local discovery'),
+            _PlainTile(
+              icon: Icons.auto_awesome_outlined,
+              title: 'Shopping Assistant',
+              onTap: () => open(const ShoppingAssistantScreen()),
+            ),
+            _PlainTile(
+              icon: Icons.campaign_outlined,
+              title: 'My “I Need This” Requests',
+              onTap: () => open(const DemandRequestsScreen()),
             ),
             const Divider(height: 24, color: AppColors.divider),
             const _SectionLabel('You'),

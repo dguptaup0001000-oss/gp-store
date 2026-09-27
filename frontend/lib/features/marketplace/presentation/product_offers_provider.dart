@@ -8,7 +8,8 @@ import '../domain/marketplace_offer.dart';
 /// FAMILY-KEYED ON THE PRODUCT, and auto-disposed, so opening six cards in a
 /// row does not keep six sets of shops alive behind the one on screen.
 final productOffersProvider =
-    FutureProvider.autoDispose.family<ProductOffers, int>((ref, productId) async {
+    FutureProvider.autoDispose.family<ProductOffers, ({int productId, int variantId})>(
+        (ref, key) async {
   final pin = ref.watch(deliveryPinProvider);
   if (pin == null) {
     // No placeable address means nobody can be told which shops serve them.
@@ -17,7 +18,8 @@ final productOffersProvider =
     return const ProductOffers([]);
   }
   return ref.read(marketplaceRepositoryProvider).offersOf(
-        productId: productId,
+        productId: key.productId,
+        variantId: key.variantId,
         latitude: pin.lat,
         longitude: pin.lng,
       );

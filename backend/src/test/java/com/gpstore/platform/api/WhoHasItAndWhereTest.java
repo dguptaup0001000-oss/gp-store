@@ -181,6 +181,33 @@ class WhoHasItAndWhereTest {
         assertTrue(marketplace.offersOf(productId, -40.0, -70.0).isEmpty());
     }
 
+    @Test
+    @DisplayName("different pack sizes remain separate cards and comparisons")
+    void variantsAreNotFalselyComparedAsEquivalent() {
+        sells("Pack shop", 0.0008, "45", CommerceMode.ONLINE_PURCHASE);
+        jdbc.update("""
+                INSERT INTO product_variants
+                    (product_id, quantity, unit, mrp, selling_price, available, active)
+                VALUES (?, 2, 'bottle', 90, 85, true, true)
+                """, productId);
+        Long larger = jdbc.queryForObject("""
+                SELECT id FROM product_variants WHERE product_id=? ORDER BY id DESC LIMIT 1
+                """, Long.class, productId);
+        jdbc.update("""
+                INSERT INTO shop_product_variants
+                    (shop_id, product_variant_id, selling_price, mrp, available, active,
+                     commerce_mode, price_mode, created_at, updated_at)
+                VALUES (?, ?, 85, 90, true, true, 'ONLINE_PURCHASE', 'EXACT_PRICE', now(), now())
+                """, shopIds.get(0), larger);
+
+        List<MarketplaceFeedView> cards = marketplace.page(LAT, LNG,
+                java.util.Set.of(CommerceMode.ONLINE_PURCHASE), categoryId, 0, 20);
+        assertEquals(2, cards.size(), "1 bottle and 2 bottle packs are not equivalent");
+        assertEquals(1, marketplace.offersOf(productId, larger, LAT, LNG).size());
+        assertEquals(larger, marketplace.offersOf(productId, larger, LAT, LNG)
+                .get(0).productVariantId());
+    }
+
     // ------------------------------------------------------------- fixture
 
     private void sells(String name, double latOffset, String price, CommerceMode mode) {
