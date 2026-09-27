@@ -4,6 +4,8 @@ import com.gpstore.catalog.shop.CommerceMode;
 import com.gpstore.security.CurrentUser;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -25,6 +27,7 @@ public class MarketplaceSignals {
         this.currentUser = currentUser;
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void search(String query, Double latitude, Double longitude,
                        Set<CommerceMode> modes, int resultCount) {
         if (query == null || query.isBlank()) return;

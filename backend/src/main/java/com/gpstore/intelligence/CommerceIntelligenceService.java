@@ -128,12 +128,13 @@ public class CommerceIntelligenceService {
                 """, (rs, n) -> new TrendPoint(rs.getString("period"), rs.getLong("orders"),
                 rs.getBigDecimal("sales")), shopId, from);
         List<PopularPeriod> popular = jdbc.query("""
-                SELECT extract(hour from order_date)::int hour, count(*) orders
+                SELECT extract(hour from order_date)::int AS order_hour, count(*) AS orders
                   FROM orders WHERE shop_id=? AND order_date>=?
                  GROUP BY extract(hour from order_date)
                  HAVING count(*)>=?
-                 ORDER BY orders DESC, hour LIMIT 8
-                """, (rs, n) -> new PopularPeriod(rs.getInt("hour"), rs.getLong("orders")),
+                 ORDER BY orders DESC, order_hour LIMIT 8
+                """, (rs, n) -> new PopularPeriod(
+                        rs.getInt("order_hour"), rs.getLong("orders")),
                 shopId, from, privacyThreshold);
         return new MerchantInsight(from, to, searches, zero, requests, responses, visit, service,
                 orders, outOfStock, repeatCustomers,
