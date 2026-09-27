@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/images/image_upload_service.dart';
-import '../../../shared/widgets/action_feedback.dart';
+import '../../../shared/widgets/status_feedback.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'category_picker_sheet.dart';
 
