@@ -43,10 +43,15 @@ public class CommerceIntelligenceService {
     public record ModeUsage(String commerceMode, long listings, long engagementEvents) {}
     public record MarketplaceInsight(LocalDateTime from, LocalDateTime to,
                                      long searches, long zeroResultSearches,
+                                     long lowResultSearches,
                                      BigDecimal zeroResultRate, long demandRequests,
                                      long merchantResponses, BigDecimal responseRate,
                                      long matchedRequests, long approvedAiDrafts,
-                                     long failedAiJobs, List<DemandTerm> unmetDemand,
+                                     long failedAiJobs, long productDiscoveryEvents,
+                                     long directionRequests, long shopCalls,
+                                     long completedOrders, long activeSupplyShops,
+                                     long coveredCategories,
+                                     List<DemandTerm> unmetDemand,
                                      List<ModeUsage> commerceModeUsage) {}
 
     @Transactional(readOnly = true)
@@ -145,6 +150,10 @@ public class CommerceIntelligenceService {
         long zero = count("""
                 SELECT count(*) FROM marketplace_search_events WHERE created_at>=? AND result_count=0
                 """, from);
+        long low = count("""
+                SELECT count(*) FROM marketplace_search_events
+                 WHERE created_at>=? AND result_count BETWEEN 1 AND 2
+                """, from);
         long requests = count("SELECT count(*) FROM demand_requests WHERE created_at>=?", from);
         long responses = count("SELECT count(*) FROM demand_responses WHERE created_at>=?", from);
         long matched = count("""
@@ -157,6 +166,33 @@ public class CommerceIntelligenceService {
         long failures = count("""
                 SELECT count(*) FROM ai_extraction_jobs WHERE created_at>=? AND status='FAILED'
                 """, from);
+        long discoveryEvents = count("""
+                SELECT count(*) FROM listing_engagement_events
+                 WHERE occurred_at>=? AND kind IN ('VIEWED_CARD','OPENED_DETAIL')
+                """, from);
+        long directions = count("""
+                SELECT count(*) FROM listing_engagement_events
+                 WHERE occurred_at>=? AND kind='ASKED_DIRECTIONS'
+                """, from);
+        long calls = count("""
+                SELECT count(*) FROM listing_engagement_events
+                 WHERE occurred_at>=? AND kind='CALLED_SHOP'
+                """, from);
+        long completedOrders = count("""
+                SELECT count(*) FROM orders
+                 WHERE order_date>=? AND order_status='DELIVERED'
+                """, from);
+        long activeSupplyShops = count("""
+                SELECT count(DISTINCT shop_id) FROM shop_product_variants
+                 WHERE active=true
+                """);
+        long coveredCategories = count("""
+                SELECT count(DISTINCT p.category_id)
+                  FROM shop_product_variants spv
+                  JOIN product_variants v ON v.id=spv.product_variant_id
+                  JOIN products p ON p.id=v.product_id
+                 WHERE spv.active=true AND p.active=true
+                """);
         List<ModeUsage> modes = jdbc.query("""
                 SELECT m.mode, count(DISTINCT spv.id) listings,
                        count(DISTINCT e.id) engagements
@@ -166,8 +202,10 @@ public class CommerceIntelligenceService {
                  GROUP BY m.mode ORDER BY m.mode
                 """, (rs, n) -> new ModeUsage(rs.getString("mode"), rs.getLong("listings"),
                 rs.getLong("engagements")), from);
-        return new MarketplaceInsight(from, to, searches, zero, rate(zero, searches),
+        return new MarketplaceInsight(from, to, searches, zero, low, rate(zero, searches),
                 requests, responses, rate(responses, requests), matched, approved, failures,
+                discoveryEvents, directions, calls, completedOrders,
+                activeSupplyShops, coveredCategories,
                 platformTerms(from), modes);
     }
 
