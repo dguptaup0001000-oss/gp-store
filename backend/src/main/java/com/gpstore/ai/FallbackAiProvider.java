@@ -32,7 +32,7 @@ public class FallbackAiProvider implements MarketplaceAiProvider {
         Integer quantity = integer(PEOPLE.matcher(clean));
         String lower = clean.toLowerCase(Locale.ROOT);
         List<String> required = new ArrayList<>();
-        String query = clean;
+        String query = conciseQuery(clean, lower);
         if (lower.contains("biryani") || lower.contains("बिरयानी")) {
             required.addAll(List.of("basmati rice", "onion", "tomato", "biryani masala",
                     "curd", "cooking oil"));
@@ -72,5 +72,21 @@ public class FallbackAiProvider implements MarketplaceAiProvider {
         boolean hindi = value.codePoints().anyMatch(c -> c >= 0x0900 && c <= 0x097f);
         boolean latin = value.codePoints().anyMatch(c -> c < 128 && Character.isLetter(c));
         return hindi && latin ? "HINGLISH" : hindi ? "HINDI" : "ENGLISH";
+    }
+
+    private static String conciseQuery(String original, String lower) {
+        if (lower.contains("repair") || lower.contains("मरम्मत")) {
+            if (lower.contains("iphone")) return "iPhone repair";
+            if (lower.contains("mobile") || lower.contains("phone")) return "mobile repair";
+        }
+        String query = BUDGET.matcher(original).replaceAll(" ");
+        query = PEOPLE.matcher(query).replaceAll(" ");
+        query = query.replaceAll(
+                "(?i)\\b(find|show|need|want|please|available|availability|where|can|i|me|my|near|nearby|locally|a|an|the)\\b",
+                " ");
+        query = query.replaceAll(
+                "(?i)\\b(mujhe|chahiye|dikhao|paas|aas paas|ke liye)\\b", " ");
+        query = query.replaceAll("[?.,!]+", " ").replaceAll("\\s+", " ").trim();
+        return query.isBlank() ? original : query;
     }
 }

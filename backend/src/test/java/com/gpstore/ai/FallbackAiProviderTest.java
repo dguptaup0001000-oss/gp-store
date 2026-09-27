@@ -37,6 +37,16 @@ class FallbackAiProviderTest {
                 provider.interpret("Where can I repair my iPhone nearby?").orElseThrow();
 
         assertThat(intent.commerceMode()).isEqualTo("SERVICE_AT_SHOP");
+        assertThat(intent.query()).isEqualTo("iPhone repair");
         assertThat(intent.requiredItems()).isEmpty();
+    }
+
+    @Test
+    void ordinaryRequestIsReducedToSearchableInventoryTerms() {
+        MarketplaceAiProvider.Intent intent = provider.interpret(
+                "Find a phone under ₹25000 available near me").orElseThrow();
+
+        assertThat(intent.query()).isEqualTo("phone");
+        assertThat(intent.budget()).isEqualByComparingTo("25000");
     }
 }

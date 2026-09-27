@@ -49,7 +49,9 @@ public class ShoppingAssistantService {
         BigDecimal subtotal = BigDecimal.ZERO;
 
         for (String item : items) {
-            List<MarketplaceFeedView> found = marketplace.search(item, request.latitude(),
+            String inventoryQuery = items.size() == 1
+                    ? withAttributes(item, intent.attributes()) : item;
+            List<MarketplaceFeedView> found = marketplace.search(inventoryQuery, request.latitude(),
                     request.longitude(), modes, 0, 10);
             if (items.size() == 1) direct = found;
             MarketplaceFeedView choice = found.stream()
@@ -69,6 +71,19 @@ public class ShoppingAssistantService {
         }
         return new Answer(intent, provider.name(), enabled, direct, List.copyOf(basket),
                 List.copyOf(unavailable), subtotal, true);
+    }
+
+    private static String withAttributes(String query, java.util.Map<String, String> attributes) {
+        StringBuilder result = new StringBuilder(query == null ? "" : query.trim());
+        for (String value : attributes.values()) {
+            if (value == null || value.isBlank()) continue;
+            String clean = value.trim();
+            if (!result.toString().toLowerCase(java.util.Locale.ROOT)
+                    .contains(clean.toLowerCase(java.util.Locale.ROOT))) {
+                result.insert(0, clean + " ");
+            }
+        }
+        return result.toString().trim();
     }
 
     private static Set<CommerceMode> parseMode(String raw) {
