@@ -126,11 +126,10 @@ public class MarketplaceFeedService {
         if (lat == null || lng == null || keyword == null || keyword.isBlank()) {
             return List.of();
         }
+        Set<CommerceMode> requestedModes =
+                modes == null || modes.isEmpty() ? Set.of(CommerceMode.values()) : modes;
+        String interpreted = normalizeSearch(keyword);
         List<ShopDiscovery.NearbyShop> nearby = discovery.shopsServing(lat, lng);
-        if (nearby.isEmpty()) {
-            if (page <= 0) signals.search(keyword, lat, lng, modes, 0);
-            return List.of();
-        }
         Map<Long, Double> distanceByShop = new HashMap<>();
         for (ShopDiscovery.NearbyShop near : nearby) {
             distanceByShop.put(near.shop().getId(), near.distanceKm());
@@ -148,12 +147,32 @@ public class MarketplaceFeedService {
         int limit = Math.min(Math.max(size, 1), MAX_PAGE);
         int offset = Math.max(page, 0) * limit;
 
-        String interpreted = normalizeSearch(keyword);
         List<MarketplaceFeedView> results = new ArrayList<>();
-        for (Object[] row : feed.search(interpreted, distanceByShop.keySet(),
-                modes == null || modes.isEmpty() ? Set.of(CommerceMode.values()) : modes,
-                distanceByShop, limit, offset)) {
-            results.add(toCard(row));
+        if (!distanceByShop.isEmpty()) {
+            for (Object[] row : feed.search(interpreted, distanceByShop.keySet(),
+                    requestedModes, distanceByShop, limit, offset)) {
+                results.add(toCard(row));
+            }
+        }
+        // Local-first expansion uses the same radius ladder as shop discovery.
+        // It runs only for the first unscoped page and only when local supply
+        // produced no result; a caller-selected shop is never silently changed.
+        if (results.isEmpty() && page <= 0 && selectedShopId == null) {
+            ShopDiscovery.RadiusSearch expanded = discovery.searchOutwards(
+                    lat, lng, null, rung -> {
+                        if (rung.isEmpty()) return List.of();
+                        Map<Long, Double> rungDistances = distances(rung);
+                        return feed.search(interpreted, rungDistances.keySet(), requestedModes,
+                                rungDistances, 1, 0).isEmpty() ? List.of() : rung;
+                    });
+            Map<Long, Double> expandedDistances = distances(expanded.shops());
+            if (!expandedDistances.isEmpty()
+                    && !expandedDistances.keySet().equals(distanceByShop.keySet())) {
+                for (Object[] row : feed.search(interpreted, expandedDistances.keySet(),
+                        requestedModes, expandedDistances, limit, offset)) {
+                    results.add(toCard(row));
+                }
+            }
         }
         // One event per customer search, not per card or shop. Page two is
         // continuation traffic and must not inflate demand.
@@ -169,6 +188,14 @@ public class MarketplaceFeedService {
         return tokens.stream()
                 .map(token -> synonyms.canonicalFor(token).orElse(token))
                 .collect(java.util.stream.Collectors.joining(" "));
+    }
+
+    private static Map<Long, Double> distances(List<ShopDiscovery.NearbyShop> nearby) {
+        Map<Long, Double> result = new HashMap<>();
+        for (ShopDiscovery.NearbyShop near : nearby) {
+            result.put(near.shop().getId(), near.distanceKm());
+        }
+        return result;
     }
 
     /**
