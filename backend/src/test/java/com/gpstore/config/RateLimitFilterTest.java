@@ -113,6 +113,20 @@ class RateLimitFilterTest {
     }
 
     @Test
+    void marketplaceAiDemandAndUploadsUseBoundedBuckets() {
+        assertEquals(RateLimitFilter.Bucket.SEARCH,
+                filter.classify(request("POST", "/api/marketplace/assistant")));
+        assertEquals(RateLimitFilter.Bucket.MUTATION,
+                filter.classify(request("POST", "/api/demand-requests")));
+        assertEquals(RateLimitFilter.Bucket.MUTATION,
+                filter.classify(request("POST", "/api/demand-responses/9/report")));
+        assertEquals(RateLimitFilter.Bucket.ADMIN,
+                filter.classify(request("POST", "/api/shop/ai-catalog/jobs")));
+        assertEquals(RateLimitFilter.Bucket.UPLOAD,
+                filter.classify(request("POST", "/api/customers/me/photo/sign")));
+    }
+
+    @Test
     void checkoutSessionAndVerifyAreRateLimited() throws Exception {
         when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(21L);
 

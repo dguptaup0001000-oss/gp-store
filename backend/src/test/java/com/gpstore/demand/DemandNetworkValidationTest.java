@@ -12,7 +12,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -69,5 +73,27 @@ class DemandNetworkValidationTest {
                 new DemandNetwork.ReportRequest("DELETE_SHOP", null, true);
 
         assertThrows(BadRequestException.class, () -> demand.report(91L, report));
+    }
+
+    @Test
+    void merchantDemandContractCannotLeakCustomerPiiOrCoordinates() {
+        Set<String> fields = Arrays.stream(DemandNetwork.MerchantDemand.class
+                        .getRecordComponents())
+                .map(component -> component.getName().toLowerCase())
+                .collect(Collectors.toSet());
+
+        assertThat(fields).doesNotContain(
+                "customerid", "customer", "name", "phone", "email",
+                "address", "latitude", "longitude");
+    }
+
+    @Test
+    void customerCreateContractCannotSupplyAShopId() {
+        Set<String> fields = Arrays.stream(DemandNetwork.CreateRequest.class
+                        .getRecordComponents())
+                .map(component -> component.getName().toLowerCase())
+                .collect(Collectors.toSet());
+
+        assertThat(fields).doesNotContain("shopid", "merchantid", "customerid");
     }
 }
