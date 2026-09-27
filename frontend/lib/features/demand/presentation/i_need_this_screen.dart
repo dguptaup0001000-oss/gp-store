@@ -138,8 +138,15 @@ class _INeedThisScreenState extends ConsumerState<INeedThisScreen> {
 }
 
 class DemandRequestCard extends StatelessWidget {
-  const DemandRequestCard({super.key, required this.request});
+  const DemandRequestCard({
+    super.key,
+    required this.request,
+    this.onClose,
+    this.onCancel,
+  });
   final DemandRequest request;
+  final VoidCallback? onClose;
+  final VoidCallback? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -157,11 +164,30 @@ class DemandRequestCard extends StatelessWidget {
                 title: Text(response.shopName),
                 subtitle: Text([
                   response.status == 'AVAILABLE' ? 'Available' : 'Not available',
+                  if (response.quantity != null) 'Qty ${response.quantity}',
+                  if (response.readyMinutes != null)
+                    'Ready in ${response.readyMinutes} min',
                   if (response.commerceMode != null)
                     response.commerceMode!.replaceAll('_', ' '),
                   if (response.note != null) response.note!,
                 ].join(' • ')),
                 trailing: response.price == null ? null : Text('₹${response.price}'),
+              ),
+            if (onClose != null || onCancel != null)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (onCancel != null)
+                    TextButton(
+                      onPressed: onCancel,
+                      child: const Text('Cancel request'),
+                    ),
+                  if (onClose != null)
+                    FilledButton.tonal(
+                      onPressed: onClose,
+                      child: const Text('Close request'),
+                    ),
+                ],
               ),
           ],
         ),

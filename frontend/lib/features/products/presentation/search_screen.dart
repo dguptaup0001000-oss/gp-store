@@ -13,6 +13,7 @@ import '../../../shared/widgets/action_feedback.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
+import '../../demand/presentation/demand_requests_screen.dart';
 import '../../demand/presentation/i_need_this_screen.dart';
 import '../../assistant/presentation/shopping_assistant_screen.dart';
 import '../domain/product_models.dart';
@@ -439,6 +440,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         onTap: hapticizeValue(_runTerm),
         onAssistant: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const ShoppingAssistantScreen()),
+        ),
+        onDemandRequests: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const DemandRequestsScreen()),
         ),
         onClear: () async {
           await _recent.clear();
@@ -884,22 +888,34 @@ class _RecentSearches extends StatelessWidget {
     required this.terms,
     required this.onTap,
     required this.onAssistant,
+    required this.onDemandRequests,
     required this.onClear,
   });
 
   final List<String> terms;
   final ValueChanged<String> onTap;
   final VoidCallback onAssistant;
+  final VoidCallback onDemandRequests;
   final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
     if (terms.isEmpty) {
       return Center(
-        child: FilledButton.icon(
-          onPressed: onAssistant,
-          icon: const Icon(Icons.auto_awesome_outlined),
-          label: const Text('Ask Shopping Assistant'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilledButton.icon(
+              onPressed: onAssistant,
+              icon: const Icon(Icons.auto_awesome_outlined),
+              label: const Text('Ask Shopping Assistant'),
+            ),
+            TextButton.icon(
+              onPressed: onDemandRequests,
+              icon: const Icon(Icons.inbox_outlined),
+              label: const Text('My I Need This requests'),
+            ),
+          ],
         ),
       );
     }
@@ -911,6 +927,11 @@ class _RecentSearches extends StatelessWidget {
           onPressed: onAssistant,
           icon: const Icon(Icons.auto_awesome_outlined),
           label: const Text('Ask Shopping Assistant'),
+        ),
+        TextButton.icon(
+          onPressed: onDemandRequests,
+          icon: const Icon(Icons.inbox_outlined),
+          label: const Text('My I Need This requests'),
         ),
         const SizedBox(height: 12),
         Row(

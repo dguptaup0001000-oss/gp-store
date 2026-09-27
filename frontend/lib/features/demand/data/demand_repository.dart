@@ -42,6 +42,12 @@ class DemandRepository {
     final response = await apiClient.dio.post('/api/demand-requests/$id/close');
     return DemandRequest.fromJson(response.data as Map<String, dynamic>);
   }
+
+  Future<DemandRequest> cancel(int id) async {
+    final response =
+        await apiClient.dio.post('/api/demand-requests/$id/cancel');
+    return DemandRequest.fromJson(response.data as Map<String, dynamic>);
+  }
 }
 
 class DemandRequest {

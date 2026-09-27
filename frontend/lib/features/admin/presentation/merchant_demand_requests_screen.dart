@@ -31,43 +31,106 @@ class _MerchantDemandRequestsScreenState
 
   Future<void> _respond(Map<String, dynamic> request, bool available) async {
     final price = TextEditingController();
+    final quantity = TextEditingController(
+      text: available ? '${request['quantity'] ?? 1}' : '',
+    );
+    final readyMinutes = TextEditingController();
     final note = TextEditingController();
+    String selectedMode =
+        request['preferredMode'] as String? ?? 'VISIT_TO_BUY';
     final accepted = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(available ? 'Respond available' : 'Respond not available'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (available)
-              TextField(
-                controller: price,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Price (optional)'),
-              ),
-            TextField(
-              controller: note,
-              maxLength: 500,
-              decoration: const InputDecoration(labelText: 'Merchant note (optional)'),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(available ? 'Respond available' : 'Respond not available'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (available) ...[
+                  TextField(
+                    controller: price,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration:
+                        const InputDecoration(labelText: 'Price (optional)'),
+                  ),
+                  TextField(
+                    controller: quantity,
+                    keyboardType: TextInputType.number,
+                    decoration:
+                        const InputDecoration(labelText: 'Quantity available'),
+                  ),
+                  TextField(
+                    controller: readyMinutes,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Ready in minutes (optional)',
+                    ),
+                  ),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedMode,
+                    decoration:
+                        const InputDecoration(labelText: 'How customer buys'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'ONLINE_PURCHASE',
+                        child: Text('Buy Online'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'VISIT_TO_BUY',
+                        child: Text('Visit Shop'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'SERVICE_AT_SHOP',
+                        child: Text('Service at Shop'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() => selectedMode = value);
+                      }
+                    },
+                  ),
+                ],
+                TextField(
+                  controller: note,
+                  maxLength: 500,
+                  decoration: const InputDecoration(
+                    labelText: 'Merchant note (optional)',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Send'),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Send')),
-        ],
       ),
     );
     if (accepted != true) return;
     final parsedPrice = double.tryParse(price.text);
+    final parsedQuantity = int.tryParse(quantity.text);
+    final parsedReadyMinutes = int.tryParse(readyMinutes.text);
     final requestId = request['id'];
     await ref.read(apiClientProvider).dio.put(
       '/api/shop/demand-requests/$requestId/response',
       data: {
         'status': available ? 'AVAILABLE' : 'NOT_AVAILABLE',
         if (parsedPrice != null) 'price': parsedPrice,
+        if (available && parsedQuantity != null) 'quantity': parsedQuantity,
+        if (available && parsedReadyMinutes != null)
+          'readyMinutes': parsedReadyMinutes,
         if (note.text.trim().isNotEmpty) 'note': note.text.trim(),
-        if (available) 'commerceMode': request['preferredMode'] ?? 'VISIT_TO_BUY',
+        if (available) 'commerceMode': selectedMode,
       },
     );
     if (mounted) setState(() => _requests = _load());

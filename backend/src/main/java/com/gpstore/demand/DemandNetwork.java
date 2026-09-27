@@ -1,6 +1,7 @@
 package com.gpstore.demand;
 
 import com.gpstore.catalog.shop.CommerceMode;
+import com.gpstore.catalog.CatalogUrlValidator;
 import com.gpstore.exception.BadRequestException;
 import com.gpstore.exception.ResourceNotFoundException;
 import com.gpstore.platform.ShopDiscovery;
@@ -65,6 +66,11 @@ public class DemandNetwork {
         if (request.latitude() == null || request.longitude() == null) {
             throw new BadRequestException("Choose an approximate search location.");
         }
+        if (!Double.isFinite(request.latitude()) || !Double.isFinite(request.longitude())
+                || request.latitude() < -90 || request.latitude() > 90
+                || request.longitude() < -180 || request.longitude() > 180) {
+            throw new BadRequestException("Search location is invalid.");
+        }
         int quantity = request.quantity() == null ? 1 : request.quantity();
         if (quantity < 1 || quantity > 10_000) throw new BadRequestException("Quantity is invalid.");
         if (request.budget() != null && request.budget().signum() <= 0) {
@@ -99,7 +105,8 @@ public class DemandNetwork {
                 RETURNING id
                 """, Long.class, customerId, description, safePhoto(request.photoUrl()), quantity,
                 request.categoryId(), request.budget(), request.requiredBy() == null
-                        ? null : Timestamp.valueOf(request.requiredBy()), request.latitude(), request.longitude(),
+                        ? null : Timestamp.valueOf(request.requiredBy()),
+                coarseCoordinate(request.latitude()), coarseCoordinate(request.longitude()),
                 radius, mode == null ? null : mode.name(), Timestamp.valueOf(expires));
 
         List<Long> candidates = discovery.shopsWithin(
@@ -192,6 +199,13 @@ public class DemandNetwork {
         if (request.quantity() != null && request.quantity() <= 0) {
             throw new BadRequestException("Quantity must be greater than zero.");
         }
+        if (request.quantity() != null && request.quantity() > 10_000) {
+            throw new BadRequestException("Quantity is too large.");
+        }
+        if (request.readyMinutes() != null
+                && (request.readyMinutes() < 0 || request.readyMinutes() > 43_200)) {
+            throw new BadRequestException("Ready time is invalid.");
+        }
         Long id = jdbc.queryForObject("""
                 INSERT INTO demand_responses
                     (request_id, shop_id, status, price, quantity, ready_minutes,
@@ -210,17 +224,23 @@ public class DemandNetwork {
     private Set<Long> eligible(List<Long> shops, Long categoryId, CommerceMode mode) {
         String ids = String.join(",", java.util.Collections.nCopies(shops.size(), "?"));
         String sql = """
-                SELECT DISTINCT spv.shop_id
-                  FROM shop_product_variants spv
-                  JOIN product_variants v ON v.id=spv.product_variant_id
-                  JOIN products p ON p.id=v.product_id
-                 WHERE spv.shop_id IN (%s)
-                   AND (?::bigint IS NULL OR p.category_id=?::bigint OR EXISTS (
+                SELECT s.id
+                  FROM shops s
+                 WHERE s.id IN (%s)
+                   AND (?::bigint IS NULL OR EXISTS (
                        SELECT 1 FROM shop_categories sc
-                        WHERE sc.shop_id=spv.shop_id AND sc.active=true
-                          AND sc.global_category_id=?::bigint))
-                   AND (?::varchar IS NULL OR spv.commerce_mode=?::varchar)
-                   AND spv.active=true
+                        WHERE sc.shop_id=s.id AND sc.active=true
+                          AND sc.global_category_id=?::bigint)
+                     OR EXISTS (
+                       SELECT 1 FROM shop_product_variants category_spv
+                       JOIN product_variants v ON v.id=category_spv.product_variant_id
+                       JOIN products p ON p.id=v.product_id
+                        WHERE category_spv.shop_id=s.id AND category_spv.active=true
+                          AND p.category_id=?::bigint))
+                   AND (?::varchar IS NULL OR EXISTS (
+                       SELECT 1 FROM shop_product_variants mode_spv
+                        WHERE mode_spv.shop_id=s.id AND mode_spv.active=true
+                          AND mode_spv.commerce_mode=?::varchar))
                 """.formatted(ids);
         java.util.ArrayList<Object> args = new java.util.ArrayList<>(shops);
         args.add(categoryId); args.add(categoryId); args.add(categoryId);
@@ -290,7 +310,9 @@ public class DemandNetwork {
     private static String safePhoto(String raw) {
         String value = clean(raw, 1000);
         if (value == null) return null;
-        if (!(value.startsWith("https://") || value.startsWith("catalog/"))) {
+        if (value.contains("..") || value.startsWith("/")
+                || !(value.startsWith("catalog/")
+                || CatalogUrlValidator.isAllowedImageUrl(value))) {
             throw new BadRequestException("Use a GP-STORE controlled image upload.");
         }
         return value;
@@ -302,6 +324,11 @@ public class DemandNetwork {
     }
     private static String upper(String value) {
         return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+    }
+    private static double coarseCoordinate(double value) {
+        return BigDecimal.valueOf(value)
+                .setScale(2, java.math.RoundingMode.HALF_UP)
+                .doubleValue();
     }
     private static LocalDateTime min(LocalDateTime a, LocalDateTime b) {
         return a.isBefore(b) ? a : b;
