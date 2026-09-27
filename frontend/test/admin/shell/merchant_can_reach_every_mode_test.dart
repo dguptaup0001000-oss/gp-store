@@ -57,19 +57,22 @@ void main() {
           reason: 'the existing entries must survive the addition');
     });
 
-    test('they sit beside Products, where a merchant looks for what they sell', () {
+    test('they sit with product entry, where a merchant looks for what they sell', () {
       final labels =
           catalogueFor(merchant()).destinations.map((d) => d.label).toList();
 
-      expect(labels.indexOf('Visit to Buy'), labels.indexOf('Products') + 1);
+      expect(labels.indexOf('AI Add & Bulk Digitize'), labels.indexOf('Products') + 1);
+      expect(labels.indexOf('Visit to Buy'),
+          labels.indexOf('AI Add & Bulk Digitize') + 1);
       expect(labels.indexOf('Services at Shop'), labels.indexOf('Visit to Buy') + 1);
     });
 
     test('the whole requested Catalogue order is what a merchant sees', () {
       expect(
           catalogueFor(merchant()).destinations.map((d) => d.label).toList(),
-          ['Products', 'Visit to Buy', 'Services at Shop', 'Categories',
-            'Inventory', 'Import Catalogue', 'Coupons']);
+          ['Products', 'AI Add & Bulk Digitize', 'Visit to Buy',
+            'Services at Shop', 'Categories', 'Inventory', 'Import Catalogue',
+            'Coupons']);
     });
 
     test('a merchant who may only VIEW the catalogue still sees both', () {
