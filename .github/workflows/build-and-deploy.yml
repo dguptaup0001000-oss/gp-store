@@ -77,7 +77,13 @@ jobs:
         run: |
           set -Eeuo pipefail
           echo "event_name=${GITHUB_EVENT_NAME}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.sha }}" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] \
+             && [ "${{ github.head_ref }}" = "cursor/test-apk-artifacts-31a9" ]; then
+            # One-off test-artifact trigger: package the immutable current
+            # main commit, not GitHub's synthetic PR merge commit. This keeps
+            # DNS-independent phone-test APKs attributable to exact main.
+            SHA="${{ github.event.pull_request.base.sha }}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.sha }}" ]; then
             SHA="${{ inputs.sha }}"
           else
             SHA="${GITHUB_SHA}"
@@ -556,7 +562,7 @@ jobs:
       - name: Upload customer ARM64 APK
         uses: actions/upload-artifact@v4
         with:
-          name: gpstore-customer-release.apk
+          name: gpstore-customer-release-${{ steps.src.outputs.short }}
           path: |
             ${{ runner.temp }}/gpstore-release/gpstore-customer-release.apk
             ${{ runner.temp }}/gpstore-release/gpstore-customer-release.apk.sha256
@@ -576,7 +582,7 @@ jobs:
       - name: Upload admin ARM64 APK
         uses: actions/upload-artifact@v4
         with:
-          name: gpstore-admin-release.apk
+          name: gpstore-admin-release-${{ steps.src.outputs.short }}
           path: |
             ${{ runner.temp }}/gpstore-release/gpstore-admin-release.apk
             ${{ runner.temp }}/gpstore-release/gpstore-admin-release.apk.sha256
@@ -596,7 +602,7 @@ jobs:
       - name: Upload super admin ARM64 APK
         uses: actions/upload-artifact@v4
         with:
-          name: gpstore-superadmin-release.apk
+          name: gpstore-superadmin-release-${{ steps.src.outputs.short }}
           path: |
             ${{ runner.temp }}/gpstore-release/gpstore-superadmin-release.apk
             ${{ runner.temp }}/gpstore-release/gpstore-superadmin-release.apk.sha256
@@ -616,7 +622,7 @@ jobs:
       - name: Upload worker ARM64 APK
         uses: actions/upload-artifact@v4
         with:
-          name: gpstore-worker-arm64.apk
+          name: gpstore-worker-release-${{ steps.src.outputs.short }}
           path: |
             ${{ runner.temp }}/gpstore-release/gpstore-worker-arm64.apk
             ${{ runner.temp }}/gpstore-release/gpstore-worker-arm64.apk.sha256
@@ -674,6 +680,7 @@ jobs:
     needs: [build-apk]
     if: >-
       github.event_name == 'pull_request' &&
+      github.head_ref != 'cursor/test-apk-artifacts-31a9' &&
       needs.build-apk.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
