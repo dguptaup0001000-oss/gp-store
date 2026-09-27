@@ -9,6 +9,7 @@ import com.gpstore.platform.TenantContext;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.ProductService;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,7 +55,9 @@ public class AiCatalogService {
                             String barcode, String imageUrl, String commerceMode,
                             BigDecimal confidence, String generatedFields,
                             String uncertainFields, String status, Long approvedProductId,
+                            Long matchedProductId, Long matchedVariantId,
                             LocalDateTime createdAt) {}
+    private record CanonicalMatch(Long productId, Long variantId) {}
 
     @Transactional
     public JobView start(StartRequest request) {
@@ -178,10 +181,20 @@ public class AiCatalogService {
                 clean(input.barcode(), 120), controlledImage(input.imageUrl()),
                 requiredMode(input.commerceMode()), id, shopId);
         if (changed == 0) throw new ResourceNotFoundException("Review draft not found.");
+        CanonicalMatch match = canonicalMatch(input);
+        jdbc.update("""
+                UPDATE ai_catalog_drafts
+                   SET matched_product_id=?, matched_variant_id=?, updated_at=now()
+                 WHERE id=? AND shop_id=? AND status='REVIEW'
+                """, match == null ? null : match.productId(),
+                match == null ? null : match.variantId(), id, shopId);
         return draft(id);
     }
 
     @Transactional
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts",
+            "productDetail", "productSearch", "productFeed", "bestsellerTiles",
+            "trending", "frequentlyBought"}, allEntries = true)
     public DraftView approve(long id) {
         long shopId = shopId();
         long userId = currentUser.customerId();
@@ -211,7 +224,20 @@ public class AiCatalogService {
         first.setCommerceMode(requiredMode(input.commerceMode()));
         first.setAvailable(true);
         request.setFirstVariant(first);
-        ProductResponse published = products.createProduct(request);
+        CanonicalMatch match = canonicalMatch(input);
+        Long publishedProductId;
+        if (match == null) {
+            ProductResponse published = products.createProduct(request);
+            publishedProductId = published.getId();
+        } else {
+            attachCanonicalVariant(shopId, match, input);
+            publishedProductId = match.productId();
+            jdbc.update("""
+                    UPDATE ai_catalog_drafts
+                       SET matched_product_id=?, matched_variant_id=?, updated_at=now()
+                     WHERE id=? AND shop_id=?
+                    """, match.productId(), match.variantId(), id, shopId);
+        }
         jdbc.update("""
                 UPDATE ai_catalog_drafts SET status='APPROVED', approved_product_id=?,
                     approved_by=?, approved_at=now(), updated_at=now(),
@@ -223,7 +249,7 @@ public class AiCatalogService {
                       'barcode', barcode, 'imageUrl', image_url,
                       'commerceMode', commerce_mode)
                  WHERE id=? AND shop_id=? AND status='REVIEW'
-                """, published.getId(), userId, id, shopId);
+                """, publishedProductId, userId, id, shopId);
         return draft(id);
     }
 
@@ -239,6 +265,9 @@ public class AiCatalogService {
     }
 
     @Transactional
+    @CacheEvict(value = {"products", "brands", "newArrivals", "categoryProducts",
+            "productDetail", "productSearch", "productFeed", "bestsellerTiles",
+            "trending", "frequentlyBought"}, allEntries = true)
     public List<DraftView> approveBatch(BatchApproveRequest request) {
         if (request == null || request.draftIds() == null || request.draftIds().isEmpty()) {
             throw new BadRequestException("Choose at least one reviewed draft.");
@@ -354,7 +383,68 @@ public class AiCatalogService {
                 rs.getString("commerce_mode"), rs.getBigDecimal("confidence"),
                 rs.getString("generated_fields"), rs.getString("uncertain_fields"),
                 rs.getString("status"), (Long) rs.getObject("approved_product_id"),
+                (Long) rs.getObject("matched_product_id"),
+                (Long) rs.getObject("matched_variant_id"),
                 local(rs.getTimestamp("created_at")));
+    }
+
+    private CanonicalMatch canonicalMatch(DraftInput input) {
+        List<CanonicalMatch> matches;
+        String barcode = clean(input.barcode(), 120);
+        if (barcode != null) {
+            matches = jdbc.query("""
+                    SELECT p.id product_id, v.id variant_id
+                      FROM product_variants v JOIN products p ON p.id=v.product_id
+                     WHERE p.active=true AND v.active=true AND lower(v.barcode)=lower(?)
+                     ORDER BY v.id LIMIT 2
+                    """, (rs, n) -> new CanonicalMatch(
+                    rs.getLong("product_id"), rs.getLong("variant_id")), barcode);
+        } else if (input.brand() != null && !input.brand().isBlank()) {
+            matches = jdbc.query("""
+                    SELECT p.id product_id, v.id variant_id
+                      FROM products p JOIN product_variants v ON v.product_id=p.id
+                     WHERE p.active=true AND v.active=true AND p.category_id=?
+                       AND lower(btrim(p.name))=lower(btrim(?))
+                       AND lower(btrim(COALESCE(p.brand,'')))=lower(btrim(?))
+                       AND (?::double precision IS NULL OR v.quantity=?::double precision)
+                       AND (?::varchar IS NULL OR lower(btrim(v.unit))=lower(btrim(?::varchar)))
+                     ORDER BY v.id LIMIT 2
+                    """, (rs, n) -> new CanonicalMatch(
+                    rs.getLong("product_id"), rs.getLong("variant_id")),
+                    input.categoryId(), input.name(), input.brand(),
+                    input.quantity(), input.quantity(), input.unit(), input.unit());
+        } else {
+            return null;
+        }
+        // Ambiguous candidates are never auto-matched. The merchant can
+        // publish a separate reviewed item rather than attaching to the wrong
+        // pack size.
+        return matches.size() == 1 ? matches.get(0) : null;
+    }
+
+    private void attachCanonicalVariant(long shopId, CanonicalMatch match, DraftInput input) {
+        Boolean alreadyListed = jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM shop_product_variants
+                 WHERE shop_id=? AND product_variant_id=? AND active=true)
+                """, Boolean.class, shopId, match.variantId());
+        if (Boolean.TRUE.equals(alreadyListed)) {
+            throw new com.gpstore.exception.ConflictException(
+                    "This canonical product is already on your shelf.");
+        }
+        jdbc.update("""
+                INSERT INTO shop_product_variants
+                    (shop_id, product_variant_id, selling_price, mrp, available, active,
+                     commerce_mode, price_mode, created_at, updated_at)
+                VALUES (?, ?, ?, ?, true, true, ?, 'EXACT_PRICE', now(), now())
+                """, shopId, match.variantId(), input.sellingPrice(), input.mrp(),
+                requiredMode(input.commerceMode()));
+        jdbc.update("""
+                INSERT INTO inventory
+                    (shop_id, product_variant_id, stock, reserved_stock)
+                VALUES (?, ?, ?, 0)
+                ON CONFLICT (shop_id, product_variant_id) DO UPDATE SET
+                    stock=excluded.stock, reserved_stock=0
+                """, shopId, match.variantId(), input.stock() == null ? 0 : input.stock());
     }
 
     private long shopId() {

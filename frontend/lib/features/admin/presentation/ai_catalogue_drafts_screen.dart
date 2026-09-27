@@ -300,7 +300,12 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
                     Card(
                       child: ListTile(
                         title: Text(draft['name'] as String? ?? 'Unnamed draft'),
-                        subtitle: Text('${draft['status']} • confidence ${draft['confidence'] ?? 'unknown'}'),
+                        subtitle: Text([
+                          '${draft['status']}',
+                          'confidence ${draft['confidence'] ?? 'unknown'}',
+                          if (draft['matchedProductId'] != null)
+                            'canonical match found — approval reuses it',
+                        ].join(' • ')),
                         onTap: draft['status'] == 'REVIEW' ? () => _review(draft) : null,
                         trailing: draft['status'] == 'REVIEW'
                             ? Wrap(
