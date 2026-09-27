@@ -24,11 +24,36 @@ class PlatformControlTowerScreen extends ConsumerStatefulWidget {
       _PlatformControlTowerScreenState();
 }
 
+class _LoopMetric extends StatelessWidget {
+  const _LoopMetric(this.label, this.value);
+  final String label;
+  final Object? value;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 145,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${value ?? 0}',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: AdminColors.primaryDark,
+                  )),
+          Text(label),
+        ],
+      ),
+    );
+  }
+}
+
 class _PlatformControlTowerScreenState
     extends ConsumerState<PlatformControlTowerScreen> {
   final _search = TextEditingController();
   Timer? _debounce;
   Future<PlatformDashboardSummary>? _dashboard;
+  Future<Map<String, dynamic>>? _marketplace;
   PlatformSearchPage? _results;
   Object? _searchError;
   bool _searching = false;
@@ -62,6 +87,8 @@ class _PlatformControlTowerScreenState
             from: range.start,
             to: range.end,
           );
+      _marketplace =
+          ref.read(platformRepositoryProvider).marketplaceIntelligence(days: 30);
     });
   }
 
@@ -143,6 +170,30 @@ class _PlatformControlTowerScreenState
                   return const Text('No platform summary is available.');
                 }
                 return _Dashboard(summary: summary);
+              },
+            ),
+            const SizedBox(height: AdminSpacing.lg),
+            FutureBuilder<Map<String, dynamic>>(
+              future: _marketplace,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const SizedBox.shrink();
+                final data = snapshot.data!;
+                return AdminSectionCard(
+                  title: 'Demand → Discovery → Supply (30 days)',
+                  child: Wrap(
+                    spacing: AdminSpacing.lg,
+                    runSpacing: AdminSpacing.md,
+                    children: [
+                      _LoopMetric('Searches', data['searches']),
+                      _LoopMetric('Zero-result rate', '${data['zeroResultRate']}%'),
+                      _LoopMetric('Demand requests', data['demandRequests']),
+                      _LoopMetric('Merchant responses', data['merchantResponses']),
+                      _LoopMetric('Matched requests', data['matchedRequests']),
+                      _LoopMetric('Approved AI drafts', data['approvedAiDrafts']),
+                      _LoopMetric('AI failures', data['failedAiJobs']),
+                    ],
+                  ),
+                );
               },
             ),
           ],

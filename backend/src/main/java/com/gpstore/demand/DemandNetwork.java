@@ -98,8 +98,8 @@ public class DemandNetwork {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """, Long.class, customerId, description, safePhoto(request.photoUrl()), quantity,
-                request.categoryId(), request.budget(), Timestamp.valueOf(request.requiredBy() == null
-                        ? expires : request.requiredBy()), request.latitude(), request.longitude(),
+                request.categoryId(), request.budget(), request.requiredBy() == null
+                        ? null : Timestamp.valueOf(request.requiredBy()), request.latitude(), request.longitude(),
                 radius, mode == null ? null : mode.name(), Timestamp.valueOf(expires));
 
         List<Long> candidates = discovery.shopsWithin(
@@ -215,12 +215,15 @@ public class DemandNetwork {
                   JOIN product_variants v ON v.id=spv.product_variant_id
                   JOIN products p ON p.id=v.product_id
                  WHERE spv.shop_id IN (%s)
-                   AND (?::bigint IS NULL OR p.category_id=?::bigint)
+                   AND (?::bigint IS NULL OR p.category_id=?::bigint OR EXISTS (
+                       SELECT 1 FROM shop_categories sc
+                        WHERE sc.shop_id=spv.shop_id AND sc.active=true
+                          AND sc.global_category_id=?::bigint))
                    AND (?::varchar IS NULL OR spv.commerce_mode=?::varchar)
                    AND spv.active=true
                 """.formatted(ids);
         java.util.ArrayList<Object> args = new java.util.ArrayList<>(shops);
-        args.add(categoryId); args.add(categoryId);
+        args.add(categoryId); args.add(categoryId); args.add(categoryId);
         args.add(mode == null ? null : mode.name()); args.add(mode == null ? null : mode.name());
         return new java.util.LinkedHashSet<>(jdbc.queryForList(sql, Long.class, args.toArray()));
     }

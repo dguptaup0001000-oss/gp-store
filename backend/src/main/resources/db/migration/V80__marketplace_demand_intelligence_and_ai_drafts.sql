@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS ai_catalog_drafts (
     confidence          NUMERIC(4,3),
     generated_fields    VARCHAR(1000) NOT NULL DEFAULT '',
     uncertain_fields    VARCHAR(1000) NOT NULL DEFAULT '',
+    original_payload    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    approved_payload    JSONB,
     status              VARCHAR(24) NOT NULL DEFAULT 'REVIEW',
     approved_product_id BIGINT REFERENCES products(id),
     approved_by         BIGINT REFERENCES customers(id),

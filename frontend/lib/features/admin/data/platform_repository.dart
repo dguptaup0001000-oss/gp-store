@@ -17,6 +17,14 @@ class PlatformRepository {
 
   final ApiClient apiClient;
 
+  Future<Map<String, dynamic>> marketplaceIntelligence({int days = 30}) async {
+    final response = await apiClient.dio.get(
+      '/api/platform/marketplace-intelligence',
+      queryParameters: {'days': days},
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
   Future<PlatformSearchPage> globalSearch({
     required String query,
     int page = 0,

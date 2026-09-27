@@ -593,9 +593,10 @@ public class MarketplaceController {
     @GetMapping("/products/{productId}/offers")
     public List<MarketplaceOfferView> offersOf(
             @PathVariable Long productId,
+            @RequestParam(required = false) Long variantId,
             @RequestParam(required = false) Double lat,
             @RequestParam(required = false) Double lng) {
-        return marketplaceFeed.offersOf(productId, lat, lng);
+        return marketplaceFeed.offersOf(productId, variantId, lat, lng);
     }
 
     /**

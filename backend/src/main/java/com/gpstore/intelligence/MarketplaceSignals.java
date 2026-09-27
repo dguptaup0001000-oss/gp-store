@@ -15,6 +15,8 @@ import java.util.Set;
  */
 @Service
 public class MarketplaceSignals {
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(MarketplaceSignals.class);
     private final JdbcTemplate jdbc;
     private final CurrentUser currentUser;
 
@@ -35,13 +37,19 @@ public class MarketplaceSignals {
             // Anonymous discovery remains useful; no pseudonymous identifier is invented.
         }
         String mode = modes != null && modes.size() == 1 ? modes.iterator().next().name() : null;
-        jdbc.update("""
-                INSERT INTO marketplace_search_events
-                    (customer_id, query_text, normalized_query, commerce_mode,
-                     latitude_cell, longitude_cell, result_count)
-                VALUES (?, ?, lower(?), ?, ?, ?, ?)
-                """, customer, clean, clean, mode, cell(latitude), cell(longitude),
-                Math.max(0, resultCount));
+        try {
+            jdbc.update("""
+                    INSERT INTO marketplace_search_events
+                        (customer_id, query_text, normalized_query, commerce_mode,
+                         latitude_cell, longitude_cell, result_count)
+                    VALUES (?, ?, lower(?), ?, ?, ?, ?)
+                    """, customer, clean, clean, mode, cell(latitude), cell(longitude),
+                    Math.max(0, resultCount));
+        } catch (RuntimeException unavailable) {
+            // Analytics may lose one event; discovery must never lose its answer.
+            log.warn("Could not record marketplace search signal: {}",
+                    unavailable.getClass().getSimpleName());
+        }
     }
 
     private static BigDecimal cell(Double value) {

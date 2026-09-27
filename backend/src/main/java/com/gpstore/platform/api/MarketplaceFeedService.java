@@ -173,6 +173,16 @@ public class MarketplaceFeedService {
      */
     @Transactional(readOnly = true)
     public List<MarketplaceOfferView> offersOf(Long productId, Double lat, Double lng) {
+        return offersOf(productId, null, lat, lng);
+    }
+
+    /**
+     * Variant-safe offer comparison. New clients always provide variantId so
+     * 500 g and 1 kg packs can never appear as equivalent offers.
+     */
+    @Transactional(readOnly = true)
+    public List<MarketplaceOfferView> offersOf(Long productId, Long variantId,
+                                               Double lat, Double lng) {
         if (productId == null || lat == null || lng == null) {
             return List.of();
         }
@@ -186,7 +196,8 @@ public class MarketplaceFeedService {
         }
 
         List<MarketplaceOfferView> offers = new ArrayList<>();
-        for (Object[] row : feed.offersOf(productId, distanceByShop.keySet(), distanceByShop)) {
+        for (Object[] row : feed.offersOf(
+                productId, variantId, distanceByShop.keySet(), distanceByShop)) {
             offers.add(toOffer(row));
         }
         return offers;

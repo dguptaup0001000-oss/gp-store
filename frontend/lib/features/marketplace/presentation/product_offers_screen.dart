@@ -38,13 +38,14 @@ class ProductOffersScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final offers = ref.watch(productOffersProvider(card.productId));
+    final key = (productId: card.productId, variantId: card.productVariantId!);
+    final offers = ref.watch(productOffersProvider(key));
 
     // OPENING IS A DELIBERATE ACT, unlike scrolling past - which is what makes
     // it worth more to a merchant than a view. Recorded against the shop the
     // card named, once the offers have actually arrived, so a failed load is
     // not counted as interest in a listing the customer never saw.
-    ref.listen(productOffersProvider(card.productId), (previous, next) {
+    ref.listen(productOffersProvider(key), (previous, next) {
       if (previous?.hasValue == true || !next.hasValue) return;
       final shopId = card.shopId;
       final variantId = card.productVariantId;
@@ -65,7 +66,7 @@ class ProductOffersScreen extends ConsumerWidget {
           title: 'Could not load shops',
           body: 'Check your connection and try again.',
           action: FilledButton(
-            onPressed: () => ref.invalidate(productOffersProvider(card.productId)),
+            onPressed: () => ref.invalidate(productOffersProvider(key)),
             child: const Text('Try again'),
           ),
         ),

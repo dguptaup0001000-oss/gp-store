@@ -92,6 +92,20 @@ public class AiCatalogService {
                     UPDATE ai_extraction_jobs SET status='REVIEW_READY', completed_at=now(), updated_at=now()
                      WHERE id=? AND shop_id=?
                     """, jobId, shopId);
+        } else {
+            // AI-disabled fallback: preserve the controlled source as a draft
+            // and mark every value as requiring human entry. Nothing is
+            // guessed and the merchant can continue working without a provider.
+            String image = Set.of("PRODUCT_PHOTO", "LABEL_PHOTO", "SHELF_PHOTO")
+                    .contains(type) ? objectKey : null;
+            createDraft(jobId, shopId, userId,
+                    new DraftInput(null, null, null, null, null, null, null,
+                            null, null, null, null, image, null),
+                    BigDecimal.ZERO, "", "name,brand,categoryId,sellingPrice,unit,commerceMode");
+            jdbc.update("""
+                    UPDATE ai_extraction_jobs SET status='REVIEW_READY', completed_at=now(), updated_at=now()
+                     WHERE id=? AND shop_id=?
+                    """, jobId, shopId);
         }
         return job(jobId);
     }
@@ -160,7 +174,14 @@ public class AiCatalogService {
         ProductResponse published = products.createProduct(request);
         jdbc.update("""
                 UPDATE ai_catalog_drafts SET status='APPROVED', approved_product_id=?,
-                    approved_by=?, approved_at=now(), updated_at=now()
+                    approved_by=?, approved_at=now(), updated_at=now(),
+                    approved_payload=jsonb_build_object(
+                      'name', name, 'brand', brand, 'description', description,
+                      'categoryId', category_id, 'variantLabel', variant_label,
+                      'quantity', quantity, 'unit', unit, 'mrp', mrp,
+                      'sellingPrice', selling_price, 'stock', stock,
+                      'barcode', barcode, 'imageUrl', image_url,
+                      'commerceMode', commerce_mode)
                  WHERE id=? AND shop_id=? AND status='REVIEW'
                 """, published.getId(), userId, id, shopId);
         return draft(id);
@@ -179,7 +200,7 @@ public class AiCatalogService {
 
     private Long createDraft(Long jobId, long shopId, long userId, DraftInput input,
                              BigDecimal confidence, String generated, String uncertain) {
-        return jdbc.queryForObject("""
+        Long id = jdbc.queryForObject("""
                 INSERT INTO ai_catalog_drafts
                     (job_id, shop_id, requested_by, name, brand, description, category_id,
                      variant_label, quantity, unit, mrp, selling_price, stock, barcode,
@@ -190,6 +211,17 @@ public class AiCatalogService {
                 input.description(), input.categoryId(), input.variantLabel(), input.quantity(),
                 input.unit(), input.mrp(), input.sellingPrice(), input.stock(), input.barcode(),
                 input.imageUrl(), input.commerceMode(), confidence, generated, uncertain);
+        jdbc.update("""
+                UPDATE ai_catalog_drafts SET original_payload=jsonb_build_object(
+                    'name', name, 'brand', brand, 'description', description,
+                    'categoryId', category_id, 'variantLabel', variant_label,
+                    'quantity', quantity, 'unit', unit, 'mrp', mrp,
+                    'sellingPrice', selling_price, 'stock', stock,
+                    'barcode', barcode, 'imageUrl', image_url,
+                    'commerceMode', commerce_mode)
+                 WHERE id=? AND shop_id=?
+                """, id, shopId);
+        return id;
     }
 
     private DraftInput extractText(String text, String type) {
