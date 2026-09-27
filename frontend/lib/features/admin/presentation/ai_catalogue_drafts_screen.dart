@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/images/image_upload_service.dart';
+import '../../../shared/widgets/action_feedback.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'category_picker_sheet.dart';
 
@@ -14,6 +16,8 @@ class AiCatalogueDraftsScreen extends ConsumerStatefulWidget {
 class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScreen> {
   final _text = TextEditingController();
   late Future<List<Map<String, dynamic>>> _jobs;
+  String _mediaType = 'PRODUCT_PHOTO';
+  bool _uploading = false;
 
   @override
   void initState() {
@@ -42,6 +46,33 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
     );
     _text.clear();
     if (mounted) setState(() => _jobs = _load());
+  }
+
+  Future<void> _extractMedia() async {
+    setState(() => _uploading = true);
+    try {
+      final upload = ImageUploadService(
+        apiClient: ref.read(apiClientProvider),
+      );
+      final objectKey = await upload.pickAndUpload(
+        kind: CatalogImageKind.product,
+      );
+      if (objectKey == null) return;
+      await ref.read(apiClientProvider).dio.post(
+        '/api/shop/ai-catalog/jobs',
+        data: {'sourceType': _mediaType, 'objectKey': objectKey},
+      );
+      if (mounted) {
+        setState(() => _jobs = _load());
+        showActionSuccess(context, 'Extraction queued. Refresh to review drafts.');
+      }
+    } catch (error) {
+      if (mounted) {
+        showActionFailure(context, 'Could not upload this catalogue source.');
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
   }
 
   Future<void> _review(Map<String, dynamic> draft) async {
@@ -189,6 +220,38 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
             icon: const Icon(Icons.auto_awesome_outlined),
             label: const Text('Create review draft'),
           ),
+          const SizedBox(height: 16),
+          const Text(
+            'Or digitize a controlled photo source',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          DropdownButtonFormField<String>(
+            initialValue: _mediaType,
+            items: const [
+              DropdownMenuItem(value: 'PRODUCT_PHOTO', child: Text('Product photograph')),
+              DropdownMenuItem(value: 'LABEL_PHOTO', child: Text('Package or label photograph')),
+              DropdownMenuItem(value: 'SHELF_PHOTO', child: Text('Shelf photograph')),
+              DropdownMenuItem(value: 'INVOICE', child: Text('Invoice or bill photograph')),
+              DropdownMenuItem(value: 'PRICE_LIST', child: Text('Price-list photograph')),
+              DropdownMenuItem(value: 'CATALOGUE_PAGE', child: Text('Catalogue page photograph')),
+            ],
+            onChanged: _uploading
+                ? null
+                : (value) {
+                    if (value != null) setState(() => _mediaType = value);
+                  },
+          ),
+          OutlinedButton.icon(
+            onPressed: _uploading ? null : _extractMedia,
+            icon: _uploading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.document_scanner_outlined),
+            label: const Text('Upload and queue extraction'),
+          ),
           const SizedBox(height: 20),
           FutureBuilder<List<Map<String, dynamic>>>(
             future: _jobs,
@@ -196,13 +259,31 @@ class _AiCatalogueDraftsScreenState extends ConsumerState<AiCatalogueDraftsScree
               if (snapshot.connectionState != ConnectionState.done) {
                 return const Center(child: CircularProgressIndicator());
               }
-              final drafts = (snapshot.data ?? const [])
+              final jobs = snapshot.data ?? const [];
+              final drafts = jobs
                   .expand((job) => (job['drafts'] as List? ?? const []))
                   .map((row) => Map<String, dynamic>.from(row as Map))
                   .toList();
-              if (drafts.isEmpty) return const Text('No catalogue drafts yet.');
+              if (jobs.isEmpty) return const Text('No catalogue drafts yet.');
               return Column(
                 children: [
+                  for (final job in jobs.where((job) =>
+                      job['status'] == 'QUEUED' ||
+                      job['status'] == 'PROCESSING' ||
+                      job['status'] == 'FAILED'))
+                    ListTile(
+                      leading: job['status'] == 'FAILED'
+                          ? const Icon(Icons.error_outline)
+                          : const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                      title: Text('${job['sourceType']} • ${job['status']}'),
+                      subtitle: job['errorCode'] == null
+                          ? null
+                          : Text('Extraction failed: ${job['errorCode']}'),
+                    ),
                   if (drafts.where((draft) =>
                       draft['status'] == 'REVIEW' &&
                       draft['categoryId'] != null &&

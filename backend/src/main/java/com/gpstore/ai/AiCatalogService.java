@@ -135,9 +135,12 @@ public class AiCatalogService {
         long userId = ((Number) claimed.get("userId")).longValue();
         String type = (String) claimed.get("type");
         String objectKey = (String) claimed.get("objectKey");
+        String associatedImage = Set.of("PRODUCT_PHOTO", "LABEL_PHOTO", "SHELF_PHOTO")
+                .contains(type) && CatalogUrlValidator.isAllowedImageUrl(objectKey)
+                ? objectKey : null;
         createDraft(jobId, shopId, userId,
                 new DraftInput(null, null, null, null, null, null, null,
-                        null, null, null, null, null, null),
+                        null, null, null, null, associatedImage, null),
                 BigDecimal.ZERO, "", "name,brand,categoryId,sellingPrice,unit,commerceMode");
         jdbc.update("""
                 UPDATE ai_extraction_jobs SET status='REVIEW_READY',
@@ -377,7 +380,8 @@ public class AiCatalogService {
     private static String controlledKey(String raw) {
         String key = clean(raw, 1000);
         if (key == null) return null;
-        if (key.contains("..") || key.startsWith("/") || !key.startsWith("catalog/")) {
+        if (key.contains("..") || key.startsWith("/")
+                || !(key.startsWith("catalog/") || CatalogUrlValidator.isAllowedImageUrl(key))) {
             throw new BadRequestException("Use a GP-STORE controlled upload.");
         }
         return key;
