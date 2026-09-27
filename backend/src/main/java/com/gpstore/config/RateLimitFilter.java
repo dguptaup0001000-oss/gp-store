@@ -354,7 +354,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return Bucket.WEBHOOK;
         }
 
-        if (isWrite && path.startsWith("/api/uploads")) {
+        if (isWrite && (path.startsWith("/api/uploads")
+                || path.equals("/api/customers/me/photo/sign"))) {
             return Bucket.UPLOAD;
         }
 

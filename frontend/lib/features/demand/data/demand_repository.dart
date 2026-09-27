@@ -13,6 +13,7 @@ class DemandRepository {
     double? budget,
     int? categoryId,
     DateTime? requiredBy,
+    String? photoUrl,
     String? preferredMode,
   }) async {
     final response = await apiClient.dio.post(
@@ -26,6 +27,7 @@ class DemandRepository {
         if (budget != null) 'budget': budget,
         if (categoryId != null) 'categoryId': categoryId,
         if (requiredBy != null) 'requiredBy': requiredBy.toIso8601String(),
+        if (photoUrl != null) 'photoUrl': photoUrl,
         if (preferredMode != null) 'preferredMode': preferredMode,
       },
     );
@@ -78,6 +80,7 @@ class DemandRequest {
     required this.status,
     required this.expiresAt,
     required this.responses,
+    this.photoUrl,
   });
 
   final int id;
@@ -86,6 +89,7 @@ class DemandRequest {
   final String status;
   final DateTime? expiresAt;
   final List<DemandResponse> responses;
+  final String? photoUrl;
 
   factory DemandRequest.fromJson(Map<String, dynamic> json) => DemandRequest(
         id: (json['id'] as num).toInt(),
@@ -93,6 +97,7 @@ class DemandRequest {
         quantity: (json['quantity'] as num?)?.toInt() ?? 1,
         status: json['status'] as String? ?? 'OPEN',
         expiresAt: DateTime.tryParse(json['expiresAt'] as String? ?? ''),
+        photoUrl: json['photoUrl'] as String?,
         responses: (json['responses'] as List? ?? const [])
             .map((row) => DemandResponse.fromJson(row as Map<String, dynamic>))
             .toList(),

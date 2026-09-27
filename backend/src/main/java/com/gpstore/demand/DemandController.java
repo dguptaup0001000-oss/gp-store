@@ -7,14 +7,21 @@ import java.util.List;
 @RestController
 public class DemandController {
     private final DemandNetwork demand;
+    private final DemandPhotoService photos;
 
-    public DemandController(DemandNetwork demand) {
+    public DemandController(DemandNetwork demand, DemandPhotoService photos) {
         this.demand = demand;
+        this.photos = photos;
     }
 
     @PostMapping("/api/demand-requests")
     public DemandNetwork.DemandView create(@RequestBody DemandNetwork.CreateRequest request) {
         return demand.create(request);
+    }
+
+    @PostMapping("/api/demand-requests/photo/confirm")
+    public DemandPhotoService.PhotoView confirmPhoto(@RequestBody PhotoRequest request) {
+        return photos.confirm(request.objectKey());
     }
 
     @GetMapping("/api/demand-requests/mine")
@@ -52,4 +59,6 @@ public class DemandController {
             @PathVariable long id, @RequestBody DemandNetwork.ResponseRequest request) {
         return demand.respond(id, request);
     }
+
+    public record PhotoRequest(String objectKey) {}
 }

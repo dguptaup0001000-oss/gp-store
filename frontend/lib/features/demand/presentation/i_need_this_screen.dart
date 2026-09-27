@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/api/error_messages.dart';
+import '../../../core/images/gp_network_image.dart';
+import '../../../core/images/image_upload_service.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../shared/widgets/action_feedback.dart';
 import '../../products/presentation/products_providers.dart';
@@ -25,6 +28,8 @@ class _INeedThisScreenState extends ConsumerState<INeedThisScreen> {
   String? _mode;
   int? _categoryId;
   DateTime? _requiredBy;
+  String? _photoUrl;
+  bool _uploadingPhoto = false;
   bool _saving = false;
 
   @override
@@ -61,6 +66,7 @@ class _INeedThisScreenState extends ConsumerState<INeedThisScreen> {
             budget: double.tryParse(_budget.text),
             categoryId: _categoryId,
             requiredBy: _requiredBy,
+            photoUrl: _photoUrl,
             radiusKm: _radius,
             preferredMode: _mode,
           );
@@ -71,6 +77,38 @@ class _INeedThisScreenState extends ConsumerState<INeedThisScreen> {
       if (mounted) showActionFailure(context, extractErrorMessage(error));
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _pickPhoto() async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+      maxWidth: 1600,
+      maxHeight: 1600,
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _uploadingPhoto = true);
+    try {
+      final upload = ImageUploadService(
+        apiClient: ref.read(demandRepositoryProvider).apiClient,
+      );
+      final stagingKey = await upload.uploadProfilePhoto(
+        bytes: await picked.readAsBytes(),
+      );
+      final response = await ref.read(demandRepositoryProvider).apiClient.dio.post(
+        '/api/demand-requests/photo/confirm',
+        data: {'objectKey': stagingKey},
+      );
+      final url = (response.data as Map)['photoUrl'] as String?;
+      if (url == null || url.isEmpty) throw StateError('Missing photo URL');
+      if (mounted) setState(() => _photoUrl = url);
+    } catch (error) {
+      if (mounted) {
+        showActionFailure(context, extractErrorMessage(error));
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
     }
   }
 
@@ -94,6 +132,37 @@ class _INeedThisScreenState extends ConsumerState<INeedThisScreen> {
               labelText: 'What do you need?',
               hintText: 'Example: tractor brake pad for model…',
             ),
+          ),
+          Row(
+            children: [
+              if (_photoUrl != null)
+                SizedBox(
+                  width: 72,
+                  height: 72,
+                  child: GpNetworkImage(
+                    url: _photoUrl,
+                    renderWidth: 72,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              TextButton.icon(
+                onPressed: _uploadingPhoto ? null : _pickPhoto,
+                icon: _uploadingPhoto
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add_a_photo_outlined),
+                label: Text(_photoUrl == null ? 'Add photo' : 'Replace photo'),
+              ),
+              if (_photoUrl != null)
+                IconButton(
+                  tooltip: 'Remove photo',
+                  onPressed: () => setState(() => _photoUrl = null),
+                  icon: const Icon(Icons.close),
+                ),
+            ],
           ),
           TextField(
             controller: _quantity,
@@ -223,6 +292,19 @@ class DemandRequestCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(request.description, style: const TextStyle(fontWeight: FontWeight.w700)),
+            if (request.photoUrl != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: SizedBox(
+                  width: 120,
+                  height: 120,
+                  child: GpNetworkImage(
+                    url: request.photoUrl,
+                    renderWidth: 120,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
             Text('${request.status} • ${request.responses.length} responses'),
             for (final response in request.responses)
               ListTile(
