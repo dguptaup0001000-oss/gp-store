@@ -66,7 +66,7 @@ class ConfiguredMarketplaceAiProviderTest {
         return new ConfiguredMarketplaceAiProvider(
                 new FallbackAiProvider(), new ObjectMapper(), enabled,
                 "OPENAI_COMPATIBLE", endpoint(), "server-only-test-key", "intent-model",
-                Duration.ofSeconds(2), HttpClient.newHttpClient());
+                Duration.ofSeconds(2), 2, HttpClient.newHttpClient());
     }
 
     private String endpoint() {

@@ -94,22 +94,57 @@ public class AiCatalogService {
                     UPDATE ai_extraction_jobs SET status='REVIEW_READY', completed_at=now(), updated_at=now()
                      WHERE id=? AND shop_id=?
                     """, jobId, shopId);
-        } else {
-            // AI-disabled fallback: preserve the controlled source as a draft
-            // and mark every value as requiring human entry. Nothing is
-            // guessed and the merchant can continue working without a provider.
-            String image = Set.of("PRODUCT_PHOTO", "LABEL_PHOTO", "SHELF_PHOTO")
-                    .contains(type) ? objectKey : null;
-            createDraft(jobId, shopId, userId,
-                    new DraftInput(null, null, null, null, null, null, null,
-                            null, null, null, null, image, null),
-                    BigDecimal.ZERO, "", "name,brand,categoryId,sellingPrice,unit,commerceMode");
-            jdbc.update("""
-                    UPDATE ai_extraction_jobs SET status='REVIEW_READY', completed_at=now(), updated_at=now()
-                     WHERE id=? AND shop_id=?
-                    """, jobId, shopId);
         }
         return job(jobId);
+    }
+
+    /**
+     * Claims and processes one media/document job. The HTTP request only
+     * enqueues; this worker path owns all expensive extraction work.
+     *
+     * When no media provider is configured it creates an explicit empty draft
+     * with every required field marked uncertain. It never guesses and never
+     * publishes, so merchants can still complete review manually.
+     */
+    @Transactional
+    public boolean processNextQueuedJob() {
+        java.util.Map<String, Object> claimed = jdbc.query("""
+                WITH next_job AS (
+                    SELECT id FROM ai_extraction_jobs
+                     WHERE status='QUEUED' ORDER BY created_at, id
+                     FOR UPDATE SKIP LOCKED LIMIT 1
+                )
+                UPDATE ai_extraction_jobs j
+                   SET status='PROCESSING', updated_at=now()
+                  FROM next_job
+                 WHERE j.id=next_job.id
+                RETURNING j.id, j.shop_id, j.requested_by, j.source_type, j.object_key
+                """, rs -> {
+            if (!rs.next()) return null;
+            java.util.Map<String, Object> row = new java.util.HashMap<>();
+            row.put("id", rs.getLong("id"));
+            row.put("shopId", rs.getLong("shop_id"));
+            row.put("userId", rs.getLong("requested_by"));
+            row.put("type", rs.getString("source_type"));
+            row.put("objectKey", rs.getString("object_key"));
+            return row;
+        });
+        if (claimed == null) return false;
+        long jobId = ((Number) claimed.get("id")).longValue();
+        long shopId = ((Number) claimed.get("shopId")).longValue();
+        long userId = ((Number) claimed.get("userId")).longValue();
+        String type = (String) claimed.get("type");
+        String objectKey = (String) claimed.get("objectKey");
+        createDraft(jobId, shopId, userId,
+                new DraftInput(null, null, null, null, null, null, null,
+                        null, null, null, null, null, null),
+                BigDecimal.ZERO, "", "name,brand,categoryId,sellingPrice,unit,commerceMode");
+        jdbc.update("""
+                UPDATE ai_extraction_jobs SET status='REVIEW_READY',
+                    completed_at=now(), updated_at=now()
+                 WHERE id=? AND status='PROCESSING'
+                """, jobId);
+        return true;
     }
 
     @Transactional(readOnly = true)

@@ -43,6 +43,7 @@ public class ConfiguredMarketplaceAiProvider implements MarketplaceAiProvider {
     private final String apiKey;
     private final String model;
     private final Duration timeout;
+    private final int maxAttempts;
 
     public ConfiguredMarketplaceAiProvider(
             FallbackAiProvider fallback,
@@ -52,16 +53,18 @@ public class ConfiguredMarketplaceAiProvider implements MarketplaceAiProvider {
             @Value("${marketplace.ai.endpoint:}") String endpoint,
             @Value("${marketplace.ai.api-key:}") String apiKey,
             @Value("${marketplace.ai.model:}") String model,
-            @Value("${marketplace.ai.timeout-ms:5000}") int timeoutMs) {
+            @Value("${marketplace.ai.timeout-ms:5000}") int timeoutMs,
+            @Value("${marketplace.ai.max-attempts:2}") int maxAttempts) {
         this(fallback, json, enabled, providerName, endpoint, apiKey, model,
                 Duration.ofMillis(Math.min(Math.max(timeoutMs, 2_000), 30_000)),
+                Math.min(Math.max(maxAttempts, 1), 3),
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
     }
 
     ConfiguredMarketplaceAiProvider(
             FallbackAiProvider fallback, ObjectMapper json, boolean enabled,
             String providerName, String endpoint, String apiKey, String model,
-            Duration timeout, HttpClient http) {
+            Duration timeout, int maxAttempts, HttpClient http) {
         this.fallback = fallback;
         this.json = json;
         this.enabled = enabled;
@@ -70,6 +73,7 @@ public class ConfiguredMarketplaceAiProvider implements MarketplaceAiProvider {
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.model = model == null ? "" : model.trim();
         this.timeout = timeout;
+        this.maxAttempts = maxAttempts;
         this.http = http;
     }
 
@@ -88,13 +92,18 @@ public class ConfiguredMarketplaceAiProvider implements MarketplaceAiProvider {
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body(bounded))))
                     .build();
-            HttpResponse<String> response =
-                    http.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                log.warn("Marketplace AI provider returned HTTP {}", response.statusCode());
-                return local;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                HttpResponse<String> response =
+                        http.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                    Optional<Intent> parsed = parse(response.body());
+                    if (parsed.isPresent()) return parsed;
+                } else {
+                    log.warn("Marketplace AI provider returned HTTP {}", response.statusCode());
+                    if (response.statusCode() < 500 && response.statusCode() != 429) break;
+                }
             }
-            return parse(response.body()).or(() -> local);
+            return local;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             return local;
