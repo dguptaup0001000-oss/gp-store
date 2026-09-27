@@ -33,12 +33,15 @@ public class MarketplaceFeedService {
     private final ShopDiscovery discovery;
     private final MarketplaceFeedRepository feed;
     private final com.gpstore.intelligence.MarketplaceSignals signals;
+    private final com.gpstore.search.SynonymDictionary synonyms;
 
     public MarketplaceFeedService(ShopDiscovery discovery, MarketplaceFeedRepository feed,
-                                  com.gpstore.intelligence.MarketplaceSignals signals) {
+                                  com.gpstore.intelligence.MarketplaceSignals signals,
+                                  com.gpstore.search.SynonymDictionary synonyms) {
         this.discovery = discovery;
         this.feed = feed;
         this.signals = signals;
+        this.synonyms = synonyms;
     }
 
     /**
@@ -145,8 +148,9 @@ public class MarketplaceFeedService {
         int limit = Math.min(Math.max(size, 1), MAX_PAGE);
         int offset = Math.max(page, 0) * limit;
 
+        String interpreted = normalizeSearch(keyword);
         List<MarketplaceFeedView> results = new ArrayList<>();
-        for (Object[] row : feed.search(keyword, distanceByShop.keySet(),
+        for (Object[] row : feed.search(interpreted, distanceByShop.keySet(),
                 modes == null || modes.isEmpty() ? Set.of(CommerceMode.values()) : modes,
                 distanceByShop, limit, offset)) {
             results.add(toCard(row));
@@ -157,6 +161,14 @@ public class MarketplaceFeedService {
             signals.search(keyword, lat, lng, modes, results.size());
         }
         return results;
+    }
+
+    private String normalizeSearch(String keyword) {
+        List<String> tokens = com.gpstore.search.SearchNormalizer.words(keyword);
+        if (tokens.isEmpty()) return keyword.trim();
+        return tokens.stream()
+                .map(token -> synonyms.canonicalFor(token).orElse(token))
+                .collect(java.util.stream.Collectors.joining(" "));
     }
 
     /**

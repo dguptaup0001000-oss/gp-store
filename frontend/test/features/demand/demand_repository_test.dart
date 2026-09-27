@@ -21,6 +21,7 @@ void main() {
           'responses': [
             {
               'id': 91,
+              'shopId': 12,
               'shopName': 'Local Tractor Parts',
               'status': 'AVAILABLE',
               'price': 850,

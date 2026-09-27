@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/widgets/action_feedback.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../cart/presentation/cart_providers.dart';
+import '../../marketplace/domain/marketplace_feed_models.dart';
+import '../../marketplace/presentation/product_offers_screen.dart';
 
 class ShoppingAssistantScreen extends ConsumerStatefulWidget {
   const ShoppingAssistantScreen({super.key});
@@ -25,7 +29,17 @@ class _ShoppingAssistantScreenState extends ConsumerState<ShoppingAssistantScree
 
   Future<void> _ask() async {
     final pin = ref.read(deliveryPinProvider);
-    if (pin == null || _prompt.text.trim().isEmpty) return;
+    if (pin == null) {
+      showActionFailure(
+        context,
+        'Add a delivery address before searching the local marketplace.',
+      );
+      return;
+    }
+    if (_prompt.text.trim().isEmpty) {
+      showActionFailure(context, 'Describe what you need.');
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
@@ -47,10 +61,67 @@ class _ShoppingAssistantScreenState extends ConsumerState<ShoppingAssistantScree
     }
   }
 
+  Future<void> _reviewOffer(Map<String, dynamic> raw) async {
+    final card = MarketplaceCard.fromJson(raw);
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProductOffersScreen(
+          card: card,
+          onAdd: (offer) async {
+            final variantId = offer.productVariantId;
+            if (variantId == null || !offer.addable) return;
+            final added = await ref
+                .read(cartControllerProvider.notifier)
+                .addToCart(
+                  variantId: variantId,
+                  quantity: 1,
+                  shopId: offer.shopId,
+                );
+            if (!mounted) return;
+            if (added == true) {
+              showAddedToCartFeedback(context, offer.productName);
+            } else {
+              showActionFailure(context, "Couldn't add this offer to your cart.");
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addReviewedOffer(Map<String, dynamic> raw) async {
+    final card = MarketplaceCard.fromJson(raw);
+    final variantId = card.productVariantId;
+    if (!card.addable || variantId == null || card.shopId == null) {
+      await _reviewOffer(raw);
+      return;
+    }
+    try {
+      final added = await ref
+          .read(cartControllerProvider.notifier)
+          .addToCart(
+            variantId: variantId,
+            quantity: 1,
+            shopId: card.shopId,
+          );
+      if (!mounted) return;
+      if (added == true) {
+        showAddedToCartFeedback(context, card.name);
+      } else {
+        showActionFailure(context, "Couldn't add this offer to your cart.");
+      }
+    } catch (_) {
+      if (mounted) {
+        showActionFailure(context, "Couldn't add this offer to your cart.");
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final basket = (_answer?['suggestedBasket'] as List? ?? const []);
     final unavailable = (_answer?['unavailableItems'] as List? ?? const []);
+    final subtotal = (_answer?['estimatedSubtotal'] as num?)?.toDouble();
     return Scaffold(
       appBar: AppBar(title: const Text('Shopping Assistant')),
       body: ListView(
@@ -82,7 +153,22 @@ class _ShoppingAssistantScreenState extends ConsumerState<ShoppingAssistantScree
             const SizedBox(height: 20),
             const Text('Suggested basket — review before adding', style: TextStyle(fontWeight: FontWeight.w700)),
             for (final raw in basket)
-              _BasketTile(data: Map<String, dynamic>.from(raw as Map)),
+              _BasketTile(
+                data: Map<String, dynamic>.from(raw as Map),
+                onReview: _reviewOffer,
+                onAdd: _addReviewedOffer,
+              ),
+            if (subtotal != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'Estimated item subtotal: ₹${subtotal.toStringAsFixed(2)}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            const Text(
+              'Delivery and other shop charges are confirmed by ordinary checkout.',
+            ),
           ],
           if (unavailable.isNotEmpty) ...[
             const SizedBox(height: 16),
@@ -96,12 +182,19 @@ class _ShoppingAssistantScreenState extends ConsumerState<ShoppingAssistantScree
 }
 
 class _BasketTile extends StatelessWidget {
-  const _BasketTile({required this.data});
+  const _BasketTile({
+    required this.data,
+    required this.onReview,
+    required this.onAdd,
+  });
   final Map<String, dynamic> data;
+  final Future<void> Function(Map<String, dynamic>) onReview;
+  final Future<void> Function(Map<String, dynamic>) onAdd;
 
   @override
   Widget build(BuildContext context) {
     final offer = Map<String, dynamic>.from(data['offer'] as Map? ?? const {});
+    final addable = offer['addable'] == true;
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: const Icon(Icons.storefront_outlined),
@@ -111,7 +204,11 @@ class _BasketTile extends StatelessWidget {
         offer['commerceLabel'],
         if (offer['distanceKm'] != null) '${offer['distanceKm']} km',
       ].whereType<Object>().join(' • ')),
-      trailing: offer['sellingPrice'] == null ? null : Text('₹${offer['sellingPrice']}'),
+      trailing: FilledButton.tonal(
+        onPressed: () => addable ? onAdd(offer) : onReview(offer),
+        child: Text(addable ? 'Review & add' : 'View options'),
+      ),
+      onTap: () => onReview(offer),
     );
   }
 }

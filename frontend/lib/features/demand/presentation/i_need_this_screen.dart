@@ -5,6 +5,7 @@ import '../../../core/api/error_messages.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../shared/widgets/action_feedback.dart';
 import '../../products/presentation/products_providers.dart';
+import '../../marketplace/presentation/shop_profile_screen.dart';
 import '../data/demand_repository.dart';
 import 'demand_providers.dart';
 
@@ -248,6 +249,14 @@ class DemandRequestCard extends StatelessWidget {
                       ),
                   ],
                 ),
+                onTap: response.status != 'AVAILABLE'
+                    ? null
+                    : () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                ShopProfileScreen(shopId: response.shopId),
+                          ),
+                        ),
               ),
             if (onClose != null || onCancel != null)
               Row(

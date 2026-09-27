@@ -102,6 +102,7 @@ class DemandRequest {
 class DemandResponse {
   const DemandResponse({
     required this.id,
+    required this.shopId,
     required this.shopName,
     required this.status,
     required this.price,
@@ -112,6 +113,7 @@ class DemandResponse {
   });
 
   final int id;
+  final int shopId;
   final String shopName;
   final String status;
   final double? price;
@@ -122,6 +124,7 @@ class DemandResponse {
 
   factory DemandResponse.fromJson(Map<String, dynamic> json) => DemandResponse(
         id: (json['id'] as num).toInt(),
+        shopId: (json['shopId'] as num).toInt(),
         shopName: json['shopName'] as String? ?? 'Local shop',
         status: json['status'] as String? ?? '',
         price: (json['price'] as num?)?.toDouble(),

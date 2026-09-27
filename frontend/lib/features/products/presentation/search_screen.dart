@@ -588,7 +588,29 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Future<void> _openMarketCard(MarketplaceCard card) async {
     if (!card.addable) {
       await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ProductOffersScreen(card: card),
+        builder: (_) => ProductOffersScreen(
+          card: card,
+          onAdd: (offer) async {
+            final variantId = offer.productVariantId;
+            if (variantId == null || !offer.addable) return;
+            final added = await ref
+                .read(cartControllerProvider.notifier)
+                .addToCart(
+                  variantId: variantId,
+                  quantity: 1,
+                  shopId: offer.shopId,
+                );
+            if (!mounted) return;
+            if (added == true) {
+              showAddedToCartFeedback(context, offer.productName);
+            } else {
+              showActionFailure(
+                context,
+                "Couldn't add the item to your cart. Please try again.",
+              );
+            }
+          },
+        ),
       ));
       return;
     }
@@ -618,7 +640,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     try {
       final added = await ref
           .read(cartControllerProvider.notifier)
-          .addToCart(variantId: variantId, quantity: 1);
+          .addToCart(
+            variantId: variantId,
+            quantity: 1,
+            shopId: card.shopId,
+          );
       if (!mounted) return;
       if (added == true) {
         showAddedToCartFeedback(context, card.name);
