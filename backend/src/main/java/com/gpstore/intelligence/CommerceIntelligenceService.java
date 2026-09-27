@@ -82,7 +82,8 @@ public class CommerceIntelligenceService {
                  WHERE shop_id=? AND occurred_at>=? AND commerce_mode='SERVICE_AT_SHOP'
                 """, shopId, from);
         long orders = count("""
-                SELECT count(*) FROM orders WHERE shop_id=? AND order_date>=? AND status='DELIVERED'
+                SELECT count(*) FROM orders
+                 WHERE shop_id=? AND order_date>=? AND order_status='DELIVERED'
                 """, shopId, from);
         return new MerchantInsight(from, to, searches, zero, requests, responses, visit, service,
                 orders, frequent, unmet);
