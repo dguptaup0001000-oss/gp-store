@@ -248,6 +248,9 @@ services:
       RATE_LIMIT_TRUST_FORWARDED_FOR: "true"
       STORE_LATITUDE: ${STORE_LATITUDE:-27.162310}
       STORE_LONGITUDE: ${STORE_LONGITUDE:-83.940468}
+      # Browse progressively across the Kushinagar test marketplace. This does
+      # not widen any shop's own delivery/service promise at checkout.
+      MARKETPLACE_SEARCH_RADII_KM: ${MARKETPLACE_SEARCH_RADII_KM:-8,20,50,100,500}
       # Contact Us. `:-` keeps placeholders if the VPS .env keys are empty.
       STORE_SUPPORT_PHONE: ${STORE_SUPPORT_PHONE:-}
       STORE_SUPPORT_WHATSAPP: ${STORE_SUPPORT_WHATSAPP:-}

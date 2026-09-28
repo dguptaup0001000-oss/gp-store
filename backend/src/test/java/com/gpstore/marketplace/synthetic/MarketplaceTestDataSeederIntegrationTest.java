@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest(properties = {
         "app.production=false",
         "platform.mode=MULTI_SHOP_PRODUCTION",
+        "marketplace.search.radii-km=8,20,50,100,500",
         "store.latitude=27.162310",
         "store.longitude=83.940468",
         "outbox.initial-delay-ms=3600000",
@@ -105,11 +106,20 @@ class MarketplaceTestDataSeederIntegrationTest {
                  WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$'
                 """, Integer.class));
         assertEquals(100, jdbc.queryForObject("""
+                SELECT count(*) FROM shops
+                 WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$'
+                   AND active = TRUE AND status = 'ACTIVE'
+                """, Integer.class), "every controlled shop must be active");
+        assertEquals(100, jdbc.queryForObject("""
                 SELECT count(*) FROM shops s JOIN merchants m ON m.id = s.merchant_id
                  WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$'
-                   AND s.active = TRUE AND s.status = 'ACTIVE' AND m.status = 'ACTIVE'
-                   AND s.latitude BETWEEN -90 AND 90 AND s.longitude BETWEEN -180 AND 180
-                """, Integer.class));
+                   AND m.is_demo = TRUE AND m.active = TRUE AND m.status = 'ACTIVE'
+                """, Integer.class), "every controlled shop must have an active controlled merchant");
+        assertEquals(100, jdbc.queryForObject("""
+                SELECT count(*) FROM shops
+                 WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$'
+                   AND latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180
+                """, Integer.class), "every controlled shop must have valid coordinates");
         assertEquals(0, first.shopsBelowEightListings());
         assertTrue(first.buyOnline() > 0);
         assertTrue(first.visitToBuy() > 0);
