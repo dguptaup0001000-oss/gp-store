@@ -1,0 +1,10 @@
+MARKETPLACE_TEST_100_SHOPS_V1
+
+One-time production request:
+- preserve every existing production shop and its data;
+- bring the controlled marketplace to exactly 100 total shops;
+- run only after this merged main SHA is green and deployed on Hostinger;
+- verify the resulting production database and public marketplace API.
+
+The seed workflow is path-filtered to this file. Adding it triggers one run;
+ordinary future pushes do not repeat the production operation.

@@ -24,6 +24,13 @@
 name: Controlled marketplace test data
 
 on:
+  push:
+    branches: [main]
+    paths:
+      # One immutable, explicitly reviewed request. Adding it triggers the
+      # seed once; later pushes do not touch the file and therefore do not
+      # repeat a production operation.
+      - '.github/marketplace-test-data-seed-request-v1'
   workflow_dispatch:
     inputs:
       target_sha:
@@ -46,6 +53,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   validate:
@@ -56,6 +64,8 @@ jobs:
     timeout-minutes: 15
     outputs:
       target_sha: ${{ steps.validate.outputs.target_sha }}
+      operation: ${{ steps.validate.outputs.operation }}
+      confirmation: ${{ steps.validate.outputs.confirmation }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,8 +74,9 @@ jobs:
       - name: Require current main and exact confirmation
         id: validate
         env:
-          TARGET_SHA: ${{ inputs.target_sha }}
-          CONFIRMATION: ${{ inputs.confirmation }}
+          TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha || github.sha }}
+          OPERATION: ${{ github.event_name == 'workflow_dispatch' && inputs.operation || 'SEED' }}
+          CONFIRMATION: ${{ github.event_name == 'workflow_dispatch' && inputs.confirmation || 'MARKETPLACE_TEST_100_SHOPS_V1' }}
         run: |
           set -Eeuo pipefail
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || {
@@ -83,6 +94,8 @@ jobs:
             exit 1
           }
           echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "operation=$OPERATION" >> "$GITHUB_OUTPUT"
+          echo "confirmation=$CONFIRMATION" >> "$GITHUB_OUTPUT"
       # A base without /v1 makes every route 404, and this guard would then
       # read "production is down" when only the URL was wrong.
       - name: Refuse a version URL that is not the public versioned API
@@ -95,6 +108,38 @@ jobs:
             *) echo "::error::PUBLIC_VERSION_URL must be https and end in /v1/api/version (got '$PUBLIC_VERSION_URL')"; exit 1 ;;
           esac
           echo "PUBLIC_VERSION_URL=$PUBLIC_VERSION_URL" >> "$GITHUB_ENV"
+
+      - name: Wait for this exact main SHA to deploy
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.validate.outputs.target_sha }}
+        run: |
+          set -Eeuo pipefail
+          deadline=$((SECONDS + 1800))
+          while (( SECONDS < deadline )); do
+            row="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$TARGET_SHA" \
+              --workflow "Deploy Production" \
+              --json status,conclusion,event,url --limit 10 \
+              --jq 'map(select(.event == "push" or .event == "workflow_dispatch")) | first // {}')"
+            status="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("status",""))' "$row")"
+            conclusion="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("conclusion",""))' "$row")"
+            url="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("url",""))' "$row")"
+            echo "Deploy Production: status=${status:-missing} conclusion=${conclusion:-pending} ${url}"
+            if [[ "$status" == "completed" && "$conclusion" == "success" ]]; then
+              break
+            fi
+            if [[ "$status" == "completed" && -n "$conclusion" \
+                  && "$conclusion" != "success" ]]; then
+              echo "::error::Exact-SHA production deployment ended $conclusion; refusing seed"
+              exit 1
+            fi
+            sleep 20
+          done
+          [[ "$status" == "completed" && "$conclusion" == "success" ]] || {
+            echo "::error::Timed out waiting for exact-SHA production deployment"
+            exit 1
+          }
 
       # WHY THIS IS A SCRIPT AND NOT A curl.
       #
@@ -122,7 +167,7 @@ jobs:
       - name: Verify public Hostinger runtime and embedded JAR SHA
         id: live_release
         env:
-          EXPECT_SHA: ${{ inputs.target_sha }}
+          EXPECT_SHA: ${{ steps.validate.outputs.target_sha }}
           VERIFY_ATTEMPTS: '8'
           VERIFY_BACKOFF_CAP_SECONDS: '30'
           VERIFY_BODY_OUTPUT: /tmp/gpstore-version.json
@@ -152,8 +197,8 @@ jobs:
           {
             echo "## Controlled marketplace test data - validation"
             echo
-            echo "- Requested SHA: \`${{ inputs.target_sha }}\`"
-            echo "- Operation: \`${{ inputs.operation }}\`"
+            echo "- Requested SHA: \`${{ steps.validate.outputs.target_sha }}\`"
+            echo "- Operation: \`${{ steps.validate.outputs.operation }}\`"
             echo "- Version URL: \`${PUBLIC_VERSION_URL:-unset}\`"
             echo "- Live release check exit: \`${{ steps.live_release.outputs.status || 'did not run' }}\` (0 verified, 1 wrong release, 2 never answered)"
             echo
@@ -188,8 +233,8 @@ jobs:
       - name: Run guarded one-shot operation and verify database counts
         uses: appleboy/ssh-action@v1.2.0
         env:
-          GPSTORE_TEST_DATA_OPERATION: ${{ inputs.operation }}
-          GPSTORE_TEST_DATA_CONFIRMATION: ${{ inputs.confirmation }}
+          GPSTORE_TEST_DATA_OPERATION: ${{ needs.validate.outputs.operation }}
+          GPSTORE_TEST_DATA_CONFIRMATION: ${{ needs.validate.outputs.confirmation }}
           GPSTORE_TEST_DATA_TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
         with:
           host: ${{ secrets.PROD_HOST }}
@@ -206,7 +251,7 @@ jobs:
   production-smoke:
     name: Read-only production marketplace smoke
     needs: [validate, operate]
-    if: ${{ inputs.operation == 'SEED' }}
+    if: ${{ needs.validate.outputs.operation == 'SEED' }}
     uses: ./.github/workflows/production-smoke.yml
     with:
       expect_sha: ${{ needs.validate.outputs.target_sha }}
