@@ -6,5 +6,6 @@ One-time production request:
 - run only after this merged main SHA is green and deployed on Hostinger;
 - verify the resulting production database and public marketplace API.
 
-The seed workflow is path-filtered to this file. Adding it triggers one run;
-ordinary future pushes do not repeat the production operation.
+The seed workflow matches this reviewed file change to the successful
+Hostinger deployment of the exact merged SHA. Ordinary future deployments
+that do not change this request do not repeat the production operation.
