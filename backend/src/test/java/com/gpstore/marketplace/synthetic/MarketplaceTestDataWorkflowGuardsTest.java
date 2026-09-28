@@ -39,6 +39,16 @@ class MarketplaceTestDataWorkflowGuardsTest {
     void validateJobStillProvesTheWholeChain() throws IOException {
         String workflow = read(".github/workflows/seed-marketplace-test-data.yml");
 
+        assertTrue(workflow.contains("workflow_run:")
+                        && workflow.contains("workflows: [\"Deploy Production\"]"),
+                "an Actions-token merge cannot trigger a push workflow, so seeding must follow "
+                        + "the completed production deployment");
+        assertTrue(workflow.contains("git diff-tree --no-commit-id --name-only -r -m \"$TARGET_SHA\"")
+                        && workflow.contains("grep -Fxq '.github/marketplace-test-data-seed-request-v1'"),
+                "an ordinary deployment must not seed unless its exact merge changed the "
+                        + "reviewed request file");
+        assertTrue(workflow.contains("needs: request"),
+                "validation must not run until the exact deployment is matched to the request");
         assertTrue(workflow.contains("[[ \"$TARGET_SHA\" =~ ^[0-9a-f]{40}$ ]]"),
                 "the full 40-character SHA check was removed; a short SHA matches nothing");
         assertTrue(workflow.contains("[[ \"$CONFIRMATION\" == \"MARKETPLACE_TEST_100_SHOPS_V1\" ]]"),
