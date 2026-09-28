@@ -93,13 +93,42 @@ max_radius="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("ma
 [[ "$max_radius" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "Production radius ladder could not be read."
 
 read -r -d '' verification_sql <<'SQL' || true
+WITH visible_distances AS (
+    SELECT s.id,
+           6371 * acos(least(1.0, greatest(-1.0,
+               cos(radians(:'anchor_lat')) * cos(radians(s.latitude))
+               * cos(radians(s.longitude) - radians(:'anchor_lng'))
+               + sin(radians(:'anchor_lat')) * sin(radians(s.latitude))))) AS distance_km
+      FROM shops s
+     WHERE s.active = TRUE AND s.status IN ('ACTIVE','PAUSED')
+       AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
+), batch_category_counts AS (
+    SELECT c.name AS category, count(DISTINCT spv.shop_id) AS shop_count
+      FROM shop_product_variants spv
+      JOIN product_variants v ON v.id = spv.product_variant_id
+      JOIN products p ON p.id = v.product_id
+      JOIN categories c ON c.id = p.category_id
+     WHERE p.is_test_data = TRUE AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1'
+     GROUP BY c.name
+), batch_shop_categories AS (
+    SELECT spv.shop_id, count(DISTINCT p.category_id) AS category_count
+      FROM shop_product_variants spv
+      JOIN product_variants v ON v.id = spv.product_variant_id
+      JOIN products p ON p.id = v.product_id
+     WHERE p.is_test_data = TRUE AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1'
+     GROUP BY spv.shop_id
+)
 SELECT json_build_object(
       'database', current_database(),
       'database_host', inet_server_addr()::text,
+      'total_shops', (SELECT count(*) FROM shops),
+      'non_batch_shops', (SELECT count(*) FROM shops WHERE code IS NULL OR code !~ '^MKT100V1-SHOP-[0-9]{3}$'),
       'merchants', (SELECT count(*) FROM merchants WHERE is_demo = TRUE AND left(legal_name, length('[MARKETPLACE_TEST_100_SHOPS_V1] Merchant ')) = '[MARKETPLACE_TEST_100_SHOPS_V1] Merchant '),
       'shops', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$'),
       'active_shops', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND active = TRUE AND status = 'ACTIVE'),
+      'total_active_shops', (SELECT count(*) FROM shops WHERE active = TRUE AND status = 'ACTIVE'),
       'customer_visible_shops', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND active = TRUE AND status IN ('ACTIVE','PAUSED')),
+      'total_customer_visible_shops', (SELECT count(*) FROM shops WHERE active = TRUE AND status IN ('ACTIVE','PAUSED')),
       'shops_with_valid_coordinates', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180),
       'shops_inside_configured_max_radius_from_anchor', (SELECT count(*) FROM shops s WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND s.active = TRUE AND s.status IN ('ACTIVE','PAUSED') AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND 6371 * acos(least(1.0, greatest(-1.0, cos(radians(:'anchor_lat')) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(:'anchor_lng')) + sin(radians(:'anchor_lat')) * sin(radians(s.latitude))))) <= :'max_radius'::double precision),
       'shops_excluded_by_distance_from_anchor', (SELECT count(*) FROM shops s WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND s.active = TRUE AND s.status IN ('ACTIVE','PAUSED') AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND 6371 * acos(least(1.0, greatest(-1.0, cos(radians(:'anchor_lat')) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(:'anchor_lng')) + sin(radians(:'anchor_lat')) * sin(radians(s.latitude))))) > :'max_radius'::double precision),
@@ -115,6 +144,15 @@ SELECT json_build_object(
       'shops_with_buy_online', (SELECT count(DISTINCT s.id) FROM shops s JOIN shop_product_variants spv ON spv.shop_id = s.id JOIN product_variants v ON v.id = spv.product_variant_id JOIN products p ON p.id = v.product_id WHERE s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' AND spv.commerce_mode = 'ONLINE_PURCHASE'),
       'shops_with_visit_to_buy', (SELECT count(DISTINCT s.id) FROM shops s JOIN shop_product_variants spv ON spv.shop_id = s.id JOIN product_variants v ON v.id = spv.product_variant_id JOIN products p ON p.id = v.product_id WHERE s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' AND spv.commerce_mode = 'VISIT_TO_BUY'),
       'shops_with_service_at_shop', (SELECT count(DISTINCT s.id) FROM shops s JOIN shop_product_variants spv ON spv.shop_id = s.id JOIN product_variants v ON v.id = spv.product_variant_id JOIN products p ON p.id = v.product_id WHERE s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' AND spv.commerce_mode = 'SERVICE_AT_SHOP'),
+      'category_shop_counts', (SELECT coalesce(json_object_agg(category, shop_count), '{}'::json) FROM batch_category_counts),
+      'cross_category_shops', (SELECT count(*) FROM batch_shop_categories WHERE category_count <> 1),
+      'radius_counts', json_build_object(
+          '8_km', (SELECT count(*) FROM visible_distances WHERE distance_km <= 8),
+          '20_km', (SELECT count(*) FROM visible_distances WHERE distance_km <= 20),
+          '50_km', (SELECT count(*) FROM visible_distances WHERE distance_km <= 50),
+          '100_km', (SELECT count(*) FROM visible_distances WHERE distance_km <= 100),
+          '500_km', (SELECT count(*) FROM visible_distances WHERE distance_km <= 500)
+      ),
       'image_products', (SELECT count(DISTINCT p.id) FROM products p JOIN product_variants v ON v.product_id = p.id LEFT JOIN product_images pi ON pi.product_id = p.id WHERE p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' AND (NULLIF(v.image_url, '') IS NOT NULL OR pi.id IS NOT NULL)),
       'undersized_shops', (SELECT count(*) FROM (SELECT s.id FROM shops s LEFT JOIN shop_product_variants spv ON spv.shop_id = s.id LEFT JOIN product_variants v ON v.id = spv.product_variant_id LEFT JOIN products p ON p.id = v.product_id AND p.is_test_data = TRUE AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' GROUP BY s.id HAVING count(p.id) < 50) small)
     )::text;
@@ -124,16 +162,34 @@ if [[ "$OPERATION" == "SEED" ]]; then
   python3 - "$metrics" <<'PY'
 import json, sys
 m = json.loads(sys.argv[1])
-assert m["merchants"] == 100, m
-assert m["shops"] == 100, m
-assert m["products"] >= 5000 and m["variants"] >= 5000 and m["listings"] >= 5000, m
+expected_synthetic = 100 - m["non_batch_shops"]
+expected_listings = expected_synthetic * 60
+assert expected_synthetic > 0, m
+assert m["total_shops"] == 100, m
+assert m["merchants"] == expected_synthetic, m
+assert m["shops"] == expected_synthetic, m
+assert m["products"] == expected_listings and m["variants"] == expected_listings and m["listings"] == expected_listings, m
 assert m["buy_online"] > 0 and m["visit_to_buy"] > 0 and m["service_at_shop"] > 0, m
 assert m["undersized_shops"] == 0, m
 assert m["image_products"] == 0, m
-assert m["customer_visible_shops"] == 100, m
-assert m["shops_inside_configured_max_radius_from_anchor"] == 100, m
-assert m["shops_order_acceptance_on"] == 100, m
+assert m["customer_visible_shops"] == expected_synthetic, m
+assert m["total_customer_visible_shops"] == 100, m
+assert m["total_active_shops"] == 100, m
+assert m["shops_inside_configured_max_radius_from_anchor"] == expected_synthetic, m
+assert m["shops_order_acceptance_on"] == expected_synthetic, m
 assert m["merchants_not_trading"] == 0, m
+assert m["cross_category_shops"] == 0, m
+for category in ("Test Marketplace - Grocery", "Test Marketplace - Mobile and Electronics",
+                 "Test Marketplace - Hardware", "Test Marketplace - Clothing",
+                 "Test Marketplace - Footwear", "Test Marketplace - Restaurant and Food",
+                 "Test Marketplace - Pharmacy and Medical Test Supplies",
+                 "Test Marketplace - Automotive Parts", "Test Marketplace - Furniture",
+                 "Test Marketplace - Jewellery", "Test Marketplace - Repair Services",
+                 "Test Marketplace - Tractor and Farm Parts"):
+    assert m["category_shop_counts"].get(category, 0) > 0, (category, m)
+r = m["radius_counts"]
+assert 0 < r["8_km"] < r["20_km"] < r["50_km"], m
+assert r["50_km"] == r["100_km"] == r["500_km"] == 100, m
 print(json.dumps(m, sort_keys=True))
 PY
 else
@@ -174,10 +230,11 @@ for mode, rows in (("ONLINE_PURCHASE", buy0), ("ONLINE_PURCHASE", buy1),
     assert len(rows) <= 12
     assert all(item.get("commerceMode") == mode for item in rows)
 if operation == "SEED":
-    assert shop0["totalElements"] >= 100, shop0
+    assert shop0["totalElements"] == 100, shop0
     assert len(buy0) and len(visit0) and len(service0), {
         "buy_online": len(buy0), "visit_to_buy": len(visit0), "service_at_shop": len(service0)}
     assert len({x.get("shopId") for x in buy0}) > 1, buy0
+    assert not all(x.get("shopId") == 1 for x in buy0), "Shop #1 fallback monopolised the marketplace feed"
     keys0 = {(x.get("productId"), x.get("commerceMode"), x.get("shopId"), x.get("productVariantId")) for x in buy0}
     keys1 = {(x.get("productId"), x.get("commerceMode"), x.get("shopId"), x.get("productVariantId")) for x in buy1}
     assert not keys0.intersection(keys1), "marketplace feed pages overlap"

@@ -72,7 +72,9 @@ public final class MarketplaceTestDataGenerator {
                     "Milk Bread|Brown Bread|Rusk|Butter Cookies|Fruit Cake|Cupcake Box|Pav Buns|Khari Biscuits|Tea Cake|Whole Wheat Loaf"),
             new ShopType("Family Restaurant", "Restaurant and Food", 58, 2, 0,
                     "Veg Thali|Paneer Curry|Dal Tadka|Jeera Rice|Tandoori Roti|Veg Biryani|Masala Dosa|Chole Bhature|Lassi|Gulab Jamun"),
-            new ShopType("Medical Supplies Test Shop", "Medical Test Supplies", 52, 8, 0,
+            // Deliberately non-prescription: this exercises pharmacy discovery
+            // without inventing licences or making regulated medicine claims.
+            new ShopType("Pharmacy Essentials Test Shop", "Pharmacy and Medical Test Supplies", 52, 8, 0,
                     "Digital Thermometer|Reusable Hot Water Bag|First Aid Box|Cotton Roll|Crepe Bandage|Adult Walking Stick|Pill Organiser|Digital Weighing Scale|Surgical Mask Pack|Hand Sanitiser"),
             new ShopType("Auto Parts Centre", "Automotive Parts", 34, 26, 0,
                     "Wiper Blade Set|Car Air Filter|Engine Oil Can|Car Floor Mat|Headlamp Bulb|Battery Cable|Tyre Inflator|Seat Cover Set|Car Accessories Fitment"),
@@ -95,7 +97,11 @@ public final class MarketplaceTestDataGenerator {
             new ShopType("Appliance Service Centre", "Repair Services", 8, 2, 50,
                     "Power Cord|Water Inlet Pipe|AC Servicing|Refrigerator Repair|Washing Machine Repair|Microwave Repair|Cooler Pump Repair|Appliance Diagnosis"),
             new ShopType("Cleaning and Care Services", "Cleaning Services", 8, 2, 50,
-                    "Cleaning Brush Set|Microfibre Cloth Pack|Floor Cleaner|Bathroom Deep Cleaning|Sofa Cleaning|Kitchen Cleaning|Water Tank Cleaning|Window Cleaning")
+                    "Cleaning Brush Set|Microfibre Cloth Pack|Floor Cleaner|Bathroom Deep Cleaning|Sofa Cleaning|Kitchen Cleaning|Water Tank Cleaning|Window Cleaning"),
+            new ShopType("Jewellery Showroom", "Jewellery", 0, 60, 0,
+                    "Gold Ring|Silver Anklet|Gold Chain|Wedding Necklace|Silver Coin|Diamond Ring|Gold Earrings|Bangle Set|Pendant|Jewellery Cleaning"),
+            new ShopType("Tractor Parts Centre", "Tractor and Farm Parts", 24, 34, 2,
+                    "Tractor Brake Pad|Clutch Plate|Hydraulic Filter|Tractor Headlamp|Fuel Filter|Fan Belt|Steering Joint|PTO Shaft Guard|Tractor Service Check|Brake Inspection")
     );
 
     private MarketplaceTestDataGenerator() { }
@@ -119,16 +125,29 @@ public final class MarketplaceTestDataGenerator {
     public record Dataset(List<ShopSpec> shops, List<ListingSpec> listings) { }
 
     public static Dataset generate(long seed) {
+        return generate(seed, SHOP_COUNT);
+    }
+
+    /**
+     * Generates only the number of synthetic shops needed to bring an
+     * existing marketplace to {@link #SHOP_COUNT}. Ordinals and SKUs remain
+     * stable prefixes of the full deterministic dataset, so reruns cannot
+     * create a second identity for the same intended shop.
+     */
+    public static Dataset generate(long seed, int shopCount) {
+        if (shopCount < 0 || shopCount > SHOP_COUNT) {
+            throw new IllegalArgumentException("shopCount must be between 0 and " + SHOP_COUNT);
+        }
         Random random = new Random(seed);
-        List<ShopSpec> shops = new ArrayList<>(SHOP_COUNT);
-        List<ListingSpec> listings = new ArrayList<>(LISTING_COUNT);
+        List<ShopSpec> shops = new ArrayList<>(shopCount);
+        List<ListingSpec> listings = new ArrayList<>(shopCount * LISTINGS_PER_SHOP);
         BigDecimal[] radii = {
                 new BigDecimal("3.00"), new BigDecimal("5.00"), new BigDecimal("8.00"),
                 new BigDecimal("10.00"), new BigDecimal("15.00"), new BigDecimal("20.00"),
                 new BigDecimal("30.00")
         };
 
-        for (int shopNumber = 1; shopNumber <= SHOP_COUNT; shopNumber++) {
+        for (int shopNumber = 1; shopNumber <= shopCount; shopNumber++) {
             int ordinal = shopNumber - 1;
             ShopType type = TYPES.get(ordinal % TYPES.size());
             String surname = SURNAMES[(ordinal * 7) % SURNAMES.length];
@@ -171,6 +190,11 @@ public final class MarketplaceTestDataGenerator {
             }
         }
         return new Dataset(List.copyOf(shops), List.copyOf(listings));
+    }
+
+    /** Categories owned by this synthetic batch, used by guarded cleanup. */
+    public static List<String> categories() {
+        return TYPES.stream().map(ShopType::category).distinct().sorted().toList();
     }
 
     private static ListingSpec makeListing(Random random, int shopNumber, String shopCode,

@@ -22,7 +22,6 @@ import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -81,17 +80,24 @@ public class MarketplaceTestDataSeeder {
     public Result execute(Request request) {
         authorize(request);
         acquireBatchLock();
+        int existingMarketplaceShops = nonBatchShopCount();
+        int syntheticShopTarget = MarketplaceTestDataGenerator.SHOP_COUNT - existingMarketplaceShops;
+        if (syntheticShopTarget <= 0) {
+            throw new IllegalStateException("The marketplace already has " + existingMarketplaceShops
+                    + " non-batch shops; refusing to exceed the controlled total of "
+                    + MarketplaceTestDataGenerator.SHOP_COUNT + ".");
+        }
         if (request.operation() == Operation.INSPECT) {
             // Read-only verification. It uses the same batch lock as seed and
             // cleanup so an inspection cannot report a half-written batch.
             return inspectBatch();
         }
         if (request.operation() == Operation.CLEANUP) {
-            return cleanupBatch();
+            return cleanupBatch(syntheticShopTarget);
         }
         Result existing = inspectBatch();
         if (existing.shops() > 0 || existing.products() > 0 || existing.listings() > 0) {
-            if (isComplete(existing)) {
+            if (isComplete(existing, syntheticShopTarget)) {
                 return new Result(existing.shops(), existing.merchants(), existing.products(), existing.variants(),
                         existing.listings(), existing.shopsBelowFiftyListings(), existing.buyOnline(), existing.visitToBuy(),
                         existing.serviceAtShop(), existing.withImages(), existing.withoutImages(), true);
@@ -101,7 +107,8 @@ public class MarketplaceTestDataSeeder {
         }
 
         MarketplaceTestDataGenerator.Dataset dataset =
-                MarketplaceTestDataGenerator.generate(MarketplaceTestDataGenerator.DEFAULT_SEED);
+                MarketplaceTestDataGenerator.generate(
+                        MarketplaceTestDataGenerator.DEFAULT_SEED, syntheticShopTarget);
         Shop anchor = shopRepository.findByCode(platform.getFirstShopCode())
                 .orElseThrow(() -> new IllegalStateException("The configured first shop is missing."));
         if (anchor.getLatitude() == null || anchor.getLongitude() == null) {
@@ -115,7 +122,7 @@ public class MarketplaceTestDataSeeder {
         insertListingRows(dataset.listings(), shopIds);
 
         Result result = inspectBatch();
-        if (!isComplete(result)) {
+        if (!isComplete(result, syntheticShopTarget)) {
             throw new IllegalStateException("Seed verification failed inside the transaction: " + result);
         }
         return result;
@@ -354,21 +361,27 @@ public class MarketplaceTestDataSeeder {
                 Math.max(0, products - withImages), false);
     }
 
-    private static boolean isComplete(Result result) {
-        return result.shops() == MarketplaceTestDataGenerator.SHOP_COUNT
-                && result.merchants() == MarketplaceTestDataGenerator.SHOP_COUNT
-                && result.products() >= MarketplaceTestDataGenerator.LISTING_COUNT
-                && result.variants() >= MarketplaceTestDataGenerator.LISTING_COUNT
-                && result.listings() >= MarketplaceTestDataGenerator.LISTING_COUNT
+    private static boolean isComplete(Result result, int syntheticShopTarget) {
+        int listingTarget = syntheticShopTarget * MarketplaceTestDataGenerator.LISTINGS_PER_SHOP;
+        return result.shops() == syntheticShopTarget
+                && result.merchants() == syntheticShopTarget
+                && result.products() == listingTarget
+                && result.variants() == listingTarget
+                && result.listings() == listingTarget
                 && result.shopsBelowFiftyListings() == 0
                 && result.buyOnline() > 0 && result.visitToBuy() > 0 && result.serviceAtShop() > 0;
     }
 
-    private Result cleanupBatch() {
+    private int nonBatchShopCount() {
+        return jdbc.queryForObject("SELECT count(*) FROM shops WHERE code IS NULL OR code !~ ?",
+                Integer.class, SHOP_CODE_PATTERN);
+    }
+
+    private Result cleanupBatch(int syntheticShopTarget) {
         Result before = inspectBatch();
         if (before.shops() == 0 && before.merchants() == 0
                 && before.products() == 0 && before.listings() == 0) return before;
-        if (!isComplete(before)) {
+        if (!isComplete(before, syntheticShopTarget)) {
             throw new IllegalStateException("Cleanup refused: batch identity/counts are incomplete; "
                     + "inspect the exact batch before deleting anything.");
         }
@@ -460,12 +473,10 @@ public class MarketplaceTestDataSeeder {
     }
 
     private List<String> categoryNames() {
-        return Arrays.asList("Grocery", "Supermarket", "Mobile and Electronics", "Electronics",
-                "Hardware", "Clothing", "Footwear", "Home Appliances", "Furniture", "Kitchenware",
-                "Beauty and Personal Care", "Stationery", "Bakery and Food", "Restaurant and Food",
-                "Medical Test Supplies", "Automotive Parts", "Motorcycle Parts", "Agriculture Supplies",
-                "Electrical Supplies", "Computers and Accessories", "Gifts and Home Decor", "Toys and Kids",
-                "Home Services", "Repair Services", "Cleaning Services")
-                .stream().map(CATEGORY_PREFIX::concat).toList();
+        List<String> categories = new ArrayList<>(MarketplaceTestDataGenerator.categories());
+        // Kept for guarded cleanup compatibility with an older uncommitted
+        // batch shape; no production seed is known to have reached this row.
+        categories.add("Medical Test Supplies");
+        return categories.stream().distinct().map(CATEGORY_PREFIX::concat).toList();
     }
 }

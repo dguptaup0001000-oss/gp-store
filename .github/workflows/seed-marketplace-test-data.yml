@@ -68,10 +68,20 @@ jobs:
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -Eeuo pipefail
-          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$CONFIRMATION" == "MARKETPLACE_TEST_100_SHOPS_V1" ]]
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::target_sha must be the full 40-character lowercase SHA (got '$TARGET_SHA')"
+            exit 1
+          }
+          [[ "$CONFIRMATION" == "MARKETPLACE_TEST_100_SHOPS_V1" ]] || {
+            echo "::error::confirmation must exactly identify MARKETPLACE_TEST_100_SHOPS_V1"
+            exit 1
+          }
           git fetch origin main --quiet
-          [[ "$(git rev-parse origin/main)" == "$TARGET_SHA" ]]
+          CURRENT_MAIN="$(git rev-parse origin/main)"
+          [[ "$CURRENT_MAIN" == "$TARGET_SHA" ]] || {
+            echo "::error::target_sha is stale or not current main: requested=$TARGET_SHA current_main=$CURRENT_MAIN"
+            exit 1
+          }
           echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
       # A base without /v1 makes every route 404, and this guard would then
       # read "production is down" when only the URL was wrong.

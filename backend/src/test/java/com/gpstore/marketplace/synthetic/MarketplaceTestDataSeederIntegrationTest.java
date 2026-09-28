@@ -60,6 +60,12 @@ class MarketplaceTestDataSeederIntegrationTest {
         Double anchorLat = anchor.getLatitude();
         Double anchorLng = anchor.getLongitude();
         long customerCountBefore = jdbc.queryForObject("SELECT count(*) FROM customers", Long.class);
+        int existingShopCount = jdbc.queryForObject(
+                "SELECT count(*) FROM shops WHERE code !~ '^MKT100V1-SHOP-[0-9]{3}$'", Integer.class);
+        int syntheticShopTarget = MarketplaceTestDataGenerator.SHOP_COUNT - existingShopCount;
+        int syntheticListingTarget =
+                syntheticShopTarget * MarketplaceTestDataGenerator.LISTINGS_PER_SHOP;
+        assertTrue(syntheticShopTarget > 0);
 
         var inspectionBefore = seeder.execute(new MarketplaceTestDataSeeder.Request(
                 MarketplaceTestDataSeeder.Operation.INSPECT,
@@ -73,21 +79,61 @@ class MarketplaceTestDataSeederIntegrationTest {
                 MarketplaceTestDataSeeder.Operation.SEED,
                 MarketplaceTestDataGenerator.BATCH_ID, null);
         var first = seeder.execute(seed);
-        assertEquals(100, first.shops());
-        assertEquals(100, first.merchants());
-        assertEquals(6_000, first.products());
-        assertEquals(6_000, first.variants());
-        assertEquals(6_000, first.listings());
+        assertEquals(syntheticShopTarget, first.shops());
+        assertEquals(syntheticShopTarget, first.merchants());
+        assertEquals(syntheticListingTarget, first.products());
+        assertEquals(syntheticListingTarget, first.variants());
+        assertEquals(syntheticListingTarget, first.listings());
+        assertEquals(100, jdbc.queryForObject("SELECT count(*) FROM shops", Integer.class),
+                "the controlled marketplace is 100 shops total, including preserved shops");
         assertEquals(0, first.shopsBelowFiftyListings());
         assertTrue(first.buyOnline() > 0);
         assertTrue(first.visitToBuy() > 0);
         assertTrue(first.serviceAtShop() > 0);
         assertEquals(0, first.withImages());
-        assertEquals(6_000, first.withoutImages());
-        assertEquals(100, discovery.shopsServing(anchorLat, anchorLng).stream()
+        assertEquals(syntheticListingTarget, first.withoutImages());
+        assertEquals(syntheticShopTarget, discovery.shopsServing(anchorLat, anchorLng).stream()
                         .filter(nearby -> nearby.shop().getCode().startsWith("MKT100V1-SHOP-"))
                         .count(),
                 "all synthetic shops must be returned by the real nearby-discovery service at the seed anchor");
+        long within8 = discovery.shopsWithin(anchorLat, anchorLng, new java.math.BigDecimal("8")).stream()
+                .filter(nearby -> nearby.shop().getCode().startsWith("MKT100V1-SHOP-")).count();
+        long within20 = discovery.shopsWithin(anchorLat, anchorLng, new java.math.BigDecimal("20")).stream()
+                .filter(nearby -> nearby.shop().getCode().startsWith("MKT100V1-SHOP-")).count();
+        long within50 = discovery.shopsWithin(anchorLat, anchorLng, new java.math.BigDecimal("50")).stream()
+                .filter(nearby -> nearby.shop().getCode().startsWith("MKT100V1-SHOP-")).count();
+        assertTrue(within8 > 1 && within8 < within20);
+        assertTrue(within20 < within50);
+        assertEquals(syntheticShopTarget, within50);
+        assertEquals(0, jdbc.queryForObject("""
+                SELECT count(*) FROM (
+                    SELECT spv.shop_id
+                      FROM shop_product_variants spv
+                      JOIN product_variants v ON v.id = spv.product_variant_id
+                      JOIN products p ON p.id = v.product_id
+                     WHERE p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1'
+                     GROUP BY spv.shop_id
+                    HAVING count(DISTINCT p.category_id) <> 1
+                ) mixed
+                """, Integer.class), "a generated merchant must never inherit another shop type's category");
+        assertTrue(jdbc.queryForObject("""
+                SELECT count(DISTINCT spv.shop_id)
+                  FROM shop_product_variants spv
+                  JOIN product_variants v ON v.id = spv.product_variant_id
+                  JOIN products p ON p.id = v.product_id
+                  JOIN categories c ON c.id = p.category_id
+                 WHERE p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1'
+                   AND c.name = 'Test Marketplace - Jewellery'
+                """, Integer.class) > 0);
+        assertTrue(jdbc.queryForObject("""
+                SELECT count(DISTINCT spv.shop_id)
+                  FROM shop_product_variants spv
+                  JOIN product_variants v ON v.id = spv.product_variant_id
+                  JOIN products p ON p.id = v.product_id
+                  JOIN categories c ON c.id = p.category_id
+                 WHERE p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1'
+                   AND c.name = 'Test Marketplace - Tractor and Farm Parts'
+                """, Integer.class) > 0);
         var inspectionAfter = seeder.execute(new MarketplaceTestDataSeeder.Request(
                 MarketplaceTestDataSeeder.Operation.INSPECT,
                 MarketplaceTestDataGenerator.BATCH_ID, null));
@@ -105,7 +151,7 @@ class MarketplaceTestDataSeederIntegrationTest {
         assertEquals(anchorLat, shops.findByCode("SHOP-1").orElseThrow().getLatitude());
         assertEquals(anchorLng, shops.findByCode("SHOP-1").orElseThrow().getLongitude());
         assertEquals("ACTIVE", firstTestShop.getStatus().name());
-        assertEquals(100, jdbc.queryForObject("""
+        assertEquals(syntheticShopTarget, jdbc.queryForObject("""
                 SELECT count(*) FROM store_operations_settings o
                 JOIN shops s ON s.id = o.shop_id
                 WHERE s.code ~ '^MKT100V1-SHOP-[0-9]{3}$'
