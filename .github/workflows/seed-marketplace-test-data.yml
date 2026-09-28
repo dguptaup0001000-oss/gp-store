@@ -24,13 +24,20 @@
 name: Controlled marketplace test data
 
 on:
-  # Auto-merge uses GITHUB_TOKEN, so its resulting push intentionally cannot
-  # start another workflow. Deploy Production is explicitly dispatched by the
-  # merge workflow; listening for its successful completion works for both
-  # bot and human merges and means this workflow never races the deployment.
-  workflow_run:
-    workflows: ["Deploy Production"]
-    types: [completed]
+  # Deploy Production calls this workflow directly after its exact-SHA smoke
+  # passes. GITHUB_TOKEN events cannot trigger a second workflow, so this must
+  # be a reusable call rather than a push/workflow_run chain.
+  workflow_call:
+    inputs:
+      target_sha:
+        required: true
+        type: string
+      operation:
+        required: true
+        type: string
+      confirmation:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       target_sha:
@@ -56,39 +63,8 @@ permissions:
   actions: read
 
 jobs:
-  request:
-    name: Require reviewed seed request
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.request.outputs.should_run }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
-          fetch-depth: 2
-          persist-credentials: false
-      - name: Match this exact deployment to the reviewed request
-        id: request
-        env:
-          TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-        run: |
-          set -Eeuo pipefail
-          should_run=false
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            should_run=true
-          elif [[ "${{ github.event.workflow_run.conclusion }}" == "success" \
-              && "${{ github.event.workflow_run.head_branch }}" == "main" ]] \
-              && git diff-tree --no-commit-id --name-only -r -m "$TARGET_SHA" \
-                | grep -Fxq '.github/marketplace-test-data-seed-request-v1'; then
-            should_run=true
-          fi
-          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
-          echo "Reviewed seed request for $TARGET_SHA: $should_run"
-
   validate:
     name: Validate exact merged production release
-    needs: request
-    if: needs.request.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     # The retry budget is bounded, so this job is too: a validation that hangs
     # is a validation nobody gets an answer from.
@@ -106,9 +82,9 @@ jobs:
       - name: Require current main and exact confirmation
         id: validate
         env:
-          TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha || github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-          OPERATION: ${{ github.event_name == 'workflow_dispatch' && inputs.operation || 'SEED' }}
-          CONFIRMATION: ${{ github.event_name == 'workflow_dispatch' && inputs.confirmation || 'MARKETPLACE_TEST_100_SHOPS_V1' }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          OPERATION: ${{ inputs.operation }}
+          CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -Eeuo pipefail
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || {
@@ -140,38 +116,6 @@ jobs:
             *) echo "::error::PUBLIC_VERSION_URL must be https and end in /v1/api/version (got '$PUBLIC_VERSION_URL')"; exit 1 ;;
           esac
           echo "PUBLIC_VERSION_URL=$PUBLIC_VERSION_URL" >> "$GITHUB_ENV"
-
-      - name: Wait for this exact main SHA to deploy
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ steps.validate.outputs.target_sha }}
-        run: |
-          set -Eeuo pipefail
-          deadline=$((SECONDS + 1800))
-          while (( SECONDS < deadline )); do
-            row="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$TARGET_SHA" \
-              --workflow "Deploy Production" \
-              --json status,conclusion,event,url --limit 10 \
-              --jq 'map(select(.event == "push" or .event == "workflow_dispatch")) | first // {}')"
-            status="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("status",""))' "$row")"
-            conclusion="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("conclusion",""))' "$row")"
-            url="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("url",""))' "$row")"
-            echo "Deploy Production: status=${status:-missing} conclusion=${conclusion:-pending} ${url}"
-            if [[ "$status" == "completed" && "$conclusion" == "success" ]]; then
-              break
-            fi
-            if [[ "$status" == "completed" && -n "$conclusion" \
-                  && "$conclusion" != "success" ]]; then
-              echo "::error::Exact-SHA production deployment ended $conclusion; refusing seed"
-              exit 1
-            fi
-            sleep 20
-          done
-          [[ "$status" == "completed" && "$conclusion" == "success" ]] || {
-            echo "::error::Timed out waiting for exact-SHA production deployment"
-            exit 1
-          }
 
       # WHY THIS IS A SCRIPT AND NOT A curl.
       #

@@ -517,6 +517,53 @@ jobs:
       # assert whatever the deploy was actually told to ship.
       expect_sha: ${{ inputs.sha || github.sha }}
 
+  seed-request:
+    name: Match reviewed marketplace seed request
+    needs: [deploy, deploy-fallback, smoke]
+    if: >-
+      always()
+      && github.event_name != 'pull_request'
+      && needs.smoke.result == 'success'
+      && (needs.deploy.result == 'success' || needs['deploy-fallback'].result == 'success')
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.request.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Require the reviewed request in this exact deployed SHA
+        id: request
+        env:
+          TARGET_SHA: ${{ inputs.sha || github.sha }}
+        run: |
+          set -Eeuo pipefail
+          should_run=false
+          if git diff-tree --no-commit-id --name-only -r -m "$TARGET_SHA" \
+              | grep -Fxq '.github/marketplace-test-data-seed-request-v1'; then
+            should_run=true
+          fi
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
+          echo "Reviewed marketplace seed request for $TARGET_SHA: $should_run"
+
+  controlled-seed:
+    name: Seed and verify controlled marketplace
+    needs: [deploy, deploy-fallback, smoke, seed-request]
+    if: >-
+      always()
+      && needs.smoke.result == 'success'
+      && needs['seed-request'].result == 'success'
+      && needs['seed-request'].outputs.should_run == 'true'
+      && (needs.deploy.result == 'success' || needs['deploy-fallback'].result == 'success')
+    uses: ./.github/workflows/seed-marketplace-test-data.yml
+    with:
+      target_sha: ${{ inputs.sha || github.sha }}
+      operation: SEED
+      confirmation: MARKETPLACE_TEST_100_SHOPS_V1
+    secrets: inherit
+
   start-offbox:
     name: Start off-box backup
     needs: [deploy, deploy-fallback]

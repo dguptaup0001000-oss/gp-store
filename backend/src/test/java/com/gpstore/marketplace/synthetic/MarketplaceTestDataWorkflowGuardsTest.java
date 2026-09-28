@@ -38,17 +38,21 @@ class MarketplaceTestDataWorkflowGuardsTest {
     @DisplayName("every guard the seed depends on is still in the validate job")
     void validateJobStillProvesTheWholeChain() throws IOException {
         String workflow = read(".github/workflows/seed-marketplace-test-data.yml");
+        String deployment = read(".github/workflows/deploy-production.yml");
 
-        assertTrue(workflow.contains("workflow_run:")
-                        && workflow.contains("workflows: [\"Deploy Production\"]"),
-                "an Actions-token merge cannot trigger a push workflow, so seeding must follow "
-                        + "the completed production deployment");
-        assertTrue(workflow.contains("git diff-tree --no-commit-id --name-only -r -m \"$TARGET_SHA\"")
-                        && workflow.contains("grep -Fxq '.github/marketplace-test-data-seed-request-v1'"),
+        assertTrue(workflow.contains("workflow_call:"),
+                "GITHUB_TOKEN events cannot fan out, so deployment must call the seed workflow");
+        assertFalse(workflow.contains("workflow_run:"),
+                "a workflow_run emitted by the Actions-token deployment will never start");
+        assertTrue(deployment.contains(
+                        "git diff-tree --no-commit-id --name-only -r -m \"$TARGET_SHA\"")
+                        && deployment.contains(
+                        "grep -Fxq '.github/marketplace-test-data-seed-request-v1'"),
                 "an ordinary deployment must not seed unless its exact merge changed the "
                         + "reviewed request file");
-        assertTrue(workflow.contains("needs: request"),
-                "validation must not run until the exact deployment is matched to the request");
+        assertTrue(deployment.contains("uses: ./.github/workflows/seed-marketplace-test-data.yml")
+                        && deployment.contains("needs.smoke.result == 'success'"),
+                "the exact deployment must call the guarded seed only after production smoke");
         assertTrue(workflow.contains("[[ \"$TARGET_SHA\" =~ ^[0-9a-f]{40}$ ]]"),
                 "the full 40-character SHA check was removed; a short SHA matches nothing");
         assertTrue(workflow.contains("[[ \"$CONFIRMATION\" == \"MARKETPLACE_TEST_100_SHOPS_V1\" ]]"),
