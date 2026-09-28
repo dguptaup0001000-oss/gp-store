@@ -67,7 +67,7 @@ public class MarketplaceTestDataSeeder {
     }
 
     public record Result(int shops, int merchants, int products, int variants, int listings,
-                         int shopsBelowFiftyListings,
+                         int shopsBelowEightListings,
                          int buyOnline, int visitToBuy, int serviceAtShop,
                          int withImages, int withoutImages, boolean alreadyPresent) { }
 
@@ -80,13 +80,7 @@ public class MarketplaceTestDataSeeder {
     public Result execute(Request request) {
         authorize(request);
         acquireBatchLock();
-        int existingMarketplaceShops = nonBatchShopCount();
-        int syntheticShopTarget = MarketplaceTestDataGenerator.SHOP_COUNT - existingMarketplaceShops;
-        if (syntheticShopTarget <= 0) {
-            throw new IllegalStateException("The marketplace already has " + existingMarketplaceShops
-                    + " non-batch shops; refusing to exceed the controlled total of "
-                    + MarketplaceTestDataGenerator.SHOP_COUNT + ".");
-        }
+        int syntheticShopTarget = MarketplaceTestDataGenerator.SHOP_COUNT;
         if (request.operation() == Operation.INSPECT) {
             // Read-only verification. It uses the same batch lock as seed and
             // cleanup so an inspection cannot report a half-written batch.
@@ -99,7 +93,7 @@ public class MarketplaceTestDataSeeder {
         if (existing.shops() > 0 || existing.products() > 0 || existing.listings() > 0) {
             if (isComplete(existing, syntheticShopTarget)) {
                 return new Result(existing.shops(), existing.merchants(), existing.products(), existing.variants(),
-                        existing.listings(), existing.shopsBelowFiftyListings(), existing.buyOnline(), existing.visitToBuy(),
+                        existing.listings(), existing.shopsBelowEightListings(), existing.buyOnline(), existing.visitToBuy(),
                         existing.serviceAtShop(), existing.withImages(), existing.withoutImages(), true);
             }
             throw new IllegalStateException("The named synthetic batch is present but incomplete; "
@@ -107,8 +101,7 @@ public class MarketplaceTestDataSeeder {
         }
 
         MarketplaceTestDataGenerator.Dataset dataset =
-                MarketplaceTestDataGenerator.generate(
-                        MarketplaceTestDataGenerator.DEFAULT_SEED, syntheticShopTarget);
+                MarketplaceTestDataGenerator.generate(MarketplaceTestDataGenerator.DEFAULT_SEED);
         Shop anchor = shopRepository.findByCode(platform.getFirstShopCode())
                 .orElseThrow(() -> new IllegalStateException("The configured first shop is missing."));
         if (anchor.getLatitude() == null || anchor.getLongitude() == null) {
@@ -204,20 +197,25 @@ public class MarketplaceTestDataSeeder {
 
     private Map<String, Long> createShops(List<MarketplaceTestDataGenerator.ShopSpec> specs, Shop anchor) {
         Map<String, Long> ids = new HashMap<>();
+        Map<String, Merchant> merchants = new HashMap<>();
         double latitude = anchor.getLatitude();
         double longitude = anchor.getLongitude();
         double longitudeDegreesPerKm = 111.0d * Math.max(0.1d,
                 Math.cos(Math.toRadians(latitude)));
 
         for (MarketplaceTestDataGenerator.ShopSpec spec : specs) {
-            Merchant merchant = merchantLifecycle.register(spec.merchantName(), spec.shopName(),
-                    null, null, null, true);
-            merchantLifecycle.transition(merchant.getId(), MerchantStatus.PENDING_REVIEW,
-                    BATCH + " synthetic merchant staging");
-            merchantLifecycle.transition(merchant.getId(), MerchantStatus.APPROVED,
-                    BATCH + " synthetic test approval");
-            merchantLifecycle.transition(merchant.getId(), MerchantStatus.ACTIVE,
-                    BATCH + " synthetic test activation");
+            Merchant merchant = merchants.get(spec.merchantName());
+            if (merchant == null) {
+                merchant = merchantLifecycle.register(spec.merchantName(), spec.shopName(),
+                        null, null, null, true);
+                merchantLifecycle.transition(merchant.getId(), MerchantStatus.PENDING_REVIEW,
+                        BATCH + " synthetic merchant staging");
+                merchantLifecycle.transition(merchant.getId(), MerchantStatus.APPROVED,
+                        BATCH + " synthetic test approval");
+                merchant = merchantLifecycle.transition(merchant.getId(), MerchantStatus.ACTIVE,
+                        BATCH + " synthetic test activation");
+                merchants.put(spec.merchantName(), merchant);
+            }
 
             double shopLatitude = latitude + Math.cos(spec.bearingRadians()) * spec.distanceKm() / 111.0d;
             double shopLongitude = longitude + Math.sin(spec.bearingRadians()) * spec.distanceKm()
@@ -347,14 +345,14 @@ public class MarketplaceTestDataSeeder {
                         + "WHERE p.is_test_data = TRUE AND p.data_source = ? "
                         + "AND (NULLIF(v.image_url, '') IS NOT NULL OR pi.id IS NOT NULL)",
                 Integer.class, BATCH);
-        int shopsBelowFifty = jdbc.queryForObject("SELECT count(*) FROM (SELECT s.id "
+        int shopsBelowEight = jdbc.queryForObject("SELECT count(*) FROM (SELECT s.id "
                         + "FROM shops s LEFT JOIN shop_product_variants spv ON spv.shop_id = s.id "
                         + "LEFT JOIN product_variants v ON v.id = spv.product_variant_id "
                         + "LEFT JOIN products p ON p.id = v.product_id AND p.is_test_data = TRUE AND p.data_source = ? "
                         + "WHERE s.is_demo = TRUE AND s.code ~ ? "
-                        + "GROUP BY s.id HAVING count(p.id) < 50) undersized",
+                        + "GROUP BY s.id HAVING count(p.id) < 8) undersized",
                 Integer.class, BATCH, SHOP_CODE_PATTERN);
-        return new Result(shops, merchants, products, variants, listings, shopsBelowFifty,
+        return new Result(shops, merchants, products, variants, listings, shopsBelowEight,
                 modes.getOrDefault(CommerceMode.ONLINE_PURCHASE.name(), 0),
                 modes.getOrDefault(CommerceMode.VISIT_TO_BUY.name(), 0),
                 modes.getOrDefault(CommerceMode.SERVICE_AT_SHOP.name(), 0), withImages,
@@ -364,17 +362,12 @@ public class MarketplaceTestDataSeeder {
     private static boolean isComplete(Result result, int syntheticShopTarget) {
         int listingTarget = syntheticShopTarget * MarketplaceTestDataGenerator.LISTINGS_PER_SHOP;
         return result.shops() == syntheticShopTarget
-                && result.merchants() == syntheticShopTarget
+                && result.merchants() == MarketplaceTestDataGenerator.MERCHANT_COUNT
                 && result.products() == listingTarget
                 && result.variants() == listingTarget
                 && result.listings() == listingTarget
-                && result.shopsBelowFiftyListings() == 0
+                && result.shopsBelowEightListings() == 0
                 && result.buyOnline() > 0 && result.visitToBuy() > 0 && result.serviceAtShop() > 0;
-    }
-
-    private int nonBatchShopCount() {
-        return jdbc.queryForObject("SELECT count(*) FROM shops WHERE code IS NULL OR code !~ ?",
-                Integer.class, SHOP_CODE_PATTERN);
     }
 
     private Result cleanupBatch(int syntheticShopTarget) {
@@ -403,8 +396,9 @@ public class MarketplaceTestDataSeeder {
         String merchantPrefix = "[" + BATCH + "] Merchant ";
         long merchantShopMismatch = jdbc.queryForObject("SELECT count(*) FROM merchants m WHERE m.is_demo = TRUE "
                         + "AND left(m.legal_name, length(?)) = ? "
-                        + "AND (SELECT count(*) FROM shops s WHERE s.merchant_id = m.id) <> 1",
-                Long.class, merchantPrefix, merchantPrefix);
+                        + "AND ((SELECT count(*) FROM shops s WHERE s.merchant_id = m.id) NOT BETWEEN 1 AND 2 "
+                        + "OR EXISTS (SELECT 1 FROM shops s WHERE s.merchant_id = m.id AND s.code !~ ?))",
+                Long.class, merchantPrefix, merchantPrefix, SHOP_CODE_PATTERN);
         if (merchantShopMismatch != 0) {
             throw new IllegalStateException("Cleanup refused: a marked merchant owns additional shop records.");
         }

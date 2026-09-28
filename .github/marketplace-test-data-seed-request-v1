@@ -2,7 +2,8 @@ MARKETPLACE_TEST_100_SHOPS_V1
 
 One-time production request:
 - preserve every existing production shop and its data;
-- bring the controlled marketplace to exactly 100 total shops;
+- create exactly 100 controlled test shops in addition to every preserved
+  existing/non-controlled production shop;
 - run only after this merged main SHA is green and deployed on Hostinger;
 - verify the resulting production database and public marketplace API.
 

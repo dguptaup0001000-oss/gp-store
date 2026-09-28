@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The Controlled marketplace test data workflow brings the live database to exactly 100 total
- * shops, generating only the missing synthetic shops and listings while preserving real shops.
+ * The Controlled marketplace test data workflow adds exactly 100 controlled shops to the live
+ * database while preserving every existing non-controlled shop and its data.
  * The only thing standing in front of that operation is the validate job. That job once probed
  * the live deployment with a single bare curl; a runner that could not resolve
  * api.gpstore.co.in failed it in twelve seconds, and the tempting "fix" for a flaky network

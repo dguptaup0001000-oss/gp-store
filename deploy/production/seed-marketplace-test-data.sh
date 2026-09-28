@@ -102,6 +102,13 @@ WITH visible_distances AS (
       FROM shops s
      WHERE s.active = TRUE AND s.status IN ('ACTIVE','PAUSED')
        AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
+), controlled_distances AS (
+    SELECT id, distance_km
+      FROM visible_distances
+     WHERE id IN (
+           SELECT id FROM shops
+            WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$'
+     )
 ), batch_category_counts AS (
     SELECT c.name AS category, count(DISTINCT spv.shop_id) AS shop_count
       FROM shop_product_variants spv
@@ -124,8 +131,14 @@ SELECT json_build_object(
       'total_shops', (SELECT count(*) FROM shops),
       'non_batch_shops', (SELECT count(*) FROM shops WHERE code IS NULL OR code !~ '^MKT100V1-SHOP-[0-9]{3}$'),
       'merchants', (SELECT count(*) FROM merchants WHERE is_demo = TRUE AND left(legal_name, length('[MARKETPLACE_TEST_100_SHOPS_V1] Merchant ')) = '[MARKETPLACE_TEST_100_SHOPS_V1] Merchant '),
+      'multi_shop_merchants', (SELECT count(*) FROM (SELECT merchant_id FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$' GROUP BY merchant_id HAVING count(*) = 2) grouped),
       'shops', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$'),
+      'unique_controlled_shop_ids', (SELECT count(DISTINCT id) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$'),
+      'unique_controlled_shop_names', (SELECT count(DISTINCT display_name) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$'),
+      'duplicate_controlled_shops', (SELECT count(*) - count(DISTINCT display_name) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$'),
       'active_shops', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND active = TRUE AND status = 'ACTIVE'),
+      'approved_shops', (SELECT count(*) FROM shops s JOIN merchants m ON m.id = s.merchant_id WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND m.status IN ('APPROVED','ACTIVE')),
+      'valid_merchant_relationships', (SELECT count(*) FROM shops s JOIN merchants m ON m.id = s.merchant_id WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND m.is_demo = TRUE AND left(m.legal_name, length('[MARKETPLACE_TEST_100_SHOPS_V1] Merchant ')) = '[MARKETPLACE_TEST_100_SHOPS_V1] Merchant '),
       'total_active_shops', (SELECT count(*) FROM shops WHERE active = TRUE AND status = 'ACTIVE'),
       'customer_visible_shops', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND active = TRUE AND status IN ('ACTIVE','PAUSED')),
       'total_customer_visible_shops', (SELECT count(*) FROM shops WHERE active = TRUE AND status IN ('ACTIVE','PAUSED')),
@@ -153,8 +166,15 @@ SELECT json_build_object(
           '100_km', (SELECT count(*) FROM visible_distances WHERE distance_km <= 100),
           '500_km', (SELECT count(*) FROM visible_distances WHERE distance_km <= 500)
       ),
+      'controlled_radius_counts', json_build_object(
+          '8_km', (SELECT count(*) FROM controlled_distances WHERE distance_km <= 8),
+          '20_km', (SELECT count(*) FROM controlled_distances WHERE distance_km <= 20),
+          '50_km', (SELECT count(*) FROM controlled_distances WHERE distance_km <= 50),
+          '100_km', (SELECT count(*) FROM controlled_distances WHERE distance_km <= 100),
+          '500_km', (SELECT count(*) FROM controlled_distances WHERE distance_km <= 500)
+      ),
       'image_products', (SELECT count(DISTINCT p.id) FROM products p JOIN product_variants v ON v.product_id = p.id LEFT JOIN product_images pi ON pi.product_id = p.id WHERE p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' AND (NULLIF(v.image_url, '') IS NOT NULL OR pi.id IS NOT NULL)),
-      'undersized_shops', (SELECT count(*) FROM (SELECT s.id FROM shops s LEFT JOIN shop_product_variants spv ON spv.shop_id = s.id LEFT JOIN product_variants v ON v.id = spv.product_variant_id LEFT JOIN products p ON p.id = v.product_id AND p.is_test_data = TRUE AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' GROUP BY s.id HAVING count(p.id) < 50) small)
+      'undersized_shops', (SELECT count(*) FROM (SELECT s.id FROM shops s LEFT JOIN shop_product_variants spv ON spv.shop_id = s.id LEFT JOIN product_variants v ON v.id = spv.product_variant_id LEFT JOIN products p ON p.id = v.product_id AND p.is_test_data = TRUE AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' GROUP BY s.id HAVING count(p.id) < 8) small)
     )::text;
 SQL
 metrics="$(compose exec -T postgres sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v anchor_lat="$2" -v anchor_lng="$3" -v max_radius="$4" -tA -c "$1"' sh "$verification_sql" "$anchor_lat" "$anchor_lng" "$max_radius")"
@@ -162,34 +182,39 @@ if [[ "$OPERATION" == "SEED" ]]; then
   python3 - "$metrics" <<'PY'
 import json, sys
 m = json.loads(sys.argv[1])
-expected_synthetic = 100 - m["non_batch_shops"]
-expected_listings = expected_synthetic * 60
+expected_synthetic = 100
+expected_listings = expected_synthetic * 12
 assert expected_synthetic > 0, m
-assert m["total_shops"] == 100, m
-assert m["merchants"] == expected_synthetic, m
+assert m["total_shops"] == m["non_batch_shops"] + expected_synthetic, m
+assert m["merchants"] == 95 and m["multi_shop_merchants"] == 5, m
 assert m["shops"] == expected_synthetic, m
+assert m["unique_controlled_shop_ids"] == expected_synthetic, m
+assert m["unique_controlled_shop_names"] == expected_synthetic, m
+assert m["duplicate_controlled_shops"] == 0, m
 assert m["products"] == expected_listings and m["variants"] == expected_listings and m["listings"] == expected_listings, m
 assert m["buy_online"] > 0 and m["visit_to_buy"] > 0 and m["service_at_shop"] > 0, m
 assert m["undersized_shops"] == 0, m
 assert m["image_products"] == 0, m
 assert m["customer_visible_shops"] == expected_synthetic, m
-assert m["total_customer_visible_shops"] == 100, m
-assert m["total_active_shops"] == 100, m
+assert m["active_shops"] == expected_synthetic, m
+assert m["approved_shops"] == expected_synthetic, m
+assert m["valid_merchant_relationships"] == expected_synthetic, m
 assert m["shops_inside_configured_max_radius_from_anchor"] == expected_synthetic, m
 assert m["shops_order_acceptance_on"] == expected_synthetic, m
 assert m["merchants_not_trading"] == 0, m
 assert m["cross_category_shops"] == 0, m
 for category in ("Test Marketplace - Grocery", "Test Marketplace - Mobile and Electronics",
-                 "Test Marketplace - Hardware", "Test Marketplace - Clothing",
+                 "Test Marketplace - Hardware and Electrical", "Test Marketplace - Clothing and Fashion",
                  "Test Marketplace - Footwear", "Test Marketplace - Restaurant and Food",
-                 "Test Marketplace - Pharmacy and Medical Test Supplies",
-                 "Test Marketplace - Automotive Parts", "Test Marketplace - Furniture",
-                 "Test Marketplace - Jewellery", "Test Marketplace - Repair Services",
-                 "Test Marketplace - Tractor and Farm Parts"):
+                 "Test Marketplace - Health and Medical Test Supplies",
+                 "Test Marketplace - Automotive Parts", "Test Marketplace - Furniture and Home",
+                 "Test Marketplace - Jewellery and Accessories",
+                 "Test Marketplace - Mobile and Electronics Repair",
+                 "Test Marketplace - Tractor and Agricultural Parts"):
     assert m["category_shop_counts"].get(category, 0) > 0, (category, m)
-r = m["radius_counts"]
-assert 0 < r["8_km"] < r["20_km"] < r["50_km"], m
-assert r["50_km"] == r["100_km"] == r["500_km"] == 100, m
+r = m["controlled_radius_counts"]
+assert r == {"8_km": 60, "20_km": 85, "50_km": 95,
+             "100_km": 100, "500_km": 100}, m
 print(json.dumps(m, sort_keys=True))
 PY
 else
@@ -204,25 +229,40 @@ fi
 # Exercise the serialized production API pages using the same configured
 # marketplace anchor. Only compact counts/ids are emitted to the workflow log.
 api_base="http://127.0.0.1:8081/v1/api/marketplace"
-shops_page0="$(compose exec -T backend curl -fsS --max-time 20 "$api_base/shops/page?lat=${anchor_lat}&lng=${anchor_lng}&page=0&size=20")"
-shops_page1="$(compose exec -T backend curl -fsS --max-time 20 "$api_base/shops/page?lat=${anchor_lat}&lng=${anchor_lng}&page=1&size=20")"
-shops_page2="$(compose exec -T backend curl -fsS --max-time 20 "$api_base/shops/page?lat=${anchor_lat}&lng=${anchor_lng}&page=2&size=20")"
+shops_pages="$(mktemp)"
+trap 'rm -f "$shops_pages"' EXIT
+page=0
+while :; do
+  body="$(compose exec -T backend curl -fsS --max-time 20 \
+    "$api_base/shops/page?lat=${anchor_lat}&lng=${anchor_lng}&page=${page}&size=20")"
+  printf '%s\n' "$body" >> "$shops_pages"
+  has_next="$(python3 -c 'import json,sys; print(str(bool(json.loads(sys.argv[1]).get("hasNext"))).lower())' "$body")"
+  [[ "$has_next" == "true" ]] || break
+  page=$((page + 1))
+  (( page < 100 )) || die "Marketplace shop pagination did not terminate."
+done
 buy_page0="$(compose exec -T backend curl -fsS --max-time 20 "$api_base/feed?lat=${anchor_lat}&lng=${anchor_lng}&mode=ONLINE_PURCHASE&page=0&size=12")"
 buy_page1="$(compose exec -T backend curl -fsS --max-time 20 "$api_base/feed?lat=${anchor_lat}&lng=${anchor_lng}&mode=ONLINE_PURCHASE&page=1&size=12")"
 visit_page0="$(compose exec -T backend curl -fsS --max-time 20 "$api_base/feed?lat=${anchor_lat}&lng=${anchor_lng}&mode=VISIT_TO_BUY&page=0&size=12")"
 visit_page1="$(compose exec -T backend curl -fsS --max-time 20 "$api_base/feed?lat=${anchor_lat}&lng=${anchor_lng}&mode=VISIT_TO_BUY&page=1&size=12")"
 service_page0="$(compose exec -T backend curl -fsS --max-time 20 "$api_base/feed?lat=${anchor_lat}&lng=${anchor_lng}&mode=SERVICE_AT_SHOP&page=0&size=12")"
 service_page1="$(compose exec -T backend curl -fsS --max-time 20 "$api_base/feed?lat=${anchor_lat}&lng=${anchor_lng}&mode=SERVICE_AT_SHOP&page=1&size=12")"
-python3 - "$OPERATION" "$metrics" "$shops_page0" "$shops_page1" "$shops_page2" "$buy_page0" "$buy_page1" "$visit_page0" "$visit_page1" "$service_page0" "$service_page1" <<'PY'
+python3 - "$OPERATION" "$metrics" "$shops_pages" "$buy_page0" "$buy_page1" "$visit_page0" "$visit_page1" "$service_page0" "$service_page1" <<'PY'
 import json, sys
 operation = sys.argv[1]
-metrics, shop0, shop1, shop2, buy0, buy1, visit0, visit1, service0, service1 = map(json.loads, sys.argv[2:])
-assert isinstance(shop0.get("shops"), list) and isinstance(shop1.get("shops"), list)
-shop_pages = [shop0, shop1, shop2]
-assert [item["page"] for item in shop_pages] == [0, 1, 2]
+metrics = json.loads(sys.argv[2])
+with open(sys.argv[3], encoding="utf-8") as handle:
+    shop_pages = [json.loads(line) for line in handle if line.strip()]
+buy0, buy1, visit0, visit1, service0, service1 = map(json.loads, sys.argv[4:])
+assert shop_pages and all(isinstance(item.get("shops"), list) for item in shop_pages)
+assert [item["page"] for item in shop_pages] == list(range(len(shop_pages)))
 shop_ids = [row["shopId"] for item in shop_pages for row in item["shops"]]
 assert len(shop_ids) == len(set(shop_ids)), "nearby shop pages overlap"
 assert all(item["size"] <= 20 and isinstance(item["hasNext"], bool) for item in shop_pages)
+assert shop_pages[-1]["hasNext"] is False
+assert shop_pages[0]["totalElements"] == len(shop_ids)
+controlled = [row for item in shop_pages for row in item["shops"]
+              if str(row.get("code") or "").startswith("MKT100V1-SHOP-")]
 for mode, rows in (("ONLINE_PURCHASE", buy0), ("ONLINE_PURCHASE", buy1),
                    ("VISIT_TO_BUY", visit0), ("VISIT_TO_BUY", visit1),
                    ("SERVICE_AT_SHOP", service0), ("SERVICE_AT_SHOP", service1)):
@@ -230,7 +270,9 @@ for mode, rows in (("ONLINE_PURCHASE", buy0), ("ONLINE_PURCHASE", buy1),
     assert len(rows) <= 12
     assert all(item.get("commerceMode") == mode for item in rows)
 if operation == "SEED":
-    assert shop0["totalElements"] == 100, shop0
+    assert len(controlled) == 100, {"controlled": len(controlled), "pages": shop_pages}
+    assert len({row["shopId"] for row in controlled}) == 100, controlled
+    assert len({row["displayName"] for row in controlled}) == 100, controlled
     assert len(buy0) and len(visit0) and len(service0), {
         "buy_online": len(buy0), "visit_to_buy": len(visit0), "service_at_shop": len(service0)}
     assert len({x.get("shopId") for x in buy0}) > 1, buy0
@@ -239,8 +281,10 @@ if operation == "SEED":
     keys1 = {(x.get("productId"), x.get("commerceMode"), x.get("shopId"), x.get("productVariantId")) for x in buy1}
     assert not keys0.intersection(keys1), "marketplace feed pages overlap"
 print(json.dumps({"shop_page_rows": [len(item["shops"]) for item in shop_pages],
-                  "shop_total_elements": shop0["totalElements"],
-                  "shop_has_next": shop0["hasNext"],
+                  "shop_pages_traversed": len(shop_pages),
+                  "shop_total_elements": shop_pages[0]["totalElements"],
+                  "controlled_shop_ids_returned": len({row["shopId"] for row in controlled}),
+                  "shop_has_next": shop_pages[0]["hasNext"],
                   "buy_online_page_rows": [len(buy0), len(buy1)],
                   "visit_to_buy_page_rows": [len(visit0), len(visit1)],
                   "service_at_shop_page_rows": [len(service0), len(service1)]}, sort_keys=True))
