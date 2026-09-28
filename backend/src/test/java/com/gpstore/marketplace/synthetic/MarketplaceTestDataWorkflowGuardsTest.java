@@ -11,11 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The Controlled marketplace test data workflow writes 100 shops and 6000 listings into the
- * database a real shop trades on, and the only thing standing in front of it is the validate
- * job. That job once probed the live deployment with a single bare curl; a runner that could
- * not resolve api.gpstore.co.in failed it in twelve seconds, and the tempting "fix" for a
- * flaky network check is to make it softer. These assertions exist so that nobody can.
+ * The Controlled marketplace test data workflow brings the live database to exactly 100 total
+ * shops, generating only the missing synthetic shops and listings while preserving real shops.
+ * The only thing standing in front of that operation is the validate job. That job once probed
+ * the live deployment with a single bare curl; a runner that could not resolve
+ * api.gpstore.co.in failed it in twelve seconds, and the tempting "fix" for a flaky network
+ * check is to make it softer. These assertions exist so that nobody can.
  */
 @DisplayName("Controlled marketplace test data cannot be seeded without a verified live release")
 class MarketplaceTestDataWorkflowGuardsTest {
@@ -42,7 +43,7 @@ class MarketplaceTestDataWorkflowGuardsTest {
                 "the full 40-character SHA check was removed; a short SHA matches nothing");
         assertTrue(workflow.contains("[[ \"$CONFIRMATION\" == \"MARKETPLACE_TEST_100_SHOPS_V1\" ]]"),
                 "the exact confirmation string is the batch identity cleanup keys on");
-        assertTrue(workflow.contains("[[ \"$(git rev-parse origin/main)\" == \"$TARGET_SHA\" ]]"),
+        assertTrue(workflow.contains("[[ \"$CURRENT_MAIN\" == \"$TARGET_SHA\" ]]"),
                 "the requested SHA must still be the current tip of origin/main");
         assertTrue(workflow.contains("deploy/production/verify-public-release-sha.sh"),
                 "the live-release verifier must run before anything may be seeded");

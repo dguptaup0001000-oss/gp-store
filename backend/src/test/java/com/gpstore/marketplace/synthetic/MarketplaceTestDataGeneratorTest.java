@@ -33,6 +33,27 @@ class MarketplaceTestDataGeneratorTest {
     }
 
     @Test
+    void preservesExistingShopsByGeneratingOnlyTheMissingDeterministicPrefix() {
+        var full = MarketplaceTestDataGenerator.generate(MarketplaceTestDataGenerator.DEFAULT_SEED);
+        var missing = MarketplaceTestDataGenerator.generate(
+                MarketplaceTestDataGenerator.DEFAULT_SEED, 97);
+
+        assertEquals(97, missing.shops().size());
+        assertEquals(97 * MarketplaceTestDataGenerator.LISTINGS_PER_SHOP,
+                missing.listings().size());
+        assertEquals(full.shops().subList(0, 97), missing.shops());
+        assertEquals(full.listings().subList(0, 97 * MarketplaceTestDataGenerator.LISTINGS_PER_SHOP),
+                missing.listings());
+        assertThrows(IllegalArgumentException.class,
+                () -> MarketplaceTestDataGenerator.generate(
+                        MarketplaceTestDataGenerator.DEFAULT_SEED, 101));
+        assertTrue(MarketplaceTestDataGenerator.categories().contains("Jewellery"));
+        assertTrue(MarketplaceTestDataGenerator.categories().contains("Tractor and Farm Parts"));
+        assertTrue(MarketplaceTestDataGenerator.categories()
+                .contains("Pharmacy and Medical Test Supplies"));
+    }
+
+    @Test
     void includesEveryAuthoritativeCommerceModeAndKeepsPriceRulesCoherent() {
         var dataset = MarketplaceTestDataGenerator.generate(MarketplaceTestDataGenerator.DEFAULT_SEED);
         Map<CommerceMode, Long> counts = dataset.listings().stream().collect(Collectors.groupingBy(

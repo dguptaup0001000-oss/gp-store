@@ -17,10 +17,10 @@
 #
 # THE OTHER HALF OF THE LESSON, WHICH IS THE IMPORTANT HALF. The wrong fix is
 # to make the failure softer - `|| true`, a warning, a skip - because this
-# check is the gate in front of a script that writes 100 shops and 6000
-# listings into the live database. A gate that opens when it cannot see is
-# worse than no gate: it looks like verification. So THREE outcomes, never
-# two:
+# check is the gate in front of a script that brings the live marketplace to
+# exactly 100 total shops, generating only the missing synthetic shops and
+# listings. A gate that opens when it cannot see is worse than no gate: it
+# looks like verification. So THREE outcomes, never two:
 #
 #   exit 0  the live deployment answered, and reports exactly this release.
 #   exit 1  the live deployment answered, and it is NOT this release - or we
