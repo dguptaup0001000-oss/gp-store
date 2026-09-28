@@ -243,6 +243,13 @@ public class MarketplaceTestDataSeeder {
                     BATCH, shop.getId());
             ids.put(spec.shopCode(), shop.getId());
         }
+        // The catalogue and the verification below use JdbcTemplate inside
+        // this same transaction. Flush the final JPA status transition first;
+        // otherwise every next-loop repository query flushes its predecessor
+        // but shop 100 remains DRAFT until commit, making the SQL funnel see
+        // 99 ACTIVE shops even though the transaction would eventually store
+        // all 100 as ACTIVE.
+        shopRepository.flush();
         return ids;
     }
 
