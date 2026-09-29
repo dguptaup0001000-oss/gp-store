@@ -13,12 +13,12 @@ void main() {
   test('page 1, 2 and 3 append exact identities, dedupe and exhaust',
       () async {
     final repository = _PagingMarketplaceRepository({
-      0: [for (var i = 0; i < 24; i++) _card(i, shopId: 10 + i)],
+      0: [for (var i = 0; i < 18; i++) _card(i, shopId: 10 + i)],
       1: [
         _card(0, shopId: 10),
-        for (var i = 24; i < 47; i++) _card(i, shopId: 10 + i),
+        for (var i = 18; i < 35; i++) _card(i, shopId: 10 + i),
       ],
-      2: [_card(47, shopId: 57)],
+      2: [_card(35, shopId: 45)],
     });
     final container = ProviderContainer(overrides: [
       deliveryPinProvider.overrideWith((ref) => (lat: 27.16, lng: 83.94)),
@@ -33,20 +33,20 @@ void main() {
     );
     addTearDown(subscription.close);
     await _until(() =>
-        container.read(marketplaceHomeAllFeedProvider).cards.length == 24);
-    expect(container.read(marketplaceHomeAllFeedProvider).cards, hasLength(24));
+        container.read(marketplaceHomeAllFeedProvider).cards.length == 18);
+    expect(container.read(marketplaceHomeAllFeedProvider).cards, hasLength(18));
 
     await container
         .read(marketplaceHomeAllFeedProvider.notifier)
         .loadMore();
-    expect(container.read(marketplaceHomeAllFeedProvider).cards, hasLength(47),
+    expect(container.read(marketplaceHomeAllFeedProvider).cards, hasLength(35),
         reason: 'the repeated first-page identity must not be appended');
 
     await container
         .read(marketplaceHomeAllFeedProvider.notifier)
         .loadMore();
     final state = container.read(marketplaceHomeAllFeedProvider);
-    expect(state.cards, hasLength(48));
+    expect(state.cards, hasLength(36));
     expect(state.hasNext, isFalse);
     expect(repository.pages, [0, 1, 2]);
 
@@ -60,8 +60,8 @@ void main() {
   test('a failed next page keeps appended cards and retry resumes that page',
       () async {
     final repository = _PagingMarketplaceRepository({
-      0: [for (var i = 0; i < 24; i++) _card(i, shopId: 100 + i)],
-      1: [_card(24, shopId: 124)],
+      0: [for (var i = 0; i < 18; i++) _card(i, shopId: 100 + i)],
+      1: [_card(18, shopId: 118)],
     }, failPageOnce: 1);
     final container = ProviderContainer(overrides: [
       deliveryPinProvider.overrideWith((ref) => (lat: 27.16, lng: 83.94)),
@@ -76,19 +76,19 @@ void main() {
     );
     addTearDown(subscription.close);
     await _until(() =>
-        container.read(marketplaceHomeAllFeedProvider).cards.length == 24);
+        container.read(marketplaceHomeAllFeedProvider).cards.length == 18);
     await container
         .read(marketplaceHomeAllFeedProvider.notifier)
         .loadMore();
     await _until(
         () => container.read(marketplaceHomeAllFeedProvider).error != null);
     var state = container.read(marketplaceHomeAllFeedProvider);
-    expect(state.cards, hasLength(24));
+    expect(state.cards, hasLength(18));
     expect(state.error, isNotNull);
 
     await container.read(marketplaceHomeAllFeedProvider.notifier).retry();
     state = container.read(marketplaceHomeAllFeedProvider);
-    expect(state.cards, hasLength(25));
+    expect(state.cards, hasLength(19));
     expect(state.error, isNull);
     expect(state.hasNext, isFalse);
     expect(repository.pages, [0, 1, 1]);

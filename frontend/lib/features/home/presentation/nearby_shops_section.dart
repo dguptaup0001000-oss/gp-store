@@ -56,7 +56,8 @@ class NearbyShopsSection extends ConsumerWidget {
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
         child: TextButton.icon(
-          onPressed: () => ref.invalidate(nearbyShopsPageProvider(query)),
+          onPressed: hapticize(
+              () => ref.invalidate(nearbyShopsPageProvider(query))),
           icon: const Icon(Icons.refresh),
           label: const Text("Couldn't load nearby shops. Retry"),
         ),
@@ -117,7 +118,9 @@ class NearbyShopsSection extends ConsumerWidget {
                       borderRadius: BorderRadius.circular(14),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(14),
-                        onTap: () => ref.read(marketplaceShopFilterProvider.notifier).state = null,
+                        onTap: hapticize(() => ref
+                            .read(marketplaceShopFilterProvider.notifier)
+                            .state = null),
                         child: Container(
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(14),

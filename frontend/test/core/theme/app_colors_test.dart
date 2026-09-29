@@ -35,36 +35,22 @@ double _hueGap(Color a, Color b) {
 
 void main() {
   group('GP-Store palette', () {
-    test('primary is a deep violet, not a green and not a bright purple', () {
-      // The identity rule, pinned. Blue must lead, red must be present (that
-      // is what makes it violet rather than blue), and green must trail.
-      expect(AppColors.primary.b, greaterThan(AppColors.primary.r));
-      expect(AppColors.primary.r, greaterThan(AppColors.primary.g));
-      // Dark enough to read as premium rather than as a toy, light enough
-      // not to be the near-black "dark purple" the brief rules out.
+    test('primary is the approved deep marketplace green', () {
+      expect(AppColors.primary.g, greaterThan(AppColors.primary.r));
+      expect(AppColors.primary.g, greaterThan(AppColors.primary.b));
       expect(_luminance(AppColors.primary), lessThan(0.15));
       expect(_luminance(AppColors.primary), greaterThan(0.03));
     });
 
-    test('white text on the primary violet clears WCAG AA', () {
+    test('white text on the primary green clears WCAG AA', () {
       expect(_contrast(AppColors.primary, const Color(0xFFFFFFFF)), greaterThanOrEqualTo(4.5));
     });
 
-    test('the ground leans violet without being a tint', () {
-      // THIS RULE CHANGED, AND ON PURPose. It used to demand a CLEARLY
-      // lavender ground, which suited an app that sold groceries. GP-STORE
-      // sells groceries, saris, phones and medicine on the same screen, and a
-      // ground with an opinion makes two thirds of that photography look
-      // wrong. So the lean survives and the tint does not.
-      //
-      // The lean is still required: it is what keeps this from being any
-      // other app's default white, and what makes the violet brand colour
-      // read as belonging to the screen rather than as paint on top of it.
-      expect(AppColors.background.b, greaterThan(AppColors.background.g));
-      expect(AppColors.background.r, greaterThan(AppColors.background.g));
-      // Near-white now, not merely light: the old ground passed 0.75 at a
-      // visible lavender, so that bound would not have caught a regression
-      // back to it.
+    test('the ground is a near-white green-neutral surface', () {
+      expect(AppColors.background.g,
+          greaterThanOrEqualTo(AppColors.background.r));
+      expect(AppColors.background.g,
+          greaterThanOrEqualTo(AppColors.background.b));
       expect(_luminance(AppColors.background), greaterThan(0.92));
     });
 
@@ -119,8 +105,7 @@ void main() {
       ]) {
         expect(_luminance(colour), greaterThan(0.01), reason: '$colour is effectively black');
       }
-      // Text is indigo-navy: blue must lead red and green.
-      expect(AppColors.textPrimary.b, greaterThan(AppColors.textPrimary.g));
+      expect(AppColors.textPrimary.g, greaterThan(AppColors.textPrimary.r));
     });
 
     test('discount coral carries white badge text', () {
@@ -132,9 +117,7 @@ void main() {
       expect(AppColors.accent.r, greaterThan(AppColors.accent.b));
     });
 
-    test('the ADD button is teal and readable, and is not the brand violet', () {
-      // Deliberately its own colour so the basket action reads as its own
-      // thing rather than as another primary button.
+    test('the ADD button stays in the green family and remains readable', () {
       expect(AppColors.cart, isNot(AppColors.primary));
       expect(AppColors.cart.g, greaterThan(AppColors.cart.r));
       expect(_contrast(AppColors.cart, const Color(0xFFFFFFFF)), greaterThanOrEqualTo(4.5));
@@ -147,7 +130,7 @@ void main() {
       expect(AppColors.gold.r, greaterThan(AppColors.gold.b));
     });
 
-    test('the roles stay distinguishable by hue', () {
+    test('money accents stay distinguishable from the green action family', () {
       // Measured as HUE separation, not contrast ratio. Contrast is a
       // LUMINANCE comparison, and coral, gold and teal deliberately sit at
       // almost identical luminance because each was tuned to clear 4.5:1
@@ -161,7 +144,6 @@ void main() {
       // badge on an image corner versus a star glyph in a text row - so the
       // colour is not carrying the distinction alone.
       final roles = <String, Color>{
-        'primary': AppColors.primary,
         'accent': AppColors.accent,
         'gold': AppColors.gold,
         'cart': AppColors.cart,
@@ -176,6 +158,11 @@ void main() {
                   '${separation.toStringAsFixed(1)} degrees apart');
         }
       }
+    });
+
+    test('yellow highlight carries dark green text', () {
+      expect(_contrast(AppColors.highlight, AppColors.primary),
+          greaterThanOrEqualTo(4.5));
     });
 
     test('body text clears WCAG AA on the ground and on cards', () {

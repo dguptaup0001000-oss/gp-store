@@ -250,12 +250,19 @@ void main() {
       expect(
         marketplaceRepository.calls,
         containsAll([
-          'marketplace-feed:27.16231:83.940468:ONLINE_PURCHASE:ALL:0:12',
-          'marketplace-feed:27.16231:83.940468:VISIT_TO_BUY:ALL:0:12',
-          'marketplace-feed:27.16231:83.940468:SERVICE_AT_SHOP:ALL:0:12',
+          'marketplace-feed:27.16231:83.940468:ONLINE_PURCHASE:ALL:0:9',
         ]),
-        reason: 'Each commerce mode must have an independent bounded request; '
-            'a Buy Online first page must not hide Visit or Service inventory.',
+        reason: 'The first useful catalogue rail must start without waiting '
+            'on secondary Home content.',
+      );
+      expect(
+        marketplaceRepository.calls.where((call) =>
+            call.contains(':VISIT_TO_BUY:') ||
+            call.contains(':SERVICE_AT_SHOP:') ||
+            call.contains(':ALL:ALL:0:18')),
+        isEmpty,
+        reason: 'secondary mode rails and the infinite tail must not compete '
+            'with cold-start content',
       );
       expect(repository.calls, isNot(contains('feed')),
           reason: 'marketplace Home must never fall back to Shop #1');
@@ -399,7 +406,7 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(find.text('Buy Online near you'), findsOneWidget);
+      expect(find.text('All products'), findsOneWidget);
       expect(find.text('Visit to Buy'), findsNothing);
       await tester.scrollUntilVisible(
         find.text('Services at Shop'),
@@ -441,10 +448,13 @@ void main() {
           ],
         },
       );
+      repository.categories.complete(const []);
+      repository.brands.complete(const []);
+      repository.offers.complete(const []);
       await tester.pump();
       await tester.pump();
 
-      expect(find.text('Buy Online near you'), findsNothing);
+      expect(find.text('All products'), findsNothing);
       expect(find.text('Visit to Buy'), findsWidgets);
       await tester.scrollUntilVisible(
         find.text('Services at Shop'),
@@ -492,7 +502,7 @@ void main() {
             (widget) => widget is ListView && widget.scrollDirection == Axis.horizontal),
         findsWidgets,
       );
-      expect(find.text('Buy Online near you'), findsOneWidget);
+      expect(find.text('All products'), findsOneWidget);
       expect(find.text('Buy Online fixture'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('${CommerceMode.visitToBuy.label} fixture'),

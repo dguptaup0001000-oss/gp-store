@@ -142,7 +142,8 @@ class _FeedGrid extends ConsumerWidget {
             return ProductCard(
               key: ValueKey<int>(product.id),
               product: product,
-              onTap: hapticize(() => onProductTap(product)),
+              // ProductCard owns the haptic for its whole tappable image/card.
+              onTap: () => onProductTap(product),
               isWishlisted: wishlistController.isWishlisted(product.id),
               onWishlistMutation: () => wishlistController.toggle(product.id),
               onAddPressed: variant == null

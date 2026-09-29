@@ -21,6 +21,25 @@ Widget _host(Widget child, {Size size = const Size(160, 160)}) {
 
 void main() {
   group('GpNetworkImage', () {
+    test('signed R2 refreshes keep one stable disk-cache identity', () {
+      const object = 'https://bucket.r2.cloudflarestorage.com/products/salt.png';
+      final first = GpNetworkImage.stableCacheKeyFor(
+          '$object?X-Amz-Credential=one&X-Amz-Signature=aaa');
+      final refreshed = GpNetworkImage.stableCacheKeyFor(
+          '$object?X-Amz-Credential=two&X-Amz-Signature=bbb');
+
+      expect(first, object);
+      expect(refreshed, object);
+    });
+
+    test('ordinary query parameters remain part of the cache identity', () {
+      const first = 'https://images.example.test/product?id=1';
+      const second = 'https://images.example.test/product?id=2';
+
+      expect(GpNetworkImage.stableCacheKeyFor(first), first);
+      expect(GpNetworkImage.stableCacheKeyFor(second), second);
+    });
+
     testWidgets('a null url draws the placeholder rather than nothing', (tester) async {
       await tester.pumpWidget(_host(
         const GpNetworkImage(url: null, renderWidth: 160),

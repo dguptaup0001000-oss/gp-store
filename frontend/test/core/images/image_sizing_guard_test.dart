@@ -69,8 +69,10 @@ void main() {
     // would notice, because the pictures would still be correct.
     final source = File(imageWidget).readAsStringSync();
 
-    expect(source.contains('imageUrl: _sizedUrl('), isTrue,
-        reason: 'The URL handed to CachedNetworkImage must go through _sizedUrl');
+    expect(source.contains('final sizedSource = _sizedUrl('), isTrue,
+        reason: 'The URL handed to CachedNetworkImage must first go through _sizedUrl');
+    expect(source.contains('imageUrl: sizedSource'), isTrue,
+        reason: 'CachedNetworkImage must receive the CDN-sized source');
     expect(source.contains('ImageUrlService.'), isTrue,
         reason: '_sizedUrl must resolve through ImageUrlService - memCacheWidth limits the '
             'DECODE, not the DOWNLOAD');
@@ -84,5 +86,7 @@ void main() {
     // over the network is small.
     expect(source.contains('memCacheWidth:'), isTrue,
         reason: 'Without a decode cap, a 4000px original becomes a 4000px bitmap per tile');
+    expect(source.contains('maxWidthDiskCache:'), isTrue,
+        reason: 'The disk cache must not keep full-resolution bytes for tiny product tiles');
   });
 }

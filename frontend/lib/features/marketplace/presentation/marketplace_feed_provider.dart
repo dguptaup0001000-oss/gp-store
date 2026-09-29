@@ -23,7 +23,7 @@ final marketplaceShopFilterProvider = StateProvider<int?>((ref) => null);
 /// first page of the combined feed happened to contain only another mode.
 /// Each of the three rails asks the server for its own mode (and the current
 /// shop filter), so one rail can be empty without suppressing its siblings.
-/// Twelve cards per rail keeps startup bounded; each rail fetches later pages
+/// Nine cards per rail keeps startup bounded; each rail fetches later pages
 /// as the customer scrolls horizontally.
 class MarketplaceHomeModeFeedState {
   const MarketplaceHomeModeFeedState({
@@ -61,7 +61,9 @@ class MarketplaceHomeModeFeedController
     if (pin != null) unawaited(_loadInitial());
   }
 
-  static const _pageSize = 12;
+  /// Three visible cards plus two off-screen rows. This keeps the first useful
+  /// Home paint light; horizontal infinite scroll fetches the next nine.
+  static const _pageSize = 9;
   final Ref _ref;
   final CommerceMode _mode;
   final ({double lat, double lng})? _pin;
@@ -200,7 +202,7 @@ class MarketplaceHomeAllFeedController
     if (pin != null) unawaited(_load(0, replace: true));
   }
 
-  static const pageSize = 24;
+  static const pageSize = 18;
   final Ref _ref;
   final ({double lat, double lng})? _pin;
   final int? _shopId;
@@ -272,4 +274,113 @@ final marketplaceHomeAllFeedProvider = StateNotifierProvider.autoDispose<
   final pin = ref.watch(deliveryPinProvider);
   final shopId = ref.watch(marketplaceShopFilterProvider);
   return MarketplaceHomeAllFeedController(ref: ref, pin: pin, shopId: shopId);
+});
+
+/// Infinite marketplace catalogue for one product category.
+///
+/// This is intentionally backed by `/api/marketplace/feed?categoryId=...`, not
+/// the legacy shop-scoped category route. A customer who taps Soap, Namkeen,
+/// Phones or Laptops is asking what all eligible nearby merchants offer. The
+/// selected shop filter is still honoured when they deliberately narrow Home
+/// to one storefront.
+class MarketplaceCategoryFeedController
+    extends StateNotifier<MarketplaceHomeAllFeedState> {
+  MarketplaceCategoryFeedController({
+    required Ref ref,
+    required int categoryId,
+    required ({double lat, double lng})? pin,
+    required int? shopId,
+  })  : _ref = ref,
+        _categoryId = categoryId,
+        _pin = pin,
+        _shopId = shopId,
+        super(MarketplaceHomeAllFeedState(isLoading: pin != null)) {
+    if (pin != null) unawaited(_load(0, replace: true));
+  }
+
+  /// Six rows on a three-column phone grid. Large enough to avoid a request on
+  /// every small swipe, bounded enough that opening Soap does not download all
+  /// 500 matches before the first frame is useful.
+  static const pageSize = 18;
+
+  final Ref _ref;
+  final int _categoryId;
+  final ({double lat, double lng})? _pin;
+  final int? _shopId;
+  final Set<String> _seen = <String>{};
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  Future<void> _load(int page, {required bool replace}) async {
+    final before = state;
+    if (replace) {
+      _seen.clear();
+      state = const MarketplaceHomeAllFeedState(isLoading: true);
+    } else {
+      if (before.isLoading || before.isLoadingMore || !before.hasNext) return;
+      state = MarketplaceHomeAllFeedState(
+        cards: before.cards,
+        nextPage: before.nextPage,
+        hasNext: before.hasNext,
+        isLoadingMore: true,
+      );
+    }
+
+    try {
+      final pin = _pin;
+      final cards = pin == null
+          ? const <MarketplaceCard>[]
+          : await _ref.read(marketplaceRepositoryProvider).feed(
+                latitude: pin.lat,
+                longitude: pin.lng,
+                categoryId: _categoryId,
+                shopId: _shopId,
+                page: page,
+                size: pageSize,
+              );
+      if (_disposed) return;
+      final fresh = <MarketplaceCard>[];
+      for (final card in cards) {
+        if (_seen.add(card.feedKey)) fresh.add(card);
+      }
+      state = MarketplaceHomeAllFeedState(
+        cards: replace ? fresh : [...before.cards, ...fresh],
+        nextPage: page + 1,
+        hasNext: cards.length == pageSize,
+      );
+    } catch (error) {
+      if (_disposed) return;
+      state = MarketplaceHomeAllFeedState(
+        cards: replace ? const [] : before.cards,
+        nextPage: page,
+        hasNext: replace ? true : before.hasNext,
+        error: error,
+      );
+    }
+  }
+
+  Future<void> loadMore() => _load(state.nextPage, replace: false);
+
+  Future<void> retry() => _load(
+        state.cards.isEmpty ? 0 : state.nextPage,
+        replace: state.cards.isEmpty,
+      );
+}
+
+final marketplaceCategoryFeedProvider = StateNotifierProvider.autoDispose
+    .family<MarketplaceCategoryFeedController, MarketplaceHomeAllFeedState,
+        int>((ref, categoryId) {
+  final pin = ref.watch(deliveryPinProvider);
+  final shopId = ref.watch(marketplaceShopFilterProvider);
+  return MarketplaceCategoryFeedController(
+    ref: ref,
+    categoryId: categoryId,
+    pin: pin,
+    shopId: shopId,
+  );
 });

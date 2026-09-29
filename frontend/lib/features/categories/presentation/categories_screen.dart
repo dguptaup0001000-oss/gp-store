@@ -7,7 +7,7 @@ import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
-import '../../marketplace/presentation/category_shops_screen.dart';
+import '../../marketplace/presentation/marketplace_category_products_screen.dart';
 import '../../products/domain/product_models.dart';
 import '../../products/presentation/category_products_screen.dart';
 import '../../products/presentation/products_providers.dart';
@@ -145,7 +145,7 @@ class _CategoryGrid extends StatelessWidget {
   }
 }
 
-/// One category: a round image and a name under it.
+/// One category: compact image-first artwork and a name under it.
 ///
 /// FOUR ACROSS RATHER THAN THREE, and small. A category tile is a signpost,
 /// not a product - it carries no price, no rating and nothing to decide
@@ -161,13 +161,10 @@ class CategoryTile extends StatelessWidget {
 
   final Category category;
 
-  /// WHERE A CATEGORY LEADS DEPENDS ON WHETHER THERE IS A CHOICE OF SHOP.
-  ///
-  /// On a marketplace it opens the shops that sell it, because "which chemist
-  /// is open" is the question a customer has before "which paracetamol". Under
-  /// one shop there is no such question, and it opens the products exactly as
-  /// it always has - §14: an existing customer must not have to learn that a
-  /// multi-shop architecture exists.
+  /// On a marketplace this opens every nearby listing in the category. That is
+  /// the product-type drill-down customers expect: tapping Soap shows all soap
+  /// sold by eligible nearby shops, not a dead-end shop chooser. The screen is
+  /// server-paginated and still honours an explicitly selected shop.
   final bool marketplace;
 
   @override
@@ -177,8 +174,7 @@ class CategoryTile extends StatelessWidget {
       onTap: hapticize(() => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) => marketplace
-                  ? CategoryShopsScreen(
-                      categoryId: category.id, categoryName: category.name)
+                  ? MarketplaceCategoryProductsScreen(category: category)
                   : CategoryProductsScreen(category: category),
             ),
           )),
@@ -192,10 +188,11 @@ class CategoryTile extends StatelessWidget {
               height: 56,
               decoration: BoxDecoration(
                 color: AppColors.surfaceSoft,
-                shape: BoxShape.circle,
+                borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: AppColors.divider),
               ),
-              child: ClipOval(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(13),
                 child: GpNetworkImage(
                   url: category.imageUrl,
                   renderWidth: 56,

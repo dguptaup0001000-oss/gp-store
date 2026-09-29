@@ -1,16 +1,12 @@
 import '../../marketplace/presentation/marketplace_drawer.dart';
-import '../../cart/presentation/cart_providers.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../marketplace/domain/marketplace_feed_models.dart';
-import '../../marketplace/domain/marketplace_offer.dart';
-import '../../marketplace/presentation/product_offers_screen.dart';
+import '../../marketplace/presentation/marketplace_card_actions.dart';
 import '../../marketplace/presentation/marketplace_feed_provider.dart';
 import '../../marketplace/presentation/marketplace_feed_section.dart';
-import '../../../shared/widgets/action_feedback.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:dio/dio.dart';
 
 import '../../../shared/widgets/brands_row.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
@@ -93,100 +89,12 @@ class HomeScreen extends ConsumerWidget {
           MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
         );
 
-    // A marketplace card carries a product ID rather than a whole product -
-    // the feed deliberately does not pay for every product's full detail to
-    // draw a grid. So the detail is fetched when one is actually opened.
-    /// Adds one shop's offer of a product to the cart.
-    ///
-    /// THE SAME DOOR AS THE FEED'S ADD, on purpose. The offers screen can
-    /// legitimately offer to add - a shop further away may deliver what the
-    /// card could only be visited for - and routing that through a second,
-    /// parallel add would be two places to keep the error handling and the
-    /// confirmation wording in step.
-    Future<void> addFromOffer(MarketplaceOffer offer) async {
-      final variantId = offer.productVariantId;
-      if (variantId == null || !offer.addable) return;
-      try {
-        final added = await ref
-            .read(cartControllerProvider.notifier)
-            .addToCart(
-              variantId: variantId,
-              quantity: 1,
-              shopId: offer.shopId,
-            );
-        if (!context.mounted) return;
-        if (added == true) {
-          showAddedToCartFeedback(context, offer.productName);
-        } else if (added == false) {
-          showActionFailure(context, "Couldn't add to cart. Please try again.");
-        }
-      } catch (e) {
-        if (!context.mounted) return;
-        showActionFailure(context, "Couldn't add the item to your cart. Please try again.");
-      }
+    void openMarketplaceCard(MarketplaceCard card) {
+      MarketplaceCardActions.open(context, ref, card);
     }
 
-    Future<void> openMarketplaceCard(MarketplaceCard card) async {
-      // A VISIT-TO-BUY CARD CANNOT OPEN THE PRODUCT SCREEN. That screen's
-      // whole shape is an ADD TO CART button, and drawing one for something
-      // the backend will refuse is a promise the app cannot keep. It opens
-      // the shops-near-you screen instead, which answers the question that
-      // card actually raises: who has it, where, and for how much.
-      if (!card.addable) {
-        await Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => ProductOffersScreen(
-            card: card,
-            // A shop two streets further may deliver the same thing, and that
-            // offer is addable even though the card was not - so the screen
-            // still needs a way to add, and it is the same one the feed uses.
-            onAdd: (offer) => addFromOffer(offer),
-          ),
-        ));
-        return;
-      }
-      try {
-        final product = await ref
-            .read(productsRepositoryProvider)
-            .fetchProductDetail(card.productId, shopId: card.shopId);
-        if (!context.mounted) return;
-        openProduct(product);
-      } catch (e) {
-        if (!context.mounted) return;
-        final unavailable = e is DioException && e.response?.statusCode == 404;
-        if (unavailable) {
-          ref.invalidate(marketplaceHomeModeFeedProvider(card.commerceMode));
-        }
-        showActionFailure(context, unavailable
-            ? 'Product is no longer available. Nearby products have been refreshed.'
-            : "Couldn't open this product right now. Please try again.");
-      }
-    }
-
-    // ADD IS ONLY EVER CALLED FOR A CARD THE SERVER SAID IS ADDABLE - the
-    // tile passes null otherwise - and the backend refuses a Visit-to-Buy or
-    // a service anyway. Two doors, because a hidden button is a courtesy
-    // rather than a control.
-    Future<void> addFromMarketplace(MarketplaceCard card) async {
-      final variantId = card.productVariantId;
-      if (variantId == null) return;
-      try {
-        final added = await ref
-            .read(cartControllerProvider.notifier)
-            .addToCart(
-              variantId: variantId,
-              quantity: 1,
-              shopId: card.shopId,
-            );
-        if (!context.mounted) return;
-        if (added == true) {
-          showAddedToCartFeedback(context, card.name);
-        } else if (added == false) {
-          showActionFailure(context, "Couldn't add to cart. Please try again.");
-        }
-      } catch (e) {
-        if (!context.mounted) return;
-        showActionFailure(context, "Couldn't add the item to your cart. Please try again.");
-      }
+    void addFromMarketplace(MarketplaceCard card) {
+      MarketplaceCardActions.addCard(context, ref, card);
     }
 
     return Scaffold(
@@ -276,6 +184,11 @@ class HomeScreen extends ConsumerWidget {
                       if (onAMarketplace)
                         ...MarketplaceFeedSlivers.homeSections(
                           selectedMode: selectedMarketplaceMode,
+                          // The first useful product rail gets the network to
+                          // itself. Visit/Service begin after the small first
+                          // wave has settled, rather than all three competing
+                          // with header/categories/images on cold launch.
+                          loadSecondary: belowFoldReady,
                           onCardTap: openMarketplaceCard,
                           onAdd: addFromMarketplace,
                         ),
@@ -395,7 +308,7 @@ class HomeScreen extends ConsumerWidget {
                       if (!onAMarketplace)
                         ...HomeFeedSlivers.build(context, ref,
                             feed: feedAsync, onProductTap: openProduct),
-                      if (onAMarketplace)
+                      if (onAMarketplace && belowFoldReady)
                         MarketplaceAllProductsSliver(
                           onCardTap: openMarketplaceCard,
                           onAdd: addFromMarketplace,

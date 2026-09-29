@@ -147,14 +147,24 @@ class GpNetworkImage extends StatelessWidget {
     }
 
     final pixelRatio = math.min(MediaQuery.devicePixelRatioOf(context), _maxPixelRatio);
+    final decodeWidth = (width * pixelRatio).round();
 
+    final sizedSource = _sizedUrl(source, width);
     final image = CachedNetworkImage(
-      imageUrl: _sizedUrl(source, width),
+      imageUrl: sizedSource,
+      // Private R2 fallback URLs are signed. Their signature and expiry change
+      // even when the underlying object does not, which used to turn every
+      // feed refresh into a cache miss. The object path is stable and is the
+      // correct cache identity; ordinary query-driven image URLs are left
+      // untouched.
+      cacheKey: stableCacheKeyFor(sizedSource),
       fit: fit,
-      memCacheWidth: (width * pixelRatio).round(),
+      memCacheWidth: decodeWidth,
+      maxWidthDiskCache: decodeWidth,
+      useOldImageOnUrlChange: true,
       // Short. The default half-second cross-fade reads as the app being slow
       // when twenty tiles do it at once during a scroll.
-      fadeInDuration: const Duration(milliseconds: 150),
+      fadeInDuration: const Duration(milliseconds: 70),
       placeholder: (context, _) => _placeholder(width: width, isLoading: true),
       errorWidget: (context, _, __) => _placeholder(width: width, isLoading: false),
     );
@@ -166,9 +176,26 @@ class GpNetworkImage extends StatelessWidget {
   String _sizedUrl(String source, double width) {
     // Thresholds sit at the render widths the app actually uses: cart and
     // collage thumbnails, grid and carousel cards, then the detail page hero.
-    if (width <= 100) return ImageUrlService.thumbnail(source);
+    // Three-across customer cards are about 105-125dp wide. A 200px CDN
+    // thumbnail is enough for that surface and halves the bytes of the old
+    // 400px request on the screen with the most simultaneous images.
+    if (width <= 140) return ImageUrlService.thumbnail(source);
     if (width <= 220) return ImageUrlService.medium(source);
     return ImageUrlService.large(source);
+  }
+
+  /// Signed S3/R2 query parameters authenticate a byte stream; they do not
+  /// identify different image content. Removing only a recognised AWS signing
+  /// query lets disk cache survive a feed refresh without conflating arbitrary
+  /// application URLs whose query parameters may genuinely select an image.
+  static String stableCacheKeyFor(String source) {
+    final uri = Uri.tryParse(source);
+    if (uri == null || !uri.isScheme('https')) return source;
+    final keys = uri.queryParameters.keys.map((key) => key.toLowerCase()).toSet();
+    final signed = keys.contains('x-amz-signature') ||
+        keys.contains('x-amz-credential') ||
+        keys.contains('x-amz-security-token');
+    return signed ? uri.replace(query: '').toString() : source;
   }
 
   /// One shape for "still coming" and "never coming".

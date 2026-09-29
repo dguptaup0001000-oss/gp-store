@@ -228,9 +228,9 @@ class _BrandProductsScreenState extends ConsumerState<BrandProductsScreen> {
                 final product = section.products[index];
                 return CartAwareProductCard(
                   product: product,
-                  onTap: hapticize(() => Navigator.of(context).push(
+                  onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
-                  )),
+                  ),
                 );
               },
               childCount: section.products.length,

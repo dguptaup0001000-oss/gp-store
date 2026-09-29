@@ -6,6 +6,7 @@ import 'package:gpstore/core/marketplace/marketplace_providers.dart';
 import 'package:gpstore/features/categories/presentation/categories_screen.dart';
 import 'package:gpstore/features/home/presentation/popular_categories.dart';
 import 'package:gpstore/features/marketplace/presentation/category_shops_screen.dart';
+import 'package:gpstore/features/marketplace/presentation/marketplace_category_products_screen.dart';
 import 'package:gpstore/features/products/domain/product_models.dart';
 import 'package:gpstore/features/products/presentation/category_products_screen.dart';
 import 'package:gpstore/features/products/presentation/products_providers.dart';
@@ -19,10 +20,8 @@ import 'package:gpstore/features/products/presentation/products_providers.dart';
 /// for the kind of deployment this is.
 ///
 /// THE LAST ONE IS THE ONE THAT BREAKS QUIETLY. Under a marketplace a category
-/// must open the shops that sell it; under a single shop it must open the
-/// products, exactly as it always has. Getting that backwards gives an
-/// existing single-shop customer a shop picker with one shop in it - a screen
-/// they cannot use and did not ask for.
+/// opens all nearby matching listings; under a single shop it opens that
+/// shop's products, exactly as it always has.
 void main() {
   List<Category> catalogueOf(int howMany) => [
         for (var i = 1; i <= howMany; i++)
@@ -94,7 +93,7 @@ void main() {
     expect(find.byType(CategoriesScreen), findsOneWidget);
   });
 
-  testWidgets('on a marketplace a category opens the shops that sell it',
+  testWidgets('on a marketplace a category opens all nearby matching products',
       (tester) async {
     await tester.pumpWidget(host(catalogue: catalogueOf(8), marketplace: true));
     await tester.pumpAndSettle();
@@ -102,9 +101,8 @@ void main() {
     await tester.tap(find.text('Category 1'));
     await tester.pumpAndSettle();
 
-    // NOT the products. "Which chemist is open" comes before "which
-    // paracetamol", and it is the question a marketplace exists to answer.
-    expect(find.byType(CategoryShopsScreen), findsOneWidget);
+    expect(find.byType(MarketplaceCategoryProductsScreen), findsOneWidget);
+    expect(find.byType(CategoryShopsScreen), findsNothing);
   });
 
   testWidgets('under one shop a category opens its products, as it always has',

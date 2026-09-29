@@ -57,7 +57,9 @@ class BrandsRow extends StatelessWidget {
             itemBuilder: (context, index) {
               final brand = brands[index];
               return GestureDetector(
-                onTap: onBrandTap == null ? null : () => onBrandTap!(brand),
+                onTap: onBrandTap == null
+                    ? null
+                    : hapticize(() => onBrandTap!(brand)),
                 child: SizedBox(
                   width: 72,
                   child: Column(

@@ -88,7 +88,7 @@ void main() {
     await tester.scrollUntilVisible(find.text('New arrivals'), 220, scrollable: scrollable);
     await tester.scrollUntilVisible(find.text('Recommended for you'), 220, scrollable: scrollable);
     await tester.scrollUntilVisible(
-      find.text('All nearby products and services'),
+      find.text('More nearby products and services'),
       220,
       scrollable: scrollable,
     );
@@ -105,7 +105,7 @@ void main() {
     expect(find.text('Services at Shop'), findsOneWidget);
     expect(find.text('New arrivals'), findsOneWidget);
     expect(find.text('Recommended for you'), findsOneWidget);
-    expect(find.text('All nearby products and services'), findsOneWidget);
+    expect(find.text('More nearby products and services'), findsOneWidget);
     expect(find.textContaining('Home · Categories'), findsOneWidget,
         reason: 'the shell navigation remains fixed while Home scrolls');
 
@@ -141,13 +141,13 @@ void main() {
     await tester.pumpAndSettle();
     await reachLowerSections(tester);
     expect(find.text('Services at Shop'), findsOneWidget);
-    expect(find.text('All nearby products and services'), findsOneWidget);
+    expect(find.text('More nearby products and services'), findsOneWidget);
 
     await tester.pumpWidget(host(buyError: true));
     await tester.pump();
     await reachLowerSections(tester);
     expect(find.text('Services at Shop'), findsOneWidget);
-    expect(find.text('All nearby products and services'), findsOneWidget);
+    expect(find.text('More nearby products and services'), findsOneWidget);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
   });
