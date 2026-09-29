@@ -55,10 +55,14 @@ class MarketplaceTestDataProductionScriptTest {
                 ? fromModule
                 : Path.of("deploy/production/seed-marketplace-test-data.sh");
         String script = Files.readString(scriptPath);
+        int verificationStart = script.indexOf("metrics=\"");
+        int verificationEnd = script.indexOf("if [[ \"$OPERATION\" == \"SEED\" ]]",
+                verificationStart);
+        String verificationCommand = script.substring(verificationStart, verificationEnd);
 
         assertTrue(script.contains("<<< \"$verification_sql\""),
                 "the query must reach psql through stdin for :variables to expand");
-        assertFalse(script.contains("-tA -c \"$1\""),
+        assertFalse(verificationCommand.contains(" -c "),
                 "psql -c sends literal :anchor_lat tokens to PostgreSQL");
         assertTrue(script.contains("expected_listings = expected_synthetic * 60"));
         assertTrue(script.contains("HAVING count(p.id) < 50"));
