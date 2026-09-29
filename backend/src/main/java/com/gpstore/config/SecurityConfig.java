@@ -2,6 +2,7 @@ package com.gpstore.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.http.HttpMethod;
 import com.gpstore.security.AdminPermission;
@@ -90,6 +91,7 @@ public class SecurityConfig {
     }
 
     @Bean
+    @Profile("!marketplace-test-data-cli")
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 
         http
