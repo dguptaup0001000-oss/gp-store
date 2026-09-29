@@ -16,12 +16,12 @@ import static org.junit.jupiter.api.Assertions.*;
 class MarketplaceTestDataGeneratorTest {
 
     @Test
-    void buildsOneHundredUniqueShopsWithTwelveUsefulListingsEach() {
+    void buildsOneHundredUniqueShopsWithAtLeastFiftyUsefulListingsEach() {
         var first = MarketplaceTestDataGenerator.generate(MarketplaceTestDataGenerator.DEFAULT_SEED);
         var second = MarketplaceTestDataGenerator.generate(MarketplaceTestDataGenerator.DEFAULT_SEED);
 
         assertEquals(100, first.shops().size());
-        assertEquals(1_200, first.listings().size());
+        assertEquals(6_000, first.listings().size());
         assertEquals(100, first.shops().stream().map(MarketplaceTestDataGenerator.ShopSpec::shopName)
                 .collect(Collectors.toSet()).size());
         assertEquals(100, first.shops().stream().map(MarketplaceTestDataGenerator.ShopSpec::shopCode)
@@ -30,7 +30,7 @@ class MarketplaceTestDataGeneratorTest {
                 .collect(Collectors.toSet()).size());
         assertTrue(first.listings().stream().collect(Collectors.groupingBy(
                 MarketplaceTestDataGenerator.ListingSpec::shopCode, Collectors.counting()))
-                .values().stream().allMatch(count -> count == 12));
+                .values().stream().allMatch(count -> count >= 50));
         Map<String, Long> categoryCounts = first.shops().stream().collect(Collectors.groupingBy(
                 MarketplaceTestDataGenerator.ShopSpec::category, Collectors.counting()));
         assertEquals(12L, categoryCounts.get("Grocery"));

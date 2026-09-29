@@ -17,7 +17,11 @@ public final class MarketplaceTestDataGenerator {
     public static final String BATCH_ID = "MARKETPLACE_TEST_100_SHOPS_V1";
     public static final int SHOP_COUNT = 100;
     public static final int MERCHANT_COUNT = 95;
-    public static final int LISTINGS_PER_SHOP = 12;
+    /** The first shipped revision contained this many rows per shop. */
+    public static final int BASE_LISTINGS_PER_SHOP = 12;
+    /** Keep well above the accepted minimum of fifty rows per synthetic shop. */
+    public static final int MINIMUM_LISTINGS_PER_SHOP = 50;
+    public static final int LISTINGS_PER_SHOP = 60;
     public static final int LISTING_COUNT = SHOP_COUNT * LISTINGS_PER_SHOP;
     public static final long DEFAULT_SEED = 20260925L;
 
@@ -153,7 +157,9 @@ public final class MarketplaceTestDataGenerator {
                     .filter(radius -> radius.doubleValue() >= distanceKm + 0.1d)
                     .toList();
             BigDecimal shopRadius = eligibleRadii.get((shopNumber - 1) % eligibleRadii.size());
-            int[] counts = {type.buyOnline, type.visitToBuy, type.service};
+            int cycles = LISTINGS_PER_SHOP / BASE_LISTINGS_PER_SHOP;
+            int[] counts = {type.buyOnline * cycles, type.visitToBuy * cycles,
+                    type.service * cycles};
             shops.add(new ShopSpec(shopNumber, shopName,
                     "[" + BATCH_ID + "] Merchant " + String.format("%03d",
                             merchantNumber(shopNumber)),
@@ -161,17 +167,26 @@ public final class MarketplaceTestDataGenerator {
                     shopRadius, counts[0], counts[1], counts[2]));
 
             int listingNumber = 0;
-            for (int i = 0; i < type.buyOnline; i++) {
-                listings.add(makeListing(random, shopNumber, shopCode, shopName, type,
-                        CommerceMode.ONLINE_PURCHASE, i, listingNumber++));
-            }
-            for (int i = 0; i < type.visitToBuy; i++) {
-                listings.add(makeListing(random, shopNumber, shopCode, shopName, type,
-                        CommerceMode.VISIT_TO_BUY, i, listingNumber++));
-            }
-            for (int i = 0; i < type.service; i++) {
-                listings.add(makeListing(random, shopNumber, shopCode, shopName, type,
-                        CommerceMode.SERVICE_AT_SHOP, i, listingNumber++));
+            // Cycle zero is byte-for-byte deterministic with the original
+            // twelve-listing generator. Later cycles append new SKUs, which
+            // lets production safely expand the already-created test batch
+            // without deleting or rewriting those rows.
+            for (int cycle = 0; cycle < cycles; cycle++) {
+                for (int i = 0; i < type.buyOnline; i++) {
+                    listings.add(makeListing(random, shopNumber, shopCode, shopName, type,
+                            CommerceMode.ONLINE_PURCHASE,
+                            cycle * type.buyOnline + i, listingNumber++));
+                }
+                for (int i = 0; i < type.visitToBuy; i++) {
+                    listings.add(makeListing(random, shopNumber, shopCode, shopName, type,
+                            CommerceMode.VISIT_TO_BUY,
+                            cycle * type.visitToBuy + i, listingNumber++));
+                }
+                for (int i = 0; i < type.service; i++) {
+                    listings.add(makeListing(random, shopNumber, shopCode, shopName, type,
+                            CommerceMode.SERVICE_AT_SHOP,
+                            cycle * type.service + i, listingNumber++));
+                }
             }
         }
         return new Dataset(List.copyOf(shops), List.copyOf(listings));
