@@ -96,9 +96,9 @@ read -r -d '' verification_sql <<'SQL' || true
 WITH visible_distances AS (
     SELECT s.id,
            6371 * acos(least(1.0, greatest(-1.0,
-               cos(radians(:'anchor_lat')) * cos(radians(s.latitude))
-               * cos(radians(s.longitude) - radians(:'anchor_lng'))
-               + sin(radians(:'anchor_lat')) * sin(radians(s.latitude))))) AS distance_km
+               cos(radians(:anchor_lat)) * cos(radians(s.latitude))
+               * cos(radians(s.longitude) - radians(:anchor_lng))
+               + sin(radians(:anchor_lat)) * sin(radians(s.latitude))))) AS distance_km
       FROM shops s
      WHERE s.active = TRUE AND s.status IN ('ACTIVE','PAUSED')
        AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
@@ -143,8 +143,8 @@ SELECT json_build_object(
       'customer_visible_shops', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND active = TRUE AND status IN ('ACTIVE','PAUSED')),
       'total_customer_visible_shops', (SELECT count(*) FROM shops WHERE active = TRUE AND status IN ('ACTIVE','PAUSED')),
       'shops_with_valid_coordinates', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180),
-      'shops_inside_configured_max_radius_from_anchor', (SELECT count(*) FROM shops s WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND s.active = TRUE AND s.status IN ('ACTIVE','PAUSED') AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND 6371 * acos(least(1.0, greatest(-1.0, cos(radians(:'anchor_lat')) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(:'anchor_lng')) + sin(radians(:'anchor_lat')) * sin(radians(s.latitude))))) <= :'max_radius'::double precision),
-      'shops_excluded_by_distance_from_anchor', (SELECT count(*) FROM shops s WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND s.active = TRUE AND s.status IN ('ACTIVE','PAUSED') AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND 6371 * acos(least(1.0, greatest(-1.0, cos(radians(:'anchor_lat')) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(:'anchor_lng')) + sin(radians(:'anchor_lat')) * sin(radians(s.latitude))))) > :'max_radius'::double precision),
+      'shops_inside_configured_max_radius_from_anchor', (SELECT count(*) FROM shops s WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND s.active = TRUE AND s.status IN ('ACTIVE','PAUSED') AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND 6371 * acos(least(1.0, greatest(-1.0, cos(radians(:anchor_lat)) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(:anchor_lng)) + sin(radians(:anchor_lat)) * sin(radians(s.latitude))))) <= :max_radius::double precision),
+      'shops_excluded_by_distance_from_anchor', (SELECT count(*) FROM shops s WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND s.active = TRUE AND s.status IN ('ACTIVE','PAUSED') AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND 6371 * acos(least(1.0, greatest(-1.0, cos(radians(:anchor_lat)) * cos(radians(s.latitude)) * cos(radians(s.longitude) - radians(:anchor_lng)) + sin(radians(:anchor_lat)) * sin(radians(s.latitude))))) > :max_radius::double precision),
       'shops_excluded_by_status_or_active', (SELECT count(*) FROM shops WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND NOT (active = TRUE AND status IN ('ACTIVE','PAUSED'))),
       'shops_order_acceptance_on', (SELECT count(*) FROM shops s JOIN store_operations_settings o ON o.shop_id = s.id WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' AND o.order_acceptance = 'ON' AND s.active = TRUE AND s.status = 'ACTIVE'),
       'merchants_not_trading', (SELECT count(*) FROM merchants WHERE is_demo = TRUE AND left(legal_name, length('[MARKETPLACE_TEST_100_SHOPS_V1] Merchant ')) = '[MARKETPLACE_TEST_100_SHOPS_V1] Merchant ' AND status <> 'ACTIVE'),
