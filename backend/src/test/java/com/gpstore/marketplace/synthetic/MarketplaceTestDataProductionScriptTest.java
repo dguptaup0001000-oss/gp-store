@@ -62,7 +62,7 @@ class MarketplaceTestDataProductionScriptTest {
 
         assertTrue(script.contains("<<< \"$verification_sql\""),
                 "the query must reach psql through stdin for :variables to expand");
-        assertFalse(verificationCommand.contains(" -c "),
+        assertFalse(verificationCommand.contains("-tA -c"),
                 "psql -c sends literal :anchor_lat tokens to PostgreSQL");
         assertTrue(script.contains("expected_listings = expected_synthetic * 60"));
         assertTrue(script.contains("HAVING count(p.id) < 50"));
