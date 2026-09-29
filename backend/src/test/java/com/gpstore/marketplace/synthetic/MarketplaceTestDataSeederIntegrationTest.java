@@ -116,7 +116,7 @@ class MarketplaceTestDataSeederIntegrationTest {
                  WHERE is_demo = TRUE AND code ~ '^MKT100V1-SHOP-[0-9]{3}$'
                    AND latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180
                 """, Integer.class), "every controlled shop must have valid coordinates");
-        assertEquals(0, first.shopsBelowEightListings());
+        assertEquals(0, first.shopsBelowMinimumListings());
         assertTrue(first.buyOnline() > 0);
         assertTrue(first.visitToBuy() > 0);
         assertTrue(first.serviceAtShop() > 0);
@@ -220,7 +220,7 @@ class MarketplaceTestDataSeederIntegrationTest {
 
         var onlineAtSelectedShop = feed.page(firstTestShop.getLatitude(), firstTestShop.getLongitude(),
                 Set.of(CommerceMode.ONLINE_PURCHASE), null, firstTestShop.getId(), 0, 50);
-        assertEquals(12, onlineAtSelectedShop.size());
+        assertEquals(50, onlineAtSelectedShop.size());
         assertTrue(onlineAtSelectedShop.stream().allMatch(row -> row.shopId().equals(firstTestShop.getId())));
         assertTrue(onlineAtSelectedShop.stream().anyMatch(row -> row.addable()),
                 "an in-stock ONLINE_PURCHASE listing must remain cartable");
@@ -228,7 +228,7 @@ class MarketplaceTestDataSeederIntegrationTest {
         Shop visitShop = shops.findByCode("MKT100V1-SHOP-024").orElseThrow();
         var visitRows = feed.page(visitShop.getLatitude(), visitShop.getLongitude(),
                 Set.of(CommerceMode.VISIT_TO_BUY), null, visitShop.getId(), 0, 50);
-        assertEquals(6, visitRows.size());
+        assertEquals(30, visitRows.size());
         assertTrue(visitRows.stream().allMatch(row -> row.commerceMode() == CommerceMode.VISIT_TO_BUY));
         var visitJson = objectMapper.valueToTree(visitRows);
         for (var row : visitJson) assertFalse(row.get("addable").asBoolean());
@@ -236,10 +236,38 @@ class MarketplaceTestDataSeederIntegrationTest {
         Shop serviceShop = shops.findByCode("MKT100V1-SHOP-088").orElseThrow();
         var serviceRows = feed.page(serviceShop.getLatitude(), serviceShop.getLongitude(),
                 Set.of(CommerceMode.SERVICE_AT_SHOP), null, serviceShop.getId(), 0, 50);
-        assertEquals(10, serviceRows.size());
+        assertEquals(50, serviceRows.size());
         assertTrue(serviceRows.stream().allMatch(row -> row.commerceMode() == CommerceMode.SERVICE_AT_SHOP));
         var serviceJson = objectMapper.valueToTree(serviceRows);
         for (var row : serviceJson) assertFalse(row.get("addable").asBoolean());
+
+        // Reproduce the exact already-deployed first revision (12 listings
+        // per shop), then prove SEED only appends the deterministic remainder.
+        jdbc.update("DELETE FROM inventory WHERE product_variant_id IN (SELECT v.id "
+                + "FROM product_variants v JOIN products p ON p.id = v.product_id "
+                + "WHERE p.data_source = ? AND right(v.sku, 3)::integer > ?)",
+                MarketplaceTestDataGenerator.BATCH_ID,
+                MarketplaceTestDataGenerator.BASE_LISTINGS_PER_SHOP);
+        jdbc.update("DELETE FROM shop_product_variants WHERE product_variant_id IN (SELECT v.id "
+                + "FROM product_variants v JOIN products p ON p.id = v.product_id "
+                + "WHERE p.data_source = ? AND right(v.sku, 3)::integer > ?)",
+                MarketplaceTestDataGenerator.BATCH_ID,
+                MarketplaceTestDataGenerator.BASE_LISTINGS_PER_SHOP);
+        jdbc.update("DELETE FROM product_variants v USING products p WHERE p.id = v.product_id "
+                        + "AND p.data_source = ? AND right(v.sku, 3)::integer > ?",
+                MarketplaceTestDataGenerator.BATCH_ID,
+                MarketplaceTestDataGenerator.BASE_LISTINGS_PER_SHOP);
+        jdbc.update("DELETE FROM products p WHERE p.data_source = ? "
+                        + "AND NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.product_id = p.id)",
+                MarketplaceTestDataGenerator.BATCH_ID);
+        var originalRevision = seeder.execute(new MarketplaceTestDataSeeder.Request(
+                MarketplaceTestDataSeeder.Operation.INSPECT,
+                MarketplaceTestDataGenerator.BATCH_ID, null));
+        assertEquals(1_200, originalRevision.listings());
+        var expanded = seeder.execute(seed);
+        assertFalse(expanded.alreadyPresent());
+        assertEquals(syntheticListingTarget, expanded.listings());
+        assertEquals(0, expanded.shopsBelowMinimumListings());
 
         var cleanup = seeder.execute(new MarketplaceTestDataSeeder.Request(
                 MarketplaceTestDataSeeder.Operation.CLEANUP,

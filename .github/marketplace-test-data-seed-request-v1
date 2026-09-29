@@ -4,6 +4,9 @@ One-time production request:
 - preserve every existing production shop and its data;
 - create exactly 100 controlled test shops in addition to every preserved
   existing/non-controlled production shop;
+- require at least 50 listings per controlled shop (the deterministic batch
+  contains 60 per shop / 6,000 total); expand the exact earlier 12-per-shop
+  batch in place without deleting, duplicating, or rewriting its rows;
 - run only after this merged main SHA is green and deployed on Hostinger;
 - verify the resulting production database and public marketplace API.
 

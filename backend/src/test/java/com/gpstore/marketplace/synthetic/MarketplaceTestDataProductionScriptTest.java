@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 @DisplayName("Production marketplace test-data runner preserves build identity")
 class MarketplaceTestDataProductionScriptTest {
@@ -44,5 +45,22 @@ class MarketplaceTestDataProductionScriptTest {
                 "the seeder's independent expected-SHA guard must remain enabled");
         assertTrue(script.contains("BATCH_ID=\"MARKETPLACE_TEST_100_SHOPS_V1\""),
                 "the exact synthetic batch confirmation must remain enabled");
+    }
+
+    @Test
+    @DisplayName("verification SQL is read from stdin so psql expands coordinates")
+    void verificationSqlDoesNotUseTheNonInterpolatingCommandFlag() throws IOException {
+        Path fromModule = Path.of("../deploy/production/seed-marketplace-test-data.sh");
+        Path scriptPath = Files.isRegularFile(fromModule)
+                ? fromModule
+                : Path.of("deploy/production/seed-marketplace-test-data.sh");
+        String script = Files.readString(scriptPath);
+
+        assertTrue(script.contains("<<< \"$verification_sql\""),
+                "the query must reach psql through stdin for :variables to expand");
+        assertFalse(script.contains("-tA -c \"$1\""),
+                "psql -c sends literal :anchor_lat tokens to PostgreSQL");
+        assertTrue(script.contains("expected_listings = expected_synthetic * 60"));
+        assertTrue(script.contains("HAVING count(p.id) < 50"));
     }
 }

@@ -67,7 +67,7 @@ public class MarketplaceTestDataSeeder {
     }
 
     public record Result(int shops, int merchants, int products, int variants, int listings,
-                         int shopsBelowEightListings,
+                         int shopsBelowMinimumListings,
                          int buyOnline, int visitToBuy, int serviceAtShop,
                          int withImages, int withoutImages, boolean alreadyPresent) { }
 
@@ -93,11 +93,14 @@ public class MarketplaceTestDataSeeder {
         if (existing.shops() > 0 || existing.products() > 0 || existing.listings() > 0) {
             if (isComplete(existing, syntheticShopTarget)) {
                 return new Result(existing.shops(), existing.merchants(), existing.products(), existing.variants(),
-                        existing.listings(), existing.shopsBelowEightListings(), existing.buyOnline(), existing.visitToBuy(),
+                        existing.listings(), existing.shopsBelowMinimumListings(), existing.buyOnline(), existing.visitToBuy(),
                         existing.serviceAtShop(), existing.withImages(), existing.withoutImages(), true);
             }
+            if (canExpandOriginalBatch(existing, syntheticShopTarget)) {
+                return expandOriginalBatch();
+            }
             throw new IllegalStateException("The named synthetic batch is present but incomplete; "
-                    + "no rows were changed. Inspect it and use the exact-batch cleanup command.");
+                    + "no rows were changed. Inspect it before using the exact-batch cleanup command.");
         }
 
         MarketplaceTestDataGenerator.Dataset dataset =
@@ -119,6 +122,103 @@ public class MarketplaceTestDataSeeder {
             throw new IllegalStateException("Seed verification failed inside the transaction: " + result);
         }
         return result;
+    }
+
+    /**
+     * Expand the first, correctly seeded 12-row/shop revision in place. This
+     * is intentionally narrower than a general repair: every existing SKU,
+     * product, shop and commerce mode must match the deterministic prefix of
+     * the current dataset before a single new row is written.
+     */
+    private Result expandOriginalBatch() {
+        MarketplaceTestDataGenerator.Dataset dataset =
+                MarketplaceTestDataGenerator.generate(MarketplaceTestDataGenerator.DEFAULT_SEED);
+        Map<String, MarketplaceTestDataGenerator.ListingSpec> expected = new HashMap<>();
+        for (MarketplaceTestDataGenerator.ListingSpec spec : dataset.listings()) {
+            expected.put(spec.sku(), spec);
+        }
+
+        List<String> existingSkus = jdbc.query("SELECT v.sku FROM product_variants v "
+                        + "JOIN products p ON p.id = v.product_id "
+                        + "WHERE p.is_test_data = TRUE AND p.data_source = ? ORDER BY v.sku",
+                (rs, row) -> rs.getString(1), BATCH);
+        if (existingSkus.size() != MarketplaceTestDataGenerator.SHOP_COUNT
+                * MarketplaceTestDataGenerator.BASE_LISTINGS_PER_SHOP) {
+            throw new IllegalStateException("Expansion refused: the existing batch is not the exact "
+                    + "twelve-listing/shop revision.");
+        }
+        validateExistingListingPrefix(expected);
+
+        Map<String, Long> categories = createCategories(dataset);
+        Map<String, Long> shopIds = existingShopIds(dataset.shops());
+        var missing = dataset.listings().stream()
+                .filter(spec -> !existingSkus.contains(spec.sku()))
+                .toList();
+        int expectedMissing = MarketplaceTestDataGenerator.LISTING_COUNT - existingSkus.size();
+        if (missing.size() != expectedMissing) {
+            throw new IllegalStateException("Expansion refused: existing SKUs are not an exact "
+                    + "prefix of the current deterministic batch.");
+        }
+        insertCatalogRows(missing, categories);
+        insertListingRows(missing, shopIds);
+
+        Result expanded = inspectBatch();
+        if (!isComplete(expanded, MarketplaceTestDataGenerator.SHOP_COUNT)) {
+            throw new IllegalStateException("Expanded seed verification failed inside the transaction: "
+                    + expanded);
+        }
+        return expanded;
+    }
+
+    private void validateExistingListingPrefix(
+            Map<String, MarketplaceTestDataGenerator.ListingSpec> expected) {
+        int mismatches = jdbc.query("SELECT v.sku, p.name, s.code, spv.commerce_mode "
+                        + "FROM shop_product_variants spv "
+                        + "JOIN shops s ON s.id = spv.shop_id "
+                        + "JOIN product_variants v ON v.id = spv.product_variant_id "
+                        + "JOIN products p ON p.id = v.product_id "
+                        + "WHERE p.is_test_data = TRUE AND p.data_source = ?",
+                rs -> {
+                    int bad = 0;
+                    while (rs.next()) {
+                        MarketplaceTestDataGenerator.ListingSpec spec = expected.get(rs.getString(1));
+                        if (spec == null || !spec.productName().equals(rs.getString(2))
+                                || !spec.shopCode().equals(rs.getString(3))
+                                || !spec.commerceMode().name().equals(rs.getString(4))) {
+                            bad++;
+                        }
+                    }
+                    return bad;
+                }, BATCH);
+        if (mismatches != 0) {
+            throw new IllegalStateException("Expansion refused: " + mismatches
+                    + " existing batch listings differ from their deterministic identities.");
+        }
+    }
+
+    private Map<String, Long> existingShopIds(
+            List<MarketplaceTestDataGenerator.ShopSpec> expectedShops) {
+        Map<String, String> expectedNames = new HashMap<>();
+        expectedShops.forEach(shop -> expectedNames.put(shop.shopCode(), shop.shopName()));
+        Map<String, Long> ids = new HashMap<>();
+        int mismatches = jdbc.query("SELECT id, code, display_name FROM shops "
+                        + "WHERE is_demo = TRUE AND code ~ ?",
+                rs -> {
+                    int bad = 0;
+                    while (rs.next()) {
+                        String code = rs.getString("code");
+                        if (!Objects.equals(expectedNames.get(code), rs.getString("display_name"))) {
+                            bad++;
+                        }
+                        ids.put(code, rs.getLong("id"));
+                    }
+                    return bad;
+                }, SHOP_CODE_PATTERN);
+        if (mismatches != 0 || ids.size() != MarketplaceTestDataGenerator.SHOP_COUNT) {
+            throw new IllegalStateException("Expansion refused: controlled shop identities differ "
+                    + "from the deterministic batch.");
+        }
+        return ids;
     }
 
     private void authorize(Request request) {
@@ -271,7 +371,7 @@ public class MarketplaceTestDataSeeder {
         Map<String, Long> productIds = new HashMap<>(specs.size());
         jdbc.query("SELECT id, name FROM products WHERE is_test_data = TRUE AND data_source = ?",
                 rs -> { productIds.put(rs.getString("name"), rs.getLong("id")); }, BATCH);
-        if (productIds.size() != specs.size()) {
+        if (specs.stream().anyMatch(item -> !productIds.containsKey(item.productName()))) {
             throw new IllegalStateException("Product batch identity mismatch.");
         }
         List<Object[]> variants = new ArrayList<>(specs.size());
@@ -291,7 +391,7 @@ public class MarketplaceTestDataSeeder {
                         + "WHERE p.is_test_data = TRUE AND p.data_source = ? AND v.sku ~ ?",
                 rs -> { variantIds.put(rs.getString("sku"), rs.getLong("id")); },
                 BATCH, SKU_PATTERN);
-        if (variantIds.size() != specs.size()) {
+        if (specs.stream().anyMatch(item -> !variantIds.containsKey(item.sku()))) {
             throw new IllegalStateException("Variant batch identity mismatch.");
         }
 
@@ -352,14 +452,15 @@ public class MarketplaceTestDataSeeder {
                         + "WHERE p.is_test_data = TRUE AND p.data_source = ? "
                         + "AND (NULLIF(v.image_url, '') IS NOT NULL OR pi.id IS NOT NULL)",
                 Integer.class, BATCH);
-        int shopsBelowEight = jdbc.queryForObject("SELECT count(*) FROM (SELECT s.id "
+        int shopsBelowMinimum = jdbc.queryForObject("SELECT count(*) FROM (SELECT s.id "
                         + "FROM shops s LEFT JOIN shop_product_variants spv ON spv.shop_id = s.id "
                         + "LEFT JOIN product_variants v ON v.id = spv.product_variant_id "
                         + "LEFT JOIN products p ON p.id = v.product_id AND p.is_test_data = TRUE AND p.data_source = ? "
                         + "WHERE s.is_demo = TRUE AND s.code ~ ? "
-                        + "GROUP BY s.id HAVING count(p.id) < 8) undersized",
-                Integer.class, BATCH, SHOP_CODE_PATTERN);
-        return new Result(shops, merchants, products, variants, listings, shopsBelowEight,
+                        + "GROUP BY s.id HAVING count(p.id) < ?) undersized",
+                Integer.class, BATCH, SHOP_CODE_PATTERN,
+                MarketplaceTestDataGenerator.MINIMUM_LISTINGS_PER_SHOP);
+        return new Result(shops, merchants, products, variants, listings, shopsBelowMinimum,
                 modes.getOrDefault(CommerceMode.ONLINE_PURCHASE.name(), 0),
                 modes.getOrDefault(CommerceMode.VISIT_TO_BUY.name(), 0),
                 modes.getOrDefault(CommerceMode.SERVICE_AT_SHOP.name(), 0), withImages,
@@ -373,8 +474,20 @@ public class MarketplaceTestDataSeeder {
                 && result.products() == listingTarget
                 && result.variants() == listingTarget
                 && result.listings() == listingTarget
-                && result.shopsBelowEightListings() == 0
+                && result.shopsBelowMinimumListings() == 0
                 && result.buyOnline() > 0 && result.visitToBuy() > 0 && result.serviceAtShop() > 0;
+    }
+
+    private boolean canExpandOriginalBatch(Result result, int syntheticShopTarget) {
+        int originalListings = syntheticShopTarget
+                * MarketplaceTestDataGenerator.BASE_LISTINGS_PER_SHOP;
+        return result.shops() == syntheticShopTarget
+                && result.merchants() == MarketplaceTestDataGenerator.MERCHANT_COUNT
+                && result.products() == originalListings
+                && result.variants() == originalListings
+                && result.listings() == originalListings
+                && result.buyOnline() > 0 && result.visitToBuy() > 0
+                && result.serviceAtShop() > 0;
     }
 
     private Result cleanupBatch(int syntheticShopTarget) {

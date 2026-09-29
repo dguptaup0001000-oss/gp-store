@@ -174,16 +174,22 @@ SELECT json_build_object(
           '500_km', (SELECT count(*) FROM controlled_distances WHERE distance_km <= 500)
       ),
       'image_products', (SELECT count(DISTINCT p.id) FROM products p JOIN product_variants v ON v.product_id = p.id LEFT JOIN product_images pi ON pi.product_id = p.id WHERE p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' AND (NULLIF(v.image_url, '') IS NOT NULL OR pi.id IS NOT NULL)),
-      'undersized_shops', (SELECT count(*) FROM (SELECT s.id FROM shops s LEFT JOIN shop_product_variants spv ON spv.shop_id = s.id LEFT JOIN product_variants v ON v.id = spv.product_variant_id LEFT JOIN products p ON p.id = v.product_id AND p.is_test_data = TRUE AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' GROUP BY s.id HAVING count(p.id) < 8) small)
+      'undersized_shops', (SELECT count(*) FROM (SELECT s.id FROM shops s LEFT JOIN shop_product_variants spv ON spv.shop_id = s.id LEFT JOIN product_variants v ON v.id = spv.product_variant_id LEFT JOIN products p ON p.id = v.product_id AND p.is_test_data = TRUE AND p.data_source = 'MARKETPLACE_TEST_100_SHOPS_V1' WHERE s.is_demo = TRUE AND s.code ~ '^MKT100V1-SHOP-[0-9]{3}$' GROUP BY s.id HAVING count(p.id) < 50) small)
     )::text;
 SQL
-metrics="$(compose exec -T postgres sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v anchor_lat="$2" -v anchor_lng="$3" -v max_radius="$4" -tA -c "$1"' sh "$verification_sql" "$anchor_lat" "$anchor_lng" "$max_radius")"
+# psql deliberately does not interpolate :variables in a command supplied by
+# -c. Feed the query on stdin instead; the three values were constrained to
+# numeric syntax above, and psql performs its normal variable expansion while
+# reading stdin.
+metrics="$(compose exec -T postgres sh -c \
+  'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v anchor_lat="$1" -v anchor_lng="$2" -v max_radius="$3" -tA' \
+  sh "$anchor_lat" "$anchor_lng" "$max_radius" <<< "$verification_sql")"
 if [[ "$OPERATION" == "SEED" ]]; then
   python3 - "$metrics" <<'PY'
 import json, sys
 m = json.loads(sys.argv[1])
 expected_synthetic = 100
-expected_listings = expected_synthetic * 12
+expected_listings = expected_synthetic * 60
 assert expected_synthetic > 0, m
 assert m["total_shops"] == m["non_batch_shops"] + expected_synthetic, m
 assert m["merchants"] == 95 and m["multi_shop_merchants"] == 5, m
