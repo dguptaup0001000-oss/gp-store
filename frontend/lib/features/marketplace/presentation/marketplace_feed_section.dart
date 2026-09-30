@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/util/haptic_widgets.dart';
+import '../../categories/presentation/categories_screen.dart';
 import '../domain/marketplace_feed_models.dart';
 import 'marketplace_card_tile.dart';
 import 'marketplace_feed_provider.dart';
@@ -28,10 +30,14 @@ class MarketplaceFeedSlivers {
     required CommerceMode? selectedMode,
     required void Function(MarketplaceCard card) onCardTap,
     required void Function(MarketplaceCard card) onAdd,
+    bool loadSecondary = true,
   }) => [
         const SliverToBoxAdapter(child: _Header()),
         for (final mode in CommerceMode.values)
-          if (selectedMode == null || selectedMode == mode)
+          if ((selectedMode == null || selectedMode == mode) &&
+              (loadSecondary ||
+                  mode == CommerceMode.buyOnline ||
+                  selectedMode == mode))
             SliverToBoxAdapter(
               child: MarketplaceHomeModeSection(
                 mode: mode,
@@ -61,7 +67,7 @@ class MarketplaceHomeModeSection extends ConsumerWidget {
   final void Function(MarketplaceCard card) onAdd;
 
   String get _title => switch (mode) {
-        CommerceMode.buyOnline => 'Buy Online near you',
+        CommerceMode.buyOnline => 'All products',
         CommerceMode.visitToBuy => 'Visit to Buy',
         CommerceMode.serviceAtShop => 'Services at Shop',
       };
@@ -85,9 +91,9 @@ class MarketplaceHomeModeSection extends ConsumerWidget {
           height: 92,
           child: Center(
             child: TextButton.icon(
-              onPressed: () => ref
+              onPressed: hapticize(() => ref
                   .read(marketplaceHomeModeFeedProvider(mode).notifier)
-                  .retry(),
+                  .retry()),
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Retry this section'),
             ),
@@ -98,11 +104,21 @@ class MarketplaceHomeModeSection extends ConsumerWidget {
     if (section.cards.isEmpty) return const SizedBox.shrink();
 
     final hasMoreIndicator = section.isLoadingMore || section.error != null;
+    final cardWidth = MarketplaceCardTile.threeUpCardWidth(context);
     return _ModeSectionMessage(
       title: _title,
       subtitle: mode == CommerceMode.visitToBuy ? 'In-store products' : null,
+      actionLabel: mode == CommerceMode.buyOnline ? 'See all' : null,
+      onAction: mode == CommerceMode.buyOnline
+          ? () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CategoriesScreen()),
+              )
+          : null,
       child: SizedBox(
-        height: MarketplaceCardTile.carouselHeight(context),
+        height: MarketplaceCardTile.carouselHeight(
+          context,
+          cardWidth: cardWidth,
+        ),
         child: NotificationListener<ScrollNotification>(
           onNotification: (notification) {
             if (notification.metrics.axis == Axis.horizontal &&
@@ -125,9 +141,9 @@ class MarketplaceHomeModeSection extends ConsumerWidget {
                     child: section.isLoadingMore
                         ? const CircularProgressIndicator(strokeWidth: 2)
                         : TextButton(
-                            onPressed: () => ref
+                            onPressed: hapticize(() => ref
                                 .read(marketplaceHomeModeFeedProvider(mode).notifier)
-                                .retry(),
+                                .retry()),
                             child: const Text('Retry'),
                           ),
                   ),
@@ -135,12 +151,13 @@ class MarketplaceHomeModeSection extends ConsumerWidget {
               }
               final card = section.cards[index];
               return SizedBox(
-                width: 176,
+                width: cardWidth,
                 child: MarketplaceCardTile(
                   key: ValueKey<String>(card.feedKey),
                   card: card,
                   onTap: () => onCardTap(card),
                   onAdd: card.addable ? () => onAdd(card) : null,
+                  compact: true,
                 ),
               );
             },
@@ -188,7 +205,8 @@ class MarketplaceAllProductsSliver extends ConsumerWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: TextButton.icon(
-            onPressed: () => ref.read(marketplaceHomeAllFeedProvider.notifier).retry(),
+            onPressed: hapticize(
+                () => ref.read(marketplaceHomeAllFeedProvider.notifier).retry()),
             icon: const Icon(Icons.refresh_rounded),
             label: const Text("Couldn't load nearby listings. Retry"),
           ),
@@ -205,11 +223,11 @@ class MarketplaceAllProductsSliver extends ConsumerWidget {
       children.add(SliverPadding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         sliver: SliverGrid(
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
             mainAxisSpacing: 12,
-            crossAxisSpacing: 10,
-            childAspectRatio: .73,
+            crossAxisSpacing: 8,
+            childAspectRatio: MarketplaceCardTile.gridAspectRatio(context),
           ),
           delegate: SliverChildBuilderDelegate(
             (context, index) {
@@ -219,6 +237,7 @@ class MarketplaceAllProductsSliver extends ConsumerWidget {
                 card: card,
                 onTap: () => onCardTap(card),
                 onAdd: card.addable ? () => onAdd(card) : null,
+                compact: true,
               );
             },
             childCount: feed.cards.length,
@@ -234,7 +253,9 @@ class MarketplaceAllProductsSliver extends ConsumerWidget {
                   ? const SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 2))
                   : feed.error != null
                       ? TextButton(
-                          onPressed: () => ref.read(marketplaceHomeAllFeedProvider.notifier).retry(),
+                          onPressed: hapticize(() => ref
+                              .read(marketplaceHomeAllFeedProvider.notifier)
+                              .retry()),
                           child: const Text('Retry nearby listings'),
                         )
                       : const SizedBox(height: 8),
@@ -253,7 +274,7 @@ class _AllProductsHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const Padding(
         padding: EdgeInsets.fromLTRB(16, 24, 16, 12),
-        child: Text('All nearby products and services',
+        child: Text('More nearby products and services',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
       );
 }
@@ -263,11 +284,15 @@ class _ModeSectionMessage extends StatelessWidget {
     required this.title,
     required this.child,
     this.subtitle,
+    this.actionLabel,
+    this.onAction,
   });
 
   final String title;
   final String? subtitle;
   final Widget child;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -290,6 +315,11 @@ class _ModeSectionMessage extends StatelessWidget {
                   Text(subtitle!,
                       style: const TextStyle(
                           fontSize: 12, color: AppColors.textSecondary)),
+                if (actionLabel != null && onAction != null)
+                  TextButton(
+                    onPressed: hapticize(onAction!),
+                    child: Text(actionLabel!),
+                  ),
               ],
             ),
           ),

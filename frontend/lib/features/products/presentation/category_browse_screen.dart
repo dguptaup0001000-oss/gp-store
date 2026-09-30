@@ -659,7 +659,7 @@ class _ContinuousCategoryFeedState extends ConsumerState<_ContinuousCategoryFeed
           padding: const EdgeInsets.fromLTRB(10, 4, 10, 14),
           sliver: SliverGrid(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
+              crossAxisCount: 3,
               mainAxisSpacing: 10,
               crossAxisSpacing: 10,
               // The rail takes horizontal space, so the cards here are narrower
@@ -669,7 +669,7 @@ class _ContinuousCategoryFeedState extends ConsumerState<_ContinuousCategoryFeed
               // threshold that ProductCard will measure them to be on.
               childAspectRatio: ProductGrid.aspectRatio(
                 context,
-                columns: 2,
+                columns: 3,
                 availableWidth: MediaQuery.of(context).size.width - _railWidth(context),
                 outerPadding: 20,
                 gap: 10,
@@ -686,9 +686,9 @@ class _ContinuousCategoryFeedState extends ConsumerState<_ContinuousCategoryFeed
                   //
                   // Scale-and-fade rather than the default slide - see
                   // productPageRoute for why this is not a hero flight.
-                  onTap: hapticize(() => Navigator.of(context).push(
+                  onTap: () => Navigator.of(context).push(
                     productPageRoute(ProductDetailScreen(product: product)),
-                  )),
+                  ),
                 );
               },
               childCount: section.products.length,
@@ -948,7 +948,7 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
           controller: scrollController,
           padding: const EdgeInsets.all(10),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
+            crossAxisCount: 3,
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
             // The rail takes horizontal space, so the cards here are narrower
@@ -957,7 +957,7 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
             // why passing the real width is load-bearing.
             childAspectRatio: ProductGrid.aspectRatio(
               context,
-              columns: 2,
+              columns: 3,
               availableWidth: MediaQuery.of(context).size.width - _railWidth(context),
               outerPadding: 20,
               gap: 10,
@@ -986,9 +986,9 @@ class _CategoryProductGridState extends ConsumerState<_CategoryProductGrid> {
               product: product,
               // Scale-and-fade rather than the default slide - see
               // productPageRoute for why this is not a hero flight.
-              onTap: hapticize(() => Navigator.of(context).push(
+              onTap: () => Navigator.of(context).push(
                 productPageRoute(ProductDetailScreen(product: product)),
-              )),
+              ),
             );
           },
         ),

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/marketplace/marketplace_models.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/util/haptic_widgets.dart';
 import 'marketplace_feed_provider.dart';
 import 'market_shop_card.dart';
 
@@ -104,10 +105,10 @@ class _NearbyShopsScreenState extends ConsumerState<NearbyShopsScreen> {
           title: const Text('All nearby shops'),
           actions: [
             TextButton(
-              onPressed: () {
+              onPressed: hapticize(() {
                 ref.read(marketplaceShopFilterProvider.notifier).state = null;
                 Navigator.of(context).pop();
-              },
+              }),
               child: const Text('All'),
             ),
           ],
@@ -117,7 +118,7 @@ class _NearbyShopsScreenState extends ConsumerState<NearbyShopsScreen> {
             : _shops.isEmpty && _error != null
                 ? Center(
                     child: TextButton.icon(
-                      onPressed: () => _loadNext(refresh: true),
+                      onPressed: hapticize(() => _loadNext(refresh: true)),
                       icon: const Icon(Icons.refresh_rounded),
                       label: const Text("Couldn't load nearby shops. Retry"),
                     ),
@@ -150,7 +151,7 @@ class _NearbyShopsScreenState extends ConsumerState<NearbyShopsScreen> {
                             if (_error != null) {
                               return Center(
                                 child: TextButton.icon(
-                                  onPressed: _loadNext,
+                                  onPressed: hapticize(_loadNext),
                                   icon: const Icon(Icons.refresh_rounded),
                                   label: const Text('Retry'),
                                 ),

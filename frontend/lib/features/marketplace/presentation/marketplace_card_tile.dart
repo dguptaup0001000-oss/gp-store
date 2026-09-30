@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/util/haptic_widgets.dart';
 import '../../../shared/widgets/action_feedback.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
 import '../domain/marketplace_feed_models.dart';
@@ -26,6 +27,7 @@ class MarketplaceCardTile extends ConsumerWidget {
     required this.card,
     this.onTap,
     this.onAdd,
+    this.compact = false,
   });
 
   final MarketplaceCard card;
@@ -33,6 +35,15 @@ class MarketplaceCardTile extends ConsumerWidget {
 
   /// Called only when the server said this is addable. Null is fine.
   final VoidCallback? onAdd;
+  final bool compact;
+
+  /// Exactly three cards across the usable phone width, with the next card
+  /// appearing only after a horizontal swipe rather than because two oversized
+  /// cards consumed the row.
+  static double threeUpCardWidth(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    return ((width - 24 - 20) / 3).clamp(88, 132);
+  }
 
   /// Height for this card's horizontal rail, derived from the image geometry
   /// and text scale so the image and all mode-specific details fit together.
@@ -40,6 +51,9 @@ class MarketplaceCardTile extends ConsumerWidget {
   /// duration without relying on a one-size-fits-all viewport height.
   static double carouselHeight(BuildContext context, {double cardWidth = 176}) {
     final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    if (cardWidth < 140) {
+      return cardWidth + (118 * scale);
+    }
     const detailsAtScaleOne = 18 + // body padding
         (13 * 1.25 * 2) + // two-line product name
         4 +
@@ -52,6 +66,11 @@ class MarketplaceCardTile extends ConsumerWidget {
     return (cardWidth / 1.25) + (detailsAtScaleOne * scale) + 8;
   }
 
+  static double gridAspectRatio(BuildContext context) {
+    final width = threeUpCardWidth(context);
+    return width / carouselHeight(context, cardWidth: width);
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isWishlisted = ref.watch(wishlistControllerProvider).valueOrNull
@@ -62,7 +81,7 @@ class MarketplaceCardTile extends ConsumerWidget {
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
+        onTap: hapticizeOrNull(onTap),
         child: Column(
           // A horizontal list gives children the whole rail height as a
           // maximum. Keep this vertical card at its natural content height;
@@ -73,11 +92,12 @@ class MarketplaceCardTile extends ConsumerWidget {
                 Flexible(
                   fit: FlexFit.loose,
                   child: AspectRatio(
-                    aspectRatio: 1.25,
+                    aspectRatio: compact ? 1 : 1.25,
                     child: _Thumbnail(
                       card: card,
+                      compact: compact,
                       isWishlisted: isWishlisted,
-                      onWishlistTap: () async {
+                      onWishlistTap: hapticize(() async {
                         try {
                           final added = await ref
                               .read(wishlistControllerProvider.notifier)
@@ -93,12 +113,17 @@ class MarketplaceCardTile extends ConsumerWidget {
                             showActionFailure(context, "Couldn't update wishlist. Please try again.");
                           }
                         }
-                      },
+                      }, feedback: AppHapticFeedback.action),
                     ),
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  padding: EdgeInsets.fromLTRB(
+                    compact ? 6 : 10,
+                    compact ? 6 : 8,
+                    compact ? 6 : 10,
+                    compact ? 7 : 10,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
@@ -107,17 +132,22 @@ class MarketplaceCardTile extends ConsumerWidget {
                         card.name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
+                        style: TextStyle(
+                          fontSize: compact ? 11.5 : 13,
                           height: 1.25,
                           fontWeight: FontWeight.w600,
                           color: AppColors.textPrimary,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      _Provenance(card: card),
-                      const SizedBox(height: 6),
-                      _PriceAndAction(card: card, onAdd: onAdd, onView: onTap),
+                      SizedBox(height: compact ? 2 : 4),
+                      _Provenance(card: card, compact: compact),
+                      SizedBox(height: compact ? 4 : 6),
+                      _PriceAndAction(
+                        card: card,
+                        onAdd: onAdd,
+                        onView: onTap,
+                        compact: compact,
+                      ),
                     ],
                   ),
                 ),
@@ -133,11 +163,13 @@ class _Thumbnail extends StatelessWidget {
     required this.card,
     required this.isWishlisted,
     required this.onWishlistTap,
+    required this.compact,
   });
 
   final MarketplaceCard card;
   final bool isWishlisted;
   final VoidCallback onWishlistTap;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -153,7 +185,7 @@ class _Thumbnail extends StatelessWidget {
           GpNetworkImage.fill(
             url: card.imageUrl,
             fit: BoxFit.cover,
-            fallbackIcon: Icons.storefront_outlined,
+            fallbackIcon: Icons.inventory_2_outlined,
             fallbackIconSize: 32,
             placeholderColor: AppColors.surfaceSoft,
             placeholderIconColor: AppColors.textSecondary,
@@ -163,13 +195,13 @@ class _Thumbnail extends StatelessWidget {
           // buy now and which means a trip, before they have read a word.
           if (card.commerceMode != CommerceMode.buyOnline)
             Positioned(
-              left: 6,
-              top: 6,
-              child: _ModeBadge(mode: card.commerceMode),
+              left: compact ? 4 : 6,
+              top: compact ? 4 : 6,
+              child: _ModeBadge(mode: card.commerceMode, compact: compact),
             ),
           Positioned(
-            right: 6,
-            top: 6,
+            right: compact ? 2 : 6,
+            top: compact ? 2 : 6,
             child: Material(
               color: Colors.white.withValues(alpha: .94),
               shape: const CircleBorder(),
@@ -177,9 +209,14 @@ class _Thumbnail extends StatelessWidget {
                 tooltip: isWishlisted ? 'Remove from wishlist' : 'Add to wishlist',
                 visualDensity: VisualDensity.compact,
                 onPressed: onWishlistTap,
+                constraints: BoxConstraints.tightFor(
+                  width: compact ? 32 : 40,
+                  height: compact ? 32 : 40,
+                ),
+                padding: EdgeInsets.zero,
                 icon: Icon(
                   isWishlisted ? Icons.favorite : Icons.favorite_border,
-                  size: 20,
+                  size: compact ? 18 : 20,
                   color: isWishlisted ? AppColors.error : AppColors.textSecondary,
                 ),
               ),
@@ -191,15 +228,17 @@ class _Thumbnail extends StatelessWidget {
 }
 
 class _ModeBadge extends StatelessWidget {
-  const _ModeBadge({required this.mode});
+  const _ModeBadge({required this.mode, required this.compact});
 
   final CommerceMode mode;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final visit = mode == CommerceMode.visitToBuy;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      padding: EdgeInsets.symmetric(
+          horizontal: compact ? 4 : 7, vertical: compact ? 2 : 3),
       decoration: BoxDecoration(
         color: (visit ? AppColors.gold : AppColors.secondary).withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(999),
@@ -208,12 +247,12 @@ class _ModeBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(visit ? Icons.storefront_rounded : Icons.build_circle_outlined,
-              size: 11, color: Colors.white),
-          const SizedBox(width: 3),
+              size: compact ? 9 : 11, color: Colors.white),
+          SizedBox(width: compact ? 2 : 3),
           Text(
             mode.label,
-            style: const TextStyle(
-              fontSize: 9.5,
+            style: TextStyle(
+              fontSize: compact ? 7.5 : 9.5,
               height: 1.1,
               fontWeight: FontWeight.w700,
               color: Colors.white,
@@ -229,9 +268,10 @@ class _ModeBadge extends StatelessWidget {
 /// Who has it and how far away, which is the thing a local marketplace knows
 /// that a catalogue does not.
 class _Provenance extends StatelessWidget {
-  const _Provenance({required this.card});
+  const _Provenance({required this.card, required this.compact});
 
   final MarketplaceCard card;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -254,7 +294,9 @@ class _Provenance extends StatelessWidget {
             bits.join(' · '),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            style: TextStyle(
+                fontSize: compact ? 9.5 : 11,
+                color: AppColors.textSecondary),
           ),
         ),
         // Only when there is genuinely a choice to make. "1 shop" is noise.
@@ -276,63 +318,91 @@ class _Provenance extends StatelessWidget {
 }
 
 class _PriceAndAction extends StatelessWidget {
-  const _PriceAndAction({required this.card, this.onAdd, this.onView});
+  const _PriceAndAction({
+    required this.card,
+    this.onAdd,
+    this.onView,
+    required this.compact,
+  });
 
   final MarketplaceCard card;
   final VoidCallback? onAdd;
   final VoidCallback? onView;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final price = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            card.priceLabel(),
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: compact ? 12 : 14,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ),
+        if (!card.priceIsCommitted && !compact)
+          const Text('Confirm at shop',
+              style: TextStyle(fontSize: 9.5, color: AppColors.textSecondary)),
+        if (card.serviceDurationMinutes != null && !compact)
+          Text('~${card.serviceDurationMinutes} min',
+              style: const TextStyle(fontSize: 9.5, color: AppColors.textSecondary)),
+      ],
+    );
+
+    if (compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          price,
+          const SizedBox(height: 4),
+          SizedBox(
+            height: 27,
+            child: _Action(
+              card: card,
+              onAdd: onAdd,
+              onView: onView,
+              compact: true,
+            ),
+          ),
+        ],
+      );
+    }
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                card.priceLabel(),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              // SAYING SO WHERE IT IS NOT A PROMISE. A merchant who published
-              // "from ₹25,000" has not agreed to that figure, and a card that
-              // draws it like a checkout price is making a commitment on their
-              // behalf that they will be held to at the counter.
-              if (!card.priceIsCommitted)
-                const Text(
-                  'Confirm at shop',
-                  style: TextStyle(fontSize: 9.5, color: AppColors.textSecondary),
-                ),
-              if (card.serviceDurationMinutes != null)
-                Text(
-                  '~${card.serviceDurationMinutes} min',
-                  style: const TextStyle(
-                      fontSize: 9.5, color: AppColors.textSecondary),
-                ),
-            ],
-          ),
+          child: price,
         ),
         const SizedBox(width: 6),
-        _Action(card: card, onAdd: onAdd, onView: onView),
+        _Action(card: card, onAdd: onAdd, onView: onView, compact: false),
       ],
     );
   }
 }
 
 class _Action extends StatelessWidget {
-  const _Action({required this.card, this.onAdd, this.onView});
+  const _Action({
+    required this.card,
+    this.onAdd,
+    this.onView,
+    required this.compact,
+  });
 
   final MarketplaceCard card;
   final VoidCallback? onAdd;
   final VoidCallback? onView;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -346,20 +416,25 @@ class _Action extends StatelessWidget {
         CommerceMode.buyOnline => card.inStock == false ? 'SOLD OUT' : 'VIEW',
       };
       return OutlinedButton(
-        onPressed: onView,
+        onPressed: hapticizeOrNull(onView),
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.primary,
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+          padding: EdgeInsets.symmetric(horizontal: compact ? 2 : 7, vertical: 5),
           minimumSize: Size.zero,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           side: const BorderSide(color: AppColors.primary),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-        child: Text(label, style: const TextStyle(
-          fontSize: 9.5,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.3,
-        )),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: compact ? 8 : 9.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
+          ),
+        ),
       );
     }
 
@@ -367,10 +442,11 @@ class _Action extends StatelessWidget {
       color: AppColors.primary,
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
-        onTap: onAdd,
+        onTap:
+            hapticizeOrNull(onAdd, feedback: AppHapticFeedback.action),
         borderRadius: BorderRadius.circular(8),
         child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Text(
             'ADD',
             style: TextStyle(

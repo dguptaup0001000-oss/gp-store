@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../features/cart/presentation/cart_screen.dart';
 import '../../features/wishlist/presentation/wishlist_screen.dart';
+import '../../core/util/haptic_widgets.dart';
 
 void showAddedToCartFeedback(BuildContext context, String itemName) {
   _showAction(context,
@@ -43,6 +44,8 @@ void _showAction(BuildContext context, {required String message, String? action,
       const SizedBox(width: 8),
       Expanded(child: Text(message)),
     ]),
-    action: action == null ? null : SnackBarAction(label: action, onPressed: onPressed!),
+    action: action == null
+        ? null
+        : SnackBarAction(label: action, onPressed: hapticize(onPressed!)),
   ));
 }

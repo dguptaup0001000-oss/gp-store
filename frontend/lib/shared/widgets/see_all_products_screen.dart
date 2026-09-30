@@ -110,9 +110,10 @@ class _SeeAllProductsScreenState extends ConsumerState<SeeAllProductsScreen> {
               final product = products[index];
               return ProductCard(
                 product: product,
-                onTap: hapticize(() => Navigator.of(context).push(
+                // ProductCard supplies the tap haptic itself.
+                onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
-                )),
+                ),
                 onAddPressed: () => _addToCart(product),
                 isWishlisted: wishlistController.isWishlisted(product.id),
                 onWishlistMutation: () => wishlistController.toggle(product.id),

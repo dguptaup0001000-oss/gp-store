@@ -25,7 +25,7 @@ import '../../../core/marketplace/marketplace_providers.dart';
 import '../../marketplace/domain/marketplace_feed_models.dart';
 import '../../marketplace/presentation/marketplace_card_tile.dart';
 import '../../marketplace/presentation/marketplace_feed_provider.dart';
-import '../../marketplace/presentation/product_offers_screen.dart';
+import '../../marketplace/presentation/marketplace_card_actions.dart';
 import 'voice_search_sheet.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -83,12 +83,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   /// Paging for the results list.
   ///
-  /// A BUTTON, NOT INFINITE SCROLL, and that is deliberate. Search results
-  /// are already the most request-heavy screen in the app - every keystroke
-  /// past the debounce is a query - and hanging a scroll listener off them
-  /// would fetch pages the customer never asked for. A Load more they tap
-  /// costs exactly one request when they want one, and it does not have to
-  /// interact with the stale-response guard on every scroll frame.
+  /// Paging is driven by the results viewport. The debounce still limits
+  /// searches while typing, while the guarded request below adds one bounded
+  /// page when the customer approaches the end.
   String _lastQuery = '';
   int _page = 0;
   bool _hasMore = false;
@@ -345,7 +342,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 );
         if (!mounted || seq != _searchSeq) return;
         setState(() {
-          _marketCards = [..._marketCards, ...cards];
+          final known = _marketCards.map((card) => card.feedKey).toSet();
+          _marketCards = [
+            ..._marketCards,
+            ...cards.where((card) => known.add(card.feedKey)),
+          ];
           _page = nextPage;
           _hasMore = cards.length >= _marketPageSize;
           _isLoadingMore = false;
@@ -366,7 +367,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           );
       if (!mounted || seq != _searchSeq) return;
       setState(() {
-        _results = [..._results, ...result.products];
+        final known = _results.map((product) => product.id).toSet();
+        _results = [
+          ..._results,
+          ...result.products.where((product) => known.add(product.id)),
+        ];
         _page = nextPage;
         _hasMore = result.hasMore;
         _isLoadingMore = false;
@@ -513,37 +518,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         if (_otherIntents.isNotEmpty)
           _AlsoHeard(intents: _otherIntents, onTap: hapticizeValue(_runOtherIntent)),
         Expanded(child: _buildGrid()),
-        _buildLoadMore(),
       ],
-    );
-  }
-
-  /// A footer rather than a widget at the end of the grid: adding it to the
-  /// grid would mean rebuilding it as slivers, and a footer is reachable
-  /// without scrolling to the bottom of forty results first.
-  Widget _buildLoadMore() {
-    if (!_hasMore) return const SizedBox.shrink();
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: SizedBox(
-        width: double.infinity,
-        child: _isLoadingMore
-            ? const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(8),
-                  child: SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
-              )
-            : OutlinedButton(
-                onPressed: hapticize(_loadMore),
-                child: const Text('Show more results'),
-              ),
-      ),
     );
   }
 
@@ -554,136 +529,99 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   /// shop is offering it. A second tile written for this screen would be a
   /// second place for those rules to be got wrong.
   ///
-  /// TWO COLUMNS, not the three the product grid uses: these cards carry a
-  /// shop name, a distance and a mode badge, and three across makes each of
-  /// them a line of truncated text.
+  /// Three compact columns match the rest of the customer catalogue while
+  /// retaining shop, distance and the authoritative commerce-mode action.
   Widget _buildMarketGrid() {
     return ScrollToTop(
-      builder: (context, scrollController) => GridView.builder(
-        controller: scrollController,
-        padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 0.62,
-        ),
-        itemCount: _marketCards.length,
-        itemBuilder: (context, index) {
-          final card = _marketCards[index];
-          return MarketplaceCardTile(
-            card: card,
-            onTap: hapticize(() => _openMarketCard(card)),
-            // Null when the server said it is not addable, so the tile draws
-            // VIEW instead - and the backend refuses the call anyway.
-            onAdd: card.addable ? () => _addCardToCart(card) : null,
-          );
+      builder: (context, scrollController) => NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification.depth == 0 &&
+              notification.metrics.axis == Axis.vertical &&
+              notification.metrics.extentAfter < 650) {
+            _loadMore();
+          }
+          return false;
         },
-      ),
-    );
-  }
-
-  /// Opens a result. A non-addable one opens the shops-near-you screen,
-  /// because the ordinary product screen's whole shape is an ADD button.
-  Future<void> _openMarketCard(MarketplaceCard card) async {
-    if (!card.addable) {
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ProductOffersScreen(
-          card: card,
-          onAdd: (offer) async {
-            final variantId = offer.productVariantId;
-            if (variantId == null || !offer.addable) return;
-            final added = await ref
-                .read(cartControllerProvider.notifier)
-                .addToCart(
-                  variantId: variantId,
-                  quantity: 1,
-                  shopId: offer.shopId,
-                );
-            if (!mounted) return;
-            if (added == true) {
-              showAddedToCartFeedback(context, offer.productName);
-            } else {
-              showActionFailure(
-                context,
-                "Couldn't add the item to your cart. Please try again.",
+        child: GridView.builder(
+          controller: scrollController,
+          cacheExtent: 650,
+          padding: const EdgeInsets.all(10),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 8,
+            childAspectRatio: MarketplaceCardTile.gridAspectRatio(context),
+          ),
+          itemCount: _marketCards.length + (_isLoadingMore ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index >= _marketCards.length) {
+              return const Center(
+                child: SizedBox.square(
+                  dimension: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               );
             }
+            final card = _marketCards[index];
+            return MarketplaceCardTile(
+              card: card,
+              compact: true,
+              onTap: () => MarketplaceCardActions.open(context, ref, card),
+              onAdd: card.addable
+                  ? () => MarketplaceCardActions.addCard(context, ref, card)
+                  : null,
+            );
           },
         ),
-      ));
-      return;
-    }
-    try {
-      final product = await ref
-          .read(productsRepositoryProvider)
-          .fetchProductDetail(card.productId, shopId: card.shopId);
-      if (!mounted) return;
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ProductDetailScreen(product: product),
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      final unavailable = e is DioException && e.response?.statusCode == 404;
-      if (unavailable) {
-        setState(() => _marketCards.removeWhere((candidate) => candidate.feedKey == card.feedKey));
-      }
-      showActionFailure(context, unavailable
-          ? 'Product is no longer available and has been removed from these results.'
-          : "Couldn't open this product right now. Please try again.");
-    }
-  }
-
-  Future<void> _addCardToCart(MarketplaceCard card) async {
-    final variantId = card.productVariantId;
-    if (variantId == null) return;
-    try {
-      final added = await ref
-          .read(cartControllerProvider.notifier)
-          .addToCart(
-            variantId: variantId,
-            quantity: 1,
-            shopId: card.shopId,
-          );
-      if (!mounted) return;
-      if (added == true) {
-        showAddedToCartFeedback(context, card.name);
-      } else if (added == false) {
-        showActionFailure(context, "Couldn't add the item to your cart. Please try again.");
-      }
-    } catch (e) {
-      if (!mounted) return;
-      showActionFailure(context, "Couldn't add the item to your cart. Please try again.");
-    }
+      ),
+    );
   }
 
   Widget _buildGrid() {
     if (_marketCards.isNotEmpty) return _buildMarketGrid();
     return ScrollToTop(
-      builder: (context, scrollController) => GridView.builder(
-      controller: scrollController,
-      padding: const EdgeInsets.all(16),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: ProductGrid.aspectRatio(context, columns: 3),
-      ),
-      itemCount: _results.length,
-      itemBuilder: (context, index) {
-        // Nothing scroll-driven here: paging is the explicit button below.
-        final product = _results[index];
-        final wishlistController = ref.read(wishlistControllerProvider.notifier);
-        return ProductCard(
-          product: product,
-          onTap: hapticize(() => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
-          )),
+      builder: (context, scrollController) => NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification.depth == 0 &&
+              notification.metrics.axis == Axis.vertical &&
+              notification.metrics.extentAfter < 650) {
+            _loadMore();
+          }
+          return false;
+        },
+        child: GridView.builder(
+          controller: scrollController,
+          cacheExtent: 650,
+          padding: const EdgeInsets.all(16),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: ProductGrid.aspectRatio(context, columns: 3),
+          ),
+          itemCount: _results.length + (_isLoadingMore ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index >= _results.length) {
+              return const Center(
+                child: SizedBox.square(
+                  dimension: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              );
+            }
+            final product = _results[index];
+            final wishlistController = ref.read(wishlistControllerProvider.notifier);
+            return ProductCard(
+              product: product,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
+              ),
           onAddPressed: () => _addToCart(product),
           isWishlisted: wishlistController.isWishlisted(product.id),
           onWishlistMutation: () => wishlistController.toggle(product.id),
-        );
-      },
+            );
+          },
+        ),
       ),
     );
   }

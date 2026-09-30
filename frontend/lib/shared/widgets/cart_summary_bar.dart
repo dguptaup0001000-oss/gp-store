@@ -7,7 +7,6 @@ import '../../features/cart/presentation/cart_providers.dart';
 import '../../features/cart/presentation/cart_screen.dart';
 import '../../core/images/gp_network_image.dart';
 import '../../core/util/haptic_widgets.dart';
-import '../../core/util/app_haptics.dart';
 
 /// The floating "N items · View cart" bar - drop this in as any screen's
 /// Scaffold.bottomNavigationBar. Self-contained (reads the cart itself via
@@ -44,7 +43,6 @@ class CartSummaryBar extends ConsumerWidget {
           child: InkWell(
             customBorder: const StadiumBorder(),
             onTap: hapticize(() {
-              AppHaptics.selection();
               Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CartScreen()));
             }),
             child: Padding(

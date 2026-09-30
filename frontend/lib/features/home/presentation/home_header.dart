@@ -29,7 +29,7 @@ class HomeHeader extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Container(
-      color: AppColors.cardBackground,
+      color: AppColors.primary,
       padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 8, 6, 10),
@@ -43,7 +43,7 @@ class HomeHeader extends ConsumerWidget {
                 if (ref.watch(isMarketplaceProvider))
                   IconButton(
                     visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.menu_rounded),
+                    icon: const Icon(Icons.menu_rounded, color: Colors.white),
                     tooltip: 'Browse',
                     onPressed: hapticize(() => Scaffold.of(context).openDrawer()),
                   ),
@@ -54,7 +54,7 @@ class HomeHeader extends ConsumerWidget {
                 const _CartButton(),
                 IconButton(
                   visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.person_outline),
+                  icon: const Icon(Icons.person_outline, color: Colors.white),
                   tooltip: 'Profile',
                   onPressed: hapticize(() => Navigator.of(context).push(
                         MaterialPageRoute(builder: (_) => const ProfileScreen()),
@@ -81,13 +81,13 @@ class _Mark extends StatelessWidget {
       width: 32,
       height: 32,
       decoration: const BoxDecoration(
-        color: AppColors.primary,
+        color: AppColors.highlight,
         borderRadius: BorderRadius.all(Radius.circular(9)),
       ),
       child: const Center(
         child: Text('G',
             style: TextStyle(
-                color: Colors.white,
+                color: AppColors.primary,
                 fontWeight: FontWeight.w800,
                 fontSize: 17,
                 height: 1.1)),
@@ -136,7 +136,7 @@ class _DeliveringTo extends ConsumerWidget {
             Row(
               children: [
                 const Icon(Icons.location_on_outlined,
-                    size: 14, color: AppColors.primary),
+                    size: 14, color: AppColors.highlight),
                 const SizedBox(width: 2),
                 Flexible(
                   child: Text(
@@ -144,10 +144,11 @@ class _DeliveringTo extends ConsumerWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
+                        color: Colors.white,
                         fontWeight: FontWeight.w700, fontSize: 13.5, height: 1.2),
                   ),
                 ),
-                const Icon(Icons.keyboard_arrow_down, size: 16),
+                const Icon(Icons.keyboard_arrow_down, size: 16, color: Colors.white),
               ],
             ),
             const _ShopLine(),
@@ -191,7 +192,7 @@ class _ShopLine extends ConsumerWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
-              fontSize: 11, color: AppColors.textSecondary, height: 1.2),
+              fontSize: 11, color: Colors.white70, height: 1.2),
         ),
       ),
     );
@@ -205,7 +206,7 @@ class _NotificationsButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       visualDensity: VisualDensity.compact,
-      icon: const Icon(Icons.notifications_none_rounded),
+      icon: const Icon(Icons.notifications_none_rounded, color: Colors.white),
       tooltip: 'Notifications',
       onPressed: hapticize(() => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const NotificationsScreen()),
@@ -226,7 +227,7 @@ class _CartButton extends ConsumerWidget {
       children: [
         IconButton(
           visualDensity: VisualDensity.compact,
-          icon: const Icon(Icons.shopping_cart_outlined),
+          icon: const Icon(Icons.shopping_cart_outlined, color: Colors.white),
           tooltip: 'Cart',
           onPressed: hapticize(() => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const CartScreen()),
@@ -239,13 +240,13 @@ class _CartButton extends ConsumerWidget {
             child: Container(
               padding: const EdgeInsets.all(3),
               decoration: const BoxDecoration(
-                  color: AppColors.primary, shape: BoxShape.circle),
+                  color: AppColors.highlight, shape: BoxShape.circle),
               constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
               child: Text(
                 '$count',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                    color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -272,7 +273,7 @@ class _SearchPill extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: AppColors.surfaceSoft,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.divider),
         ),

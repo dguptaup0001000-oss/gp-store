@@ -157,7 +157,7 @@ class _AllCategoriesTile extends StatelessWidget {
               height: 56,
               decoration: BoxDecoration(
                 color: AppColors.tint(AppColors.primary),
-                shape: BoxShape.circle,
+                borderRadius: BorderRadius.circular(14),
               ),
               child: const Icon(Icons.grid_view_rounded,
                   color: AppColors.primary, size: 24),
