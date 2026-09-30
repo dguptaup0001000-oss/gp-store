@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/router/app_router.dart';
+import '../core/theme/app_theme.dart';
+import '../core/theme/customer_surface_theme.dart';
 import '../features/auth/presentation/auth_providers.dart';
 import '../features/cart/presentation/cart_providers.dart';
 import '../features/orders/presentation/order_detail_screen.dart';
@@ -12,7 +14,7 @@ import '../shared/gpstore_app.dart';
 import 'customer_router.dart';
 
 /// Shop APK UI. Does not import admin screens, printers, or order-voice.
-class CustomerApp extends StatelessWidget {
+class CustomerApp extends ConsumerWidget {
   const CustomerApp({super.key});
 
   static void _handleNotificationTap(WidgetRef ref, RemoteMessage message) {
@@ -47,9 +49,15 @@ class CustomerApp extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final surfaceTheme = ref.watch(customerSurfaceThemeProvider);
     return GpstoreApp(
       title: 'GP-STORE',
+      // Only the broad scaffold paper follows the customer's choice. All
+      // brand/action colours inside AppTheme remain fixed and accessible.
+      theme: AppTheme.light.copyWith(
+        scaffoldBackgroundColor: surfaceTheme.ground,
+      ),
       routerProvider: customerRouterProvider,
       onNotificationTap: _handleNotificationTap,
       onStaleResume: (ref) {
