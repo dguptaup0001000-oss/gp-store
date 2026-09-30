@@ -14,6 +14,7 @@ import '../../notifications/presentation/notifications_screen.dart';
 import '../../products/presentation/search_screen.dart';
 import '../../profile/presentation/profile_screen.dart';
 import 'home_load_stage.dart';
+import 'customer_theme_picker.dart';
 
 /// Who you are, where you are, and how to search - in one band.
 ///
@@ -289,6 +290,11 @@ class _SearchPill extends StatelessWidget {
                 style: TextStyle(color: AppColors.textSecondary, fontSize: 13.5),
               ),
             ),
+            // Small, always-available personalisation control. It lives in the
+            // search band instead of the already crowded address/action row,
+            // so narrow phones do not sacrifice the delivery address.
+            const CustomerThemePickerButton(),
+            const SizedBox(width: 2),
             // Opens search ALREADY LISTENING, so the microphone is one gesture
             // rather than two. The pill's own tap still opens a keyboard,
             // which is what somebody who wants to type expects.

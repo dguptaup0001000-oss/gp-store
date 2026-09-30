@@ -1,6 +1,6 @@
 import '../../marketplace/presentation/marketplace_drawer.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/customer_surface_theme.dart';
 import '../../marketplace/domain/marketplace_feed_models.dart';
 import '../../marketplace/presentation/marketplace_card_actions.dart';
 import '../../marketplace/presentation/marketplace_feed_provider.dart';
@@ -84,6 +84,7 @@ class HomeScreen extends ConsumerWidget {
         ? ref.watch(productFeedProvider)
         : const AsyncValue<ProductFeedState>.loading();
     final isLoggedIn = ref.watch(authControllerProvider).status == AuthStatus.authenticated;
+    final customerTheme = ref.watch(customerSurfaceThemeProvider);
 
     void openProduct(Product product) => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
@@ -98,8 +99,9 @@ class HomeScreen extends ConsumerWidget {
     }
 
     return Scaffold(
-      backgroundColor:
-          onAMarketplace ? AppColors.marketplaceGround : null,
+      // Personalisation changes only the broad light surface. Brand green,
+      // cards, controls and product photography keep their fixed identity.
+      backgroundColor: customerTheme.ground,
       // THE DRAWER IS ONLY ON A MARKETPLACE. Under a single shop there are no
       // modes to switch between, and an entry labelled "Visit to Buy" that
       // leads to an empty feed is the dead end this app is careful not to

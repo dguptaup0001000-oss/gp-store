@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/marketplace/marketplace_models.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/customer_surface_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
 import 'marketplace_feed_provider.dart';
 import 'market_shop_card.dart';
@@ -98,10 +99,12 @@ class _NearbyShopsScreenState extends ConsumerState<NearbyShopsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        backgroundColor: AppColors.marketplaceGround,
+  Widget build(BuildContext context) {
+    final ground = ref.watch(customerSurfaceThemeProvider).ground;
+    return Scaffold(
+        backgroundColor: ground,
         appBar: AppBar(
-          backgroundColor: AppColors.marketplaceGround,
+          backgroundColor: ground,
           title: const Text('All nearby shops'),
           actions: [
             TextButton(
@@ -174,4 +177,5 @@ class _NearbyShopsScreenState extends ConsumerState<NearbyShopsScreen> {
                         ),
                       ),
       );
+  }
 }
