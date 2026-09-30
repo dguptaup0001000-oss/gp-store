@@ -18,9 +18,19 @@ import 'products_providers.dart';
 import '../../../core/util/haptic_widgets.dart';
 
 class ProductDetailScreen extends ConsumerStatefulWidget {
-  const ProductDetailScreen({super.key, required this.product});
+  const ProductDetailScreen({
+    super.key,
+    required this.product,
+    this.shopId,
+  });
 
   final Product product;
+
+  /// Seller context when this detail was opened from the marketplace.
+  ///
+  /// Product ids are shared across the catalogue; stock/price/cart authority
+  /// are not. Keep the seller all the way to Add to Cart.
+  final int? shopId;
 
   @override
   ConsumerState<ProductDetailScreen> createState() => _ProductDetailScreenState();
@@ -47,6 +57,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       final added = await ref.read(cartControllerProvider.notifier).addToCart(
             variantId: variant.id,
             quantity: _quantity,
+            shopId: widget.shopId,
           );
       if (!mounted) return;
       if (added == true) {
@@ -74,7 +85,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     // product sold in 500 g and 1 kg showed no chooser at all when opened
     // from a grid - only when opened from somewhere that happened to pass an
     // untrimmed product. The detail response is the one with every size.
-    final loaded = ref.watch(productDetailProvider(widget.product.id)).valueOrNull;
+    final detailKey =
+        (productId: widget.product.id, shopId: widget.shopId);
+    final loaded =
+        ref.watch(marketplaceProductDetailProvider(detailKey)).valueOrNull;
     final product = loaded ?? widget.product;
     final variant = _selectedVariant;
     // Listed AND held - see ProductCard for why null reads as yes.
@@ -138,7 +152,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                     // through to (3) and looks exactly as it did.
                     Consumer(
                       builder: (context, ref, _) {
-                        final detail = ref.watch(productDetailProvider(product.id));
+                        final detail = ref.watch(marketplaceProductDetailProvider(
+                            (productId: product.id, shopId: widget.shopId)));
 
                         // THE SELECTED VARIANT'S OWN PHOTOS COME FIRST, and
                         // this is the point of the whole feature: the front,
