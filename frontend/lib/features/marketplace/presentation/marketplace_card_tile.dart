@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../../core/util/app_haptics.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../../shared/widgets/action_feedback.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
