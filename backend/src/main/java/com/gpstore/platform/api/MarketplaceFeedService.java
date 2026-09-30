@@ -7,7 +7,6 @@ import com.gpstore.catalog.shop.OfflineAvailability;
 import com.gpstore.platform.ShopDiscovery;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -60,13 +59,11 @@ public class MarketplaceFeedService {
      * customer in one town the shops of another. Empty is the honest answer
      * and it is the same rule /api/marketplace/shops has always applied.
      */
-    @Transactional(readOnly = true)
     public List<MarketplaceFeedView> page(Double lat, Double lng, Set<CommerceMode> modes,
                                           Long categoryId, int page, int size) {
         return page(lat, lng, modes, categoryId, null, page, size);
     }
 
-    @Transactional(readOnly = true)
     public List<MarketplaceFeedView> page(Double lat, Double lng, Set<CommerceMode> modes,
                                           Long categoryId, Long selectedShopId, int page, int size) {
         if (lat == null || lng == null) {
@@ -113,13 +110,11 @@ public class MarketplaceFeedService {
      * ALL THREE MODES rather than what a cart can hold. The mode is on every
      * result, so the screen can label them.
      */
-    @Transactional(readOnly = true)
     public List<MarketplaceFeedView> search(String keyword, Double lat, Double lng,
                                             Set<CommerceMode> modes, int page, int size) {
         return search(keyword, lat, lng, modes, null, page, size);
     }
 
-    @Transactional(readOnly = true)
     public List<MarketplaceFeedView> search(String keyword, Double lat, Double lng,
                                             Set<CommerceMode> modes, Long selectedShopId,
                                             int page, int size) {
@@ -226,7 +221,6 @@ public class MarketplaceFeedService {
      * <p>Same two queries as the feed: one to ShopDiscovery for who serves
      * this pin, one to the database for the offers.
      */
-    @Transactional(readOnly = true)
     public List<MarketplaceOfferView> offersOf(Long productId, Double lat, Double lng) {
         return offersOf(productId, null, lat, lng);
     }
@@ -235,7 +229,6 @@ public class MarketplaceFeedService {
      * Variant-safe offer comparison. New clients always provide variantId so
      * 500 g and 1 kg packs can never appear as equivalent offers.
      */
-    @Transactional(readOnly = true)
     public List<MarketplaceOfferView> offersOf(Long productId, Long variantId,
                                                Double lat, Double lng) {
         if (productId == null || lat == null || lng == null) {

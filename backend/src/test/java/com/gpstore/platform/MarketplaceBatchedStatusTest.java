@@ -204,6 +204,16 @@ class MarketplaceBatchedStatusTest {
                             org.springframework.transaction.annotation.Transactional.class),
                     method + " must release each bounded read transaction before rendering shops");
         }
+
+        Class<?> feed = com.gpstore.platform.api.MarketplaceFeedService.class;
+        for (String method : List.of("page", "search", "offersOf")) {
+            for (java.lang.reflect.Method endpoint : java.util.Arrays.stream(feed.getMethods())
+                    .filter(candidate -> candidate.getName().equals(method)).toList()) {
+                assertFalse(endpoint.isAnnotationPresent(
+                                org.springframework.transaction.annotation.Transactional.class),
+                        method + " must not hold the discovery connection while ranking cards");
+            }
+        }
     }
 
     @Test
