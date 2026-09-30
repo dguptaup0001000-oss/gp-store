@@ -528,6 +528,24 @@ class OpenTheAppAndSeeTheMarketplaceTest {
                             .size() <= 50,
                     "an unbounded page size turns a feed endpoint into a catalogue dump");
         }
+
+        @Test
+        @DisplayName("deep selected-shop pagination is not truncated by the marketplace candidate window")
+        void selectedShopCanScrollPastTheCandidateWarmup() {
+            Long selectedShopId = shopIds.get(0);
+            for (int i = 0; i < 190; i++) {
+                Long product = newProduct("Deep shelf product " + i, "Grocery");
+                listOn(selectedShopId, variantOf(product), CommerceMode.ONLINE_PURCHASE,
+                        new BigDecimal("50"));
+            }
+
+            List<MarketplaceFeedView> ninthPage = feed.page(LAT, LNG,
+                    Set.of(CommerceMode.ONLINE_PURCHASE), null, selectedShopId, 8, 20);
+
+            assertEquals(20, ninthPage.size(),
+                    "a bounded first-page candidate set must grow with the requested prefix; "
+                            + "infinite scroll cannot stop after 128 listings");
+        }
     }
 
     // ------------------------------------------------------------- fixture
