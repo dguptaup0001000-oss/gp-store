@@ -2,6 +2,7 @@ package com.gpstore.controller;
 
 import com.gpstore.dto.response.NotificationResponse;
 import com.gpstore.entity.Notification;
+import com.gpstore.platform.CustomerOwnedRead;
 import com.gpstore.security.CurrentUser;
 import com.gpstore.service.NotificationService;
 import org.springframework.data.domain.Page;
@@ -17,10 +18,13 @@ public class NotificationController {
 
     private final NotificationService notificationService;
     private final CurrentUser currentUser;
+    private final CustomerOwnedRead customerOwnedRead;
 
-    public NotificationController(NotificationService notificationService, CurrentUser currentUser) {
+    public NotificationController(NotificationService notificationService, CurrentUser currentUser,
+                                  CustomerOwnedRead customerOwnedRead) {
         this.notificationService = notificationService;
         this.currentUser = currentUser;
+        this.customerOwnedRead = customerOwnedRead;
     }
 
     // Admin only (enforced in SecurityConfig) - manual notification creation,
@@ -62,7 +66,9 @@ public class NotificationController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         Pageable pageable = PageRequest.of(page, Math.min(size, 100));
-        return notificationService.getNotificationsByCustomerId(currentUser.customerId(), pageable);
+        Long me = currentUser.customerId();
+        return customerOwnedRead.acrossShops(
+                () -> notificationService.getNotificationsByCustomerId(me, pageable));
     }
 
     // Lightweight badge-count query - doesn't require paging through the
