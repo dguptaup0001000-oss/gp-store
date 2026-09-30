@@ -9,6 +9,7 @@ import '../../products/presentation/products_providers.dart';
 import '../domain/marketplace_feed_models.dart';
 import '../domain/marketplace_offer.dart';
 import 'marketplace_feed_provider.dart';
+import 'marketplace_product_family_screen.dart';
 import 'product_offers_screen.dart';
 
 /// The one navigation/action path used by every marketplace card.
@@ -21,6 +22,31 @@ class MarketplaceCardActions {
   const MarketplaceCardActions._();
 
   static Future<void> open(
+    BuildContext context,
+    WidgetRef ref,
+    MarketplaceCard card,
+  ) async {
+    // The first product tap answers "show me this TYPE nearby", not "lock me
+    // to the one packet from the representative seller". Salt opens all salt,
+    // phones open phones, namkeen opens namkeen, etc. The family screen keeps
+    // marketplace pagination and the current shop filter.
+    if (card.commerceMode == CommerceMode.buyOnline) {
+      final family = MarketplaceProductFamily.fromCard(card);
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => MarketplaceProductFamilyScreen(family: family),
+        ),
+      );
+      return;
+    }
+
+    await openDetail(context, ref, card);
+  }
+
+  /// Exact product/seller detail. Used after the customer has already entered
+  /// a family grid, and for Visit-to-Buy/Service cards where the action itself
+  /// is the point of the listing.
+  static Future<void> openDetail(
     BuildContext context,
     WidgetRef ref,
     MarketplaceCard card,
