@@ -56,6 +56,7 @@ public class MarketplaceController {
     private final com.gpstore.repository.CategoryRepository categories;
     private final com.gpstore.repository.StoreOperationsSettingsRepository storeSettings;
     private final com.gpstore.repository.StoreClosureRepository closures;
+    private final com.gpstore.store.hours.ShopHoursService shopHours;
     private final MarketplaceFeedService marketplaceFeed;
     private final com.gpstore.catalog.shop.SellerResolution sellers;
     private final com.gpstore.engagement.ListingEngagement engagement;
@@ -73,6 +74,7 @@ public class MarketplaceController {
                                  com.gpstore.repository.CategoryRepository categories,
                                  com.gpstore.repository.StoreOperationsSettingsRepository storeSettings,
                                  com.gpstore.repository.StoreClosureRepository closures,
+                                 com.gpstore.store.hours.ShopHoursService shopHours,
                                  MarketplaceFeedService marketplaceFeed,
                                  com.gpstore.catalog.shop.SellerResolution sellers,
                                  com.gpstore.security.CurrentUser currentUser,
@@ -91,6 +93,7 @@ public class MarketplaceController {
         this.schedule = schedule;
         this.storeSettings = storeSettings;
         this.closures = closures;
+        this.shopHours = shopHours;
         this.marketplaceFeed = marketplaceFeed;
         this.sellers = sellers;
         this.engagement = engagement;
@@ -182,13 +185,9 @@ public class MarketplaceController {
      * goes 8 km are both answered correctly - see ShopDiscovery. Coordinates
      * with no shop in range come back as an empty list, not an error.
      */
-    // READ-ONLY TRANSACTIONAL, and it has to be. Each storefront's open/closed
-    // answer is read inside that shop's scope (ShopScopeSwitch), which re-points
-    // the Hibernate session's filter - and there is no session to re-point
-    // outside a transaction, because open-in-view is off. One transaction per
-    // request also means the whole list is one connection rather than one per
-    // shop.
-    @Transactional(readOnly = true)
+    // NO CONTROLLER-WIDE TRANSACTION. Each bounded batch read owns and releases
+    // its transaction before storefront DTOs are computed. Keeping one open
+    // here held a Hikari connection across every shop and every cache wait.
     @GetMapping("/shops")
     public List<StorefrontView> shopsNear(@RequestParam(required = false) Double lat,
                                           @RequestParam(required = false) Double lng) {
@@ -205,7 +204,6 @@ public class MarketplaceController {
      * Paginated counterpart used by the Home preview and its See all screen.
      * The existing bare-list route remains unchanged for released clients.
      */
-    @Transactional(readOnly = true)
     @GetMapping("/shops/page")
     public NearbyShopPageView nearbyShopsPage(
             @RequestParam(required = false) Double lat,
@@ -243,7 +241,6 @@ public class MarketplaceController {
      * shape of a live response to add one is how a released app starts showing
      * an empty marketplace.
      */
-    @Transactional(readOnly = true)
     @GetMapping("/discovery")
     public DiscoveryView discover(@RequestParam(required = false) Double lat,
                                   @RequestParam(required = false) Double lng,
@@ -686,14 +683,15 @@ public class MarketplaceController {
     /**
      * Everything a list of storefronts needs, read once for the whole list.
      *
-     * <p>Three maps, three queries, however many shops. Holding them together
-     * in one object is what stops a fourth per-shop read being added later
-     * without anyone noticing it is per-shop.
+     * <p>Four maps, bounded batch queries, however many shops. Holding them
+     * together in one object is what stops another per-shop read being added
+     * later without anyone noticing it is per-shop.
      */
     private record ListReads(
             java.util.Map<Long, com.gpstore.discovery.PublicShopStars.Stars> stars,
             java.util.Map<Long, com.gpstore.entity.StoreOperationsSettings> settings,
             java.util.Map<Long, java.util.Set<java.time.LocalDate>> closedDates,
+            java.util.Map<Long, com.gpstore.store.hours.ShopHours> hours,
             java.time.Instant at) {}
 
     private StorefrontView view(ShopDiscovery.NearbyShop nearby, ListReads reads) {
@@ -726,17 +724,19 @@ public class MarketplaceController {
      * so the same direction is kept here.
      */
     private List<StorefrontView> viewAll(List<ShopDiscovery.NearbyShop> nearby) {
-        List<Long> shopIds = nearby.stream().map(near -> near.shop().getId()).toList();
+        List<Shop> found = nearby.stream().map(ShopDiscovery.NearbyShop::shop).toList();
+        List<Long> shopIds = found.stream().map(Shop::getId).toList();
         // READ ONCE, OUTSIDE THE STREAM. Calling this inside map() would be
-        // three queries per shop instead of three in total - the same defect
+        // bounded queries per shop instead of bounded queries in total - the same defect
         // in a new costume.
-        ListReads reads = readOnceFor(shopIds);
+        ListReads reads = readOnceFor(found, shopIds);
         return nearby.stream().map(near -> view(near, reads)).toList();
     }
 
-    private ListReads readOnceFor(List<Long> shopIds) {
+    private ListReads readOnceFor(List<Shop> found, List<Long> shopIds) {
         if (shopIds.isEmpty()) {
             return new ListReads(java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
+                    java.util.Map.of(),
                     schedule.clockNow());
         }
         java.util.Map<Long, com.gpstore.entity.StoreOperationsSettings> settings =
@@ -762,7 +762,11 @@ public class MarketplaceController {
             settings.clear();
             closedDates.clear();
         }
-        return new ListReads(stars.forShops(shopIds), settings, closedDates, schedule.clockNow());
+        java.time.LocalDate[] window = schedule.closureWindow();
+        java.util.Map<Long, com.gpstore.store.hours.ShopHours> hours =
+                shopHours.forShops(found, window[0], window[1]);
+        return new ListReads(stars.forShops(shopIds), settings, closedDates, hours,
+                schedule.clockNow());
     }
 
     /**
@@ -801,11 +805,9 @@ public class MarketplaceController {
     /**
      * The same storefront, from rows the list already loaded.
      *
-     * <p>STILL INSIDE THE SHOP'S SCOPE, and that is not ceremony. The hours
-     * and the zone still come from {@code ShopHoursService.forCurrentShop},
-     * which reads whichever shop the thread is in; only the settings row and
-     * the closure dates are handed in. Dropping the scope switch would give
-     * every shop in the list the first one's opening times.
+     * <p>NO SCOPE SWITCH OR DATABASE ACCESS. Hours are keyed by shop id from
+     * the same discovery result as settings and closures. DTO construction is
+     * pure in-memory work after the batch read transactions have completed.
      *
      * <p>A SHOP WITH NO ROW IN EITHER MAP IS NOT A BUG. Most shops have never
      * declared a closure and many have never touched their operations
@@ -814,10 +816,10 @@ public class MarketplaceController {
      */
     private StorefrontView view(Shop shop, Double distanceKm, Boolean deliversHere,
                                 ListReads reads) {
-        StoreStatus status = shopScope.within(shop.getId(),
-                () -> schedule.getStoreStatusAt(reads.at(),
-                        reads.settings().get(shop.getId()),
-                        reads.closedDates().get(shop.getId())));
+        StoreStatus status = schedule.getStoreStatusAt(reads.at(),
+                reads.settings().get(shop.getId()),
+                reads.closedDates().get(shop.getId()),
+                reads.hours().get(shop.getId()));
         return storefront(shop, distanceKm, deliversHere, status,
                 reads.stars().get(shop.getId()));
     }

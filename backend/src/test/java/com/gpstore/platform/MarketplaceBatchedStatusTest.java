@@ -4,6 +4,8 @@ import com.gpstore.store.DeliveryScheduleService;
 import com.gpstore.store.StoreOperationsService;
 import com.gpstore.store.StoreOrderAcceptance;
 import com.gpstore.store.StoreStatus;
+import com.gpstore.store.hours.ShopHours;
+import com.gpstore.store.hours.ShopHoursService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -18,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,6 +78,7 @@ class MarketplaceBatchedStatusTest {
     @Autowired private PlatformProperties platform;
     @Autowired private StoreOperationsService operations;
     @Autowired private DeliveryScheduleService schedule;
+    @Autowired private ShopHoursService shopHours;
 
     private final ObjectMapper json = new ObjectMapper();
     private final String tag = "batch" + System.nanoTime();
@@ -121,6 +125,8 @@ class MarketplaceBatchedStatusTest {
         for (long shop : List.of(openShop, pausedShop, closedShop)) {
             jdbc.update("DELETE FROM store_closures WHERE shop_id = ?", shop);
             jdbc.update("DELETE FROM store_operations_settings WHERE shop_id = ?", shop);
+            jdbc.update("DELETE FROM shop_hours_override WHERE shop_id = ?", shop);
+            jdbc.update("DELETE FROM shop_business_hours WHERE shop_id = ?", shop);
             jdbc.update("DELETE FROM delivery_pricing_settings WHERE shop_id = ?", shop);
             jdbc.update("DELETE FROM shops WHERE id = ?", shop);
         }
@@ -155,6 +161,48 @@ class MarketplaceBatchedStatusTest {
                     "closureReason for shop " + shopId
                             + " - a batch handing over the wrong row shows one shopkeeper's "
                             + "words on another's storefront");
+            assertEquals(String.valueOf(alone.deliveryDate()),
+                    textOrNull(drawn.get("nextDeliveryDate")),
+                    "nextDeliveryDate for shop " + shopId
+                            + " must use that shop's batched trading week and time zone");
+        }
+    }
+
+    @Test
+    @DisplayName("batched weekly and override rows remain attached to their own shops")
+    void tradingHoursDoNotCrossShopBoundaries() {
+        LocalDate monday = LocalDate.of(2030, 1, 7);
+        insertWeek(openShop, monday, "09:00", "10:00");
+        insertWeek(pausedShop, monday, "11:00", "12:00");
+        insertWeek(closedShop, monday, "13:00", "14:00");
+        insertOverride(openShop, monday.plusDays(1), "15:00", "16:00");
+        insertOverride(pausedShop, monday.plusDays(1), "17:00", "18:00");
+
+        List<Shop> found = shops.findAllById(List.of(openShop, pausedShop, closedShop));
+        Map<Long, ShopHours> batch = shopHours.forShops(found, monday, monday.plusDays(2));
+
+        assertEquals(LocalTime.of(9, 0), batch.get(openShop).on(monday).get(0).opensAt());
+        assertEquals(LocalTime.of(11, 0), batch.get(pausedShop).on(monday).get(0).opensAt());
+        assertEquals(LocalTime.of(13, 0), batch.get(closedShop).on(monday).get(0).opensAt());
+        assertEquals(LocalTime.of(15, 0),
+                batch.get(openShop).on(monday.plusDays(1)).get(0).opensAt());
+        assertEquals(LocalTime.of(17, 0),
+                batch.get(pausedShop).on(monday.plusDays(1)).get(0).opensAt());
+        assertTrue(batch.get(closedShop).on(monday.plusDays(1)).isEmpty(),
+                "an override belonging to a neighbouring shop must not appear here");
+    }
+
+    @Test
+    @DisplayName("marketplace list routes do not hold one transaction across DTO rendering")
+    void listControllersDoNotHoldAConnectionAcrossTheWholeRequest() throws Exception {
+        Class<?> controller = com.gpstore.platform.api.MarketplaceController.class;
+        for (String method : List.of("shopsNear", "nearbyShopsPage", "discover")) {
+            java.lang.reflect.Method endpoint = java.util.Arrays.stream(controller.getMethods())
+                    .filter(candidate -> candidate.getName().equals(method))
+                    .findFirst().orElseThrow();
+            assertFalse(endpoint.isAnnotationPresent(
+                            org.springframework.transaction.annotation.Transactional.class),
+                    method + " must release each bounded read transaction before rendering shops");
         }
     }
 
@@ -207,11 +255,31 @@ class MarketplaceBatchedStatusTest {
 
         long settingsCalls = callsMatching("store_operations_settings");
         long closureCalls = callsMatching("store_closures");
+        long weeklyCalls = callsMatching("shop_business_hours");
+        long overrideCalls = callsMatching("shop_hours_override");
 
         assertTrue(settingsCalls <= 2,
                 "one settings read for the whole list, not one per shop. Saw " + settingsCalls);
         assertTrue(closureCalls <= 2,
                 "one closures read for the whole list, not one per shop. Saw " + closureCalls);
+        assertTrue(weeklyCalls <= 2,
+                "one weekly-hours read for the whole list, not one per shop. Saw " + weeklyCalls);
+        assertTrue(overrideCalls <= 2,
+                "one override-hours read for the whole list, not one per shop. Saw " + overrideCalls);
+    }
+
+    private void insertWeek(long shopId, LocalDate day, String opens, String closes) {
+        jdbc.update("INSERT INTO shop_business_hours "
+                        + "(shop_id, day_of_week, opens_at, closes_at, created_at) "
+                        + "VALUES (?, ?, CAST(? AS time), CAST(? AS time), CURRENT_TIMESTAMP)",
+                shopId, day.getDayOfWeek().getValue(), opens, closes);
+    }
+
+    private void insertOverride(long shopId, LocalDate day, String opens, String closes) {
+        jdbc.update("INSERT INTO shop_hours_override "
+                        + "(shop_id, on_date, opens_at, closes_at, reason, created_at) "
+                        + "VALUES (?, ?, CAST(? AS time), CAST(? AS time), ?, CURRENT_TIMESTAMP)",
+                shopId, day, opens, closes, "Batch isolation " + tag);
     }
 
     private long callsMatching(String table) {

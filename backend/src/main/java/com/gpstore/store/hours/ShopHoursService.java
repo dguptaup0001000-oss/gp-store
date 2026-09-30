@@ -16,8 +16,10 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -106,6 +108,65 @@ public class ShopHoursService {
     }
 
     /**
+     * Loads every discovered storefront's trading hours in two bounded reads.
+     *
+     * <p>This is deliberately separate from {@link #forCurrentShop}: checkout
+     * and writes remain scoped to exactly one shop, while a public marketplace
+     * list has already resolved the precise shops it may expose. Calling the
+     * scoped cached method in a loop caused a cache miss and up to three SQL
+     * reads per shop. Worse, its {@code sync=true} cache lock was waited on
+     * while the controller still held a transaction connection. Under load
+     * all twenty Hikari connections became idle-in-transaction and useful CPU
+     * work stopped. This method performs no per-shop repository calls and
+     * returns detached value objects for transaction-free DTO computation.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, ShopHours> forShops(Collection<Shop> discovered,
+                                         LocalDate from, LocalDate to) {
+        if (discovered == null || discovered.isEmpty()) {
+            return Map.of();
+        }
+
+        LinkedHashMap<Long, Shop> byId = new LinkedHashMap<>();
+        for (Shop shop : discovered) {
+            if (shop != null && shop.getId() != null) {
+                byId.putIfAbsent(shop.getId(), shop);
+            }
+        }
+        if (byId.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, Map<DayOfWeek, List<ShopHours.OpenPeriod>>> weeks = new HashMap<>();
+        Map<Long, Map<LocalDate, List<ShopHours.OpenPeriod>>> byDates = new HashMap<>();
+        try {
+            for (ShopBusinessHours row : weekly.findForShops(byId.keySet())) {
+                weeks.computeIfAbsent(row.getShopId(), ignored -> new EnumMap<>(DayOfWeek.class))
+                        .computeIfAbsent(row.day(), ignored -> new ArrayList<>())
+                        .add(new ShopHours.OpenPeriod(row.getOpensAt(), row.getClosesAt()));
+            }
+            for (ShopHoursOverride row : overrides.findBetweenForShops(byId.keySet(), from, to)) {
+                byDates.computeIfAbsent(row.getShopId(), ignored -> new HashMap<>())
+                        .computeIfAbsent(row.getOnDate(), ignored -> new ArrayList<>())
+                        .add(new ShopHours.OpenPeriod(row.getOpensAt(), row.getClosesAt()));
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Could not batch-read marketplace shop hours; using deployment hours for "
+                    + "this storefront list: {}", ex.toString());
+            Map<Long, ShopHours> fallback = new LinkedHashMap<>();
+            byId.forEach((id, shop) -> fallback.put(id,
+                    ShopHours.of(zoneOf(shop), Map.of(), Map.of(), properties)));
+            return Map.copyOf(fallback);
+        }
+
+        Map<Long, ShopHours> result = new LinkedHashMap<>();
+        byId.forEach((id, shop) -> result.put(id, ShopHours.of(zoneOf(shop),
+                weeks.getOrDefault(id, Map.of()),
+                byDates.getOrDefault(id, Map.of()), properties)));
+        return Map.copyOf(result);
+    }
+
+    /**
      * Called after any write that changes what {@link #forCurrentShop} would
      * answer: the week, an override, or the shop's zone.
      *
@@ -133,6 +194,15 @@ public class ShopHoursService {
             return properties.getZone();
         }
         String named = shops.findById(scope.shopId()).map(Shop::getTimeZone).orElse(null);
+        return zoneOf(scope.shopId(), named);
+    }
+
+    private ZoneId zoneOf(Shop shop) {
+        return zoneOf(shop == null ? null : shop.getId(),
+                shop == null ? null : shop.getTimeZone());
+    }
+
+    private ZoneId zoneOf(Long shopId, String named) {
         if (named == null || named.isBlank()) {
             return properties.getZone();
         }
@@ -140,7 +210,7 @@ public class ShopHoursService {
             return ZoneId.of(named.trim());
         } catch (java.time.DateTimeException unknown) {
             log.warn("Shop {} names time zone '{}', which this JVM does not know; using {}.",
-                    scope.shopId(), named, properties.getZone());
+                    shopId, named, properties.getZone());
             return properties.getZone();
         }
     }

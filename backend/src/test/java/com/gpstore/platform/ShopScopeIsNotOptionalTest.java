@@ -371,6 +371,8 @@ class ShopScopeIsNotOptionalTest {
             // asserted equal to its own scoped read.
             "StoreOperationsSettingsRepository.findForShops",
             "StoreClosureRepository.findBetweenForShops",
+            "ShopBusinessHoursRepository.findForShops",
+            "ShopHoursOverrideRepository.findBetweenForShops",
 
             // THE OTHER DIRECTION, AND THE SAME REASON IT CANNOT BE FILTERED.
             // "Who works in this shop" is asked by the new-order dispatcher,

@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 
 public interface ShopHoursOverrideRepository extends JpaRepository<ShopHoursOverride, Long> {
@@ -26,4 +27,13 @@ public interface ShopHoursOverrideRepository extends JpaRepository<ShopHoursOver
     List<ShopHoursOverride> findUpcoming(@Param("from") LocalDate from);
 
     List<ShopHoursOverride> findByOnDate(LocalDate onDate);
+
+    /** See {@link ShopBusinessHoursRepository#findForShops(Collection)}. */
+    @Query(value = "SELECT * FROM shop_hours_override "
+            + "WHERE shop_id IN (:shopIds) AND on_date >= :from AND on_date <= :to "
+            + "ORDER BY shop_id, on_date, opens_at", nativeQuery = true)
+    List<ShopHoursOverride> findBetweenForShops(
+            @Param("shopIds") Collection<Long> shopIds,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to);
 }
