@@ -32,6 +32,16 @@ void main() {
       expect(refreshed, object);
     });
 
+    test('signed cache identity preserves a URL fragment without an empty query', () {
+      const source =
+          'https://bucket.r2.cloudflarestorage.com/products/salt.png?X-Amz-Signature=aaa#hero';
+
+      expect(
+        GpNetworkImage.stableCacheKeyFor(source),
+        'https://bucket.r2.cloudflarestorage.com/products/salt.png#hero',
+      );
+    });
+
     test('ordinary query parameters remain part of the cache identity', () {
       const first = 'https://images.example.test/product?id=1';
       const second = 'https://images.example.test/product?id=2';

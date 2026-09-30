@@ -195,9 +195,18 @@ class GpNetworkImage extends StatelessWidget {
     final signed = keys.contains('x-amz-signature') ||
         keys.contains('x-amz-credential') ||
         keys.contains('x-amz-security-token');
-    return signed
-        ? uri.replace(queryParameters: const <String, String>{}).toString()
-        : source;
+    if (!signed) return source;
+
+    // Uri.replace(query: '') and an empty queryParameters map both serialize
+    // as a trailing `?` on the Dart version used by the Android release job.
+    // Slice only the query component so the cache identity is byte-for-byte
+    // the original object URL while a (rare but valid) fragment is preserved.
+    final queryStart = source.indexOf('?');
+    if (queryStart < 0) return source;
+    final fragmentStart = source.indexOf('#', queryStart + 1);
+    return fragmentStart < 0
+        ? source.substring(0, queryStart)
+        : '${source.substring(0, queryStart)}${source.substring(fragmentStart)}';
   }
 
   /// One shape for "still coming" and "never coming".
