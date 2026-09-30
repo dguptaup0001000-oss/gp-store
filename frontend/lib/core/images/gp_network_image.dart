@@ -195,7 +195,9 @@ class GpNetworkImage extends StatelessWidget {
     final signed = keys.contains('x-amz-signature') ||
         keys.contains('x-amz-credential') ||
         keys.contains('x-amz-security-token');
-    return signed ? uri.replace(query: '').toString() : source;
+    return signed
+        ? uri.replace(queryParameters: const <String, String>{}).toString()
+        : source;
   }
 
   /// One shape for "still coming" and "never coming".
