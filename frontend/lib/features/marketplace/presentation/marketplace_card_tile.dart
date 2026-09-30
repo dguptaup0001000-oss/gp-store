@@ -270,7 +270,7 @@ class _MarketplaceVisualPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = <Color>[
-      AppColors.marketplaceGoldSoft,
+      AppColors.cream,
       AppColors.primary.withValues(alpha: .10),
       AppColors.secondary.withValues(alpha: .12),
       AppColors.gold.withValues(alpha: .16),
