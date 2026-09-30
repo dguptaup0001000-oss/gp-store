@@ -182,7 +182,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                 ? productGallery
                                 : (fallback != null ? <String>[fallback] : const <String>[]);
 
-                        return ProductImageGallery(imageUrls: urls);
+                        return ProductImageGallery(
+                          imageUrls: urls,
+                          placeholderSeed: product.name,
+                        );
                       },
                     ),
                     // Directly under the gallery: this is an alternative way
