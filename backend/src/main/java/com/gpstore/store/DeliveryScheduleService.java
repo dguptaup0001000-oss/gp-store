@@ -203,6 +203,26 @@ public class DeliveryScheduleService {
                 theirs.getClosureMessage(), theirs.pauseEndsAt(local));
     }
 
+    /**
+     * The batched-list form: every database row, including trading hours, was
+     * loaded before DTO rendering began. No repository or cache access occurs
+     * here, so a caller cannot hold a transaction connection while waiting on
+     * a synchronized cache loader for another storefront.
+     */
+    public StoreStatus getStoreStatusAt(Instant at, StoreOperationsSettings settings,
+                                        java.util.Set<LocalDate> closedDates,
+                                        ShopHours hours) {
+        StoreOperationsSettings theirs = settings == null ? new StoreOperationsSettings() : settings;
+        java.util.Set<LocalDate> closed = closedDates == null ? java.util.Set.of() : closedDates;
+        ShopHours effectiveHours = hours == null
+                ? ShopHours.deploymentDefault(properties) : hours;
+        DeliverySchedule schedule = new DeliverySchedule(properties, effectiveHours,
+                closed::contains);
+        java.time.LocalDateTime local = at.atZone(schedule.zone()).toLocalDateTime();
+        return schedule.status(at, theirs.effectiveAcceptance(local),
+                theirs.getClosureMessage(), theirs.pauseEndsAt(local));
+    }
+
     /** Now, for a caller batching {@link #getStoreStatusAt(Instant, StoreOperationsSettings, java.util.Set)}. */
     public Instant clockNow() {
         return now();

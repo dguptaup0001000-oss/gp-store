@@ -268,8 +268,8 @@ export function setup() {
   // Prove the marketplace is actually populated before measuring anything
   // against it. An empty dataset produces beautiful latencies.
   const p = { lat: (LAT_MIN + LAT_MAX) / 2, lng: (LNG_MIN + LNG_MAX) / 2 };
-  const probe = http.get(`${BASE_URL}/api/marketplace/shops?lat=${p.lat}&lng=${p.lng}`);
-  const shops = probe.status === 200 ? probe.json() : [];
+  const probe = http.get(`${BASE_URL}/api/marketplace/shops/page?lat=${p.lat}&lng=${p.lng}&page=0&size=50`);
+  const shops = probe.status === 200 ? probe.json('shops') : [];
   if (!shops || shops.length === 0) {
     throw new Error('No shops serve the centre of the test area - is the marketplace seeded?');
   }
@@ -280,11 +280,11 @@ export function browse(data) {
   const where = pin();
 
   // 1. A customer opens the app: which shops deliver to me?
-  const near = get(`/api/marketplace/shops?lat=${where.lat}&lng=${where.lng}`, 'discovery');
+  const near = get(`/api/marketplace/shops/page?lat=${where.lat}&lng=${where.lng}&page=0&size=50`, 'discovery');
   let shopIds = data.sampleShops;
   if (near.status === 200) {
     try {
-      const list = near.json();
+      const list = near.json('shops');
       if (list && list.length) shopIds = list.map((s) => s.shopId);
     } catch (e) { /* a shed or throttled response has no list; fall back */ }
   }
