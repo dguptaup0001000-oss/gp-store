@@ -384,3 +384,114 @@ final marketplaceCategoryFeedProvider = StateNotifierProvider.autoDispose
     shopId: shopId,
   );
 });
+
+
+/// Infinite nearby results for one product family, such as Salt, Phones or
+/// Namkeen. This deliberately uses the marketplace-wide search endpoint:
+/// product names, catalogue subcategory/search keywords and category all
+/// participate, so the result is not tied to whichever shop happened to
+/// provide the card the customer tapped.
+class MarketplaceFamilyFeedController
+    extends StateNotifier<MarketplaceHomeAllFeedState> {
+  MarketplaceFamilyFeedController({
+    required Ref ref,
+    required String query,
+    required ({double lat, double lng})? pin,
+    required int? shopId,
+  })  : _ref = ref,
+        _query = query.trim(),
+        _pin = pin,
+        _shopId = shopId,
+        super(MarketplaceHomeAllFeedState(isLoading: pin != null)) {
+    if (pin != null && _query.isNotEmpty) {
+      unawaited(_load(0, replace: true));
+    }
+  }
+
+  static const pageSize = 18;
+  final Ref _ref;
+  final String _query;
+  final ({double lat, double lng})? _pin;
+  final int? _shopId;
+  final Set<String> _seen = <String>{};
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  Future<void> _load(int page, {required bool replace}) async {
+    final before = state;
+    if (replace) {
+      _seen.clear();
+      state = const MarketplaceHomeAllFeedState(isLoading: true);
+    } else {
+      if (before.isLoading || before.isLoadingMore || !before.hasNext) return;
+      state = MarketplaceHomeAllFeedState(
+        cards: before.cards,
+        nextPage: before.nextPage,
+        hasNext: before.hasNext,
+        isLoadingMore: true,
+      );
+    }
+
+    try {
+      final pin = _pin;
+      final cards = pin == null
+          ? const <MarketplaceCard>[]
+          : await _ref.read(marketplaceRepositoryProvider).search(
+                query: _query,
+                latitude: pin.lat,
+                longitude: pin.lng,
+                // A family was opened from a Buy Online card. Keep the family
+                // a shelf of buyable products; Visit-to-Buy and Services have
+                // their own discovery surfaces and must not be silently mixed
+                // into an "all salt/all phones" purchase grid.
+                mode: CommerceMode.buyOnline,
+                shopId: _shopId,
+                page: page,
+                size: pageSize,
+              );
+      if (_disposed) return;
+      final fresh = <MarketplaceCard>[];
+      for (final card in cards) {
+        if (_seen.add(card.feedKey)) fresh.add(card);
+      }
+      state = MarketplaceHomeAllFeedState(
+        cards: replace ? fresh : [...before.cards, ...fresh],
+        nextPage: page + 1,
+        hasNext: cards.length == pageSize,
+      );
+    } catch (error) {
+      if (_disposed) return;
+      state = MarketplaceHomeAllFeedState(
+        cards: replace ? const [] : before.cards,
+        nextPage: page,
+        hasNext: replace ? true : before.hasNext,
+        error: error,
+      );
+    }
+  }
+
+  Future<void> loadMore() => _load(state.nextPage, replace: false);
+
+  Future<void> retry() => _load(
+        state.cards.isEmpty ? 0 : state.nextPage,
+        replace: state.cards.isEmpty,
+      );
+}
+
+final marketplaceFamilyFeedProvider = StateNotifierProvider.autoDispose
+    .family<MarketplaceFamilyFeedController, MarketplaceHomeAllFeedState,
+        String>((ref, query) {
+  final pin = ref.watch(deliveryPinProvider);
+  final shopId = ref.watch(marketplaceShopFilterProvider);
+  return MarketplaceFamilyFeedController(
+    ref: ref,
+    query: query,
+    pin: pin,
+    shopId: shopId,
+  );
+});

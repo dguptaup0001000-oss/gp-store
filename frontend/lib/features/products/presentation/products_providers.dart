@@ -58,6 +58,25 @@ final productDetailProvider = FutureProvider.autoDispose.family<Product, int>((r
   return ref.watch(productsRepositoryProvider).fetchProductDetail(productId);
 });
 
+/// Marketplace detail keeps the seller/shop that produced the card.
+///
+/// Product ids are central-catalogue ids, but price, stock and cart authority
+/// are shop-specific. Dropping shopId between the marketplace card and the
+/// detail request silently falls back to another storefront; the picture may
+/// still look right while Add to Cart is rejected. Keep the ordinary provider
+/// above for legacy/single-shop call sites and use this one only when a
+/// marketplace card names a seller.
+typedef MarketplaceProductDetailKey = ({int productId, int? shopId});
+
+final marketplaceProductDetailProvider =
+    FutureProvider.autoDispose.family<Product, MarketplaceProductDetailKey>(
+        (ref, key) {
+  return ref.watch(productsRepositoryProvider).fetchProductDetail(
+        key.productId,
+        shopId: key.shopId,
+      );
+});
+
 /// Other products in the same category - the "Similar products" strip.
 ///
 /// Category rather than frequently-bought-together: co-purchase data is
