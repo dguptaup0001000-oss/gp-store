@@ -445,6 +445,11 @@ class MarketplaceFamilyFeedController
                 query: _query,
                 latitude: pin.lat,
                 longitude: pin.lng,
+                // A family was opened from a Buy Online card. Keep the family
+                // a shelf of buyable products; Visit-to-Buy and Services have
+                // their own discovery surfaces and must not be silently mixed
+                // into an "all salt/all phones" purchase grid.
+                mode: CommerceMode.buyOnline,
                 shopId: _shopId,
                 page: page,
                 size: pageSize,
