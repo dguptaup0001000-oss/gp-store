@@ -28,6 +28,7 @@ every collection, and summarise-gc.py reads it afterwards for free.
 """
 
 import argparse
+import csv
 import os
 import subprocess
 import sys
@@ -71,6 +72,21 @@ def pg_counts(db):
         return '0,0,0'
 
 
+def pg_active_queries(db):
+    """Return active statements with concurrency and oldest age for diagnosis."""
+    sql = ("SELECT count(*), round(max(extract(epoch from (clock_timestamp()-query_start))*1000)), "
+           "left(regexp_replace(query, E'\\\\s+', ' ', 'g'), 500) "
+           "FROM pg_stat_activity WHERE datname='" + db + "' AND state='active' "
+           "AND pid <> pg_backend_pid() GROUP BY query ORDER BY count(*) DESC, 2 DESC LIMIT 5")
+    try:
+        out = subprocess.run(['psql', '-U', os.environ.get('PGUSER', 'u0_a470'),
+                              '-d', db, '-tA', '-F', '\t', '-c', sql],
+                             capture_output=True, text=True, timeout=5)
+        return [line.split('\t', 2) for line in out.stdout.splitlines() if line.strip()]
+    except Exception:
+        return []
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--pid', type=int, required=True)
@@ -86,6 +102,10 @@ def main():
     last_time = started
 
     with open(args.out, 'w', buffering=1) as out:
+        query_path = args.out.rsplit('.', 1)[0] + '-queries.csv'
+        query_out = open(query_path, 'w', buffering=1, newline='')
+        query_csv = csv.writer(query_out)
+        query_csv.writerow(['t', 'active_count', 'oldest_ms', 'query'])
         out.write('t,cpu_pct,cores,rss_mb,threads,load1,pg_total,pg_active,pg_idle_tx\n')
         while True:
             time.sleep(args.interval)
@@ -103,7 +123,10 @@ def main():
             load1 = os.getloadavg()[0]
             out.write('%.1f,%.1f,%d,%.0f,%d,%.2f,%s\n'
                       % (now - started, cpu, cores, rss, threads, load1, pg_counts(args.db)))
+            for count, oldest, query in pg_active_queries(args.db):
+                query_csv.writerow(['%.1f' % (now - started), count, oldest, query])
             if args.duration and (now - started) >= args.duration:
+                query_out.close()
                 return 0
 
 

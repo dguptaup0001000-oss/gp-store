@@ -14,6 +14,7 @@ on:
       - perf/verify-marketplace-hours
     paths:
       - '.github/workflows/final-capacity-1k4k.yml'
+      - 'load-tests/sample-resources.py'
 
 permissions:
   contents: read
