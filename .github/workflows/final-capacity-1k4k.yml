@@ -16,6 +16,7 @@ on:
       - '.github/workflows/final-capacity-1k4k.yml'
       - 'load-tests/sample-resources.py'
       - 'backend/src/main/java/com/gpstore/catalog/shop/MarketplaceFeedRepository.java'
+      - 'backend/src/main/java/com/gpstore/platform/api/MarketplaceFeedService.java'
       - 'load-tests/marketplace-traffic.js'
 
 permissions:
