@@ -286,18 +286,6 @@ public class TenantContextFilter extends OncePerRequestFilter {
      * path is not - a row inserted with no scope under a marketplace now
      * fails loudly instead of landing in whichever shop the default named.
      */
-    private static boolean customerNotificationPath(String path) {
-        if (path == null) return false;
-        if (path.equals("/api/notifications/mine")
-                || path.equals("/api/notifications/unread-count")
-                || path.equals("/api/notifications/read-all")) {
-            return true;
-        }
-        // Customer-owned single-row actions only. Keep admin broadcast/list
-        // routes shop/platform-authorized exactly as they are.
-        return path.matches("^/api/notifications/[0-9]+(?:/read)?$");
-    }
-
     private static boolean spansEveryShop(HttpServletRequest request) {
         String path = com.gpstore.config.RequestPath.of(request);
         return path.startsWith("/api/auth/")
@@ -319,17 +307,6 @@ public class TenantContextFilter extends OncePerRequestFilter {
                 // on the first screen. These routes read shops and nothing
                 // shop-owned - see MarketplaceController.
                 || path.startsWith("/api/marketplace/")
-                // CUSTOMER NOTIFICATIONS BELONG TO THE CUSTOMER, NOT TO THE
-                // SHOP THEY HAPPEN TO BE BROWSING RIGHT NOW. A customer's
-                // history can contain order notifications from many shops.
-                // Running these ownership-checked customer routes inside one
-                // shop scope makes Hibernate materialise an Order from a
-                // different shop and TenantEntityListener correctly refuses
-                // it as cross-shop, surfacing as a misleading 404 "Not found".
-                // Platform scope here widens only the tenant filter; every
-                // route below still keys ownership from CurrentUser.customerId
-                // and never accepts a client-supplied customer id.
-                || customerNotificationPath(path)
                 // AND NEITHER CAN SAVING THE ADDRESS THAT FINDS ONE.
                 //
                 // THE DEADLOCK THIS BREAKS, found by running a real
