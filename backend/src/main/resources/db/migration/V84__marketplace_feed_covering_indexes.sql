@@ -11,7 +11,7 @@
 
 CREATE INDEX IF NOT EXISTS idx_spv_marketplace_shop_candidates
     ON shop_product_variants
-       (shop_id, commerce_mode, product_variant_id, selling_price, id)
+       (shop_id, product_variant_id, commerce_mode, selling_price, id)
     WHERE available = true
       AND COALESCE(active, true) = true
       AND selling_price IS NOT NULL
