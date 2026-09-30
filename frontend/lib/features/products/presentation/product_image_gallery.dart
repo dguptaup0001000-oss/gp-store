@@ -18,11 +18,19 @@ import '../../../core/images/gp_network_image.dart';
 /// image, not all five. Swiping fetches the next on demand, and
 /// GpNetworkImage's cache keeps it for the rest of the session.
 class ProductImageGallery extends StatefulWidget {
-  const ProductImageGallery({super.key, required this.imageUrls});
+  const ProductImageGallery({
+    super.key,
+    required this.imageUrls,
+    this.placeholderSeed,
+  });
 
-  /// Gallery images in display order. May be empty - the caller decides what
-  /// to show instead (usually the variant thumbnail).
+  /// Gallery images in display order. May be empty.
   final List<String> imageUrls;
+
+  /// Stable label used only to vary the temporary local illustration when a
+  /// test/catalogue product has no photo yet. It is never shown as a claimed
+  /// product photograph and never triggers an external image request.
+  final String? placeholderSeed;
 
   @override
   State<ProductImageGallery> createState() => _ProductImageGalleryState();
@@ -51,7 +59,7 @@ class _ProductImageGalleryState extends State<ProductImageGallery> {
   Widget build(BuildContext context) {
     final urls = widget.imageUrls;
     if (urls.isEmpty) {
-      return const _GalleryPlaceholder();
+      return _GalleryPlaceholder(seed: widget.placeholderSeed);
     }
 
     return Column(
@@ -178,19 +186,52 @@ class _Dots extends StatelessWidget {
 }
 
 class _GalleryPlaceholder extends StatelessWidget {
-  const _GalleryPlaceholder();
+  const _GalleryPlaceholder({this.seed});
+
+  final String? seed;
+
+  IconData _icon() {
+    final text = (seed ?? '').toLowerCase();
+    if (text.contains('salt') || text.contains('namak')) {
+      return Icons.restaurant_rounded;
+    }
+    if (text.contains('phone') || text.contains('mobile') || text.contains('iphone')) {
+      return Icons.smartphone_rounded;
+    }
+    if (text.contains('laptop') || text.contains('computer')) {
+      return Icons.laptop_rounded;
+    }
+    if (text.contains('apple') || text.contains('fruit')) {
+      return Icons.eco_rounded;
+    }
+    if (text.contains('soap') || text.contains('shampoo')) {
+      return Icons.spa_rounded;
+    }
+    return Icons.shopping_bag_rounded;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final hash = (seed ?? 'gp-store').hashCode.abs();
+    final palette = <Color>[
+      AppColors.cream,
+      AppColors.mist,
+      AppColors.primary.withValues(alpha: .10),
+      AppColors.highlight.withValues(alpha: .20),
+    ];
     return AspectRatio(
       aspectRatio: 1,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: AppColors.cardBackground,
+          color: palette[hash % palette.length],
           borderRadius: BorderRadius.circular(AppRadius.lg),
         ),
-        child: const Center(
-          child: Icon(Icons.shopping_basket_outlined, size: 48, color: AppColors.textSecondary),
+        child: Center(
+          child: Icon(
+            _icon(),
+            size: 72,
+            color: AppColors.primary.withValues(alpha: .72),
+          ),
         ),
       ),
     );
