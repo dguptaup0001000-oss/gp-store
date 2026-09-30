@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/customer_surface_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
 import '../../../shared/widgets/cart_summary_bar.dart';
 import '../../../shared/widgets/scroll_to_top.dart';
@@ -29,9 +30,10 @@ class MarketplaceCategoryProductsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final pin = ref.watch(deliveryPinProvider);
     final selectedShop = ref.watch(marketplaceShopFilterProvider);
+    final ground = ref.watch(customerSurfaceThemeProvider).ground;
 
     return Scaffold(
-      backgroundColor: AppColors.marketplaceGround,
+      backgroundColor: ground,
       appBar: AppBar(
         titleSpacing: 0,
         title: Column(
