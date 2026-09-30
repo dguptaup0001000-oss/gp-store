@@ -41,7 +41,12 @@ class MarketplaceCardActions {
           .fetchProductDetail(card.productId, shopId: card.shopId);
       if (!context.mounted) return;
       await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
+        MaterialPageRoute(
+          builder: (_) => ProductDetailScreen(
+            product: product,
+            shopId: card.shopId,
+          ),
+        ),
       );
     } catch (error) {
       if (!context.mounted) return;
