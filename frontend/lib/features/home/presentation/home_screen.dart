@@ -1,6 +1,5 @@
 import '../../marketplace/presentation/marketplace_drawer.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
-import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/customer_surface_theme.dart';
 import '../../marketplace/domain/marketplace_feed_models.dart';
 import '../../marketplace/presentation/marketplace_card_actions.dart';
