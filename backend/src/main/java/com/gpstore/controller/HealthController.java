@@ -92,8 +92,8 @@ public class HealthController {
 
     /**
      * Capacity snapshot for a load test. No secrets, no SQL, no env.
-     * VPS host CPU/RAM are not visible from inside this JVM — use Hostinger
-     * hPanel or {@code docker stats} over SSH for those.
+     * Includes JVM and host resource snapshots where the JDK exposes them, so
+     * a capacity sampler can align application load, pool pressure and GC.
      */
     @GetMapping("/api/health/runtime")
     public Map<String, Object> runtime() {
@@ -104,6 +104,23 @@ public class HealthController {
         body.put("processors", rt.availableProcessors());
         body.put("threadCount",
                 java.lang.management.ManagementFactory.getThreadMXBean().getThreadCount());
+        long gcCount = 0;
+        long gcTimeMs = 0;
+        for (java.lang.management.GarbageCollectorMXBean gc
+                : java.lang.management.ManagementFactory.getGarbageCollectorMXBeans()) {
+            if (gc.getCollectionCount() >= 0) gcCount += gc.getCollectionCount();
+            if (gc.getCollectionTime() >= 0) gcTimeMs += gc.getCollectionTime();
+        }
+        body.put("gcCount", gcCount);
+        body.put("gcTimeMs", gcTimeMs);
+        java.lang.management.OperatingSystemMXBean os =
+                java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+        if (os instanceof com.sun.management.OperatingSystemMXBean extendedOs) {
+            body.put("systemCpuLoad", extendedOs.getCpuLoad());
+            body.put("processCpuLoad", extendedOs.getProcessCpuLoad());
+            body.put("systemMemoryTotalMb", extendedOs.getTotalMemorySize() / (1024 * 1024));
+            body.put("systemMemoryFreeMb", extendedOs.getFreeMemorySize() / (1024 * 1024));
+        }
         HikariDataSource hikari = unwrapHikari();
         if (hikari != null) {
             body.put("hikariMax", hikari.getMaximumPoolSize());

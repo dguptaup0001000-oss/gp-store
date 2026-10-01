@@ -9,7 +9,7 @@
 # that falls behind - do not appear in a sixty-second window.
 #
 #   BASE_URL=http://127.0.0.1:8081/v1 APP_PID=1234 OUT_DIR=/tmp/run \
-#     STAGES="100 250 500 1000 2000 3000 4000" SOAK_VUS=4000 SOAK_TIME=5m \
+#     STAGES="1000 2000 3000 4000" SOAK_VUS=4000 SOAK_TIME=5m \
 #     ./run-marketplace-capacity.sh
 #
 # ESCALATION STOPS AT THE FIRST UNHEALTHY STAGE, unless CONTINUE_ON_FAIL=1.
@@ -20,15 +20,13 @@
 # script still exits non-zero.
 # The ladder exists to find a
 # ceiling, and climbing past a broken rung measures nothing except how much
-# worse it gets. A stage is unhealthy on the gates in marketplace-traffic.js:
-# 502, unexpected 503, 500, unexpected 4xx, network error, or p95/p99 over
-# budget. Deliberate refusals - 429 and shed 503 - are counted and reported
-# but do not stop the ladder, because refusing work under pressure is the
-# application behaving correctly.
+# worse it gets. A stage is unhealthy below 95% served, or with any 500/502,
+# unexpected 503/4xx, network error, tenant leak, or p95/p99 over budget.
+# Deliberate refusals still count as unserved against the 95% floor.
 set -uo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8081/v1}"
-STAGES="${STAGES:-100 250 500 1000 2000 3000 4000}"
+STAGES="${STAGES:-1000 2000 3000 4000}"
 HOLD_TIME="${HOLD_TIME:-60s}"
 RAMP_TIME="${RAMP_TIME:-20s}"
 SOAK_VUS="${SOAK_VUS:-0}"

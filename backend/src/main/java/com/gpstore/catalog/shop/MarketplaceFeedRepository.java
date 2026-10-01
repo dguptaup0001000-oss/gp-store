@@ -283,11 +283,34 @@ public class MarketplaceFeedRepository {
                                  Map<Long, Double> distanceByShop,
                                  int limit,
                                  int offset) {
+        return search(List.of(keyword == null ? "" : keyword), shopIds, modes,
+                distanceByShop, limit, offset);
+    }
+
+    /**
+     * Match one or more whole-query alternatives in one database plan. Search
+     * synonyms used to run the complete expensive search once for the
+     * canonical phrase, then again for the literal phrase whenever the first
+     * returned nothing. Progressive radius search multiplied that fallback
+     * by every radius rung. Treating the phrases as alternatives keeps the
+     * same useful matches while doing one round trip per rung.
+     */
+    public List<Object[]> search(Collection<String> keywords,
+                                 Collection<Long> shopIds,
+                                 Collection<CommerceMode> modes,
+                                 Map<Long, Double> distanceByShop,
+                                 int limit,
+                                 int offset) {
         if (shopIds == null || shopIds.isEmpty() || modes == null || modes.isEmpty()) {
             return List.of();
         }
-        List<String> words = wordsOf(keyword);
-        if (words.isEmpty()) {
+        List<List<String>> alternatives = keywords == null ? List.of() : keywords.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(MarketplaceFeedRepository::wordsOf)
+                .filter(words -> !words.isEmpty())
+                .distinct()
+                .toList();
+        if (alternatives.isEmpty()) {
             return List.of();
         }
 
@@ -296,23 +319,18 @@ public class MarketplaceFeedRepository {
         args.add(near.shopIds());
         args.add(near.distances());
 
-        // EVERY WORD MUST MATCH SOMETHING. "blue saree" should not return
-        // every saree and everything blue - a customer who typed two words
-        // meant both of them.
-        StringBuilder productMatches = new StringBuilder();
-        StringBuilder shopMatches = new StringBuilder();
-        for (int i = 0; i < words.size(); i++) {
-            if (i > 0) {
-                productMatches.append(" AND ");
-                shopMatches.append(" AND ");
-            }
-            productMatches.append("""
-                    (p.name ILIKE ? OR p.brand ILIKE ? OR c.name ILIKE ?
-                     OR p.search_keywords ILIKE ? OR p.subcategory ILIKE ?
-                     OR v.sku ILIKE ? OR v.barcode ILIKE ? OR v.unit ILIKE ?)
-                    """);
-            shopMatches.append("s.display_name ILIKE ?");
-        }
+        // All words in one phrase must match, while phrases are synonyms and
+        // therefore alternatives: "chini" can match a catalog entry called
+        // "sugar" without a second copy of this query being executed.
+        String productMatches = alternatives.stream().map(words -> "(" +
+                String.join(" AND ", java.util.Collections.nCopies(words.size(), """
+                        (p.name ILIKE ? OR p.brand ILIKE ? OR c.name ILIKE ?
+                         OR p.search_keywords ILIKE ? OR p.subcategory ILIKE ?
+                         OR v.sku ILIKE ? OR v.barcode ILIKE ? OR v.unit ILIKE ?)
+                        """)) + ")").collect(java.util.stream.Collectors.joining(" OR "));
+        String shopMatches = alternatives.stream().map(words -> "(" +
+                String.join(" AND ", java.util.Collections.nCopies(words.size(), "s.display_name ILIKE ?")) + ")")
+                .collect(java.util.stream.Collectors.joining(" OR "));
 
         // Keep the same late-enrichment boundary as page(): search matching
         // and representative selection decide the page, then only the bounded
@@ -448,19 +466,14 @@ public class MarketplaceFeedRepository {
                 """.formatted(productMatches, shopMatches,
                         placeholders(modes.size()));
 
-        for (String word : words) {
-            String like = "%" + word + "%";
-            args.add(like);
-            args.add(like);
-            args.add(like);
-            args.add(like);
-            args.add(like);
-            args.add(like);
-            args.add(like);
-            args.add(like);
+        for (List<String> words : alternatives) {
+            for (String word : words) {
+                String like = "%" + word + "%";
+                for (int i = 0; i < 8; i++) args.add(like);
+            }
         }
-        for (String word : words) {
-            args.add("%" + word + "%");
+        for (List<String> words : alternatives) {
+            for (String word : words) args.add("%" + word + "%");
         }
         for (CommerceMode mode : modes) {
             args.add(mode.name());

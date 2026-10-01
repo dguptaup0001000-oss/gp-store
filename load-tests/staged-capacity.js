@@ -12,16 +12,15 @@
 //   BASE_URL=http://localhost:8081/v1 VUS=10 HOLD_TIME=20s k6 run staged-capacity.js
 //
 // Pass/fail (hard gates — a failed stage must not continue):
+//   - at least 95% of all requests receive HTTP 2xx
 //   - p95 < 2s on catalog reads
 //   - p99 < 4s
-//   - status_502 == 0
-//   - status_503_unexpected == 0 (liveness 503, not catalog shed)
-//   - status_network_error == 0
+//   - zero real faults (network errors, unexpected statuses, 429, 5xx)
 //
-// Catalog GET 503 from PoolSaturationFilter is counted as status_503_shed
-// and does NOT fail the stage. That is the app refusing browse work so
-// checkout can keep a connection. A 502 is still a hard stop: the proxy
-// gave up, which is not intentional shedding.
+// Catalog GET 503 from PoolSaturationFilter is counted as status_503_shed:
+// intentional refusal is not a server fault, but it still counts as an
+// unserved request and can fail the 95% capacity gate. That preserves the
+// distinction between safe shedding and actual customer capacity.
 //
 // Each VU behaves like a shopper: category list → a product page → 10%
 // search, with 1.5–4s think time. Health is probed once in setup(), not
@@ -32,7 +31,7 @@
 
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { Counter, Trend } from 'k6/metrics';
+import { Counter, Rate, Trend } from 'k6/metrics';
 
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8081/v1').replace(/\/$/, '');
 const VUS = Number(__ENV.VUS || 10);
@@ -43,6 +42,8 @@ const status503Shed = new Counter('status_503_shed');
 const status503Unexpected = new Counter('status_503_unexpected');
 const statusNetworkError = new Counter('status_network_error');
 const status429 = new Counter('status_429');
+const requestsServed = new Rate('requests_served');
+const realFaults = new Counter('real_faults');
 const bytesReceived = new Counter('response_bytes');
 const browseDuration = new Trend('browse_duration', true);
 
@@ -54,8 +55,14 @@ function isCatalogShed(res) {
   return body.indexOf('POOL_SATURATED') >= 0 || body.indexOf('The shop is busy') >= 0;
 }
 
-function record(res, catalog) {
+function record(res, catalog, countForCapacity = true) {
   bytesReceived.add(res.body ? res.body.length : 0);
+  const served = res.status >= 200 && res.status < 300;
+  const shed = catalog && isCatalogShed(res);
+  if (countForCapacity) {
+    requestsServed.add(served);
+    if (!served && !shed) realFaults.add(1);
+  }
   if (res.status === 0) statusNetworkError.add(1);
   else if (res.status === 502) status502.add(1);
   else if (res.status === 429) status429.add(1);
@@ -74,6 +81,8 @@ export const options = {
     },
   },
   thresholds: {
+    requests_served: ['rate>=0.95'],
+    real_faults: ['count==0'],
     'http_req_duration{name:categories}': ['p(95)<2000', 'p(99)<4000'],
     'http_req_duration{name:browse_category}': ['p(95)<2000', 'p(99)<4000'],
     status_502: ['count==0'],
@@ -90,14 +99,14 @@ http.setResponseCallback(
 
 export function setup() {
   const health = http.get(`${BASE_URL}/api/health`, { tags: { name: 'liveness' } });
-  record(health, false);
+  record(health, false, false);
   check(health, { 'setup liveness 200': (r) => r.status === 200 });
   if (health.status !== 200) {
     throw new Error(`liveness failed with HTTP ${health.status} - refusing to start a load stage`);
   }
 
   const cats = http.get(`${BASE_URL}/api/categories`, { tags: { name: 'categories' } });
-  record(cats, true);
+  record(cats, true, false);
   const list = cats.status === 200 ? cats.json() : [];
   if (!list || list.length === 0) {
     throw new Error('No categories returned - is the catalog seeded?');

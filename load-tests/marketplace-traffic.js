@@ -13,7 +13,7 @@
 //   BASE_URL=http://localhost:8081/v1 VUS=1000 HOLD_TIME=60s k6 run marketplace-traffic.js
 //
 // WHAT IS COUNTED, AND SEPARATELY (this is the point of the script):
-//   requests_ok              2xx/3xx - a customer got an answer
+//   requests_ok              2xx - a customer got an answer
 //   status_429               deliberately throttled by the rate limiter
 //   status_503_shed          deliberately refused: shed by a saturation filter,
 //                            or answered by handlePoolExhausted. Both carry
@@ -27,13 +27,11 @@
 //   status_timeout           the request exceeded the per-request timeout
 //
 // A THROTTLED CUSTOMER IS NOT A SERVED CUSTOMER. 429 and shed-503 are correct
-// behaviour and do not fail a stage, but they are NOT successes either, and
-// the summary must never be read as "N VUs were fully served" when a share of
-// their requests were refused on purpose. served_ratio is printed for exactly
-// that reason.
+// behaviour and are NOT successes. The stage fails if refusals leave fewer
+// than 95% of requests served, so a test cannot call graceful shedding a pass.
 //
 // TWO POPULATIONS, ON PURPOSE:
-//   browse   - anonymous shoppers, scaled to VUS. Discovery at their own pin,
+//   browse   - anonymous shoppers, one share of the requested TOTAL VUS. Discovery at their own pin,
 //              open a storefront, read its shelf, sometimes search, sometimes
 //              open a product. This is what most marketplace traffic is.
 //   shopper  - signed-in customers with a cart, ONE VU PER ACCOUNT. Fixed and
@@ -76,6 +74,12 @@ const accounts = new SharedArray('accounts', () => {
 });
 
 const SHOPPERS = Math.min(Number(__ENV.SHOPPERS || accounts.length), accounts.length);
+// VUS is the TOTAL peak concurrency for a stage, not browse plus extra
+// marketplace and shopper populations. Reserve one third for marketplace
+// feed traffic and at most 4% for distinct authenticated shoppers.
+const MARKETPLACE_VUS = Math.max(1, Math.round(VUS / 3));
+const SHOPPER_VUS = Math.min(SHOPPERS, Math.floor(VUS * 0.04));
+const BROWSE_VUS = Math.max(0, VUS - MARKETPLACE_VUS - SHOPPER_VUS);
 
 const requestsOk = new Counter('requests_ok');
 const status429 = new Counter('status_429');
@@ -85,6 +89,7 @@ const status502 = new Counter('status_502');
 const status4xxExpected = new Counter('status_4xx_expected');
 const status4xxUnexpected = new Counter('status_4xx_unexpected');
 const status500 = new Counter('status_500');
+const status3xx = new Counter('status_3xx');
 const statusNetworkError = new Counter('status_network_error');
 const statusTimeout = new Counter('status_timeout');
 const servedRatio = new Rate('served_ratio');
@@ -127,7 +132,7 @@ function isShed(res) {
 
 function record(res) {
   const s = res.status;
-  if (s >= 200 && s < 400) {
+  if (s >= 200 && s < 300) {
     requestsOk.add(1);
     servedRatio.add(true);
     return true;
@@ -141,6 +146,7 @@ function record(res) {
   else if (s === 502) status502.add(1);
   else if (s === 503) { if (isShed(res)) status503Shed.add(1); else status503Unexpected.add(1); }
   else if (s >= 500) status500.add(1);
+  else if (s >= 300 && s < 400) status3xx.add(1);
   else if (s >= 400 && s < 500) {
     if (EXPECTED_4XX.indexOf(s) < 0) status4xxUnexpected.add(1); else status4xxExpected.add(1);
   }
@@ -164,7 +170,7 @@ export const options = {
       browse: {
         executor: 'ramping-vus',
         startVUs: 0,
-        stages: [{ duration: RAMP_TIME, target: VUS }, { duration: HOLD_TIME, target: VUS }],
+        stages: [{ duration: RAMP_TIME, target: BROWSE_VUS }, { duration: HOLD_TIME, target: BROWSE_VUS }],
         gracefulRampDown: '5s',
         exec: 'browse',
       },
@@ -180,15 +186,15 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: RAMP_TIME, target: Math.max(1, Math.round(VUS / 3)) },
-        { duration: HOLD_TIME, target: Math.max(1, Math.round(VUS / 3)) },
+        { duration: RAMP_TIME, target: MARKETPLACE_VUS },
+        { duration: HOLD_TIME, target: MARKETPLACE_VUS },
       ],
       exec: 'marketplace',
     };
-    if (SHOPPERS > 0) {
+    if (SHOPPER_VUS > 0) {
       s.shopper = {
         executor: 'constant-vus',
-        vus: SHOPPERS,
+        vus: SHOPPER_VUS,
         duration: HOLD_TIME,
         startTime: RAMP_TIME,
         exec: 'shopper',
@@ -197,8 +203,10 @@ export const options = {
     return s;
   })(),
   thresholds: {
-    // THE GATES ARE THE SAME AS staged-capacity.js. Intentional refusals do
-    // not fail a stage; broken ones do.
+    // Deliberate refusals are not server faults, but they are unserved.
+    // They count against this floor so graceful shedding cannot make an
+    // overloaded stage look like a capacity pass.
+    served_ratio: ['rate>=0.95'],
     'http_req_duration{name:discovery}': ['p(95)<2000', 'p(99)<4000'],
     'http_req_duration{name:shelf}': ['p(95)<2000', 'p(99)<4000'],
     // THE SAME BUDGET AS THE SHOP-SCOPED SHELF, deliberately. The marketplace
@@ -213,7 +221,9 @@ export const options = {
     status_502: ['count==0'],
     status_503_unexpected: ['count==0'],
     status_500: ['count==0'],
+    status_3xx: ['count==0'],
     status_network_error: ['count==0'],
+    status_timeout: ['count==0'],
     status_4xx_unexpected: ['count==0'],
     // A RELEASE BLOCKER, AND THE ONLY GATE HERE THAT IS ABOUT CORRECTNESS
     // RATHER THAN CAPACITY. Every other threshold says the marketplace was
@@ -262,6 +272,7 @@ const SEARCH_TERMS = ['cycle', 'saree', 'rice', 'phone', 'tyre', 'paint', 'book'
 
 export function setup() {
   const health = http.get(`${BASE_URL}/api/health`, { tags: { name: 'liveness' } });
+  record(health);
   if (health.status !== 200) {
     throw new Error(`liveness failed with HTTP ${health.status} - refusing to start a stage`);
   }
@@ -269,6 +280,7 @@ export function setup() {
   // against it. An empty dataset produces beautiful latencies.
   const p = { lat: (LAT_MIN + LAT_MAX) / 2, lng: (LNG_MIN + LNG_MAX) / 2 };
   const probe = http.get(`${BASE_URL}/api/marketplace/shops/page?lat=${p.lat}&lng=${p.lng}&page=0&size=50`);
+  record(probe);
   const shops = probe.status === 200 ? probe.json('shops') : [];
   if (!shops || shops.length === 0) {
     throw new Error('No shops serve the centre of the test area - is the marketplace seeded?');
