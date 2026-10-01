@@ -112,8 +112,14 @@ def main():
     print('  answered 4xx        %d  (401/403/404/409/410/422 - an answer, not a fault)'
           % expected4xx)
     print('  faults              ' + ', '.join('%s=%d' % (k, v) for k, v in faults.items()))
+    print('  %-16s p50=%sms p95=%sms p99=%sms max=%sms'
+          % ('all requests', fmt(trend(s, 'http_req_duration', 'med')),
+             fmt(trend(s, 'http_req_duration', 'p(95)')),
+             fmt(trend(s, 'http_req_duration', 'p(99)')),
+             fmt(trend(s, 'http_req_duration', 'max'))))
     for name in ('discovery', 'shelf', 'search', 'market_feed', 'market_search',
-                 'market_offers', 'product_detail', 'cart_add', 'cart_read'):
+                 'market_offers', 'storefront', 'product_detail', 'cart_add',
+                 'cart_read', 'my_orders', 'liveness'):
         key = 'http_req_duration{name:%s}' % name
         p95 = trend(s, key, 'p(95)')
         if p95 is None:
