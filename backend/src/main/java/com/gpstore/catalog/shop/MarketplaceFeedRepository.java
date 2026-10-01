@@ -392,6 +392,10 @@ public class MarketplaceFeedRepository {
                            AND COALESCE(spv.active, true) = true
                            AND spv.selling_price IS NOT NULL
                            AND spv.selling_price > 0
+                        -- PostgreSQL otherwise flattens this correlated lookup
+                        -- into a merge join that scans and disk-sorts every
+                        -- nearby listing before keeping matched variants.
+                        OFFSET 0
                     ) offer
                    ORDER BY matched_variants.variant_id, offer.commerce_mode,
                             offer.distance_km ASC, offer.selling_price ASC, offer.listing_id ASC
