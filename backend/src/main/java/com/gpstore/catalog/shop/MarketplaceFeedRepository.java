@@ -248,7 +248,7 @@ public class MarketplaceFeedRepository {
         args.add(limit);
         args.add(offset);
 
-        return jdbc.query(sql, MarketplaceFeedRepository::card, args.toArray());
+        return queryCardsWithOptionalPlan("feed", sql, args.toArray());
     }
 
     /**
@@ -481,7 +481,24 @@ public class MarketplaceFeedRepository {
         args.add(limit);
         args.add(offset);
 
-        return jdbc.query(sql, MarketplaceFeedRepository::card, args.toArray());
+        return queryCardsWithOptionalPlan("search", sql, args.toArray());
+    }
+
+    /**
+     * Large-marketplace CI can print the real feed/search plans for its seeded
+     * database by setting a test-only JVM property around two representative
+     * reads. This keeps EXPLAIN ANALYZE tied to the SQL and bind parameters the
+     * application actually sends, instead of maintaining a hand-copied query.
+     */
+    private List<Object[]> queryCardsWithOptionalPlan(String name, String sql, Object[] args) {
+        if (Boolean.getBoolean("gpstore.test.explain-marketplace")) {
+            List<String> plan = jdbc.query(
+                    "EXPLAIN (ANALYZE, BUFFERS, SETTINGS, FORMAT TEXT) " + sql,
+                    (rs, rowNum) -> rs.getString(1), args);
+            System.out.println("EXPLAIN ANALYZE marketplace " + name + ":");
+            plan.forEach(System.out::println);
+        }
+        return jdbc.query(sql, MarketplaceFeedRepository::card, args);
     }
 
     /**
