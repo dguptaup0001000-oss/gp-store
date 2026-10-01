@@ -42,7 +42,19 @@ void main() {
               AppEnvironment.productionApiBaseUrl),
           isTrue);
       expect(
+          AppEnvironment.isProductionApiUrl(
+              'https://staging-api.gpstore.co.in/v1'),
+          isFalse);
+      expect(
           AppEnvironment.isProductionApiUrl('https://staging.example.com/v1'),
+          isFalse);
+      expect(
+          AppEnvironment.isProductionApiUrl(
+              'https://api.gpstore.co.in.evil.example/v1'),
+          isFalse);
+      expect(
+          AppEnvironment.isProductionApiUrl(
+              'https://evil.example/api.gpstore.co.in/v1'),
           isFalse);
     });
 
@@ -82,6 +94,16 @@ void main() {
       expect(
         AppEnvironment.canonicalizeProductionApiUrl(
             'https://evil.example/v1'),
+        AppEnvironment.productionApiBaseUrl,
+      );
+      expect(
+        AppEnvironment.canonicalizeProductionApiUrl(
+            'https://api.gpstore.co.in.evil.example/v1'),
+        AppEnvironment.productionApiBaseUrl,
+      );
+      expect(
+        AppEnvironment.canonicalizeProductionApiUrl(
+            'https://api.gpstore.co.in@evil.example/v1'),
         AppEnvironment.productionApiBaseUrl,
       );
       expect(
