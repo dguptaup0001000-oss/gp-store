@@ -74,19 +74,30 @@ public class MarketplaceFeedService {
             return List.of();
         }
 
+        int limit = Math.min(Math.max(size, 1), MAX_PAGE);
+        int offset = Math.max(page, 0) * limit;
+
         Map<Long, Double> distanceByShop = new HashMap<>();
-        for (ShopDiscovery.NearbyShop near : nearby) {
-            distanceByShop.put(near.shop().getId(), near.distanceKm());
-        }
         if (selectedShopId != null) {
+            for (ShopDiscovery.NearbyShop near : nearby) {
+                distanceByShop.put(near.shop().getId(), near.distanceKm());
+            }
             Double selectedDistance = distanceByShop.get(selectedShopId);
             if (selectedDistance == null) return List.of();
             distanceByShop.clear();
             distanceByShop.put(selectedShopId, selectedDistance);
+        } else {
+            // The repository's fair walk orders shop_row first and distance
+            // second. A 20-card first page can therefore be decided by the
+            // nearest 52 shops; sending another 2,064 shops into PostgreSQL
+            // cannot change that prefix, but did keep every DB connection
+            // ranking data the client could not receive. Grow monotonically
+            // with the requested offset so infinite-scroll pages stay stable.
+            int considered = Math.min(nearby.size(), offset + limit + 32);
+            for (ShopDiscovery.NearbyShop near : nearby.subList(0, considered)) {
+                distanceByShop.put(near.shop().getId(), near.distanceKm());
+            }
         }
-
-        int limit = Math.min(Math.max(size, 1), MAX_PAGE);
-        int offset = Math.max(page, 0) * limit;
 
         List<MarketplaceFeedView> cards = new ArrayList<>();
         for (Object[] row : feed.page(distanceByShop.keySet(),
