@@ -63,6 +63,7 @@ def resources(path):
         'load1_peak': peak('load1'),
         'pg_total_peak': peak('pg_total', int),
         'pg_active_peak': peak('pg_active', int),
+        'pg_waiting_peak': peak('pg_waiting', int),
         'pg_idle_tx_peak': peak('pg_idle_tx', int),
         'hikari_active_peak': peak('hikari_active', int),
         'hikari_waiting_peak': peak('hikari_waiting', int),
@@ -128,8 +129,10 @@ def main():
               % (r['cpu_mean'], r['cpu_peak'], r['cores'], r['host_cpu_peak_pct'],
                  r['rss_peak_mb'], r['host_memory_free_min_mb'],
                  r['host_memory_total_mb'], r['threads_peak'], r['load1_peak']))
-        print('  postgres backends peak %d, executing peak %d, idle-in-transaction peak %d'
-              % (r['pg_total_peak'], r['pg_active_peak'], r['pg_idle_tx_peak']))
+        print('  postgres backends peak %d, executing peak %d, waiting peak %d, '
+              'idle-in-transaction peak %d'
+              % (r['pg_total_peak'], r['pg_active_peak'], r['pg_waiting_peak'],
+                 r['pg_idle_tx_peak']))
         print('  Hikari   active peak %d/%d, waiting peak %d, total peak %d'
               % (r['hikari_active_peak'], r['hikari_max'], r['hikari_waiting_peak'],
                  r['hikari_total_peak']))

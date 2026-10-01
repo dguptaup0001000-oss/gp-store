@@ -16,6 +16,7 @@ Writes one CSV row per interval:
     load1      the machine's one-minute load average
     pg_total   backends connected to the load-test database
     pg_active  of those, ones currently executing a statement
+    pg_waiting active statements waiting on a PostgreSQL lock or other event
     pg_idle_tx of those, ones idle inside a transaction - the dangerous state
     Hikari active/idle/waiting/max, heap, GC counts/time, system CPU and RAM
 
@@ -63,15 +64,16 @@ def proc_threads(pid):
 
 def pg_counts(db):
     sql = ("SELECT count(*), count(*) FILTER (WHERE state='active'), "
+           "count(*) FILTER (WHERE state='active' AND wait_event_type IS NOT NULL), "
            "count(*) FILTER (WHERE state='idle in transaction') "
            "FROM pg_stat_activity WHERE datname=%s" % ("'" + db + "'"))
     try:
         out = subprocess.run(['psql', '-U', os.environ.get('PGUSER', 'gpstore'),
                               '-d', db, '-tA', '-F', ',', '-c', sql],
                              capture_output=True, text=True, timeout=5)
-        return out.stdout.strip() or '0,0,0'
+        return out.stdout.strip() or '0,0,0,0'
     except Exception:
-        return '0,0,0'
+        return '0,0,0,0'
 
 
 def runtime_snapshot(url):
@@ -114,7 +116,7 @@ def main():
                           'heap_max_mb', 'gc_count', 'gc_time_ms',
                           'system_cpu_load', 'process_cpu_load',
                           'system_memory_total_mb', 'system_memory_free_mb']
-        out.write('t,cpu_pct,cores,rss_mb,threads,load1,pg_total,pg_active,pg_idle_tx,'
+        out.write('t,cpu_pct,cores,rss_mb,threads,load1,pg_total,pg_active,pg_waiting,pg_idle_tx,'
                   + ','.join(runtime_fields) + '\n')
         while True:
             time.sleep(args.interval)
@@ -127,11 +129,11 @@ def main():
                 threads = proc_threads(args.pid)
             except FileNotFoundError:
                 # The process being measured is gone. That is itself a result.
-                gone = ['%.1f' % (now - started), 'PROCESS_GONE'] + [''] * 20
+                gone = ['%.1f' % (now - started), 'PROCESS_GONE'] + [''] * 21
                 out.write(','.join(gone) + '\n')
                 return 1
             load1 = os.getloadavg()[0]
-            pg = (pg_counts(args.db).split(',') + ['', '', ''])[:3]
+            pg = (pg_counts(args.db).split(',') + ['', '', '', ''])[:4]
             runtime = runtime_snapshot(args.runtime_url)
             values = [now - started, cpu, cores, rss, threads, load1, *pg,
                       *(runtime[field] for field in runtime_fields)]

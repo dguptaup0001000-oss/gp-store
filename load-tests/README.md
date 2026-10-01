@@ -119,7 +119,8 @@ BASE_URL=http://localhost:8081/v1 HOLD_TIME=20s ./run-staged-capacity.sh
 The marketplace ladder requires the same gates: at least 95% served and zero
 500/502/unexpected 503, unexpected 4xx, timeout, network error, or tenant leak.
 Deliberate 429 and shed 503 responses count as unserved. Its stage report
-includes endpoint p95/p99, Postgres activity, Hikari active/waiting/max, JVM
+includes endpoint p95/p99, PostgreSQL active sessions and active sessions
+waiting on a database event, Hikari active/waiting/max, JVM
 heap and GC deltas, process CPU/RSS, and host CPU/RAM.
 
 There is **no** 5k/10k/25k/50k command in `browse-cart-checkout.js`. Do not
