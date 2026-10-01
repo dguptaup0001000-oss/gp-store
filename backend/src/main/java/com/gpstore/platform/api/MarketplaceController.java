@@ -472,7 +472,6 @@ public class MarketplaceController {
      * <p>Public, like the rest of discovery. Seeing what a town sells is not
      * an authorization; buying it is, and that is unchanged.
      */
-    @Transactional(readOnly = true)
     @GetMapping("/feed")
     public List<MarketplaceFeedView> feed(
             @RequestParam(required = false) Double lat,

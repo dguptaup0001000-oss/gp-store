@@ -15,8 +15,8 @@ fi
 
 echo "Target: $BASE_URL"
 echo "Stages: $STAGES (hold $HOLD_TIME each)"
-echo "Pass: p95 < 2s, p99 < 4s, zero 502 / unexpected 503 / network errors"
-echo "Catalog 503 (pool shed) is counted separately and does not fail a stage."
+echo "Pass: >=95% of requests served, p95 < 2s, p99 < 4s, zero real faults"
+echo "Catalog 503 (pool shed) counts as not served toward the 95% gate."
 echo
 
 failed_at=""

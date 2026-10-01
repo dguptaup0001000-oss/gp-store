@@ -74,11 +74,11 @@ A previous production run at ~5,005 VUs produced **95% HTTP failures and
 ~325k 502s**. That is overload of a 40-thread / 10-connection container,
 not a code rating, and it is **not** a reason to raise `DB_POOL_MAX_SIZE`.
 
-Pass/fail for each stage (see `staged-capacity.js`): p95 < 2s,
-p99 < 4s, **zero** 502, unexpected 503 (liveness), and network errors.
-Catalog GET 503 from pool shedding is counted as `status_503_shed` and
-does **not** fail the stage. Stop at the first failure; that VU count is
-the measured ceiling for that target.
+Pass/fail for each stage (see `staged-capacity.js`): at least 95% of requests
+must return 2xx, p95 < 2s, p99 < 4s, and zero real faults. Catalog GET 503 from
+pool shedding is counted as `status_503_shed`; it is not a server fault, but
+it is unserved and counts against the 95% floor. Stop at the first failure;
+that VU count is the measured ceiling for that target.
 
 | Stage | VUs | How |
 |---|---|---|
@@ -116,8 +116,11 @@ chmod +x run-staged-capacity.sh
 BASE_URL=http://localhost:8081/v1 HOLD_TIME=20s ./run-staged-capacity.sh
 ```
 
-Record Hikari (`total/active/idle/waiting`), `pg_stat_activity`, CPU and
-RSS in the same window. k6 cannot see the pool.
+The marketplace ladder requires the same gates: at least 95% served and zero
+500/502/unexpected 503, unexpected 4xx, timeout, network error, or tenant leak.
+Deliberate 429 and shed 503 responses count as unserved. Its stage report
+includes endpoint p95/p99, Postgres activity, Hikari active/waiting/max, JVM
+heap and GC deltas, process CPU/RSS, and host CPU/RAM.
 
 There is **no** 5k/10k/25k/50k command in `browse-cart-checkout.js`. Do not
 add one. A 5,000-VU run against one small VPS is overload
@@ -574,7 +577,7 @@ BASE_URL=http://127.0.0.1:8081/v1 COUNT=40 \
 
 # 4. Climb the ladder.
 BASE_URL=http://127.0.0.1:8081/v1 APP_PID=<pid> OUT_DIR=./run \
-  STAGES="100 250 500 1000 2000 3000 4000" SOAK_VUS=4000 SOAK_TIME=5m \
+  STAGES="1000 2000 3000 4000" SOAK_VUS=4000 SOAK_TIME=5m \
   ./run-marketplace-capacity.sh
 
 # 5. Drop the database. It is disposable and it is 160 MB.

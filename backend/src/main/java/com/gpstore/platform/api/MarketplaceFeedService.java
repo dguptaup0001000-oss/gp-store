@@ -181,16 +181,11 @@ public class MarketplaceFeedService {
     private List<Object[]> searchWithOriginalFallback(
             String interpreted, String original, Map<Long, Double> distances,
             Set<CommerceMode> modes, int limit, int offset) {
-        List<Object[]> rows = feed.search(
-                interpreted, distances.keySet(), modes, distances, limit, offset);
-        // Phonetic synonym keys are deliberately lossy: for example, an
-        // English catalogue word can sound like a Hindi vocabulary term.
-        // Translation gets first chance, but it must never erase a literal
-        // town-wide match such as "gold chain".
-        if (rows.isEmpty() && !interpreted.equalsIgnoreCase(original.trim())) {
-            return feed.search(original, distances.keySet(), modes, distances, limit, offset);
-        }
-        return rows;
+        // Keep the literal query as a whole-phrase alternative in the same
+        // SQL execution. Search used to run two complete database plans for
+        // a synonym miss, then repeat both plans at each progressive radius.
+        return feed.search(List.of(interpreted, original.trim()),
+                distances.keySet(), modes, distances, limit, offset);
     }
 
     private String normalizeSearch(String keyword) {

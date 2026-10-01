@@ -102,6 +102,9 @@ class BackgroundWorkIsScopedTest {
             "IdempotencyRetentionService.cleanupExpiredRecords",
             "OtpService.cleanUpExpiredOtps",
             "R2StagingSweepService.sweepExpired",
+            // Best-effort analytics batch; it persists anonymized search
+            // signals without requiring a shop scope.
+            "MarketplaceSignals.flushPending",
             // Asks the provider what happened to refunds it accepted and never
             // confirmed. Money, and platform-wide on purpose - a stuck refund
             // is stuck whichever shop issued it. Updates the payment it

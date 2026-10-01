@@ -207,7 +207,6 @@ public class ShopDiscovery {
      *
      * @param fromKm where to start, or null to start at the bottom
      */
-    @Transactional(readOnly = true)
     public RadiusSearch searchOutwards(Double latitude, Double longitude, BigDecimal fromKm) {
         return searchOutwards(latitude, longitude, fromKm, rung -> rung);
     }
@@ -233,7 +232,6 @@ public class ShopDiscovery {
      *               must not be rewritten here (§4: the ranking is the
      *               marketplace's, not the screen's)
      */
-    @Transactional(readOnly = true)
     public RadiusSearch searchOutwards(Double latitude, Double longitude, BigDecimal fromKm,
                                        java.util.function.UnaryOperator<List<NearbyShop>> narrow) {
         BigDecimal asked = fromKm == null ? ladder.first() : ladder.clamp(fromKm);
