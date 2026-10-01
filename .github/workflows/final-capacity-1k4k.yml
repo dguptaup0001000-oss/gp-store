@@ -161,13 +161,13 @@ jobs:
 
       - uses: grafana/setup-k6-action@v1
 
-      - name: Run corrected 2,000 VU capacity gate
+      - name: Run corrected 4,000 VU capacity gate
         id: ladder
         continue-on-error: true
         working-directory: load-tests
         env:
           BASE_URL: http://127.0.0.1:8081/v1
-          STAGES: '2000'
+          STAGES: '4000'
           HOLD_TIME: '60s'
           RAMP_TIME: '20s'
           SOAK_VUS: '0'
@@ -195,7 +195,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: marketplace-100-shop-capacity-2000
+          name: marketplace-100-shop-capacity-4000
           path: |
             ${{ runner.temp }}/capacity-run/
             ${{ runner.temp }}/dataset.csv
