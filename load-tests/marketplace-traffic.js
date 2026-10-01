@@ -156,10 +156,17 @@ function record(res) {
 }
 
 function get(path, name, headers) {
+  // A single k6 process is a trusted reverse proxy in the disposable test.
+  // Give each virtual customer a stable RFC 2544 benchmarking address so the
+  // per-client search limiter measures one user, not every VU as localhost.
+  const virtualUser = Math.max(1, __VU);
+  const clientHeaders = {
+    'X-Forwarded-For': `198.18.${Math.floor(virtualUser / 254) % 256}.${(virtualUser % 254) + 1}`,
+  };
   const res = http.get(`${BASE_URL}${path}`, {
     tags: { name: name, stage: STAGE },
     timeout: REQ_TIMEOUT,
-    headers: headers || {},
+    headers: Object.assign(clientHeaders, headers || {}),
   });
   record(res);
   return res;

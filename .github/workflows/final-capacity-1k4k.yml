@@ -68,6 +68,7 @@ jobs:
       DB_POOL_MAX_SIZE: '20'
       TOMCAT_MAX_THREADS: '80'
       TOMCAT_ACCEPT_COUNT: '1024'
+      RATE_LIMIT_TRUST_FORWARDED_FOR: 'true'
 
     steps:
       - name: Checkout exact branch
