@@ -11,7 +11,8 @@ import '../../support/test_api_client.dart';
 void main() {
   test('concurrent pagination callbacks issue only one next-page request', () async {
     final repository = _PagingNotificationsRepository()
-      ..nextPageCompleter = Completer();
+      ..nextPageCompleter =
+          Completer<({List<AppNotification> notifications, int totalPages})>();
     final container = ProviderContainer(overrides: [
       notificationsRepositoryProvider.overrideWithValue(repository),
     ]);
