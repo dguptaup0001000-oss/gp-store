@@ -29,6 +29,14 @@ public class MarketplaceFeedService {
     /** Bounded so a crafted query string cannot ask for the whole marketplace in one page. */
     private static final int MAX_PAGE = 50;
 
+    /**
+     * OFFSET scans past this point are too expensive to expose to an untrusted
+     * query parameter. Deeper catalogue navigation needs cursor pagination;
+     * multiplying an arbitrary page by its size can otherwise overflow the
+     * PostgreSQL offset and turn a read into a 500 or a very large scan.
+     */
+    private static final long MAX_PAGE_OFFSET = 100_000L;
+
     private final ShopDiscovery discovery;
     private final MarketplaceFeedRepository feed;
     private final com.gpstore.intelligence.MarketplaceSignals signals;
@@ -66,6 +74,11 @@ public class MarketplaceFeedService {
 
     public List<MarketplaceFeedView> page(Double lat, Double lng, Set<CommerceMode> modes,
                                           Long categoryId, Long selectedShopId, int page, int size) {
+        int limit = Math.min(Math.max(size, 1), MAX_PAGE);
+        int offset = safeOffset(page, limit);
+        if (offset < 0) {
+            return List.of();
+        }
         if (lat == null || lng == null) {
             return List.of();
         }
@@ -84,9 +97,6 @@ public class MarketplaceFeedService {
             distanceByShop.clear();
             distanceByShop.put(selectedShopId, selectedDistance);
         }
-
-        int limit = Math.min(Math.max(size, 1), MAX_PAGE);
-        int offset = Math.max(page, 0) * limit;
 
         List<MarketplaceFeedView> cards = new ArrayList<>();
         for (Object[] row : feed.page(distanceByShop.keySet(),
@@ -121,6 +131,11 @@ public class MarketplaceFeedService {
         if (lat == null || lng == null || keyword == null || keyword.isBlank()) {
             return List.of();
         }
+        int limit = Math.min(Math.max(size, 1), MAX_PAGE);
+        int offset = safeOffset(page, limit);
+        if (offset < 0) {
+            return List.of();
+        }
         Set<CommerceMode> requestedModes =
                 modes == null || modes.isEmpty() ? Set.of(CommerceMode.values()) : modes;
         String interpreted = normalizeSearch(keyword);
@@ -138,9 +153,6 @@ public class MarketplaceFeedService {
             distanceByShop.clear();
             distanceByShop.put(selectedShopId, selectedDistance);
         }
-
-        int limit = Math.min(Math.max(size, 1), MAX_PAGE);
-        int offset = Math.max(page, 0) * limit;
 
         List<MarketplaceFeedView> results = new ArrayList<>();
         if (!distanceByShop.isEmpty()) {
@@ -176,6 +188,12 @@ public class MarketplaceFeedService {
             signals.search(keyword, lat, lng, modes, results.size());
         }
         return results;
+    }
+
+    /** Returns -1 for offsets that require cursor pagination. */
+    private static int safeOffset(int page, int limit) {
+        long offset = (long) Math.max(page, 0) * limit;
+        return offset > MAX_PAGE_OFFSET ? -1 : (int) offset;
     }
 
     private List<Object[]> searchWithOriginalFallback(

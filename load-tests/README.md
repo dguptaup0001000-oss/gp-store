@@ -119,7 +119,8 @@ BASE_URL=http://localhost:8081/v1 HOLD_TIME=20s ./run-staged-capacity.sh
 The marketplace ladder requires the same gates: at least 95% served and zero
 500/502/unexpected 503, unexpected 4xx, timeout, network error, or tenant leak.
 Deliberate 429 and shed 503 responses count as unserved. Its stage report
-includes endpoint p95/p99, Postgres activity, Hikari active/waiting/max, JVM
+includes overall and per-endpoint p50/p95/p99, PostgreSQL active and waiting sessions,
+Hikari active/waiting/max, JVM
 heap and GC deltas, process CPU/RSS, and host CPU/RAM.
 
 There is **no** 5k/10k/25k/50k command in `browse-cart-checkout.js`. Do not
@@ -362,12 +363,15 @@ the application and the database shared four cores, so above the ceiling the
 numbers describe a contended box, not a server under clean load. Nothing here
 is a statement about production, which runs different hardware behind a proxy.
 
-### The ladder, before and after the fix
+### Historical ladder, before and after the discovery fix
 
-Gates: p95 < 2 s and p99 < 4 s on discovery and shelf reads, and zero 502,
-zero 503-without-Retry-After, zero 500, zero unexpected 4xx, zero network
-errors, **zero tenant leaks**. 429 and shed 503 are counted separately and do
-not fail a stage; they are the application correctly refusing work.
+**These measurements used an older pass rule.** At the time, p95 < 2 s and
+p99 < 4 s on discovery and shelf reads, zero 502, zero 503-without-Retry-After,
+zero 500, zero unexpected 4xx, zero network errors and **zero tenant leaks**
+were checked. Deliberate 429 and shed 503 responses were counted but did not
+fail a stage. The current `marketplace-traffic.js` rule is stricter: at least
+95% of all requests must be served (2xx), so deliberate refusals also make a
+stage fail.
 
 The run was done twice on the same box against the same dataset: once against
 the code as it was, and once after the discovery endpoint was fixed (see
@@ -384,9 +388,12 @@ below). Both columns are measured; neither is projected.
 | 4,000 | 30,001 ms (timeout) | 10,807 ms | 6.6% | **62.0%** |
 | 4,000 soak, 5 min | 30,001 ms (timeout) | 7,771 ms | 2.3% | **59.1%** |
 
-**The ceiling moved from about 100 concurrent browsers to 1,000.** 100, 250,
-500 and 1,000 VUs all pass the gates now; every one of them broke before. 2,000
-is the first rung that fails, on latency alone.
+Under the current rule, **none of the “after” measurements in this historical
+table pass**: the 100-VU stage served 93.8%, the 1,000-VU stage served 83.6%,
+and 4,000 VUs served 62.0%. The 2,000-VU stage also exceeded the latency
+budget. In particular, the old statement that 1,000 VUs passed is no longer a
+valid capacity claim. A passing capacity ceiling has not been established by
+these measurements.
 
 The soak is the clearest single comparison, because it is the longest window
 and the same five minutes in both runs:
@@ -535,11 +542,11 @@ against the old one.
 
 ### Reading the numbers honestly
 
-**4,000 VUs is still not "4,000 users supported", even now.** The 4,000-VU
-stage serves 62% of what it attempts; the other 38% is deliberately refused,
-and a refused customer is not a served one. The honest capacity sentence for
-this box is the ceiling rung - about a thousand concurrent browsers within the
-latency gates - not the top one.
+**4,000 VUs is not "4,000 users supported".** In this historical shared-host
+run, the 4,000-VU stage served 62% of what it attempted; the other 38% was
+refused or otherwise unserved. The run does not establish a passing capacity
+ceiling under the current 95%-served rule, and it is not a measurement of
+Hostinger staging or production.
 
 What changed is worth stating precisely, because "we fixed the N+1 and now it
 scales" would be the wrong summary. The application is still limited by the

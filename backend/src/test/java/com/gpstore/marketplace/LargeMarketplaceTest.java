@@ -7,6 +7,8 @@ import com.gpstore.platform.ShopRepository;
 import com.gpstore.platform.TenantContext;
 import com.gpstore.platform.TenantDefaults;
 import com.gpstore.platform.TenantResolver;
+import com.gpstore.catalog.shop.CommerceMode;
+import com.gpstore.catalog.shop.MarketplaceFeedRepository;
 import com.gpstore.entity.Role;
 import com.gpstore.security.AuthenticatedUser;
 import com.gpstore.security.RolePermissions;
@@ -27,8 +29,11 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
@@ -81,6 +86,7 @@ class LargeMarketplaceTest {
     @Autowired private ShopMembership membership;
     @Autowired private TenantResolver resolver;
     @Autowired private ShopRepository shops;
+    @Autowired private MarketplaceFeedRepository feed;
     @Autowired private PlatformProperties platform;
 
     private MarketplaceTestData.Marketplace market;
@@ -138,6 +144,28 @@ class LargeMarketplaceTest {
                         + "JOIN shops s ON s.id = ss.shop_id "
                         + "WHERE s.code LIKE 'gptest-%'", Long.class);
         assertTrue(ridersInDb >= 5_000, "five thousand distinct workers: " + ridersInDb);
+    }
+
+    @Test
+    @DisplayName("EXPLAIN ANALYZE reports the real marketplace feed and search plans")
+    void explainMarketplaceFeedAndSearchPlans() {
+        List<Long> nearbyShopIds = market.shopIds();
+        Map<Long, Double> distanceByShop = new LinkedHashMap<>();
+        for (int i = 0; i < nearbyShopIds.size(); i++) {
+            // Keep the generated set ordered and geographically plausible;
+            // the SQL is the same one used after ShopDiscovery supplies it.
+            distanceByShop.put(nearbyShopIds.get(i), i * 0.01d);
+        }
+
+        System.setProperty("gpstore.test.explain-marketplace", "true");
+        try {
+            feed.page(nearbyShopIds, EnumSet.allOf(CommerceMode.class), null,
+                    distanceByShop, 50, 0);
+            feed.search(List.of("phone"), nearbyShopIds,
+                    EnumSet.allOf(CommerceMode.class), distanceByShop, 50, 0);
+        } finally {
+            System.clearProperty("gpstore.test.explain-marketplace");
+        }
     }
 
     @Test

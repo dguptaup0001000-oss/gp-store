@@ -67,10 +67,14 @@ run_stage() {
 
   [ -n "$sampler" ] && { kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null; }
 
+  local report_rc=0
   python3 "$HERE/summarise-stage.py" --label "$label" --summary "$json" \
-    --resources "$csv" --k6-exit "$rc" >> "$OUT_DIR/stages.txt"
+    --resources "$csv" --k6-exit "$rc" >> "$OUT_DIR/stages.txt" || report_rc=$?
   tail -20 "$OUT_DIR/stages.txt"
-  return $rc
+  if [ "$rc" -ne 0 ] || [ "$report_rc" -ne 0 ]; then
+    return 1
+  fi
+  return 0
 }
 
 CONTINUE_ON_FAIL="${CONTINUE_ON_FAIL:-0}"

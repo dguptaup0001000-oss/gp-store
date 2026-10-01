@@ -248,7 +248,7 @@ public class MarketplaceFeedRepository {
         args.add(limit);
         args.add(offset);
 
-        return jdbc.query(sql, MarketplaceFeedRepository::card, args.toArray());
+        return queryCardsWithOptionalPlan("feed", sql, args.toArray());
     }
 
     /**
@@ -373,24 +373,32 @@ public class MarketplaceFeedRepository {
                        AND p.active = true
                 ),
                 picked AS (
-                  SELECT DISTINCT ON (matched_variants.variant_id, spv.commerce_mode)
-                         spv.id              AS listing_id,
+                  SELECT DISTINCT ON (matched_variants.variant_id, offer.commerce_mode)
+                         offer.listing_id    AS listing_id,
                          matched_variants.product_id AS product_id,
                          matched_variants.variant_id AS variant_id,
-                         spv.commerce_mode   AS commerce_mode,
-                         spv.shop_id         AS shop_id,
-                         near.distance_km    AS distance_km
+                         offer.commerce_mode AS commerce_mode,
+                         offer.shop_id       AS shop_id,
+                         offer.distance_km   AS distance_km
                     FROM matched_variants
-                    JOIN shop_product_variants spv
-                      ON spv.product_variant_id = matched_variants.variant_id
-                    JOIN near            ON near.shop_id = spv.shop_id
-                   WHERE spv.commerce_mode IN (%s)
-                     AND spv.available = true
-                     AND COALESCE(spv.active, true) = true
-                     AND spv.selling_price IS NOT NULL
-                     AND spv.selling_price > 0
-                   ORDER BY matched_variants.variant_id, spv.commerce_mode,
-                            near.distance_km ASC, spv.selling_price ASC, spv.id ASC
+                    CROSS JOIN LATERAL (
+                        SELECT spv.id AS listing_id, spv.commerce_mode, spv.shop_id,
+                               near.distance_km, spv.selling_price
+                          FROM shop_product_variants spv
+                          JOIN near ON near.shop_id = spv.shop_id
+                         WHERE spv.product_variant_id = matched_variants.variant_id
+                           AND spv.commerce_mode IN (%s)
+                           AND spv.available = true
+                           AND COALESCE(spv.active, true) = true
+                           AND spv.selling_price IS NOT NULL
+                           AND spv.selling_price > 0
+                        -- PostgreSQL otherwise flattens this correlated lookup
+                        -- into a merge join that scans and disk-sorts every
+                        -- nearby listing before keeping matched variants.
+                        OFFSET 0
+                    ) offer
+                   ORDER BY matched_variants.variant_id, offer.commerce_mode,
+                            offer.distance_km ASC, offer.selling_price ASC, offer.listing_id ASC
                 ),
                 spread AS (
                     SELECT picked.*,
@@ -481,7 +489,24 @@ public class MarketplaceFeedRepository {
         args.add(limit);
         args.add(offset);
 
-        return jdbc.query(sql, MarketplaceFeedRepository::card, args.toArray());
+        return queryCardsWithOptionalPlan("search", sql, args.toArray());
+    }
+
+    /**
+     * Large-marketplace CI can print the real feed/search plans for its seeded
+     * database by setting a test-only JVM property around two representative
+     * reads. This keeps EXPLAIN ANALYZE tied to the SQL and bind parameters the
+     * application actually sends, instead of maintaining a hand-copied query.
+     */
+    private List<Object[]> queryCardsWithOptionalPlan(String name, String sql, Object[] args) {
+        if (Boolean.getBoolean("gpstore.test.explain-marketplace")) {
+            List<String> plan = jdbc.query(
+                    "EXPLAIN (ANALYZE, BUFFERS, SETTINGS, FORMAT TEXT) " + sql,
+                    (rs, rowNum) -> rs.getString(1), args);
+            System.out.println("EXPLAIN ANALYZE marketplace " + name + ":");
+            plan.forEach(System.out::println);
+        }
+        return jdbc.query(sql, MarketplaceFeedRepository::card, args);
     }
 
     /**

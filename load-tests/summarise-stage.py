@@ -29,6 +29,33 @@ def trend(summary, name, field):
     return m.get(field)
 
 
+def gate_failures(summary, total, served, faults, k6_exit):
+    failures = []
+    if k6_exit != 0:
+        failures.append('k6 exit=%d' % k6_exit)
+    if total <= 0:
+        failures.append('no requests recorded')
+    served_pct = 100.0 * served / total if total else 0.0
+    if served_pct < 95.0:
+        failures.append('served %.2f%% < 95%%' % served_pct)
+    for name, count in faults.items():
+        if count:
+            failures.append('%s=%d' % (name, count))
+
+    for endpoint in ('discovery', 'shelf', 'market_feed', 'market_search', 'market_offers'):
+        metric_name = 'http_req_duration{name:%s}' % endpoint
+        p95 = trend(summary, metric_name, 'p(95)')
+        p99 = trend(summary, metric_name, 'p(99)')
+        if p95 is None or p99 is None:
+            failures.append('%s latency not measured' % endpoint)
+            continue
+        if p95 >= 2_000:
+            failures.append('%s p95=%sms >= 2000ms' % (endpoint, fmt(p95)))
+        if p99 >= 4_000:
+            failures.append('%s p99=%sms >= 4000ms' % (endpoint, fmt(p99)))
+    return failures
+
+
 def resources(path):
     rows = []
     try:
@@ -63,6 +90,7 @@ def resources(path):
         'load1_peak': peak('load1'),
         'pg_total_peak': peak('pg_total', int),
         'pg_active_peak': peak('pg_active', int),
+        'pg_waiting_peak': peak('pg_waiting', int),
         'pg_idle_tx_peak': peak('pg_idle_tx', int),
         'hikari_active_peak': peak('hikari_active', int),
         'hikari_waiting_peak': peak('hikari_waiting', int),
@@ -98,12 +126,15 @@ def main():
         '502': metric(s, 'status_502'),
         '503_unexpected': metric(s, 'status_503_unexpected'),
         '4xx_unexpected': metric(s, 'status_4xx_unexpected'),
+        '3xx': metric(s, 'status_3xx'),
         'network': metric(s, 'status_network_error'),
         'timeout': metric(s, 'status_timeout'),
+        'tenant_leaks': metric(s, 'tenant_leaks'),
     }
+    failures = gate_failures(s, total, ok, faults, args.k6_exit)
 
     print('=' * 72)
-    print('STAGE %s  %s' % (args.label, 'PASSED GATES' if args.k6_exit == 0 else 'BROKE A GATE'))
+    print('STAGE %s  %s' % (args.label, 'PASSED GATES' if not failures else 'BROKE A GATE'))
     print('  requests            %d' % total)
     served_pct = 100.0 * ok / total if total else 0
     print('  served (2xx)        %d  (%.2f%%)' % (ok, served_pct))
@@ -111,8 +142,14 @@ def main():
     print('  answered 4xx        %d  (401/403/404/409/410/422 - an answer, not a fault)'
           % expected4xx)
     print('  faults              ' + ', '.join('%s=%d' % (k, v) for k, v in faults.items()))
+    print('  %-16s p50=%sms p95=%sms p99=%sms max=%sms'
+          % ('all requests', fmt(trend(s, 'http_req_duration', 'med')),
+             fmt(trend(s, 'http_req_duration', 'p(95)')),
+             fmt(trend(s, 'http_req_duration', 'p(99)')),
+             fmt(trend(s, 'http_req_duration', 'max'))))
     for name in ('discovery', 'shelf', 'search', 'market_feed', 'market_search',
-                 'market_offers', 'product_detail', 'cart_add', 'cart_read'):
+                 'market_offers', 'storefront', 'product_detail', 'cart_add',
+                 'cart_read', 'my_orders', 'liveness'):
         key = 'http_req_duration{name:%s}' % name
         p95 = trend(s, key, 'p(95)')
         if p95 is None:
@@ -128,8 +165,10 @@ def main():
               % (r['cpu_mean'], r['cpu_peak'], r['cores'], r['host_cpu_peak_pct'],
                  r['rss_peak_mb'], r['host_memory_free_min_mb'],
                  r['host_memory_total_mb'], r['threads_peak'], r['load1_peak']))
-        print('  postgres backends peak %d, executing peak %d, idle-in-transaction peak %d'
-              % (r['pg_total_peak'], r['pg_active_peak'], r['pg_idle_tx_peak']))
+        print('  postgres backends peak %d, executing peak %d, waiting peak %d, '
+              'idle-in-transaction peak %d'
+              % (r['pg_total_peak'], r['pg_active_peak'], r['pg_waiting_peak'],
+                 r['pg_idle_tx_peak']))
         print('  Hikari   active peak %d/%d, waiting peak %d, total peak %d'
               % (r['hikari_active_peak'], r['hikari_max'], r['hikari_waiting_peak'],
                  r['hikari_total_peak']))
@@ -138,7 +177,10 @@ def main():
                  r['gc_time_delta_ms']))
     else:
         print('  server  NOT SAMPLED')
+    if failures:
+        print('  failed gates         ' + '; '.join(failures))
     print()
+    return 1 if failures else 0
 
 
 def fmt(v):
@@ -146,4 +188,4 @@ def fmt(v):
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())
