@@ -29,6 +29,33 @@ def trend(summary, name, field):
     return m.get(field)
 
 
+def gate_failures(summary, total, served, faults, k6_exit):
+    failures = []
+    if k6_exit != 0:
+        failures.append('k6 exit=%d' % k6_exit)
+    if total <= 0:
+        failures.append('no requests recorded')
+    served_pct = 100.0 * served / total if total else 0.0
+    if served_pct < 95.0:
+        failures.append('served %.2f%% < 95%%' % served_pct)
+    for name, count in faults.items():
+        if count:
+            failures.append('%s=%d' % (name, count))
+
+    for endpoint in ('discovery', 'shelf', 'market_feed', 'market_search', 'market_offers'):
+        metric_name = 'http_req_duration{name:%s}' % endpoint
+        p95 = trend(summary, metric_name, 'p(95)')
+        p99 = trend(summary, metric_name, 'p(99)')
+        if p95 is None or p99 is None:
+            failures.append('%s latency not measured' % endpoint)
+            continue
+        if p95 >= 2_000:
+            failures.append('%s p95=%sms >= 2000ms' % (endpoint, fmt(p95)))
+        if p99 >= 4_000:
+            failures.append('%s p99=%sms >= 4000ms' % (endpoint, fmt(p99)))
+    return failures
+
+
 def resources(path):
     rows = []
     try:
@@ -99,12 +126,15 @@ def main():
         '502': metric(s, 'status_502'),
         '503_unexpected': metric(s, 'status_503_unexpected'),
         '4xx_unexpected': metric(s, 'status_4xx_unexpected'),
+        '3xx': metric(s, 'status_3xx'),
         'network': metric(s, 'status_network_error'),
         'timeout': metric(s, 'status_timeout'),
+        'tenant_leaks': metric(s, 'tenant_leaks'),
     }
+    failures = gate_failures(s, total, ok, faults, args.k6_exit)
 
     print('=' * 72)
-    print('STAGE %s  %s' % (args.label, 'PASSED GATES' if args.k6_exit == 0 else 'BROKE A GATE'))
+    print('STAGE %s  %s' % (args.label, 'PASSED GATES' if not failures else 'BROKE A GATE'))
     print('  requests            %d' % total)
     served_pct = 100.0 * ok / total if total else 0
     print('  served (2xx)        %d  (%.2f%%)' % (ok, served_pct))
@@ -147,7 +177,10 @@ def main():
                  r['gc_time_delta_ms']))
     else:
         print('  server  NOT SAMPLED')
+    if failures:
+        print('  failed gates         ' + '; '.join(failures))
     print()
+    return 1 if failures else 0
 
 
 def fmt(v):
@@ -155,4 +188,4 @@ def fmt(v):
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())
