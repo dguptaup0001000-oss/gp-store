@@ -91,7 +91,7 @@ jobs:
           python3 .github/scripts/check_compose_published_ports.py .
 
       - name: Verify marketplace capacity report gates
-        working-directory: ..
+        working-directory: .
         run: |
           set -Eeuo pipefail
           python3 -m py_compile load-tests/summarise-stage.py load-tests/test_summarise_stage.py
