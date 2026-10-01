@@ -99,8 +99,8 @@ public class MarketplaceFeedRepository {
         // scroll therefore remains unbounded by this optimisation.
         int requestedPrefix = Math.max(1, offset + limit);
         int candidateShopLimit = Math.min(shopIds.size(), requestedPrefix + 32);
-        int candidatesPerShop = Math.max(64,
-                (requestedPrefix + candidateShopLimit - 1) / candidateShopLimit + 64);
+        int candidatesPerShop = Math.max(16,
+                (requestedPrefix + candidateShopLimit - 1) / candidateShopLimit + 12);
 
         // The distance each shop is from the customer, handed to the database
         // as a VALUES list so the ranking happens where the paging happens.
@@ -248,7 +248,19 @@ public class MarketplaceFeedRepository {
         args.add(limit);
         args.add(offset);
 
-        return jdbc.query(sql, MarketplaceFeedRepository::card, args.toArray());
+        List<Object[]> rows = jdbc.query(sql, MarketplaceFeedRepository::card, args.toArray());
+        // Diverse shops fill a page from a small candidate window. A town in
+        // which many shops stock the same first products can deduplicate that
+        // window below the requested page size; retry only that exceptional
+        // request with the conservative window rather than charging every
+        // Home load for the worst case.
+        int expandedCandidates = Math.max(64, requestedPrefix + 16);
+        if (rows.size() < limit && candidatesPerShop < expandedCandidates) {
+            int candidateParameter = 5 + modes.size();
+            args.set(candidateParameter, expandedCandidates);
+            return jdbc.query(sql, MarketplaceFeedRepository::card, args.toArray());
+        }
+        return rows;
     }
 
     /**
