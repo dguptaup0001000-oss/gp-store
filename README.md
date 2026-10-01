@@ -118,8 +118,7 @@ shops. Full method and numbers in [`load-tests/README.md`](load-tests/README.md)
 
 - The historical 1,000-VU run had p95 below 2 s, but served only **83.6%**
   of requests. It does **not** pass the current 95%-served capacity gate.
-- In the historical run, deliberate shedding was already significant at
-  1,000 VUs (only 83.6% served); at 4,000 VUs it served ~62%.
+- At 4,000 VUs, the historical run served ~62%.
 - Connection-pool residency was observed at the limit. The shared-machine run
   did not isolate database CPU, so these results do not establish a Hostinger
   capacity ceiling.
