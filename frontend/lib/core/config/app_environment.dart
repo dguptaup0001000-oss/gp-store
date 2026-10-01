@@ -54,8 +54,12 @@ enum AppEnvironment {
   /// True when [url] is the live shop API. Staging must never use this host.
   static bool isProductionApiUrl(String url) {
     final parsed = Uri.tryParse(url.trim());
-    return parsed != null &&
-        parsed.host.toLowerCase() == 'api.gpstore.co.in';
+    if (parsed == null) return false;
+    // A trailing DNS root dot is equivalent to the undotted hostname. Treat
+    // it as production too, or a staging build could bypass the live-host
+    // guard with https://api.gpstore.co.in./v1.
+    final host = parsed.host.toLowerCase().replaceFirst(RegExp(r'\.$'), '');
+    return host == 'api.gpstore.co.in';
   }
 
   /// Production APKs must not ship a retired host.

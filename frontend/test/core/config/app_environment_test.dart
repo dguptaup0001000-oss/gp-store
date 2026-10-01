@@ -43,6 +43,10 @@ void main() {
           isTrue);
       expect(
           AppEnvironment.isProductionApiUrl(
+              'https://api.gpstore.co.in./v1'),
+          isTrue);
+      expect(
+          AppEnvironment.isProductionApiUrl(
               'https://staging-api.gpstore.co.in/v1'),
           isFalse);
       expect(
