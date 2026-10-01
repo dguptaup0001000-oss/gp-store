@@ -76,6 +76,14 @@ const accounts = new SharedArray('accounts', () => {
 });
 
 const SHOPPERS = Math.min(Number(__ENV.SHOPPERS || accounts.length), accounts.length);
+// VUS means TOTAL concurrent virtual users. The old shape started VUS browse
+// users and then added another VUS/3 marketplace users, so a stage labelled
+// 1,000 actually drove 1,333 and a 4,000 stage drove 5,333. Split the stated
+// total between the two anonymous journeys; signed-in shoppers, when enabled,
+// consume part of the same total as well.
+const ANONYMOUS_VUS = Math.max(2, VUS - SHOPPERS);
+const MARKETPLACE_VUS = Math.max(1, Math.round(ANONYMOUS_VUS / 4));
+const BROWSE_VUS = Math.max(1, ANONYMOUS_VUS - MARKETPLACE_VUS);
 
 const requestsOk = new Counter('requests_ok');
 const status429 = new Counter('status_429');
@@ -164,7 +172,7 @@ export const options = {
       browse: {
         executor: 'ramping-vus',
         startVUs: 0,
-        stages: [{ duration: RAMP_TIME, target: VUS }, { duration: HOLD_TIME, target: VUS }],
+        stages: [{ duration: RAMP_TIME, target: BROWSE_VUS }, { duration: HOLD_TIME, target: BROWSE_VUS }],
         gracefulRampDown: '5s',
         exec: 'browse',
       },
@@ -180,8 +188,8 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: RAMP_TIME, target: Math.max(1, Math.round(VUS / 3)) },
-        { duration: HOLD_TIME, target: Math.max(1, Math.round(VUS / 3)) },
+        { duration: RAMP_TIME, target: MARKETPLACE_VUS },
+        { duration: HOLD_TIME, target: MARKETPLACE_VUS },
       ],
       exec: 'marketplace',
     };

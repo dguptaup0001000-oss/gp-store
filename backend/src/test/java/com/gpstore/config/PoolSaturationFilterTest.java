@@ -31,6 +31,21 @@ class PoolSaturationFilterTest {
     }
 
     @Test
+    void marketplaceGetIsShedBeforeWaitingForThePoolTimeout() throws Exception {
+        PoolSaturationFilter filter = filterWith(10, 10, PoolSaturationFilter.WAITING_SHED_THRESHOLD);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/v1/api/marketplace/feed");
+        request.setRequestURI("/v1/api/marketplace/feed");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(503, response.getStatus());
+        assertEquals("pool-saturated", response.getHeader("X-GP-Shed"));
+        assertNull(chain.getRequest());
+    }
+
+    @Test
     void waitingThreadsAloneDoNotShedWhileConnectionsAreStillIdle() throws Exception {
         PoolSaturationFilter filter = filterWith(4, 10, 20);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/v1/api/products");

@@ -67,7 +67,8 @@ class SeedLoadTestMarketplace {
                 ? MarketplaceTestData.Scale.large(shopsWanted,
                         intProperty("gpstore.seed.customers", 50_000),
                         intProperty("gpstore.seed.orders", 20_000),
-                        intProperty("gpstore.seed.listings-per-shop", 220))
+                        intProperty("gpstore.seed.listings-per-shop", 220),
+                        intProperty("gpstore.seed.max-shops-per-business", 10))
                 : MarketplaceTestData.Scale.light();
 
         MarketplaceTestData.Marketplace market = generator.create(

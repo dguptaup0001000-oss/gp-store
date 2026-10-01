@@ -58,7 +58,9 @@ public class ThreadPoolSaturationFilter extends OncePerRequestFilter {
         if (path.contains("/api/health") || path.contains("/actuator") || path.contains("/api/version")) {
             return true;
         }
-        return !path.contains("/api/products") && !path.contains("/api/categories");
+        return !path.contains("/api/products")
+                && !path.contains("/api/categories")
+                && !path.contains("/api/marketplace");
     }
 
     @Override

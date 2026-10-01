@@ -229,7 +229,7 @@ public class MarketplaceTestData {
      *                          ruinous for two thousand.
      */
     public record Scale(List<Trade> trades, int shopsTarget, int customers,
-                        int orders, int maxListingsPerShop) {
+                        int orders, int maxListingsPerShop, int maxShopsPerBusiness) {
 
         /**
          * Small enough for every push, varied enough to still mean something.
@@ -245,12 +245,19 @@ public class MarketplaceTestData {
                     Trade.FOOTWEAR, Trade.PHARMACY, Trade.RESTAURANT, Trade.BIRYANI,
                     Trade.HARDWARE, Trade.TRACTOR_PARTS, Trade.JEWELLERY, Trade.BOOKS,
                     Trade.TOYS, Trade.GIFTS),
-                    22, 600, 2200, 520);
+                    22, 600, 2200, 520, 10);
         }
 
         /** A hundred trades and two thousand shops. Not for ordinary CI. */
         public static Scale large(int shops, int customers, int orders, int maxListings) {
-            return new Scale(List.of(Trade.values()), shops, customers, orders, maxListings);
+            return large(shops, customers, orders, maxListings, 10);
+        }
+
+        /** Launch-shaped data: one independently named shop per business. */
+        public static Scale large(int shops, int customers, int orders, int maxListings,
+                                  int maxShopsPerBusiness) {
+            return new Scale(List.of(Trade.values()), shops, customers, orders, maxListings,
+                    Math.max(1, maxShopsPerBusiness));
         }
     }
 
@@ -284,7 +291,7 @@ public class MarketplaceTestData {
         //
         // The pattern below averages about 2.35 shops per business, which is
         // how many businesses each trade needs to reach its share.
-        final double averageShopsPerBusiness = 2.35;
+        final double averageShopsPerBusiness = scale.maxShopsPerBusiness() == 1 ? 1.0 : 2.35;
         int perTrade = Math.max(1, (int) Math.round(
                 scale.shopsTarget() / (double) Math.max(1, scale.trades().size())
                         / averageShopsPerBusiness));
@@ -301,7 +308,8 @@ public class MarketplaceTestData {
             variants += catalogue.variantIds().size();
 
             for (int n = 0; n < perTrade; n++) {
-                Business business = openBusiness(trade, random, n, businessOrdinal++);
+                Business business = openBusiness(
+                        trade, random, n, businessOrdinal++, scale.maxShopsPerBusiness());
                 businesses.add(business);
                 listings += listShelves(business, catalogue, random, scale);
                 offers += seedOffers(business, trade, random);
@@ -350,7 +358,8 @@ public class MarketplaceTestData {
      * @param ordinal its position across the whole marketplace, which decides
      *                how many shops it runs.
      */
-    private Business openBusiness(Trade trade, Random random, int n, int ordinal) {
+    private Business openBusiness(Trade trade, Random random, int n, int ordinal,
+                                  int maxShopsPerBusiness) {
         String name = TAG + " " + trade.label + " " + (n + 1) + " (seeded)";
         Long merchantId = merchants.register(
                 name, name, phone(random), email(trade.name().toLowerCase(Locale.ROOT) + n),
@@ -370,13 +379,14 @@ public class MarketplaceTestData {
         // makes the dataset unreproducible in exactly the dimension the
         // authorisation tests care about: "is there a merchant with five shops
         // in this run" must not be a coin toss.
-        int shopCount = switch (ordinal % 20) {
+        int naturalShopCount = switch (ordinal % 20) {
             case 0 -> 10;
             case 5, 11 -> 5;
             case 3, 8, 14 -> 3;
             case 1, 6, 9, 16 -> 2;
             default -> 1;
         };
+        int shopCount = Math.min(naturalShopCount, maxShopsPerBusiness);
 
         List<Long> shopIds = new ArrayList<>();
         for (int i = 0; i < shopCount; i++) {

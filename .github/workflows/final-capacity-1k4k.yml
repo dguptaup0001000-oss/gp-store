@@ -99,6 +99,8 @@ jobs:
             -Dgpstore.seed.loadtest=true \
             -Dgpstore.test-data.allow=true \
             -Dgpstore.seed.shops=100 \
+            -Dgpstore.seed.listings-per-shop=60 \
+            -Dgpstore.seed.max-shops-per-business=1 \
             -Dgpstore.seed.customers=50000 \
             -Dgpstore.seed.orders=20000 \
             -Dspring.datasource.url="$DB_URL"

@@ -29,6 +29,21 @@ class ThreadPoolSaturationFilterTest {
     }
 
     @Test
+    void marketplaceGetIsShedWhenEveryWorkerIsBusy() throws Exception {
+        ThreadPoolSaturationFilter filter = filterWith(true);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/v1/api/marketplace/feed");
+        request.setRequestURI("/v1/api/marketplace/feed");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(503, response.getStatus());
+        assertEquals("thread-pool-saturated", response.getHeader("X-GP-Shed"));
+        assertNull(chain.getRequest());
+    }
+
+    @Test
     void catalogGetPassesWhenWorkersAreFree() throws Exception {
         ThreadPoolSaturationFilter filter = filterWith(false);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/v1/api/products/feed");
