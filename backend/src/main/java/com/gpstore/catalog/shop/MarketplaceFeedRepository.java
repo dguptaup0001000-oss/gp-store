@@ -107,15 +107,9 @@ public class MarketplaceFeedRepository {
         // Computing it here rather than in SQL keeps ONE haversine in the
         // application - ShopDiscovery's - instead of a second one that would
         // slowly disagree with it.
-        StringBuilder distances = new StringBuilder();
-        for (Long shopId : shopIds) {
-            if (distances.length() > 0) {
-                distances.append(", ");
-            }
-            distances.append("(?::bigint, ?::double precision)");
-            args.add(shopId);
-            args.add(distanceByShop.getOrDefault(shopId, Double.MAX_VALUE));
-        }
+        NearInput near = nearInput(shopIds, distanceByShop);
+        args.add(near.shopIds());
+        args.add(near.distances());
 
         // PAGE BEFORE ENRICHMENT. Image lookup, inventory and seller counts do
         // not affect which card wins or its ordering. Performing them inside
@@ -124,7 +118,12 @@ public class MarketplaceFeedRepository {
         // twenty cards. The materialized page freezes the exact old winner
         // and order first; only those bounded rows are then enriched.
         String sql = """
-                WITH near AS (SELECT * FROM (VALUES %s) AS d(shop_id, distance_km)),
+                WITH near AS (
+                    SELECT shop_id_text::bigint AS shop_id,
+                           distance_text::double precision AS distance_km
+                      FROM unnest(string_to_array(?, ','), string_to_array(?, ','))
+                           AS d(shop_id_text, distance_text)
+                ),
                 candidate_near AS MATERIALIZED (
                     SELECT near.*
                       FROM near
@@ -237,7 +236,7 @@ public class MarketplaceFeedRepository {
                   ) product_image ON true
                  ORDER BY paged.shop_row ASC, paged.distance_km ASC,
                           paged.shop_id ASC, paged.product_id ASC, paged.commerce_mode ASC
-                """.formatted(distances, modePlaceholders);
+                """.formatted(modePlaceholders);
 
         args.add(candidateShopLimit);
         for (CommerceMode mode : modes) {
@@ -293,15 +292,9 @@ public class MarketplaceFeedRepository {
         }
 
         List<Object> args = new ArrayList<>();
-        StringBuilder distances = new StringBuilder();
-        for (Long shopId : shopIds) {
-            if (distances.length() > 0) {
-                distances.append(", ");
-            }
-            distances.append("(?::bigint, ?::double precision)");
-            args.add(shopId);
-            args.add(distanceByShop.getOrDefault(shopId, Double.MAX_VALUE));
-        }
+        NearInput near = nearInput(shopIds, distanceByShop);
+        args.add(near.shopIds());
+        args.add(near.distances());
 
         // EVERY WORD MUST MATCH SOMETHING. "blue saree" should not return
         // every saree and everything blue - a customer who typed two words
@@ -325,7 +318,12 @@ public class MarketplaceFeedRepository {
         // and representative selection decide the page, then only the bounded
         // result receives image, inventory and seller-count joins.
         String sql = """
-                WITH near AS (SELECT * FROM (VALUES %s) AS d(shop_id, distance_km)),
+                WITH near AS (
+                    SELECT shop_id_text::bigint AS shop_id,
+                           distance_text::double precision AS distance_km
+                      FROM unnest(string_to_array(?, ','), string_to_array(?, ','))
+                           AS d(shop_id_text, distance_text)
+                ),
                 product_matches AS MATERIALIZED (
                     SELECT v.id AS variant_id, p.id AS product_id
                       FROM product_variants v
@@ -447,7 +445,7 @@ public class MarketplaceFeedRepository {
                   ) product_image ON true
                  ORDER BY paged.shop_row ASC, paged.distance_km ASC,
                           paged.shop_id ASC, paged.product_id ASC, paged.commerce_mode ASC
-                """.formatted(distances, productMatches, shopMatches,
+                """.formatted(productMatches, shopMatches,
                         placeholders(modes.size()));
 
         for (String word : words) {
@@ -531,18 +529,17 @@ public class MarketplaceFeedRepository {
             return List.of();
         }
         List<Object> args = new ArrayList<>();
-        StringBuilder distances = new StringBuilder();
-        for (Long shopId : shopIds) {
-            if (distances.length() > 0) {
-                distances.append(", ");
-            }
-            distances.append("(?::bigint, ?::double precision)");
-            args.add(shopId);
-            args.add(distanceByShop.getOrDefault(shopId, Double.MAX_VALUE));
-        }
+        NearInput near = nearInput(shopIds, distanceByShop);
+        args.add(near.shopIds());
+        args.add(near.distances());
 
         String sql = """
-                WITH near AS (SELECT * FROM (VALUES %s) AS d(shop_id, distance_km))
+                WITH near AS (
+                    SELECT shop_id_text::bigint AS shop_id,
+                           distance_text::double precision AS distance_km
+                      FROM unnest(string_to_array(?, ','), string_to_array(?, ','))
+                           AS d(shop_id_text, distance_text)
+                )
                 SELECT v.id                AS variant_id,
                        v.quantity          AS variant_quantity,
                        v.unit              AS variant_unit,
@@ -581,7 +578,7 @@ public class MarketplaceFeedRepository {
                    AND COALESCE(v.active, true) = true
                    AND p.active = true
                  ORDER BY near.distance_km ASC, spv.selling_price ASC, spv.id ASC
-                """.formatted(distances);
+                """;
 
         args.add(productId);
         args.add(variantId);
@@ -624,4 +621,32 @@ public class MarketplaceFeedRepository {
     private static String placeholders(int count) {
         return String.join(", ", java.util.Collections.nCopies(count, "?"));
     }
+
+    /**
+     * A stable two-parameter representation of the authorized nearby set.
+     *
+     * <p>The former VALUES list generated two placeholders per shop. A town
+     * with 2,116 eligible shops therefore sent 4,232 bind parameters and a
+     * differently shaped SQL statement on every request, so PostgreSQL could
+     * not reuse one plan. These comma-separated values remain bound data (not
+     * SQL text) and are expanded together by PostgreSQL's multi-array unnest.
+     * The collections originate from ShopDiscovery; no client-supplied shop
+     * identifier bypasses that authority.
+     */
+    private static NearInput nearInput(Collection<Long> shopIds,
+                                       Map<Long, Double> distanceByShop) {
+        StringBuilder ids = new StringBuilder();
+        StringBuilder distances = new StringBuilder();
+        for (Long shopId : shopIds) {
+            if (ids.length() > 0) {
+                ids.append(',');
+                distances.append(',');
+            }
+            ids.append(shopId);
+            distances.append(distanceByShop.getOrDefault(shopId, Double.MAX_VALUE));
+        }
+        return new NearInput(ids.toString(), distances.toString());
+    }
+
+    private record NearInput(String shopIds, String distances) {}
 }
