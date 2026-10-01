@@ -8,16 +8,30 @@ final notificationsRepositoryProvider = Provider<NotificationsRepository>((ref) 
   return NotificationsRepository(apiClient: ref.watch(apiClientProvider));
 });
 
-typedef MyNotificationsPage = ({List<AppNotification> notifications, int page, int totalPages});
+typedef MyNotificationsPage = ({
+  List<AppNotification> notifications,
+  int page,
+  int totalPages,
+  bool isLoadingMore,
+  Object? loadMoreError,
+});
 
 /// Paginated - see NotificationsRepository.getMyNotifications's doc comment.
 /// AsyncNotifier (not a plain FutureProvider) so loadMore() can append to
 /// the existing state.
 class MyNotificationsController extends AutoDisposeAsyncNotifier<MyNotificationsPage> {
+  bool _loadingMore = false;
+
   @override
   Future<MyNotificationsPage> build() async {
     final result = await ref.read(notificationsRepositoryProvider).getMyNotifications(page: 0);
-    return (notifications: result.notifications, page: 0, totalPages: result.totalPages);
+    return (
+      notifications: result.notifications,
+      page: 0,
+      totalPages: result.totalPages,
+      isLoadingMore: false,
+      loadMoreError: null,
+    );
   }
 
   bool get hasMore {
@@ -27,15 +41,44 @@ class MyNotificationsController extends AutoDisposeAsyncNotifier<MyNotifications
 
   Future<void> loadMore() async {
     final current = state.valueOrNull;
-    if (current == null || current.page + 1 >= current.totalPages) return;
+    if (_loadingMore ||
+        current == null ||
+        current.page + 1 >= current.totalPages) return;
 
+    _loadingMore = true;
     final nextPage = current.page + 1;
-    final result = await ref.read(notificationsRepositoryProvider).getMyNotifications(page: nextPage);
     state = AsyncData((
-      notifications: [...current.notifications, ...result.notifications],
-      page: nextPage,
-      totalPages: result.totalPages,
+      notifications: current.notifications,
+      page: current.page,
+      totalPages: current.totalPages,
+      isLoadingMore: true,
+      loadMoreError: null,
     ));
+    try {
+      final result = await ref
+          .read(notificationsRepositoryProvider)
+          .getMyNotifications(page: nextPage);
+      state = AsyncData((
+        notifications: [...current.notifications, ...result.notifications],
+        page: nextPage,
+        totalPages: result.totalPages,
+        isLoadingMore: false,
+        loadMoreError: null,
+      ));
+    } catch (error) {
+      // Keep the loaded page visible and expose an explicit retry action. The
+      // scroll listener may call this again, but it must not create an
+      // unhandled asynchronous exception or silently strand the customer.
+      state = AsyncData((
+        notifications: current.notifications,
+        page: current.page,
+        totalPages: current.totalPages,
+        isLoadingMore: false,
+        loadMoreError: error,
+      ));
+    } finally {
+      _loadingMore = false;
+    }
   }
 }
 

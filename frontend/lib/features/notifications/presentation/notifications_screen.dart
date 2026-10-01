@@ -112,10 +112,28 @@ class NotificationsScreen extends ConsumerWidget {
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (context, index) {
                       if (index == notifications.length) {
-                        WidgetsBinding.instance.addPostFrameCallback(
-                          (_) => ref.read(myNotificationsProvider.notifier).loadMore(),
-                        );
-                        return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                        if (page.loadMoreError != null) {
+                          return Center(
+                            child: TextButton.icon(
+                              onPressed: hapticize(() => ref
+                                  .read(myNotificationsProvider.notifier)
+                                  .loadMore()),
+                              icon: const Icon(Icons.refresh),
+                              label: const Text("Couldn't load more. Tap to retry"),
+                            ),
+                          );
+                        }
+                        if (page.isLoadingMore) {
+                          return const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2));
+                        }
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (context.mounted) {
+                            ref.read(myNotificationsProvider.notifier).loadMore();
+                          }
+                        });
+                        return const Center(
+                            child: CircularProgressIndicator(strokeWidth: 2));
                       }
 
                       final notification = notifications[index];
