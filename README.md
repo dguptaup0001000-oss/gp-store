@@ -116,15 +116,17 @@ production by accident.
 Measured on one 4-vCPU box with the load generator sharing it, against 2,115
 shops. Full method and numbers in [`load-tests/README.md`](load-tests/README.md).
 
-- **~1,000 concurrent browsers** within a p95 < 2 s budget.
-- Above that the application sheds load deliberately (503 with `Retry-After`)
-  rather than failing; at 4,000 virtual users it still serves ~62% and refuses
-  the rest on purpose.
-- The limit is connection-pool residency on one instance, not CPU and not
-  PostgreSQL - both sat idle at the ceiling.
+- The historical 1,000-VU run had p95 below 2 s, but served only **83.6%**
+  of requests. It does **not** pass the current 95%-served capacity gate.
+- In the historical run, deliberate shedding was already significant at
+  1,000 VUs (only 83.6% served); at 4,000 VUs it served ~62%.
+- Connection-pool residency was observed at the limit. The shared-machine run
+  did not isolate database CPU, so these results do not establish a Hostinger
+  capacity ceiling.
 
-A refused customer is not a served customer, and the load-test reports are
-written to keep those two numbers apart.
+A refused customer is not a served customer. The historical run does not prove
+the current 95%-served target at any tested stage, and it was not run on
+Hostinger staging or production.
 
 ---
 
