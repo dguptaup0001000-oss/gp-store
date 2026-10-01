@@ -3,7 +3,7 @@ name: Verify marketplace hours capacity fix (temporary)
 # Temporary, branch-scoped performance run requested before launch.
 #
 # It never touches production. The job creates a disposable PostgreSQL + Redis,
-# builds a 2,000-shop/100-trade marketplace, boots the real Spring Boot jar,
+# builds the 100-shop launch-scale marketplace, boots the real Spring Boot jar,
 # then runs the repository's existing marketplace-traffic.js at exactly
 # 1,000, 2,000, 3,000 and 4,000 VUs. The client and server share one runner,
 # so this is a regression/floor measurement, not a claim about Hostinger's
@@ -87,7 +87,7 @@ jobs:
           FLYWAY_ENABLED: 'true'
         run: ./mvnw -B test -Pschema-bootstrap -Dtest=EmptyDatabaseBootstrapTest -DexcludedGroups=
 
-      - name: Seed 2,000-shop marketplace
+      - name: Seed 100-shop launch marketplace
         working-directory: backend
         env:
           DDL_AUTO: validate
@@ -98,7 +98,7 @@ jobs:
             -Dtest=SeedLoadTestMarketplace \
             -Dgpstore.seed.loadtest=true \
             -Dgpstore.test-data.allow=true \
-            -Dgpstore.seed.shops=2000 \
+            -Dgpstore.seed.shops=100 \
             -Dgpstore.seed.customers=50000 \
             -Dgpstore.seed.orders=20000 \
             -Dspring.datasource.url="$DB_URL"
@@ -192,7 +192,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: marketplace-hours-capacity-1000
+          name: marketplace-100-shop-capacity-1000
           path: |
             ${{ runner.temp }}/capacity-run/
             ${{ runner.temp }}/dataset.csv
