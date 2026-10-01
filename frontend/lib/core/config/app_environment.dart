@@ -53,8 +53,9 @@ enum AppEnvironment {
 
   /// True when [url] is the live shop API. Staging must never use this host.
   static bool isProductionApiUrl(String url) {
-    final normalized = url.trim().toLowerCase();
-    return normalized.contains('api.gpstore.co.in');
+    final parsed = Uri.tryParse(url.trim());
+    return parsed != null &&
+        parsed.host.toLowerCase() == 'api.gpstore.co.in';
   }
 
   /// Production APKs must not ship a retired host.
@@ -70,10 +71,18 @@ enum AppEnvironment {
     if (raw.isEmpty) return productionApiBaseUrl;
     final lowered = raw.toLowerCase();
     if (_isRetiredApiHost(lowered)) return productionApiBaseUrl;
-    if (!lowered.startsWith('https://')) return productionApiBaseUrl;
-    if (!lowered.endsWith('/v1')) return productionApiBaseUrl;
-    if (!isProductionApiUrl(lowered)) return productionApiBaseUrl;
-    return raw;
+    final parsed = Uri.tryParse(raw);
+    if (parsed == null ||
+        parsed.scheme.toLowerCase() != 'https' ||
+        parsed.host.toLowerCase() != 'api.gpstore.co.in' ||
+        (parsed.hasPort && parsed.port != 443) ||
+        parsed.userInfo.isNotEmpty ||
+        parsed.path != '/v1' ||
+        parsed.hasQuery ||
+        parsed.hasFragment) {
+      return productionApiBaseUrl;
+    }
+    return productionApiBaseUrl;
   }
 
   /// Built at runtime so a unzip-the-APK string scan does not find the
