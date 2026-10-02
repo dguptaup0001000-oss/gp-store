@@ -8,6 +8,7 @@ import '../../categories/presentation/categories_screen.dart';
 import '../domain/marketplace_feed_models.dart';
 import 'marketplace_card_tile.dart';
 import 'marketplace_feed_provider.dart';
+import 'marketplace_mode_products_screen.dart';
 
 /// The nearby marketplace feed on the home screen: what is available
 /// NEAR THIS CUSTOMER, across every shop that would serve them.
@@ -103,65 +104,47 @@ class MarketplaceHomeModeSection extends ConsumerWidget {
     }
     if (section.cards.isEmpty) return const SizedBox.shrink();
 
-    final hasMoreIndicator = section.isLoadingMore || section.error != null;
+    // Home is a preview, not the full catalogue. Keep a small horizontal
+    // sample here and let See all open a vertical, paginated list for the
+    // selected mode. A customer should not need to swipe past hundreds of
+    // cards to discover the rest of a mode.
+    final previewCards = section.cards.take(6).toList(growable: false);
     final cardWidth = MarketplaceCardTile.threeUpCardWidth(context);
     return _ModeSectionMessage(
       title: _title,
       subtitle: mode == CommerceMode.visitToBuy ? 'In-store products' : null,
-      actionLabel: mode == CommerceMode.buyOnline ? 'See all' : null,
-      onAction: mode == CommerceMode.buyOnline
-          ? () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const CategoriesScreen()),
-              )
-          : null,
+      actionLabel: 'See all',
+      actionKey: ValueKey<String>('marketplace-see-all-${mode.wire}'),
+      onAction: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => mode == CommerceMode.buyOnline
+              ? const CategoriesScreen()
+              : MarketplaceModeProductsScreen(mode: mode),
+        ),
+      ),
       child: SizedBox(
         height: MarketplaceCardTile.carouselHeight(
           context,
           cardWidth: cardWidth,
         ),
-        child: NotificationListener<ScrollNotification>(
-          onNotification: (notification) {
-            if (notification.metrics.axis == Axis.horizontal &&
-                notification.metrics.extentAfter < 220 &&
-                section.error == null) {
-              ref.read(marketplaceHomeModeFeedProvider(mode).notifier).loadMore();
-            }
-            return false;
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          itemCount: previewCards.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 10),
+          itemBuilder: (context, index) {
+            final card = previewCards[index];
+            return SizedBox(
+              width: cardWidth,
+              child: MarketplaceCardTile(
+                key: ValueKey<String>(card.feedKey),
+                card: card,
+                onTap: () => onCardTap(card),
+                onAdd: card.addable ? () => onAdd(card) : null,
+                compact: true,
+              ),
+            );
           },
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: section.cards.length + (hasMoreIndicator ? 1 : 0),
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (context, index) {
-              if (index >= section.cards.length) {
-                return SizedBox(
-                  width: 92,
-                  child: Center(
-                    child: section.isLoadingMore
-                        ? const CircularProgressIndicator(strokeWidth: 2)
-                        : TextButton(
-                            onPressed: hapticize(() => ref
-                                .read(marketplaceHomeModeFeedProvider(mode).notifier)
-                                .retry()),
-                            child: const Text('Retry'),
-                          ),
-                  ),
-                );
-              }
-              final card = section.cards[index];
-              return SizedBox(
-                width: cardWidth,
-                child: MarketplaceCardTile(
-                  key: ValueKey<String>(card.feedKey),
-                  card: card,
-                  onTap: () => onCardTap(card),
-                  onAdd: card.addable ? () => onAdd(card) : null,
-                  compact: true,
-                ),
-              );
-            },
-          ),
         ),
       ),
     );
@@ -285,6 +268,7 @@ class _ModeSectionMessage extends StatelessWidget {
     required this.child,
     this.subtitle,
     this.actionLabel,
+    this.actionKey,
     this.onAction,
   });
 
@@ -292,6 +276,7 @@ class _ModeSectionMessage extends StatelessWidget {
   final String? subtitle;
   final Widget child;
   final String? actionLabel;
+  final Key? actionKey;
   final VoidCallback? onAction;
 
   @override
@@ -317,6 +302,7 @@ class _ModeSectionMessage extends StatelessWidget {
                           fontSize: 12, color: AppColors.textSecondary)),
                 if (actionLabel != null && onAction != null)
                   TextButton(
+                    key: actionKey,
                     onPressed: hapticize(onAction!),
                     child: Text(actionLabel!),
                   ),
