@@ -21,9 +21,12 @@ typedef MyNotificationsPage = ({
 /// the existing state.
 class MyNotificationsController extends AutoDisposeAsyncNotifier<MyNotificationsPage> {
   bool _loadingMore = false;
+  int _requestGeneration = 0;
 
   @override
   Future<MyNotificationsPage> build() async {
+    _requestGeneration++;
+    _loadingMore = false;
     final result = await ref.read(notificationsRepositoryProvider).getMyNotifications(page: 0);
     return (
       notifications: result.notifications,
@@ -42,10 +45,14 @@ class MyNotificationsController extends AutoDisposeAsyncNotifier<MyNotifications
   Future<void> loadMore() async {
     final current = state.valueOrNull;
     if (_loadingMore ||
+        state.isLoading ||
         current == null ||
-        current.page + 1 >= current.totalPages) return;
+        current.page + 1 >= current.totalPages) {
+      return;
+    }
 
     _loadingMore = true;
+    final generation = _requestGeneration;
     final nextPage = current.page + 1;
     state = AsyncData((
       notifications: current.notifications,
@@ -58,14 +65,20 @@ class MyNotificationsController extends AutoDisposeAsyncNotifier<MyNotifications
       final result = await ref
           .read(notificationsRepositoryProvider)
           .getMyNotifications(page: nextPage);
+      if (generation != _requestGeneration) return;
+      final seenIds = current.notifications.map((item) => item.id).toSet();
+      final appended = result.notifications
+          .where((item) => seenIds.add(item.id))
+          .toList(growable: false);
       state = AsyncData((
-        notifications: [...current.notifications, ...result.notifications],
+        notifications: [...current.notifications, ...appended],
         page: nextPage,
         totalPages: result.totalPages,
         isLoadingMore: false,
         loadMoreError: null,
       ));
     } catch (error) {
+      if (generation != _requestGeneration) return;
       // Keep the loaded page visible and expose an explicit retry action. The
       // scroll listener may call this again, but it must not create an
       // unhandled asynchronous exception or silently strand the customer.
@@ -77,7 +90,7 @@ class MyNotificationsController extends AutoDisposeAsyncNotifier<MyNotifications
         loadMoreError: error,
       ));
     } finally {
-      _loadingMore = false;
+      if (generation == _requestGeneration) _loadingMore = false;
     }
   }
 }
