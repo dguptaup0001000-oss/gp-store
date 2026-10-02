@@ -19,8 +19,11 @@ class NotificationsScreen extends ConsumerWidget {
         ref.invalidate(myNotificationsProvider);
         ref.invalidate(unreadNotificationCountProvider);
       } catch (_) {
-        // Non-critical - opening the notification still works even if
-        // marking it read fails silently in the background.
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Couldn't mark notification as read. Try again.")),
+          );
+        }
       }
     }
 
@@ -48,6 +51,15 @@ class NotificationsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final notificationsAsync = ref.watch(myNotificationsProvider);
 
+    Future<void> refreshNotifications() async {
+      try {
+        await ref.refresh(myNotificationsProvider.future);
+      } catch (_) {
+        // The provider exposes the error and its Retry action; the refresh
+        // gesture itself should still finish cleanly.
+      }
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Notifications'),
@@ -59,7 +71,10 @@ class NotificationsScreen extends ConsumerWidget {
                 ref.invalidate(myNotificationsProvider);
                 ref.invalidate(unreadNotificationCountProvider);
               } catch (_) {
-                // Best-effort - the list just won't reflect it until next successful retry.
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Couldn't mark notifications as read. Try again.")),
+                );
               }
             }),
             child: const Text('Mark all read'),
@@ -97,16 +112,27 @@ class NotificationsScreen extends ConsumerWidget {
               data: (page) {
                 final notifications = page.notifications;
                 if (notifications.isEmpty) {
-                  return const Center(
-                    child: Text('No notifications yet', style: TextStyle(color: AppColors.textSecondary)),
+                  return RefreshIndicator(
+                    onRefresh: refreshNotifications,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: const [
+                        SizedBox(height: 220),
+                        Center(
+                          child: Text('No notifications yet',
+                              style: TextStyle(color: AppColors.textSecondary)),
+                        ),
+                      ],
+                    ),
                   );
                 }
 
                 final hasMore = ref.read(myNotificationsProvider.notifier).hasMore;
 
                 return RefreshIndicator(
-                  onRefresh: () async => ref.invalidate(myNotificationsProvider),
+                  onRefresh: refreshNotifications,
                   child: ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(16),
                     itemCount: notifications.length + (hasMore ? 1 : 0),
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
