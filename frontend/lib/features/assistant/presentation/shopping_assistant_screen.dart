@@ -7,6 +7,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../marketplace/domain/marketplace_feed_models.dart';
 import '../../marketplace/presentation/product_offers_screen.dart';
+import 'shopping_assistant_basket_tile.dart';
 
 class ShoppingAssistantScreen extends ConsumerStatefulWidget {
   const ShoppingAssistantScreen({super.key});
@@ -153,7 +154,7 @@ class _ShoppingAssistantScreenState extends ConsumerState<ShoppingAssistantScree
             const SizedBox(height: 20),
             const Text('Suggested basket — review before adding', style: TextStyle(fontWeight: FontWeight.w700)),
             for (final raw in basket)
-              _BasketTile(
+              ShoppingAssistantBasketTile(
                 data: Map<String, dynamic>.from(raw as Map),
                 onReview: _reviewOffer,
                 onAdd: _addReviewedOffer,
@@ -177,38 +178,6 @@ class _ShoppingAssistantScreenState extends ConsumerState<ShoppingAssistantScree
           ],
         ],
       ),
-    );
-  }
-}
-
-class _BasketTile extends StatelessWidget {
-  const _BasketTile({
-    required this.data,
-    required this.onReview,
-    required this.onAdd,
-  });
-  final Map<String, dynamic> data;
-  final Future<void> Function(Map<String, dynamic>) onReview;
-  final Future<void> Function(Map<String, dynamic>) onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    final offer = Map<String, dynamic>.from(data['offer'] as Map? ?? const {});
-    final addable = offer['addable'] == true;
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: const Icon(Icons.storefront_outlined),
-      title: Text(offer['name'] as String? ?? data['requestedItem'] as String? ?? ''),
-      subtitle: Text([
-        offer['shopName'],
-        offer['commerceLabel'],
-        if (offer['distanceKm'] != null) '${offer['distanceKm']} km',
-      ].whereType<Object>().join(' • ')),
-      trailing: FilledButton.tonal(
-        onPressed: () => addable ? onAdd(offer) : onReview(offer),
-        child: Text(addable ? 'Review & add' : 'View options'),
-      ),
-      onTap: () => onReview(offer),
     );
   }
 }

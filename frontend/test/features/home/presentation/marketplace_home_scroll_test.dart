@@ -113,6 +113,42 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   });
 
+  testWidgets('Visit to Buy and Service at Shop previews open full mode lists',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(host());
+    await tester.pumpAndSettle();
+
+    for (final mode in [CommerceMode.visitToBuy, CommerceMode.serviceAtShop]) {
+      final seeAll = find.byKey(
+        ValueKey<String>('marketplace-see-all-${mode.wire}'),
+      );
+      final scrollable = find.byWidgetPredicate(
+        (widget) => widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      ).first;
+      await tester.scrollUntilVisible(seeAll, 180, scrollable: scrollable);
+      expect(seeAll, findsOneWidget);
+      await tester.tap(seeAll);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text(mode.label),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('All nearby shops'), findsOneWidget);
+      expect(find.text('Test ${mode.label}'), findsOneWidget);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+    }
+  });
+
   testWidgets('loading Buy Online does not block Visit, Services, or later sections', (tester) async {
     tester.view.physicalSize = const Size(360, 640);
     tester.view.devicePixelRatio = 1;
