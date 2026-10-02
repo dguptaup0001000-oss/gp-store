@@ -134,7 +134,13 @@ void main() {
       await tester.tap(seeAll);
       await tester.pumpAndSettle();
 
-      expect(find.text(mode.label), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text(mode.label),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('All nearby shops'), findsOneWidget);
       expect(find.text('Test ${mode.label}'), findsOneWidget);
 

@@ -321,17 +321,23 @@ class _ModeSectionMessage extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(title,
-                      key: ValueKey<String>('marketplace-section-$title'),
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(title,
+                          key: ValueKey<String>('marketplace-section-$title'),
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700)),
+                      if (subtitle != null)
+                        Text(subtitle!,
+                            style: const TextStyle(
+                                fontSize: 12, color: AppColors.textSecondary)),
+                    ],
+                  ),
                 ),
-                if (subtitle != null)
-                  Text(subtitle!,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.textSecondary)),
                 if (actionLabel != null && onAction != null)
                   TextButton(
                     key: actionKey,
