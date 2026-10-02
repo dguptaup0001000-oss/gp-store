@@ -46,10 +46,14 @@ void main() {
     expect(find.text('View options'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.text('View options'));
+    await tester.tap(nameFinder);
     await tester.pump();
     expect(reviewed?['name'], contains('Tata Salt Iodised'));
     expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('View options'));
+    await tester.pump();
+    expect(reviewed?['name'], contains('Tata Salt Iodised'));
   });
 
   testWidgets('addable suggestions retain the explicit review-and-add action',

@@ -34,41 +34,45 @@ class ShoppingAssistantBasketTile extends StatelessWidget {
     return Card(
       key: const ValueKey<String>('shopping-assistant-basket-card'),
       margin: const EdgeInsets.only(top: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              name,
-              key: const ValueKey<String>('shopping-assistant-offer-name'),
-              softWrap: true,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-            if (details.isNotEmpty) ...[
-              const SizedBox(height: 5),
+      child: InkWell(
+        onTap: () => onReview(offer),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
               Text(
-                details.join(' • '),
+                name,
+                key: const ValueKey<String>('shopping-assistant-offer-name'),
                 softWrap: true,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              if (details.isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Text(
+                  details.join(' • '),
+                  softWrap: true,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.tonal(
+                  onPressed: () => addable ? onAdd(offer) : onReview(offer),
+                  child: Text(addable ? 'Review & add' : 'View options'),
+                ),
               ),
             ],
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.tonal(
-                onPressed: () => addable ? onAdd(offer) : onReview(offer),
-                child: Text(addable ? 'Review & add' : 'View options'),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
