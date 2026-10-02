@@ -53,7 +53,7 @@ class NotificationsScreen extends ConsumerWidget {
 
     Future<void> refreshNotifications() async {
       try {
-        await ref.refresh(myNotificationsProvider.future);
+        final _ = await ref.refresh(myNotificationsProvider.future);
       } catch (_) {
         // The provider exposes the error and its Retry action; the refresh
         // gesture itself should still finish cleanly.

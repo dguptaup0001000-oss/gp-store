@@ -47,7 +47,9 @@ class MyNotificationsController extends AutoDisposeAsyncNotifier<MyNotifications
     if (_loadingMore ||
         state.isLoading ||
         current == null ||
-        current.page + 1 >= current.totalPages) return;
+        current.page + 1 >= current.totalPages) {
+      return;
+    }
 
     _loadingMore = true;
     final generation = _requestGeneration;
