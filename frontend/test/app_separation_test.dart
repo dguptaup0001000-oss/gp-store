@@ -119,12 +119,26 @@ void main() {
       expect(workflow.contains('-t lib/super_admin_main.dart'), isTrue);
       expect(workflow.contains('--dart-define=GPSTORE_APP=superadmin'), isTrue);
       expect(
+          workflow.contains('./tool/with_superadmin_pubspec.sh flutter build'),
+          isTrue,
+          reason: 'platform app must use its reduced native plugin set');
+      expect(
           workflow.contains(
               'superadmin gpstore-superadmin-release.apk gpstore-superadmin-armv7.apk'),
           isTrue,
           reason: 'split-per-abi output needs renaming to a stable artifact name');
       expect(workflow.contains('name: gpstore-superadmin-release.apk'), isTrue);
       expect(workflow.contains('name: gpstore-superadmin-armv7.apk'), isTrue);
+    });
+
+    test('all release artifacts carry the complete source commit SHA', () {
+      expect(workflow.contains('--dart-define=BUILD_SHA="\${{ steps.src.outputs.sha }}"'),
+          isTrue);
+      expect(workflow.contains('EXPECTED_APP_BUILD: \${{ steps.src.outputs.sha }}'),
+          isTrue);
+      expect(workflow.contains('BUILD_SHA="\${{ steps.src.outputs.short }}"'),
+          isFalse,
+          reason: 'a short SHA cannot prove the APK source commit');
     });
 
     test('its signature is verified like every other APK', () {

@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
-import 'shop_switcher_bar.dart';
-
 import '../../core/util/haptic_widgets.dart';
-import '../dashboard/admin_dashboard_screen.dart';
 import '../auth/admin_permissions.dart';
 import '../design/admin_tokens.dart';
-import 'admin_destinations.dart';
+import 'admin_navigation_model.dart';
 
 /// The admin console's frame.
 ///
@@ -29,17 +26,28 @@ class AdminShell extends StatefulWidget {
     this.operatorName,
     this.role,
     this.home,
+    this.shopSwitcher,
+    required this.navigation,
   });
 
   /// The destination this shell opens on, and returns to.
   ///
-  /// Null means [AdminNav.dashboard] - one shop's working day, which is what
-  /// the admin APK wants. The super admin APK passes the platform console
-  /// instead: the platform owner's first question is never "how did this shop
+  /// Null means the injected catalog's fallback: one shop's working day for
+  /// merchant admin, and the control tower for Super Admin. The platform
+  /// owner's first question is never "how did this shop
   /// trade today", it is "which merchants and shops exist". Landing them on a
   /// shop dashboard and asking them to find Marketplace in a sidebar is what
   /// the separate APK exists to stop.
   final AdminDestination? home;
+
+  /// Injected by the merchant shell only. The Super Admin entrypoint passes
+  /// no widget, so the platform APK does not import or compile merchant shop
+  /// selection code into its shell.
+  final Widget? shopSwitcher;
+
+  /// App-specific destination catalog. The Super Admin app injects a
+  /// platform-only catalog that has no merchant screens in its import graph.
+  final AdminNavigationCatalog navigation;
 
   final VoidCallback? onSignOut;
 
@@ -58,19 +66,12 @@ class AdminShell extends StatefulWidget {
 class _AdminShellState extends State<AdminShell> {
   late String _selectedId = _home.id;
 
-  AdminDestination get _home => widget.home ?? AdminNav.dashboard;
+  AdminDestination get _home => widget.home ?? widget.navigation.fallback;
 
   Set<AdminPermission> get _permissions =>
       AdminRoles.permissionsFor(widget.role);
 
-  /// Shop selection belongs to the merchant owner account, whose backend role
-  /// is ADMIN. The platform owner spans the marketplace, and other shop staff
-  /// are attached to the shop where they work; neither should be offered a
-  /// merchant-owner control merely because their role has admin permissions.
-  bool get _showShopSwitcher =>
-      widget.role?.trim().toUpperCase() == AdminRoles.admin;
-
-  List<AdminNavGroup> get _groups => AdminNav.groupsFor(_permissions);
+  List<AdminNavGroup> get _groups => widget.navigation.groupsFor(_permissions);
 
   void _select(AdminDestination destination, {required bool wide}) {
     if (wide) {
@@ -120,10 +121,10 @@ class _AdminShellState extends State<AdminShell> {
         // there are two, because from then on a merchant who thinks they are
         // in GP Store and is actually in Deepak Hardware will change the wrong
         // prices and not find out until a customer complains (§64).
-        bottom: _showShopSwitcher
-            ? const PreferredSize(
+        bottom: widget.shopSwitcher != null
+            ? PreferredSize(
                 preferredSize: Size.fromHeight(0),
-                child: ShopSwitcherBar(),
+                child: widget.shopSwitcher!,
               )
             : null,
       ),
@@ -157,11 +158,11 @@ class _AdminShellState extends State<AdminShell> {
   // ------------------------------------------------------------------
 
   Widget _buildWide(BuildContext context) {
-    var destination = AdminNav.byId(_selectedId);
+    var destination = widget.navigation.byId(_selectedId);
     // A selection can outlive the permission that allowed it - a role change
     // takes effect on the next request, and the server would refuse the
     // screen anyway. Fall back rather than render a pane that only 403s.
-    if (!AdminNav.isVisible(destination, _permissions)) {
+    if (!widget.navigation.isVisible(destination, _permissions)) {
       destination = _home;
     }
     return Scaffold(
@@ -196,9 +197,11 @@ class _AdminShellState extends State<AdminShell> {
                   // applied to Products.
                   child: KeyedSubtree(
                     key: ValueKey(destination.id),
-                    child: destination.id == AdminNav.dashboardId
+                    child: destination.id == widget.navigation.dashboardId
                         ? _paneWithTitle(
-                            destination.label, const AdminDashboardScreen())
+                            destination.label,
+                            widget.navigation.dashboardBuilder(context),
+                          )
                         : Builder(builder: destination.builder),
                   ),
                 ),

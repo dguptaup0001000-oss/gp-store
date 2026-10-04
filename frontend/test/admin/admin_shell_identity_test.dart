@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/admin/shell/admin_shell.dart';
 import 'package:gpstore/admin/shell/admin_destinations.dart';
+import 'package:gpstore/admin/shell/super_admin_destinations.dart';
 import 'package:gpstore/features/admin/domain/shop_admin_models.dart';
 import 'package:gpstore/features/admin/presentation/shop_self_service_providers.dart';
 
@@ -51,7 +52,12 @@ void main() {
 
   testWidgets('the drawer names the role, humanised', (tester) async {
     await pumpPhone(
-        tester, const AdminShell(operatorName: 'Deepak', role: 'SUPER_ADMIN'));
+        tester,
+        const AdminShell(
+          navigation: AdminNav.navigation,
+          operatorName: 'Deepak',
+          role: 'SUPER_ADMIN',
+        ));
     await openDrawer(tester);
 
     expect(find.text('Deepak'), findsOneWidget);
@@ -61,7 +67,8 @@ void main() {
   });
 
   testWidgets('a shop owner is told they are a shop owner', (tester) async {
-    await pumpPhone(tester, const AdminShell(role: 'ADMIN'));
+    await pumpPhone(
+        tester, const AdminShell(navigation: AdminNav.navigation, role: 'ADMIN'));
     await openDrawer(tester);
 
     // The case that sent somebody hunting for a group they can never see.
@@ -70,7 +77,10 @@ void main() {
   });
 
   testWidgets('an unknown or absent role still says something', (tester) async {
-    await pumpPhone(tester, const AdminShell(operatorName: 'Somebody'));
+    await pumpPhone(
+        tester,
+        const AdminShell(
+            navigation: AdminNav.navigation, operatorName: 'Somebody'));
     await openDrawer(tester);
 
     // FAILS OPEN INTO A WORD, not into a blank line. AdminRoles.humanize
@@ -80,7 +90,10 @@ void main() {
   });
 
   testWidgets('the name is decoration and the role is not', (tester) async {
-    await pumpPhone(tester, const AdminShell(role: 'DELIVERY_MANAGER'));
+    await pumpPhone(
+        tester,
+        const AdminShell(
+            navigation: AdminNav.navigation, role: 'DELIVERY_MANAGER'));
     await openDrawer(tester);
 
     // No operatorName at all: the role must still be shown, because it is the
@@ -116,7 +129,10 @@ void main() {
             )),
       ],
       child: const MaterialApp(
-        home: AdminShell(role: 'SUPER_ADMIN'),
+        home: AdminShell(
+          navigation: SuperAdminNav.navigation,
+          role: 'SUPER_ADMIN',
+        ),
       ),
     ));
     await tester.pumpAndSettle();
@@ -130,7 +146,8 @@ void main() {
     await pumpPhone(
         tester,
         const AdminShell(
-          home: AdminNav.controlTower,
+          navigation: SuperAdminNav.navigation,
+          home: SuperAdminNav.controlTower,
           role: 'SUPER_ADMIN',
         ));
     await openDrawer(tester);
@@ -176,7 +193,10 @@ void main() {
             )),
       ],
       child: const MaterialApp(
-        home: AdminShell(role: 'ORDER_MANAGER'),
+        home: AdminShell(
+          navigation: AdminNav.navigation,
+          role: 'ORDER_MANAGER',
+        ),
       ),
     ));
     await tester.pumpAndSettle();

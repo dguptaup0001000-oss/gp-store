@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth/admin_permissions.dart';
+import 'admin_navigation_model.dart';
 
 import '../../features/admin/presentation/admin_analytics_screen.dart';
 import '../../features/admin/presentation/admin_audit_log_screen.dart';
@@ -39,59 +40,7 @@ import '../dashboard/admin_dashboard_screen.dart';
 import '../operations/morning_preparation_screen.dart';
 import '../operations/store_operations_screen.dart';
 
-/// One place in the admin console you can navigate to.
-///
-/// THE BUILDER RETURNS THE EXISTING SCREEN, UNCHANGED. Restyling the console
-/// is not a licence to rewrite seventeen working screens; every one of them
-/// keeps its own state, providers and behaviour and is simply reached from a
-/// sidebar instead of a list of cards. Converting them one at a time to
-/// shell-native bodies is follow-up work, not a prerequisite for having a
-/// shell.
-@immutable
-class AdminDestination {
-  const AdminDestination({
-    required this.id,
-    required this.label,
-    required this.icon,
-    required this.builder,
-    this.description,
-    this.requires,
-  });
-
-  /// The permission this screen needs, or null for one everybody has.
-  ///
-  /// USED ONLY TO HIDE DEAD ENDS. The server refuses the underlying routes
-  /// regardless; showing a SUPPORT account an Inventory link that can only
-  /// ever return 403 is a worse experience than not showing it.
-  final AdminPermission? requires;
-
-  /// Stable identifier. Used as the selection key, so it must not change
-  /// when a label is reworded.
-  final String id;
-  final String label;
-  final IconData icon;
-
-  /// One line for the drawer and for the old-style card list. Kept because
-  /// "Coupons" alone does not tell a new staff member what the screen does.
-  final String? description;
-
-  final WidgetBuilder builder;
-}
-
-/// A labelled run of destinations in the sidebar.
-///
-/// Grouping is not decoration - it is how an operator finds a screen without
-/// reading eighteen labels. The groups follow the shop's actual working day:
-/// what is happening now (Operations), what is on the shelves (Catalogue),
-/// who is delivering (Delivery), who is buying (Customers), and the
-/// settings you touch once a month (System).
-@immutable
-class AdminNavGroup {
-  const AdminNavGroup({required this.title, required this.destinations});
-
-  final String title;
-  final List<AdminDestination> destinations;
-}
+export 'admin_navigation_model.dart' show AdminDestination, AdminNavGroup;
 
 class AdminNav {
   const AdminNav._();
@@ -516,6 +465,14 @@ class AdminNav {
       ],
     ),
   ];
+
+  static const AdminNavigationCatalog navigation = AdminNavigationCatalog(
+    dashboardId: dashboardId,
+    merchantGroups: groups,
+    platformGroups: superAdminGroups,
+    fallback: dashboard,
+    dashboardBuilder: _dashboard,
+  );
 
   /// Flat list, in sidebar order. Used by the drawer and by lookups.
   static List<AdminDestination> get all =>

@@ -6,7 +6,9 @@ import '../features/profile/domain/profile_models.dart';
 import '../shared/widgets/signed_in_home.dart';
 import '../shared/widgets/wrong_app_screen.dart';
 import 'auth/admin_permissions.dart';
+import 'shell/admin_destinations.dart';
 import 'shell/admin_shell.dart';
+import 'shell/shop_switcher_bar.dart';
 
 /// Admin APK home. Staff tools only - no shopping shell.
 class AdminRootScreen extends ConsumerWidget {
@@ -32,8 +34,12 @@ class AdminRootScreen extends ConsumerWidget {
       );
     }
     return AdminShell(
+      navigation: AdminNav.navigation,
       operatorName: profile.fullName,
       role: profile.role,
+      shopSwitcher: profile.role.trim().toUpperCase() == AdminRoles.admin
+          ? const ShopSwitcherBar()
+          : null,
       onSignOut: () => ref.read(authControllerProvider.notifier).logout(),
     );
   }

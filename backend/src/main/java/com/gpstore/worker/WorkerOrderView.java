@@ -28,7 +28,9 @@ import java.util.List;
  *                    items, correctly, because a delivery LIST does not need
  *                    them).
  *   amountToCollect - cash, and only when there is cash. See below.
- *   address/phone  - to get there and to call when the lane is unmarked.
+ *   address       - the delivery destination. Customer telephone numbers are
+ *                   deliberately not part of this view; contact is routed
+ *                   through the shop/platform instead.
  *   status         - so the screen can show where the order actually is
  *                    rather than what the app last remembered.
  *
@@ -47,7 +49,6 @@ public record WorkerOrderView(
         List<String> allowedNext,
 
         String customerName,
-        String customerPhone,
         String deliveryAddress,
 
         /**
@@ -183,9 +184,6 @@ public record WorkerOrderView(
                 : (address == null ? null : address.getDeliveryInstructions());
         String recipientName = haveSnapshot ? order.getDeliveryRecipientName()
                 : (address == null ? null : address.getFullName());
-        String recipientPhone = haveSnapshot ? order.getDeliveryRecipientPhone()
-                : (address == null ? null : address.getMobileNumber());
-
         // The provider's own formatted line where the customer confirmed one,
         // because that is the string they actually agreed to. Otherwise the
         // parts, joined - and only the parts that exist, so an address with no
@@ -225,7 +223,6 @@ public record WorkerOrderView(
                 allowedNext == null ? List.of() : List.copyOf(allowedNext),
 
                 recipientName,
-                recipientPhone,
                 fullAddress,
                 landmark,
                 instructions,
