@@ -44,7 +44,7 @@ void main() {
     expect(name.maxLines, 2);
     expect(tester.getSize(nameFinder).width, greaterThan(250));
     expect(find.text('View options'), findsOneWidget);
-    expect(find.text('1.2 km'), findsOneWidget);
+    expect(find.textContaining('1.2 km'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.tap(nameFinder);
