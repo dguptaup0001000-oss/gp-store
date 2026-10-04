@@ -6,16 +6,14 @@ import '../features/profile/domain/profile_models.dart';
 import '../shared/widgets/signed_in_home.dart';
 import '../shared/widgets/wrong_app_screen.dart';
 import 'auth/admin_permissions.dart';
-import 'shell/admin_destinations.dart';
+import 'shell/super_admin_destinations.dart';
 import 'shell/admin_shell.dart';
 
 /// Super Admin APK home. The platform owner's console.
 ///
-/// WHAT MAKES IT DIFFERENT FROM THE ADMIN APK, and it is only two things:
-/// it opens on Merchants & Shops instead of a shop dashboard, and it refuses
-/// an account that is not the platform owner. Everything behind it is the
-/// same shell and the same screens - forking twenty-five working screens to
-/// give the owner a different front door would be a poor trade.
+/// WHAT MAKES IT DIFFERENT FROM THE ADMIN APK: a platform-only destination
+/// catalog, the Control Tower home, and a permission gate for non-platform
+/// accounts. Merchant destinations are not linked into this entrypoint.
 ///
 /// NOT A SECURITY BOUNDARY. Every route this app calls is gated server-side
 /// on PERM_PLATFORM_ADMIN, which no shop role holds, so a merchant who
@@ -49,7 +47,8 @@ class SuperAdminRootScreen extends ConsumerWidget {
       );
     }
     return AdminShell(
-      home: AdminNav.controlTower,
+      navigation: SuperAdminNav.navigation,
+      home: SuperAdminNav.controlTower,
       operatorName: profile.fullName,
       role: profile.role,
       onSignOut: () => ref.read(authControllerProvider.notifier).logout(),

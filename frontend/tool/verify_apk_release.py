@@ -73,7 +73,12 @@ ADMIN_REQUIRED_PERMISSIONS = {
 # map, no delivery, no receipt printer - so it REQUIRES nothing and forbids
 # what the admin APK forbids. src/superadmin/AndroidManifest.xml strips the
 # three the main manifest would otherwise hand it.
-SUPERADMIN_FORBIDDEN_PERMISSIONS = ADMIN_FORBIDDEN_PERMISSIONS
+SUPERADMIN_FORBIDDEN_PERMISSIONS = ADMIN_FORBIDDEN_PERMISSIONS | {
+    "android.permission.BLUETOOTH",
+    "android.permission.BLUETOOTH_ADMIN",
+    "android.permission.BLUETOOTH_CONNECT",
+    "android.permission.BLUETOOTH_SCAN",
+}
 WORKER_REQUIRED_PERMISSIONS = {
     "android.permission.CAMERA",
     # Without these the location service dies on Android 14 the instant it
@@ -160,6 +165,8 @@ def release_identity_problems(archive: str) -> list[str]:
     if not expected_build and not expected_api:
         return []
     problems: list[str] = []
+    if expected_build and not re.fullmatch(r"[0-9a-fA-F]{40}", expected_build):
+        problems.append("expected app build must be a full 40-character Git SHA")
     with zipfile.ZipFile(archive) as zf:
         names = [n for n in zf.namelist() if n.endswith("/libapp.so")]
         if not names:
@@ -613,15 +620,18 @@ if __name__ == "__main__":
 
             old_build = os.environ.get("EXPECTED_APP_BUILD")
             old_api = os.environ.get("EXPECTED_API_BASE_URL")
-            os.environ["EXPECTED_APP_BUILD"] = "abc1234"
+            full_sha = "0123456789abcdef0123456789abcdef01234567"
+            os.environ["EXPECTED_APP_BUILD"] = full_sha
             os.environ["EXPECTED_API_BASE_URL"] = "https://api.example.test/v1"
             identity_bundle = os.path.join(tmp, "identity.aab")
             with zipfile.ZipFile(identity_bundle, "w") as zf:
                 zf.writestr(
                     "base/lib/arm64-v8a/libapp.so",
-                    b"compiled abc1234 https://api.example.test/v1",
+                    f"compiled {full_sha} https://api.example.test/v1".encode(),
                 )
             assert not release_identity_problems(identity_bundle)
+            os.environ["EXPECTED_APP_BUILD"] = "abc1234"
+            assert release_identity_problems(identity_bundle), "short SHA must fail"
             os.environ["EXPECTED_APP_BUILD"] = "wrong"
             assert release_identity_problems(identity_bundle)
             if old_build is None:
@@ -662,6 +672,9 @@ if __name__ == "__main__":
         assert permission_violations(
             SUPERADMIN_PACKAGE, {"android.permission.ACCESS_FINE_LOCATION"}
         ), "precise location must be refused in the super admin APK"
+        assert permission_violations(
+            SUPERADMIN_PACKAGE, {"android.permission.BLUETOOTH_CONNECT"}
+        ), "Bluetooth printer access must be refused in the super admin APK"
         assert not permission_violations(
             SUPERADMIN_PACKAGE, {"android.permission.INTERNET"}
         )

@@ -82,8 +82,8 @@ jobs:
           else
             SHA="${GITHUB_SHA}"
           fi
-          if [ "${#SHA}" -lt 7 ]; then
-            echo "::error::Could not resolve a git SHA to package"
+          if ! [[ "$SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::A full 40-character git commit SHA is required for a verifiable release"
             exit 1
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
@@ -293,7 +293,7 @@ jobs:
             --dart-define=GPSTORE_APP=worker \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
-            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.sha }}"
           python3 tool/rename_flavor_apks.py build/app/outputs/flutter-apk \
             worker gpstore-worker-arm64.apk gpstore-worker-armv7.apk
 
@@ -319,7 +319,7 @@ jobs:
             --dart-define=GPSTORE_APP=worker \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
-            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.sha }}"
           mkdir -p build/app/outputs/bundle/worker
           mv build/app/outputs/bundle/workerRelease/app-worker-release.aab \
             build/app/outputs/bundle/worker/gpstore-worker-release.aab
@@ -351,7 +351,7 @@ jobs:
             --dart-define=GPSTORE_APP=customer \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
-            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.sha }}"
 
       - name: Build Admin APK
         env:
@@ -369,7 +369,7 @@ jobs:
             --dart-define=GPSTORE_APP=admin \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
-            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.sha }}"
 
       - name: Build Super Admin APK
         env:
@@ -393,14 +393,14 @@ jobs:
             echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
             exit 1
           fi
-          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
+          ./tool/with_superadmin_pubspec.sh flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
             --flavor superadmin \
             -t lib/super_admin_main.dart \
             --build-number="${{ github.run_number }}" \
             --dart-define=GPSTORE_APP=superadmin \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
-            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.sha }}"
 
       - name: Name customer and admin APKs
         # arm64-v8a is the production phone APK. armeabi-v7a is legacy 32-bit
@@ -456,7 +456,7 @@ jobs:
             --dart-define=GPSTORE_APP=customer \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
-            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.sha }}"
           mkdir -p build/app/outputs/bundle/customer
           mv build/app/outputs/bundle/customerRelease/app-customer-release.aab \
             build/app/outputs/bundle/customer/gpstore-customer-release.aab
@@ -475,7 +475,7 @@ jobs:
             --dart-define=GPSTORE_APP=admin \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
-            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.sha }}"
           mkdir -p build/app/outputs/bundle/admin
           mv build/app/outputs/bundle/adminRelease/app-admin-release.aab \
             build/app/outputs/bundle/admin/gpstore-admin-release.aab
@@ -487,14 +487,14 @@ jobs:
             echo "::error::API_BASE_URL must be https://api.gpstore.co.in/v1 (got '${API_BASE_URL:-}')"
             exit 1
           fi
-          flutter build appbundle --release \
+          ./tool/with_superadmin_pubspec.sh flutter build appbundle --release \
             --flavor superadmin \
             -t lib/super_admin_main.dart \
             --build-number="${{ github.run_number }}" \
             --dart-define=GPSTORE_APP=superadmin \
             --dart-define=APP_ENV=production \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
-            --dart-define=BUILD_SHA="${{ steps.src.outputs.short }}"
+            --dart-define=BUILD_SHA="${{ steps.src.outputs.sha }}"
           mkdir -p build/app/outputs/bundle/superadmin
           mv build/app/outputs/bundle/superadminRelease/app-superadmin-release.aab \
             build/app/outputs/bundle/superadmin/gpstore-superadmin-release.aab
@@ -522,7 +522,7 @@ jobs:
           PACKAGE_SHA: ${{ steps.src.outputs.sha }}
           PACKAGE_SHORT: ${{ steps.src.outputs.short }}
           REQUIRE_RELEASE_SIGNING: ${{ steps.play_signing.outputs.enabled == 'true' && '1' || '0' }}
-          EXPECTED_APP_BUILD: ${{ steps.src.outputs.short }}
+          EXPECTED_APP_BUILD: ${{ steps.src.outputs.sha }}
           EXPECTED_API_BASE_URL: https://api.gpstore.co.in/v1
           EXPECTED_BUILD_NUMBER: ${{ github.run_number }}
         run: |

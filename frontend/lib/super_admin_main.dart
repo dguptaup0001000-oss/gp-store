@@ -1,5 +1,5 @@
 import 'admin/super_admin_app.dart';
-import 'shared/bootstrap.dart';
+import 'shared/platform_admin_bootstrap.dart';
 
 /// GP-STORE Super Admin application - the platform owner's console.
 ///
@@ -14,8 +14,8 @@ import 'shared/bootstrap.dart';
 /// WHY IT IS A SEPARATE APK. Registering a merchant, opening their shop and
 /// handing over their one-time password is the platform owner's job and
 /// nobody else's, and it was buried as the last group of a sidebar inside an
-/// app whose home screen is one shop's trading day. This app opens on
-/// Merchants & Shops.
+/// app whose home screen is one shop's trading day. This app opens on the
+/// Control Tower and has a platform-only destination catalog.
 ///
 /// WHAT THE SPLIT DOES NOT DO, stated as plainly as admin_main.dart states
 /// it: this is not a security boundary. /api/platform/** is gated on
@@ -24,6 +24,6 @@ import 'shared/bootstrap.dart';
 /// refused by the backend on every screen in it, and a merchant who never
 /// installs it is no less refused.
 ///
-/// [bootstrapWithoutPush], not bootstrapGpstoreApp: this flavor has no
-/// Firebase client and needs none. See that function for why.
-Future<void> main() => bootstrapWithoutPush(app: const SuperAdminApp());
+/// A platform-only bootstrap: this flavor has no Firebase client and needs
+/// neither shop push nor shop-counter plugins.
+Future<void> main() => bootstrapPlatformAdmin(app: const SuperAdminApp());

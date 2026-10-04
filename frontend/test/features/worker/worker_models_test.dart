@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/features/worker/domain/worker_models.dart';
 
@@ -174,6 +176,25 @@ void main() {
       expect(outcome.order, isNotNull);
       expect(outcome.order!.orderNumber, 'GP10245');
       expect(outcome.order!.items.single.name, 'Tata Salt');
+    });
+
+    test('worker order parsing never retains a customer telephone number', () {
+      final order = WorkerOrder.fromJson({
+        'orderId': 8,
+        'orderNumber': 'GP8',
+        'customerPhone': '9876543210',
+        'deliveryAddress': 'Test address',
+      });
+
+      expect(order.deliveryAddress, 'Test address');
+      expect(
+          File('lib/features/worker/domain/worker_models.dart')
+              .readAsStringSync(),
+          isNot(contains('customerPhone')));
+      expect(
+          File('lib/features/worker/presentation/worker_order_screen.dart')
+              .readAsStringSync(),
+          isNot(contains('CALL CUSTOMER')));
     });
 
     test('a refused scan carries no order', () {

@@ -3,9 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/router/app_router.dart';
-import '../shared/gpstore_app.dart';
+import '../core/lifecycle/app_session_tracker.dart';
+import '../core/lifecycle/session_refresh.dart';
 import 'design/admin_theme.dart';
 import 'super_admin_root.dart';
+
+final _superAdminMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 final superAdminRouterProvider = Provider<GoRouter>((ref) {
   return createGoRouter(
@@ -27,16 +30,21 @@ final superAdminRouterProvider = Provider<GoRouter>((ref) {
 ///
 /// No printer, no new-order sound, no voice announcement either: all three are
 /// a shop counter's tools.
-class SuperAdminApp extends StatelessWidget {
+class SuperAdminApp extends ConsumerWidget {
   const SuperAdminApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return GpstoreApp(
-      title: 'GP-STORE Super Admin',
-      theme: AdminTheme.light,
-      routerProvider: superAdminRouterProvider,
-      onNotificationTap: (_, __) {},
+  Widget build(BuildContext context, WidgetRef ref) {
+    return AppSessionTracker(
+      child: SessionRefresh(
+        child: MaterialApp.router(
+          title: 'GP-STORE Super Admin',
+          debugShowCheckedModeBanner: false,
+          theme: AdminTheme.light,
+          routerConfig: ref.watch(superAdminRouterProvider),
+          scaffoldMessengerKey: _superAdminMessengerKey,
+        ),
+      ),
     );
   }
 }

@@ -1,0 +1,27 @@
+name: gpstore
+description: GP-STORE platform control app
+publish_to: 'none'
+version: 1.0.0+2
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.35.0 <3.36.0'
+
+# This is intentionally limited to the import graph rooted at
+# lib/super_admin_main.dart. Flutter links every declared plugin into the
+# Android app even when a different app entrypoint never calls it.
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^2.5.1
+  dio: ^5.4.3
+  go_router: ^14.2.0
+  flutter_secure_storage: ^9.2.2
+  freezed_annotation: ^2.4.4
+  cached_network_image: ^3.4.1
+  package_info_plus: ^8.1.2
+  crypto: ^3.0.6
+  image_picker: ^1.1.2
+
+flutter:
+  uses-material-design: true

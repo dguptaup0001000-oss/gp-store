@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/admin/admin_root.dart';
+import 'package:gpstore/admin/auth/admin_permissions.dart';
+import 'package:gpstore/admin/shell/super_admin_destinations.dart';
 import 'package:gpstore/admin/super_admin_root.dart';
 import 'package:gpstore/features/profile/domain/profile_models.dart';
 import 'package:gpstore/features/profile/presentation/profile_providers.dart';
@@ -45,6 +47,21 @@ void main() {
   }
 
   group('the super admin app', () {
+    test('the platform navigation has no merchant shell destinations', () {
+      final groups = SuperAdminNav.navigation.groupsFor(
+          AdminRoles.permissionsFor('SUPER_ADMIN'));
+      final labels = groups
+          .expand((group) => group.destinations)
+          .map((destination) => destination.label)
+          .toSet();
+
+      expect(labels, contains('Control Tower'));
+      expect(labels, contains('Merchants'));
+      expect(labels, isNot(contains('Receipt Printer')));
+      expect(labels, isNot(contains('Store Hours')));
+      expect(labels, isNot(contains('My Shop')));
+    });
+
     testWidgets('opens on the Control Tower, not a shop dashboard',
         (tester) async {
       await pumpAs(tester, const SuperAdminRootScreen(), 'SUPER_ADMIN');

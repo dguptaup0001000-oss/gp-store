@@ -46,19 +46,21 @@ class PlatformControlTowerSecurityTest {
     private final String tag = "tower" + System.nanoTime();
     private Long platformAdmin;
     private Long customer;
+    private Long merchant;
 
     @BeforeEach
     void accounts() {
         platformAdmin = insert("Platform Owner", tag + "-platform@example.test", Role.PLATFORM_ADMIN, null);
         customer = insert("Deepak Search " + tag, tag + "-customer@example.test", Role.CUSTOMER,
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        merchant = insert("Shop Owner " + tag, tag + "-merchant@example.test", Role.ADMIN, null);
     }
 
     @AfterEach
     void cleanup() {
-        jdbc.update("DELETE FROM audit_logs WHERE entity_type='Customer' AND entity_id IN (?,?)",
-                platformAdmin, customer);
-        jdbc.update("DELETE FROM customers WHERE id IN (?,?)", platformAdmin, customer);
+        jdbc.update("DELETE FROM audit_logs WHERE entity_type='Customer' AND entity_id IN (?,?,?)",
+                platformAdmin, customer, merchant);
+        jdbc.update("DELETE FROM customers WHERE id IN (?,?,?)", platformAdmin, customer, merchant);
     }
 
     @Test
@@ -66,6 +68,22 @@ class PlatformControlTowerSecurityTest {
         mockMvc.perform(get("/api/platform/control/search")
                         .param("q", tag)
                         .with(authentication(token(customer, Role.CUSTOMER))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void merchantCannotUsePlatformControlOrOnboardingRoutes() throws Exception {
+        var auth = authentication(token(merchant, Role.ADMIN));
+        mockMvc.perform(get("/api/platform/control/search").param("q", tag).with(auth))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/platform/control/dashboard").with(auth))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/platform/merchants").with(auth))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/platform/shops").with(auth))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/platform/onboard").contentType(MediaType.APPLICATION_JSON)
+                        .content("{}").with(auth))
                 .andExpect(status().isForbidden());
     }
 
@@ -184,14 +202,9 @@ class PlatformControlTowerSecurityTest {
                         .value(activeMerchants == null ? 0L : activeMerchants))
                 .andExpect(jsonPath("$.finance.gmv").isNumber());
 
-        Long merchantAccount = insert("Merchant", tag + "-merchant@example.test", Role.ADMIN, null);
-        try {
-            mockMvc.perform(get("/api/platform/control/dashboard")
-                            .with(authentication(token(merchantAccount, Role.ADMIN))))
-                    .andExpect(status().isForbidden());
-        } finally {
-            jdbc.update("DELETE FROM customers WHERE id=?", merchantAccount);
-        }
+        mockMvc.perform(get("/api/platform/control/dashboard")
+                        .with(authentication(token(merchant, Role.ADMIN))))
+                .andExpect(status().isForbidden());
     }
 
     private Long insert(String name, String email, Role role, String activationHash) {

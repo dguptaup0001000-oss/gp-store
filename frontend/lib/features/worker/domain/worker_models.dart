@@ -143,7 +143,6 @@ class WorkerOrder {
     this.deliveryId,
     this.allowedNext = const [],
     this.customerName,
-    this.customerPhone,
     this.deliveryAddress,
     this.landmark,
     this.deliveryInstructions,
@@ -175,7 +174,6 @@ class WorkerOrder {
   final List<String> allowedNext;
 
   final String? customerName;
-  final String? customerPhone;
   final String? deliveryAddress;
 
   /// "Near Gupta Medical Store", as its own line.
@@ -218,7 +216,6 @@ class WorkerOrder {
                 .toList(growable: false) ??
             const [],
         customerName: json['customerName'] as String?,
-        customerPhone: json['customerPhone'] as String?,
         deliveryAddress: json['deliveryAddress'] as String?,
         landmark: json['landmark'] as String?,
         deliveryInstructions: json['deliveryInstructions'] as String?,

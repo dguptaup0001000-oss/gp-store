@@ -2,6 +2,7 @@ package com.gpstore.worker;
 
 import com.gpstore.entity.Order;
 import com.gpstore.entity.Payment;
+import com.gpstore.entity.Address;
 import com.gpstore.enums.OrderStatus;
 import com.gpstore.enums.PaymentMethod;
 import com.gpstore.enums.PaymentStatus;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -97,5 +99,28 @@ class WorkerOrderViewCashToCollectTest {
         WorkerOrderView view = WorkerOrderView.of(order(), null, null, List.of());
 
         assertEquals(0, BigDecimal.ZERO.compareTo(view.amountToCollect()));
+    }
+
+    @Test
+    @DisplayName("worker order data never contains the customer's phone number")
+    void customerPhoneIsNotPartOfTheWorkerView() throws Exception {
+        Address address = new Address();
+        address.setFullName("Test Customer");
+        address.setMobileNumber("9876543210");
+        address.setHouseNo("42");
+        address.setFormattedAddress("Test delivery address");
+        Order order = order();
+        order.setAddress(address);
+        order.captureDeliverySnapshot(address, LocalDateTime.now());
+
+        WorkerOrderView view = WorkerOrderView.of(order, null, null, List.of());
+        String json = new com.fasterxml.jackson.databind.ObjectMapper()
+                .findAndRegisterModules()
+                .writeValueAsString(view);
+
+        assertTrue(json.contains("Test Customer"));
+        assertTrue(json.contains("Test delivery address"));
+        assertFalse(json.contains("customerPhone"), json);
+        assertFalse(json.contains("9876543210"), json);
     }
 }
