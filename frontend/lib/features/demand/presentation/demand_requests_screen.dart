@@ -119,11 +119,25 @@ class DemandRequestsScreen extends ConsumerWidget {
             padding: const EdgeInsets.all(12),
             children: [
               if (items.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.only(top: 180),
-                  child: Text(
-                    'No requests yet. When local search cannot find something, use “I Need This”.',
-                    textAlign: TextAlign.center,
+                Padding(
+                  padding: const EdgeInsets.only(top: 180, left: 16, right: 16),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'No requests yet. When local search cannot find something, use “I Need This”.',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const INeedThisScreen(),
+                          ),
+                        ),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Create a request'),
+                      ),
+                    ],
                   ),
                 )
               else

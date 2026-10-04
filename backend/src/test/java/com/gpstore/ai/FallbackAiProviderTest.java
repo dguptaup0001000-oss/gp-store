@@ -22,6 +22,26 @@ class FallbackAiProviderTest {
     }
 
     @Test
+    void commonBiryaniMisspellingSearchesTheCanonicalCatalogTerm() {
+        MarketplaceAiProvider.Intent intent = provider.interpret(
+                "briyani for 10 people under 1500").orElseThrow();
+
+        assertThat(intent.query()).isEqualTo("biryani");
+        assertThat(intent.requiredItems()).isEmpty();
+        assertThat(intent.quantity()).isEqualTo(10);
+        assertThat(intent.budget()).isEqualByComparingTo("1500");
+    }
+
+    @Test
+    void suggestionAndRecommendationPhrasingIsRemovedFromTheSearchTerms() {
+        MarketplaceAiProvider.Intent intent = provider.interpret(
+                "suggest me a phone under 159999").orElseThrow();
+
+        assertThat(intent.query()).isEqualTo("phone");
+        assertThat(intent.budget()).isEqualByComparingTo("159999");
+    }
+
+    @Test
     void hindiAndHinglishAreAcceptedWithoutInventingStock() {
         MarketplaceAiProvider.Intent intent = provider.interpret(
                 "मुझे paneer butter masala के लिए सामान चाहिए").orElseThrow();

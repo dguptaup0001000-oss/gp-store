@@ -33,9 +33,12 @@ public class FallbackAiProvider implements MarketplaceAiProvider {
         String lower = clean.toLowerCase(Locale.ROOT);
         List<String> required = new ArrayList<>();
         String query = conciseQuery(clean, lower);
-        if (lower.contains("biryani") || lower.contains("बिरयानी")) {
-            required.addAll(List.of("basmati rice", "onion", "tomato", "biryani masala",
-                    "curd", "cooking oil"));
+        if (isBiryaniRequest(lower)) {
+            if (lower.contains("ingredient") || lower.contains("groceries")
+                    || lower.contains("shopping list") || lower.contains("सामान")) {
+                required.addAll(List.of("basmati rice", "onion", "tomato", "biryani masala",
+                        "curd", "cooking oil"));
+            }
             query = "biryani";
         } else if (lower.contains("paneer butter masala") || lower.contains("पनीर बटर मसाला")) {
             required.addAll(List.of("paneer", "butter", "tomato", "cream", "garam masala"));
@@ -68,6 +71,12 @@ public class FallbackAiProvider implements MarketplaceAiProvider {
         return matcher.find() ? Integer.valueOf(matcher.group(1)) : null;
     }
 
+    private static boolean isBiryaniRequest(String lower) {
+        return lower.contains("biryani") || lower.contains("briyani")
+                || lower.contains("biriyani") || lower.contains("biriani")
+                || lower.contains("बिरयानी");
+    }
+
     private static String detectLanguage(String value) {
         boolean hindi = value.codePoints().anyMatch(c -> c >= 0x0900 && c <= 0x097f);
         boolean latin = value.codePoints().anyMatch(c -> c < 128 && Character.isLetter(c));
@@ -82,7 +91,7 @@ public class FallbackAiProvider implements MarketplaceAiProvider {
         String query = BUDGET.matcher(original).replaceAll(" ");
         query = PEOPLE.matcher(query).replaceAll(" ");
         query = query.replaceAll(
-                "(?i)\\b(find|show|need|want|please|available|availability|where|can|i|me|my|near|nearby|locally|a|an|the)\\b",
+                "(?i)\\b(find|show|suggest|recommend|need|want|please|available|availability|where|can|i|me|my|near|nearby|locally|a|an|the)\\b",
                 " ");
         query = query.replaceAll(
                 "(?i)\\b(mujhe|chahiye|dikhao|paas|aas paas|ke liye)\\b", " ");

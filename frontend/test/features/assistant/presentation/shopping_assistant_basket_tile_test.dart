@@ -44,6 +44,7 @@ void main() {
     expect(name.maxLines, 2);
     expect(tester.getSize(nameFinder).width, greaterThan(250));
     expect(find.text('View options'), findsOneWidget);
+    expect(find.textContaining('1.2 km'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.tap(nameFinder);
@@ -54,6 +55,31 @@ void main() {
     await tester.tap(find.text('View options'));
     await tester.pump();
     expect(reviewed?['name'], contains('Tata Salt Iodised'));
+  });
+
+  testWidgets('sub-kilometre distance is rounded to whole metres', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ShoppingAssistantBasketTile(
+            data: {
+              'requestedItem': 'masala',
+              'offer': {
+                'name': 'Biryani Masala',
+                'distanceKm': 0.015305327818,
+                'addable': false,
+              },
+            },
+            onReview: (_) async {},
+            onAdd: (_) async {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('15 m'), findsOneWidget);
+    expect(find.textContaining('0.015305'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('addable suggestions retain the explicit review-and-add action',

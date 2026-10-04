@@ -27,8 +27,7 @@ class ShoppingAssistantBasketTile extends StatelessWidget {
     final details = <String>[
       _displayText(offer['shopName']),
       _displayText(offer['commerceLabel']),
-      if (offer['distanceKm'] != null)
-        '${_displayText(offer['distanceKm'])} km',
+      if (offer['distanceKm'] != null) _formatDistance(offer['distanceKm']),
     ].where((part) => part.isNotEmpty).toList(growable: false);
 
     return Card(
@@ -76,6 +75,14 @@ class ShoppingAssistantBasketTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static String _formatDistance(Object? value) {
+    if (value is! num) return '';
+    final distanceKm = value.toDouble();
+    if (!distanceKm.isFinite || distanceKm < 0) return '';
+    if (distanceKm < 1) return '${(distanceKm * 1000).round()} m';
+    return '${distanceKm.toStringAsFixed(1)} km';
   }
 
   static String _displayText(Object? value) {

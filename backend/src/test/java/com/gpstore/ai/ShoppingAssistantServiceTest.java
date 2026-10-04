@@ -36,6 +36,52 @@ class ShoppingAssistantServiceTest {
     }
 
     @Test
+    void unrelatedDatabaseSearchHitsAreNotRecommended() {
+        MarketplaceFeedService marketplace = mock(MarketplaceFeedService.class);
+        MarketplaceFeedView unrelated = offer("TATA NIMAK", "30");
+        MarketplaceFeedView relevant = offer("Biryani Masala", "85");
+        when(marketplace.search(eq("masala"), eq(28.6), eq(77.2), anySet(), eq(0), eq(10)))
+                .thenReturn(List.of(unrelated, relevant));
+        ShoppingAssistantService service =
+                new ShoppingAssistantService(new FallbackAiProvider(), marketplace, false);
+
+        ShoppingAssistantService.Answer answer = service.answer(
+                new ShoppingAssistantService.Request("masala", 28.6, 77.2));
+
+        assertThat(answer.results()).containsExactly(relevant);
+        assertThat(answer.suggestedBasket()).extracting(ShoppingAssistantService.BasketLine::offer)
+                .containsExactly(relevant);
+        assertThat(answer.unavailableItems()).isEmpty();
+    }
+
+    @Test
+    void unrelatedSearchHitIsReportedAsUnavailableRatherThanPresentedAsAnOffer() {
+        MarketplaceFeedService marketplace = mock(MarketplaceFeedService.class);
+        when(marketplace.search(eq("masala"), anyDouble(), anyDouble(), anySet(), eq(0), eq(10)))
+                .thenReturn(List.of(offer("TATA NIMAK", "30")));
+        MarketplaceAiProvider misleadingInterpreter = new MarketplaceAiProvider() {
+            @Override
+            public java.util.Optional<Intent> interpret(String prompt) {
+                return java.util.Optional.of(new MarketplaceAiProvider.Intent("namak", null, null, null,
+                        null, java.util.Map.of(), List.of(), "ENGLISH"));
+            }
+
+            @Override
+            public String name() {
+                return "TEST";
+            }
+        };
+        ShoppingAssistantService service =
+                new ShoppingAssistantService(misleadingInterpreter, marketplace, false);
+
+        ShoppingAssistantService.Answer answer = service.answer(
+                new ShoppingAssistantService.Request("masala", 1.0, 2.0));
+
+        assertThat(answer.suggestedBasket()).isEmpty();
+        assertThat(answer.unavailableItems()).containsExactly("masala");
+    }
+
+    @Test
     void unavailableComponentsAreReportedInsteadOfHallucinated() {
         MarketplaceFeedService marketplace = mock(MarketplaceFeedService.class);
         when(marketplace.search(anyString(), anyDouble(), anyDouble(), anySet(), eq(0), eq(10)))
