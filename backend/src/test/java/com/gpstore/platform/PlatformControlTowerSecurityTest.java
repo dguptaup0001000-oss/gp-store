@@ -202,14 +202,9 @@ class PlatformControlTowerSecurityTest {
                         .value(activeMerchants == null ? 0L : activeMerchants))
                 .andExpect(jsonPath("$.finance.gmv").isNumber());
 
-        Long merchantAccount = insert("Merchant", tag + "-merchant@example.test", Role.ADMIN, null);
-        try {
-            mockMvc.perform(get("/api/platform/control/dashboard")
-                            .with(authentication(token(merchantAccount, Role.ADMIN))))
-                    .andExpect(status().isForbidden());
-        } finally {
-            jdbc.update("DELETE FROM customers WHERE id=?", merchantAccount);
-        }
+        mockMvc.perform(get("/api/platform/control/dashboard")
+                        .with(authentication(token(merchant, Role.ADMIN))))
+                .andExpect(status().isForbidden());
     }
 
     private Long insert(String name, String email, Role role, String activationHash) {
