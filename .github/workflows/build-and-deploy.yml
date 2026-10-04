@@ -158,6 +158,7 @@ jobs:
           python3 tool/assert_app_separation.py
           python3 tool/install_release_keystore.py --self-test
           python3 tool/decode_google_services.py --self-test
+          python3 tool/verify_google_services.py --self-test
           python3 tool/report_apk_artifacts.py --self-test
           python3 ../.github/scripts/resolve_api_base_url.py --self-test
 
@@ -242,12 +243,17 @@ jobs:
             echo "Release keystore secrets are present. APK/AAB artifacts on this run must not be Android Debug signed. Play Console is not required."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Decode google-services.json
+      - name: Decode and verify google-services.json
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set +x
-          python3 tool/decode_google_services.py
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            python3 tool/decode_google_services.py --use-placeholder
+          else
+            python3 tool/decode_google_services.py --require-real
+          fi
 
       - name: Install release keystore if configured
         # When ANDROID_KEYSTORE_BASE64 is set, password + alias were already

@@ -23,17 +23,11 @@ import '../../features/admin/presentation/admin_reviews_screen.dart';
 import '../../features/admin/presentation/admin_territories_screen.dart';
 import '../../features/admin/presentation/admin_voice_settings_screen.dart';
 import '../../features/admin/presentation/my_shop_screen.dart';
-import '../../features/admin/presentation/platform_console_screen.dart';
-import '../../features/admin/presentation/platform_control_tower_screen.dart';
-import '../../features/admin/presentation/platform_finance_screen.dart';
-import '../../features/admin/presentation/platform_resource_screen.dart';
-import '../../features/admin/presentation/platform_directory_screen.dart';
 import '../../features/admin/domain/selling_mode.dart';
 import '../../features/admin/presentation/merchant_mode_catalogue_screen.dart';
 import '../../features/admin/presentation/merchant_demand_requests_screen.dart';
 import '../../features/admin/presentation/merchant_intelligence_screen.dart';
 import '../../features/admin/presentation/ai_catalogue_drafts_screen.dart';
-import '../../features/admin/presentation/platform_system_health_screen.dart';
 import '../../features/admin/presentation/shop_earnings_screen.dart';
 import '../../features/support/presentation/release_diagnostics_screen.dart';
 import '../dashboard/admin_dashboard_screen.dart';
@@ -61,39 +55,6 @@ class AdminNav {
     icon: Icons.fact_check_outlined,
     description: 'APK, API, backend and database release identity',
     builder: _releaseDiagnostics,
-  );
-
-  static const AdminDestination platformReleaseDiagnostics = AdminDestination(
-    id: 'platform-release-diagnostics',
-    requires: AdminPermission.platformAdmin,
-    label: 'Release Diagnostics',
-    icon: Icons.fact_check_outlined,
-    description: 'APK, API, backend and database release identity',
-    builder: _releaseDiagnostics,
-  );
-
-  /// Named, like [dashboard], because the super admin APK opens on it.
-  ///
-  /// Still listed in the Marketplace group below and still gated on
-  /// platformAdmin - naming it does not grant it. It is a `static const` here
-  /// so SuperAdminRootScreen can hand it to AdminShell as that app's home
-  /// without a second copy of its label, icon and builder to keep in step.
-  static const AdminDestination platformConsole = AdminDestination(
-    id: 'platform',
-    requires: AdminPermission.platformAdmin,
-    label: 'Merchant Administration',
-    icon: Icons.hub_outlined,
-    description: 'Approve, pause, suspend, and manage merchant access',
-    builder: _platform,
-  );
-
-  static const AdminDestination controlTower = AdminDestination(
-    id: 'control-tower',
-    requires: AdminPermission.platformAdmin,
-    label: 'Control Tower',
-    icon: Icons.space_dashboard_outlined,
-    description: 'Marketplace KPIs and global search',
-    builder: _controlTower,
   );
 
   static Widget _dashboard(BuildContext context) => const AdminDashboardScreen();
@@ -396,80 +357,11 @@ class AdminNav {
     ),
   ];
 
-  /// Platform-owner navigation is deliberately separate from merchant
-  /// navigation. Super Admin inspects entities globally; it does not enter a
-  /// shop identity or inherit counter/printer/catalogue write screens merely
-  /// because its backend permission set is broad.
-  static const List<AdminNavGroup> superAdminGroups = [
-    AdminNavGroup(
-      title: 'Overview',
-      destinations: [controlTower],
-    ),
-    AdminNavGroup(
-      title: 'Marketplace',
-      destinations: [
-        AdminDestination(id: 'platform-merchants', requires: AdminPermission.platformAdmin,
-            label: 'Merchants', icon: Icons.business_outlined, builder: _platformMerchants),
-        AdminDestination(id: 'platform-shops', requires: AdminPermission.platformAdmin,
-            label: 'Shops', icon: Icons.storefront_outlined, builder: _platformShops),
-        AdminDestination(id: 'platform-customers', requires: AdminPermission.platformAdmin,
-            label: 'Customers', icon: Icons.people_outline, builder: _platformCustomers),
-        platformConsole,
-      ],
-    ),
-    AdminNavGroup(
-      title: 'Commerce',
-      destinations: [
-        AdminDestination(id: 'platform-orders', requires: AdminPermission.platformAdmin,
-            label: 'Orders', icon: Icons.receipt_long_outlined, builder: _platformOrders),
-        AdminDestination(id: 'platform-workers', requires: AdminPermission.platformAdmin,
-            label: 'Workers', icon: Icons.badge_outlined, builder: _platformWorkers),
-        AdminDestination(id: 'platform-products', requires: AdminPermission.platformAdmin,
-            label: 'Products', icon: Icons.inventory_2_outlined, builder: _platformProducts),
-      ],
-    ),
-    AdminNavGroup(
-      title: 'Money',
-      destinations: [
-        AdminDestination(id: 'platform-finance', requires: AdminPermission.platformAdmin,
-            label: 'Finance', icon: Icons.account_balance_outlined, builder: _platformFinance),
-        AdminDestination(id: 'platform-payments', requires: AdminPermission.platformAdmin,
-            label: 'Payments', icon: Icons.payments_outlined, builder: _platformPayments),
-        AdminDestination(id: 'platform-refunds', requires: AdminPermission.platformAdmin,
-            label: 'Refunds', icon: Icons.currency_rupee_outlined, builder: _platformRefunds),
-        AdminDestination(id: 'platform-returns', requires: AdminPermission.platformAdmin,
-            label: 'Returns', icon: Icons.assignment_return_outlined, builder: _platformReturns),
-      ],
-    ),
-    AdminNavGroup(
-      title: 'Trust & System',
-      destinations: [
-        AdminDestination(id: 'platform-reviews', requires: AdminPermission.platformAdmin,
-            label: 'Product Reviews', icon: Icons.rate_review_outlined, builder: _platformReviews),
-        AdminDestination(id: 'platform-shop-reviews', requires: AdminPermission.platformAdmin,
-            label: 'Shop Reviews', icon: Icons.reviews_outlined, builder: _platformShopReviews),
-        AdminDestination(id: 'platform-security', requires: AdminPermission.platformAdmin,
-            label: 'Security', icon: Icons.security_outlined, builder: _platformSecurity),
-        AdminDestination(
-          id: 'platform-audit',
-          requires: AdminPermission.auditView,
-          label: 'Audit Logs',
-          icon: Icons.policy_outlined,
-          description: 'Privileged and commerce event history',
-          builder: _audit,
-        ),
-        AdminDestination(id: 'platform-health', requires: AdminPermission.platformAdmin,
-            label: 'System Health', icon: Icons.monitor_heart_outlined,
-            builder: _platformHealth),
-        platformReleaseDiagnostics,
-      ],
-    ),
-  ];
-
   static const AdminNavigationCatalog navigation = AdminNavigationCatalog(
     dashboardId: dashboardId,
     merchantGroups: groups,
-    platformGroups: superAdminGroups,
+    // Platform destinations belong only to SuperAdminNav.
+    platformGroups: groups,
     fallback: dashboard,
     dashboardBuilder: _dashboard,
   );
@@ -478,7 +370,6 @@ class AdminNav {
   static List<AdminDestination> get all =>
       [
         for (final group in groups) ...group.destinations,
-        for (final group in superAdminGroups) ...group.destinations,
       ];
 
   /// The groups this role may actually use, with empty groups dropped.
@@ -487,9 +378,7 @@ class AdminNav {
   /// heading with nothing under it - which reads as a screen that failed to
   /// load rather than one that does not apply.
   static List<AdminNavGroup> groupsFor(Set<AdminPermission> permissions) {
-    final source = permissions.contains(AdminPermission.platformAdmin)
-        ? superAdminGroups
-        : groups;
+    final source = navigation.groupsFor(permissions);
     final visible = <AdminNavGroup>[];
     for (final group in source) {
       final allowed = group.destinations
@@ -516,7 +405,7 @@ class AdminNav {
   /// an older build); landing on the dashboard is recoverable, a crash on
   /// launch is not.
   static AdminDestination byId(String id) {
-    for (final group in [...groups, ...superAdminGroups]) {
+    for (final group in groups) {
       for (final destination in group.destinations) {
         if (destination.id == id) return destination;
       }
@@ -567,38 +456,5 @@ class AdminNav {
       const AdminPrinterSettingsScreen();
   static Widget _earnings(BuildContext context) => const ShopEarningsScreen();
   static Widget _myShop(BuildContext context) => const MyShopScreen();
-  static Widget _platform(BuildContext context) => const PlatformConsoleScreen();
-  static Widget _controlTower(BuildContext context) =>
-      const PlatformControlTowerScreen();
-  // SEARCH FIRST, NOT A LIST. On a marketplace of any size, paging through
-  // every merchant to find one is not how anybody uses this screen - an
-  // operator arrives with a name, a phone number or a shop, and wants that
-  // record. The generic resource list is still reachable for browsing; this
-  // is the door for looking somebody up.
-  static Widget _platformMerchants(BuildContext context) =>
-      const PlatformDirectoryScreen(kind: DirectoryKind.merchants);
-  static Widget _platformShops(BuildContext context) => const PlatformResourceScreen(
-      resource: 'shops', title: 'Shops', icon: Icons.storefront_outlined);
-  static Widget _platformCustomers(BuildContext context) =>
-      const PlatformDirectoryScreen(kind: DirectoryKind.customers);
-  static Widget _platformOrders(BuildContext context) => const PlatformResourceScreen(
-      resource: 'orders', title: 'Orders', icon: Icons.receipt_long_outlined);
-  static Widget _platformWorkers(BuildContext context) => const PlatformResourceScreen(
-      resource: 'workers', title: 'Workers', icon: Icons.badge_outlined);
-  static Widget _platformProducts(BuildContext context) => const PlatformResourceScreen(
-      resource: 'products', title: 'Products', icon: Icons.inventory_2_outlined);
-  static Widget _platformFinance(BuildContext context) => const PlatformFinanceScreen();
-  static Widget _platformPayments(BuildContext context) => const PlatformResourceScreen(
-      resource: 'payments', title: 'Payments', icon: Icons.payments_outlined);
-  static Widget _platformRefunds(BuildContext context) => const PlatformResourceScreen(
-      resource: 'refunds', title: 'Refunds', icon: Icons.currency_rupee_outlined);
-  static Widget _platformReturns(BuildContext context) => const PlatformResourceScreen(
-      resource: 'returns', title: 'Returns', icon: Icons.assignment_return_outlined);
-  static Widget _platformReviews(BuildContext context) => const PlatformResourceScreen(
-      resource: 'reviews', title: 'Product Reviews', icon: Icons.rate_review_outlined);
-  static Widget _platformShopReviews(BuildContext context) => const PlatformResourceScreen(
-      resource: 'shop-reviews', title: 'Shop Reviews', icon: Icons.reviews_outlined);
-  static Widget _platformSecurity(BuildContext context) => const PlatformResourceScreen(
-      resource: 'security', title: 'Security Events', icon: Icons.security_outlined);
-  static Widget _platformHealth(BuildContext context) => const PlatformSystemHealthScreen();
+
 }

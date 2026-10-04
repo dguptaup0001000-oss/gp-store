@@ -9,7 +9,7 @@ import '../../../core/api/error_messages.dart';
 import '../domain/control_tower_models.dart';
 import 'platform_providers.dart';
 import 'platform_entity_360_screen.dart';
-import 'admin_worker_profile_screen.dart';
+import 'platform_worker_profile_screen.dart';
 
 /// Reusable paged reader for platform operational projections. It contains no
 /// write controls; sensitive actions continue through their established,
@@ -441,7 +441,7 @@ class _PlatformResourceScreenState extends ConsumerState<PlatformResourceScreen>
     final id = (row['id'] as num).toInt();
     if (widget.resource == 'workers') {
       Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => AdminWorkerProfileScreen(workerId: id, platformScope: true),
+        builder: (_) => PlatformWorkerProfileScreen(workerId: id),
       ));
       return;
     }

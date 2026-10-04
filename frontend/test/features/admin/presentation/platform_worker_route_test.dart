@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/features/admin/data/platform_repository.dart';
-import 'package:gpstore/features/admin/presentation/admin_worker_profile_screen.dart';
+import 'package:gpstore/features/admin/presentation/platform_worker_profile_screen.dart';
 import 'package:gpstore/features/admin/presentation/platform_providers.dart';
 import 'package:gpstore/features/admin/presentation/platform_resource_screen.dart';
 
@@ -65,7 +65,7 @@ void main() {
     await tester.tap(row);
     await tester.pumpAndSettle();
 
-    expect(find.byType(AdminWorkerProfileScreen), findsOneWidget);
+    expect(find.byType(PlatformWorkerProfileScreen), findsOneWidget);
     expect(find.text('Worker 360'), findsOneWidget);
     expect(find.text('GP Store'), findsOneWidget);
     expect(find.text('6'), findsOneWidget);
