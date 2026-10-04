@@ -4,6 +4,7 @@ import com.gpstore.catalog.shop.CommerceMode;
 import com.gpstore.platform.api.MarketplaceFeedService;
 import com.gpstore.platform.api.MarketplaceFeedView;
 import com.gpstore.search.SearchNormalizer;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -20,13 +21,23 @@ import java.util.Set;
 public class ShoppingAssistantService {
     private final MarketplaceAiProvider provider;
     private final MarketplaceFeedService marketplace;
+    private final FallbackAiProvider fallback;
     private final boolean enabled;
 
     public ShoppingAssistantService(MarketplaceAiProvider provider,
                                     MarketplaceFeedService marketplace,
                                     @Value("${marketplace.ai.enabled:false}") boolean enabled) {
+        this(provider, marketplace, new FallbackAiProvider(), enabled);
+    }
+
+    @Autowired
+    public ShoppingAssistantService(MarketplaceAiProvider provider,
+                                    MarketplaceFeedService marketplace,
+                                    FallbackAiProvider fallback,
+                                    @Value("${marketplace.ai.enabled:false}") boolean enabled) {
         this.provider = provider;
         this.marketplace = marketplace;
+        this.fallback = fallback;
         this.enabled = enabled;
     }
 
@@ -41,9 +52,15 @@ public class ShoppingAssistantService {
         MarketplaceAiProvider.Intent intent = provider.interpret(request == null ? null : request.prompt())
                 .orElseThrow(() -> new com.gpstore.exception.BadRequestException(
                         "Tell GP-STORE what you need."));
+        MarketplaceAiProvider.Intent localIntent = fallback
+                .interpret(request == null ? null : request.prompt()).orElse(intent);
         Set<CommerceMode> modes = parseMode(intent.commerceMode());
-        List<String> items = intent.requiredItems().isEmpty()
-                ? List.of(intent.query()) : intent.requiredItems();
+        List<String> items = !intent.requiredItems().isEmpty()
+                ? intent.requiredItems()
+                : !localIntent.requiredItems().isEmpty()
+                        ? localIntent.requiredItems()
+                        : List.of(localIntent.query());
+        BigDecimal budget = intent.budget() == null ? localIntent.budget() : intent.budget();
         List<BasketLine> basket = new ArrayList<>();
         List<String> unavailable = new ArrayList<>();
         List<MarketplaceFeedView> direct = List.of();
@@ -65,7 +82,7 @@ public class ShoppingAssistantService {
                 continue;
             }
             BigDecimal next = subtotal.add(choice.sellingPrice());
-            if (intent.budget() != null && next.compareTo(intent.budget()) > 0) {
+            if (budget != null && next.compareTo(budget) > 0) {
                 unavailable.add(item + " (outside remaining budget)");
                 continue;
             }

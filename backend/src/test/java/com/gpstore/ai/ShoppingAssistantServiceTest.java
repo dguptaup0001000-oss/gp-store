@@ -59,8 +59,20 @@ class ShoppingAssistantServiceTest {
         MarketplaceFeedService marketplace = mock(MarketplaceFeedService.class);
         when(marketplace.search(eq("masala"), anyDouble(), anyDouble(), anySet(), eq(0), eq(10)))
                 .thenReturn(List.of(offer("TATA NIMAK", "30")));
+        MarketplaceAiProvider misleadingInterpreter = new MarketplaceAiProvider() {
+            @Override
+            public java.util.Optional<Intent> interpret(String prompt) {
+                return java.util.Optional.of(new MarketplaceAiProvider.Intent("namak", null, null, null,
+                        null, java.util.Map.of(), List.of(), "ENGLISH"));
+            }
+
+            @Override
+            public String name() {
+                return "TEST";
+            }
+        };
         ShoppingAssistantService service =
-                new ShoppingAssistantService(new FallbackAiProvider(), marketplace, false);
+                new ShoppingAssistantService(misleadingInterpreter, marketplace, false);
 
         ShoppingAssistantService.Answer answer = service.answer(
                 new ShoppingAssistantService.Request("masala", 1.0, 2.0));
