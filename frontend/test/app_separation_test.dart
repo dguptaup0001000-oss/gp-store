@@ -72,7 +72,7 @@ void main() {
         .where((line) => !line.trimLeft().startsWith('//'))
         .join('\n');
 
-    expect(code.contains('bootstrapWithoutPush'), isTrue,
+    expect(code.contains('bootstrapPlatformAdmin'), isTrue,
         reason: 'the super admin app must use the push-free bootstrap');
     expect(code.contains('bootstrapGpstoreApp'), isFalse);
     expect(code.toLowerCase().contains('firebase'), isFalse);
