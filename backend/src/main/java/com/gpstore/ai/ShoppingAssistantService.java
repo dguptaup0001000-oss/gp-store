@@ -3,6 +3,7 @@ package com.gpstore.ai;
 import com.gpstore.catalog.shop.CommerceMode;
 import com.gpstore.platform.api.MarketplaceFeedService;
 import com.gpstore.platform.api.MarketplaceFeedView;
+import com.gpstore.search.SearchNormalizer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -52,7 +53,9 @@ public class ShoppingAssistantService {
             String inventoryQuery = items.size() == 1
                     ? withAttributes(item, intent.attributes()) : item;
             List<MarketplaceFeedView> found = marketplace.search(inventoryQuery, request.latitude(),
-                    request.longitude(), modes, 0, 10);
+                            request.longitude(), modes, 0, 10).stream()
+                    .filter(card -> matchesRequestedItem(item, card))
+                    .toList();
             if (items.size() == 1) direct = found;
             MarketplaceFeedView choice = found.stream()
                     .filter(card -> card.sellingPrice() != null)
@@ -71,6 +74,35 @@ public class ShoppingAssistantService {
         }
         return new Answer(intent, provider.name(), enabled, direct, List.copyOf(basket),
                 List.copyOf(unavailable), subtotal, true);
+    }
+
+    /**
+     * Search metadata can be broad or stale. A candidate is only a suggestion
+     * when its customer-visible product, brand, or category agrees with at
+     * least one meaningful requested word. The phonetic key preserves common
+     * transliteration and typo matches such as "briyani" / "biryani".
+     */
+    private static boolean matchesRequestedItem(String requestedItem, MarketplaceFeedView card) {
+        if (requestedItem == null || card == null) return false;
+        List<String> requested = SearchNormalizer.tokenize(requestedItem).stream()
+                .filter(token -> token.length() >= 3)
+                .toList();
+        if (requested.isEmpty()) return true;
+        List<String> visible = SearchNormalizer.tokenize(String.join(" ",
+                card.name() == null ? "" : card.name(),
+                card.brand() == null ? "" : card.brand(),
+                card.categoryName() == null ? "" : card.categoryName()));
+        for (String wanted : requested) {
+            String key = SearchNormalizer.phoneticKey(wanted);
+            for (String actual : visible) {
+                if (wanted.equals(actual)) return true;
+                if (!key.isEmpty() && key.equals(SearchNormalizer.phoneticKey(actual))) return true;
+                if ((wanted.equals("phone") || wanted.equals("mobile"))
+                        && List.of("phone", "mobile", "smartphone", "iphone", "android")
+                                .contains(actual)) return true;
+            }
+        }
+        return false;
     }
 
     private static String withAttributes(String query, java.util.Map<String, String> attributes) {

@@ -5,6 +5,7 @@ import '../../../shared/widgets/action_feedback.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
+import '../../demand/presentation/i_need_this_screen.dart';
 import '../../marketplace/domain/marketplace_feed_models.dart';
 import '../../marketplace/presentation/product_offers_screen.dart';
 import 'shopping_assistant_basket_tile.dart';
@@ -60,6 +61,16 @@ class _ShoppingAssistantScreenState extends ConsumerState<ShoppingAssistantScree
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _requestUnavailableItems() async {
+    final description = _prompt.text.trim();
+    if (description.isEmpty) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => INeedThisScreen(initialDescription: description),
+      ),
+    );
   }
 
   Future<void> _reviewOffer(Map<String, dynamic> raw) async {
@@ -174,7 +185,17 @@ class _ShoppingAssistantScreenState extends ConsumerState<ShoppingAssistantScree
           if (unavailable.isNotEmpty) ...[
             const SizedBox(height: 16),
             const Text('Not found nearby', style: TextStyle(fontWeight: FontWeight.w700)),
-            for (final item in unavailable) ListTile(leading: const Icon(Icons.search_off), title: Text('$item')),
+            for (final item in unavailable)
+              ListTile(
+                leading: const Icon(Icons.search_off),
+                title: Text('$item'),
+              ),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: _loading ? null : _requestUnavailableItems,
+              icon: const Icon(Icons.campaign_outlined),
+              label: const Text('Ask nearby shops for this'),
+            ),
           ],
         ],
       ),

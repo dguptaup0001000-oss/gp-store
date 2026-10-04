@@ -36,6 +36,40 @@ class ShoppingAssistantServiceTest {
     }
 
     @Test
+    void unrelatedDatabaseSearchHitsAreNotRecommended() {
+        MarketplaceFeedService marketplace = mock(MarketplaceFeedService.class);
+        MarketplaceFeedView unrelated = offer("TATA NIMAK", "30");
+        MarketplaceFeedView relevant = offer("Biryani Masala", "85");
+        when(marketplace.search(eq("masala"), eq(28.6), eq(77.2), anySet(), eq(0), eq(10)))
+                .thenReturn(List.of(unrelated, relevant));
+        ShoppingAssistantService service =
+                new ShoppingAssistantService(new FallbackAiProvider(), marketplace, false);
+
+        ShoppingAssistantService.Answer answer = service.answer(
+                new ShoppingAssistantService.Request("masala", 28.6, 77.2));
+
+        assertThat(answer.results()).containsExactly(relevant);
+        assertThat(answer.suggestedBasket()).extracting(ShoppingAssistantService.BasketLine::offer)
+                .containsExactly(relevant);
+        assertThat(answer.unavailableItems()).isEmpty();
+    }
+
+    @Test
+    void unrelatedSearchHitIsReportedAsUnavailableRatherThanPresentedAsAnOffer() {
+        MarketplaceFeedService marketplace = mock(MarketplaceFeedService.class);
+        when(marketplace.search(eq("masala"), anyDouble(), anyDouble(), anySet(), eq(0), eq(10)))
+                .thenReturn(List.of(offer("TATA NIMAK", "30")));
+        ShoppingAssistantService service =
+                new ShoppingAssistantService(new FallbackAiProvider(), marketplace, false);
+
+        ShoppingAssistantService.Answer answer = service.answer(
+                new ShoppingAssistantService.Request("masala", 1.0, 2.0));
+
+        assertThat(answer.suggestedBasket()).isEmpty();
+        assertThat(answer.unavailableItems()).containsExactly("masala");
+    }
+
+    @Test
     void unavailableComponentsAreReportedInsteadOfHallucinated() {
         MarketplaceFeedService marketplace = mock(MarketplaceFeedService.class);
         when(marketplace.search(anyString(), anyDouble(), anyDouble(), anySet(), eq(0), eq(10)))
