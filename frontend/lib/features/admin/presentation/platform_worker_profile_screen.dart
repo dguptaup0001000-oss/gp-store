@@ -3,17 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/error_messages.dart';
 import '../domain/worker_models.dart';
-import 'admin_providers.dart';
+import 'platform_providers.dart';
 
-class AdminWorkerProfileScreen extends ConsumerStatefulWidget {
-  const AdminWorkerProfileScreen({super.key, required this.workerId});
+class PlatformWorkerProfileScreen extends ConsumerStatefulWidget {
+  const PlatformWorkerProfileScreen({super.key, required this.workerId});
   final int workerId;
 
   @override
-  ConsumerState<AdminWorkerProfileScreen> createState() => _AdminWorkerProfileScreenState();
+  ConsumerState<PlatformWorkerProfileScreen> createState() => _PlatformWorkerProfileScreenState();
 }
 
-class _AdminWorkerProfileScreenState extends ConsumerState<AdminWorkerProfileScreen> {
+class _PlatformWorkerProfileScreenState extends ConsumerState<PlatformWorkerProfileScreen> {
   AdminWorkerProfile? _profile;
   Object? _error;
   bool _loading = true;
@@ -28,8 +28,8 @@ class _AdminWorkerProfileScreenState extends ConsumerState<AdminWorkerProfileScr
   Future<void> _load({int page = 0, bool append = false}) async {
     setState(() { if (append) { _loadingMore = true; } else { _loading = true; _error = null; } });
     try {
-      final next = await ref.read(adminWorkersRepositoryProvider)
-          .profile(widget.workerId, page: page);
+      final next = await ref.read(platformRepositoryProvider)
+          .workerProfile(widget.workerId, page: page);
       if (!mounted) return;
       setState(() {
         _profile = append && _profile != null

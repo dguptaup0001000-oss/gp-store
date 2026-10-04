@@ -24,25 +24,23 @@ backend and the try/catch around `Firebase.initializeApp()` in
    - Customer package name: `in.gpstore.customer`
    - Admin package name: `in.gpstore.admin`
    Both must match `android/app/build.gradle` productFlavors exactly.
-   Download one `google-services.json` that lists **both** clients (Firebase
-   Console → Project settings → Your apps → the JSON includes every Android
-   app in the project). Until that secret is updated, CI clones the existing
-   `com.gpstore.app` client so Gradle can match the new applicationIds;
-   push/Crashlytics for those IDs are not fully registered until you add
-   the apps in Firebase. The Crashlytics Gradle plugin (mapping upload)
-   is applied only when `CRASHLYTICS_MAPPING_UPLOAD=1`; a cloned app id
-   returns HTTP 400 and fails the release APK.
+   Download a `google-services.json` that lists both registered apps
+   (Firebase Console → Project settings → Your apps). CI verifies exactly one
+   app entry per package, validates each `mobilesdk_app_id` format and project
+   number, and fails production packaging if either registration is missing.
+   It never clones or invents Firebase App IDs. The Crashlytics Gradle plugin
+   (mapping upload) is applied only when `CRASHLYTICS_MAPPING_UPLOAD=1`.
 3. Download the `google-services.json` file it offers you.
 4. Put that file at `android/app/google-services.json` in this project
    (same folder as `android/app/build.gradle`). This file is
    project-specific and already gitignored - never commit it, it's tied to
    your Firebase project.
-5. For GitHub Actions Play-signed APKs/AABs (`ANDROID_KEYSTORE_*` set), also
-   store the same file as repo secret `GOOGLE_SERVICES_JSON_BASE64`
-   (`base64 -w0 android/app/google-services.json`). Play-named artifacts fail
-   the job if this secret is missing so a placeholder cannot ship to Play.
-   Sideload/debug-signed CI copies `google-services.placeholder.json`
-   (not a real Firebase project; push and Crashlytics stay off).
+5. Store the exported file as GitHub Actions repo secret
+   `GOOGLE_SERVICES_JSON_BASE64` (`base64 -w0 android/app/google-services.json`).
+   Every production release build fails if this secret is missing or does not
+   contain both registered apps. Pull-request validation uses the committed
+   `google-services.placeholder.json` only; that local placeholder is not a
+   Firebase project and cannot be used for a production APK.
 6. Skip the rest of Firebase's setup wizard (SDK snippets, etc.) - the
    `firebase_core`/`firebase_messaging` packages already handle that; you
    only needed the JSON file.
@@ -90,10 +88,10 @@ flutter pub get
 flutter run --dart-define=API_BASE_URL=https://api.gpstore.co.in/v1
 ```
 
-If `google-services.json` is missing, the build fails immediately with a
-clear "File google-services.json is missing" error - that's intentional,
-so a missing setup step shows up as a build failure, not a silently broken
-feature.
+Production CI requires the real, Firebase-exported `google-services.json`
+for both package IDs. The local placeholder is accepted only on pull requests.
+A missing or incomplete production registration fails before APK packaging,
+rather than producing an APK with a fabricated app ID.
 
 ## 5. Test it end to end
 

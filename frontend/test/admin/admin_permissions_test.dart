@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/admin/auth/admin_permissions.dart';
 import 'package:gpstore/admin/shell/admin_destinations.dart';
+import 'package:gpstore/admin/shell/super_admin_destinations.dart';
 
 /// The client's permission mirror, and the guard that keeps it a mirror.
 ///
@@ -192,35 +193,26 @@ void main() {
       expect(labels.toSet(), shopDestinations);
     });
 
-    test('no shop role can see platform navigation, and the platform role can', () {
-      // The server refuses /api/platform/** regardless; this is the other
-      // half - not offering a shopkeeper a door that only ever answers 403,
-      // and not hiding it from the one person whose job it is.
+    test('Merchant Admin never exposes platform-control destinations', () {
       for (final role in AdminRoles.all) {
-        final groups = AdminNav.groupsFor(AdminRoles.permissionsFor(role));
-        final labels = [
-          for (final g in groups) ...g.destinations.map((d) => d.label)
-        ];
-        // superAdmin is the platform OWNER, not a shop role, so the
-        // marketplace console is exactly its job.
-        if (role == AdminRoles.platformAdmin ||
-            role == AdminRoles.superAdmin) {
-          expect(
-            labels,
-            containsAll([
-              'Control Tower',
-              'Merchants',
-              'Shops',
-              'Merchant Administration',
-            ]),
-            reason: role,
-          );
-          expect(labels, isNot(contains('My Shop')), reason: role);
-        } else {
-          expect(labels, isNot(contains('Control Tower')), reason: role);
-          expect(labels, isNot(contains('Merchant Administration')), reason: role);
-        }
+        final labels = AdminNav.groupsFor(AdminRoles.permissionsFor(role))
+            .expand((group) => group.destinations)
+            .map((destination) => destination.label);
+        expect(labels, isNot(contains('Control Tower')), reason: role);
+        expect(labels, isNot(contains('Merchant Administration')), reason: role);
       }
+    });
+
+    test('Super Admin keeps platform-control destinations in its own catalogue', () {
+      final labels = SuperAdminNav.navigation
+          .groupsFor(AdminRoles.permissionsFor(AdminRoles.superAdmin))
+          .expand((group) => group.destinations)
+          .map((destination) => destination.label)
+          .toSet();
+      expect(labels, containsAll([
+        'Control Tower', 'Merchants', 'Shops', 'Merchant Administration',
+      ]));
+      expect(labels, isNot(contains('My Shop')));
     });
 
     test('support sees a short menu and no inventory or coupons', () {
@@ -261,16 +253,13 @@ void main() {
       }
     });
 
-    test('shop roles keep Dashboard while platform roles open Control Tower', () {
+    test('Merchant Admin opens on Dashboard for every role', () {
       for (final role in AdminRoles.all) {
-        final groups = AdminNav.groupsFor(AdminRoles.permissionsFor(role));
-        final ids = [for (final g in groups) ...g.destinations.map((d) => d.id)];
-        if (role == AdminRoles.platformAdmin || role == AdminRoles.superAdmin) {
-          expect(ids, contains(AdminNav.controlTower.id), reason: role);
-          expect(ids, isNot(contains(AdminNav.dashboardId)), reason: role);
-        } else {
-          expect(ids, contains(AdminNav.dashboardId), reason: role);
-        }
+        final ids = AdminNav.groupsFor(AdminRoles.permissionsFor(role))
+            .expand((group) => group.destinations)
+            .map((destination) => destination.id);
+        expect(ids, contains(AdminNav.dashboardId), reason: role);
+        expect(ids, isNot(contains('control-tower')), reason: role);
       }
     });
 

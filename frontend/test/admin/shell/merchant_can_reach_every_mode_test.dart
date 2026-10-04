@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/admin/auth/admin_permissions.dart';
 import 'package:gpstore/admin/shell/admin_destinations.dart';
+import 'package:gpstore/admin/shell/super_admin_destinations.dart';
 import 'package:gpstore/features/admin/presentation/merchant_mode_catalogue_screen.dart';
 
 /// A merchant must be able to REACH every way they are allowed to sell.
@@ -114,7 +115,7 @@ void main() {
     test('the platform console has no Visit to Buy destination', () {
       // Super Admin inspects shops through search and drill-down; it does not
       // assume a merchant identity, which is why it has no Switch Shop either.
-      final labels = AdminNav.groupsFor({AdminPermission.platformAdmin})
+      final labels = SuperAdminNav.navigation.groupsFor({AdminPermission.platformAdmin})
           .expand((group) => group.destinations)
           .map((d) => d.label)
           .toList();

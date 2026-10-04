@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gpstore/admin/shell/admin_destinations.dart';
+import 'package:gpstore/admin/shell/super_admin_destinations.dart';
 
 /// The navigation is now the ONLY way into seventeen admin screens. The old
 /// card-list home screen is gone, so a destination missing from this list is
@@ -106,8 +107,8 @@ void main() {
     expect(labels.difference(expected), addedSince);
   });
 
-  test('the platform owner gets a separate control-tower navigation', () {
-    final labels = AdminNav.superAdminGroups
+  test('the platform owner gets a separate control-tower navigation outside Merchant Admin', () {
+    final labels = SuperAdminNav.groups
         .expand((group) => group.destinations)
         .map((d) => d.label)
         .toSet();
@@ -152,6 +153,7 @@ void main() {
     // somewhere sensible is recoverable; a crash on launch is not.
     expect(AdminNav.byId('a-screen-that-was-deleted').id, AdminNav.dashboardId);
     expect(AdminNav.byId('').id, AdminNav.dashboardId);
+    expect(AdminNav.byId('control-tower').id, AdminNav.dashboardId);
   });
 
   test('every group has a title and at least one destination', () {
