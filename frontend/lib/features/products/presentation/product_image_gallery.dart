@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/images/local_catalogue_artwork.dart';
 
 /// Swipeable product gallery with page dots.
 ///
@@ -85,7 +86,15 @@ class _ProductImageGalleryState extends State<ProductImageGallery> {
                   // that real width is what stops a 4000px product photo
                   // being downloaded and decoded at full size. One broken URL
                   // costs one blank page, not the gallery.
-                  child: GpNetworkImage.fill(url: urls[index]),
+                  child: GpNetworkImage.fill(
+                    url: urls[index],
+                    placeholder: LocalCatalogueArtwork(
+                      seed: widget.placeholderSeed ?? 'product',
+                      role: LocalArtworkRole.product,
+                      variant: index,
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -190,49 +199,15 @@ class _GalleryPlaceholder extends StatelessWidget {
 
   final String? seed;
 
-  IconData _icon() {
-    final text = (seed ?? '').toLowerCase();
-    if (text.contains('salt') || text.contains('namak')) {
-      return Icons.restaurant_rounded;
-    }
-    if (text.contains('phone') || text.contains('mobile') || text.contains('iphone')) {
-      return Icons.smartphone_rounded;
-    }
-    if (text.contains('laptop') || text.contains('computer')) {
-      return Icons.laptop_rounded;
-    }
-    if (text.contains('apple') || text.contains('fruit')) {
-      return Icons.eco_rounded;
-    }
-    if (text.contains('soap') || text.contains('shampoo')) {
-      return Icons.spa_rounded;
-    }
-    return Icons.shopping_bag_rounded;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final hash = (seed ?? 'gp-store').hashCode.abs();
-    final palette = <Color>[
-      AppColors.cream,
-      AppColors.mist,
-      AppColors.primary.withValues(alpha: .10),
-      AppColors.highlight.withValues(alpha: .20),
-    ];
     return AspectRatio(
       aspectRatio: 1,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: palette[hash % palette.length],
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-        ),
-        child: Center(
-          child: Icon(
-            _icon(),
-            size: 72,
-            color: AppColors.primary.withValues(alpha: .72),
-          ),
-        ),
+      child: LocalCatalogueArtwork(
+        seed: seed ?? 'product',
+        role: LocalArtworkRole.product,
+        variant: 0,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
       ),
     );
   }
