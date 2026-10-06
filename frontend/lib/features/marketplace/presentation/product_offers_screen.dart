@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/images/local_catalogue_artwork.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/util/haptic_widgets.dart';
@@ -137,7 +138,19 @@ class _Head extends StatelessWidget {
           child: SizedBox(
             width: 78,
             height: 78,
-            child: GpNetworkImage.fill(url: card.imageUrl),
+            child: GpNetworkImage.fill(
+              url: card.imageUrl,
+              placeholder: LocalCatalogueArtwork(
+                seed: '${card.name} ${card.categoryName ?? ''}',
+                role: switch (card.commerceMode) {
+                  CommerceMode.visitToBuy => LocalArtworkRole.visitToBuy,
+                  CommerceMode.serviceAtShop => LocalArtworkRole.serviceAtShop,
+                  CommerceMode.buyOnline => LocalArtworkRole.product,
+                },
+                variant: card.productId,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
           ),
         ),
         const SizedBox(width: 12),
