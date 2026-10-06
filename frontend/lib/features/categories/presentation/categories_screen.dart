@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/images/local_catalogue_artwork.dart';
 import '../../../core/marketplace/marketplace_models.dart';
 import '../../../core/marketplace/marketplace_providers.dart';
 import '../../../core/theme/app_theme.dart';
@@ -198,6 +199,12 @@ class CategoryTile extends StatelessWidget {
                   renderWidth: 56,
                   fit: BoxFit.cover,
                   fallbackIcon: Icons.category_outlined,
+                  placeholder: LocalCatalogueArtwork(
+                    seed: category.name,
+                    role: LocalArtworkRole.category,
+                    variant: category.id,
+                    borderRadius: BorderRadius.circular(13),
+                  ),
                 ),
               ),
             ),
