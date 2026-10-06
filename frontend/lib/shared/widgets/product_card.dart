@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../features/products/domain/product_models.dart';
 import '../../core/images/gp_network_image.dart';
+import '../../core/images/local_catalogue_artwork.dart';
 import '../../core/util/app_haptics.dart';
 import 'action_feedback.dart';
 
@@ -252,6 +253,12 @@ class _ProductCardState extends State<ProductCard> {
                           url: variant?.imageUrl,
                           borderRadius: BorderRadius.circular(8),
                           fallbackIcon: Icons.shopping_basket_outlined,
+                          placeholder: LocalCatalogueArtwork(
+                            seed: '${product.name} ${product.category?.name ?? ''}',
+                            role: LocalArtworkRole.product,
+                            variant: product.id,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
                       ),
                     ),
