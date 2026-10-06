@@ -1,4 +1,5 @@
 import '../../../core/images/gp_network_image.dart';
+import '../../../core/images/local_catalogue_artwork.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -194,7 +195,15 @@ class _Thumbnail extends StatelessWidget {
             // becoming a wall of broken-image icons without downloading
             // random third-party images or pretending these are real product
             // photographs. A real merchant image replaces this automatically.
-            placeholder: _MarketplaceVisualPlaceholder(card: card),
+            placeholder: LocalCatalogueArtwork(
+              seed: '${card.name} ${card.categoryName ?? ''}',
+              role: switch (card.commerceMode) {
+                CommerceMode.visitToBuy => LocalArtworkRole.visitToBuy,
+                CommerceMode.serviceAtShop => LocalArtworkRole.serviceAtShop,
+                CommerceMode.buyOnline => LocalArtworkRole.product,
+              },
+              variant: card.productId,
+            ),
           ),
           // THE MODE IS ON THE PICTURE, not buried in the body text. A
           // customer must be able to tell at a glance which of these they can
@@ -229,62 +238,6 @@ class _Thumbnail extends StatelessWidget {
             ),
           ),
       ],
-    );
-  }
-}
-
-class _MarketplaceVisualPlaceholder extends StatelessWidget {
-  const _MarketplaceVisualPlaceholder({required this.card});
-
-  final MarketplaceCard card;
-
-  IconData _icon() {
-    final text = '${card.name} ${card.categoryName ?? ''}'.toLowerCase();
-    if (text.contains('salt') || text.contains('namak')) {
-      return Icons.restaurant_rounded;
-    }
-    if (text.contains('phone') || text.contains('mobile') || text.contains('iphone')) {
-      return Icons.smartphone_rounded;
-    }
-    if (text.contains('laptop') || text.contains('computer')) {
-      return Icons.laptop_rounded;
-    }
-    if (text.contains('soap') || text.contains('shampoo') || text.contains('beauty')) {
-      return Icons.spa_rounded;
-    }
-    if (text.contains('shoe') || text.contains('footwear')) {
-      return Icons.directions_walk_rounded;
-    }
-    if (text.contains('hardware') || text.contains('repair')) {
-      return Icons.handyman_rounded;
-    }
-    if (text.contains('food') || text.contains('restaurant') || text.contains('namkeen')) {
-      return Icons.lunch_dining_rounded;
-    }
-    if (text.contains('milk') || text.contains('dairy')) {
-      return Icons.local_drink_rounded;
-    }
-    return Icons.shopping_bag_rounded;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = <Color>[
-      AppColors.cream,
-      AppColors.primary.withValues(alpha: .10),
-      AppColors.secondary.withValues(alpha: .12),
-      AppColors.gold.withValues(alpha: .16),
-    ];
-    final background = palette[card.productId.abs() % palette.length];
-    return ColoredBox(
-      color: background,
-      child: Center(
-        child: Icon(
-          _icon(),
-          size: 34,
-          color: AppColors.primary.withValues(alpha: .72),
-        ),
-      ),
     );
   }
 }
