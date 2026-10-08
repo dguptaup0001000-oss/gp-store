@@ -366,9 +366,11 @@ public class DeliveryScheduleService {
      */
     @Transactional(readOnly = true)
     public StoreOperationsSettings settings() {
-        return settingsRepository
-                .findByShopId(com.gpstore.platform.TenantDefaults
-                        .shopIdForCurrentWork(StoreOperationsSettings.class))
+        // A marketplace-wide read has no one shop to load. In that case the
+        // status calculation uses neutral defaults; never ask the write-side
+        // resolver to invent a shop for a read.
+        return com.gpstore.platform.TenantDefaults.shopIdIfKnown()
+                .flatMap(settingsRepository::findByShopId)
                 .orElseGet(StoreOperationsSettings::new);
     }
 
