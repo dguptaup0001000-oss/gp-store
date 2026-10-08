@@ -204,6 +204,11 @@ jobs:
   deploy:
     name: Deploy backend to VPS
     needs: [syntax, wait-for-ci]
+    outputs:
+      # A single GitHub runner can have an unreachable egress path while a
+      # fresh runner succeeds. Preserve the step outcome so fallback and
+      # downstream release gates can distinguish that from a successful SSH.
+      primary_ssh_failed: ${{ steps.ssh2.outcome == 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # PRs only syntax-check; they must not sit in the production environment.
@@ -358,6 +363,9 @@ jobs:
       - name: SSH deploy (attempt 2)
         id: ssh2
         if: github.event_name != 'pull_request' && steps.ssh1.outcome == 'failure'
+        # Capture this runner's failure as an output. The fresh-runner job is
+        # the recovery path; only its failure should fail the overall release.
+        continue-on-error: true
         uses: appleboy/ssh-action@v1.2.0
         env:
           TARGET_SHA: ${{ steps.sha.outputs.sha }}
@@ -387,7 +395,10 @@ jobs:
   deploy-fallback:
     name: Deploy backend to VPS (fresh runner)
     needs: deploy
-    if: failure() && needs.deploy.result == 'failure' && github.event_name != 'pull_request'
+    if: >-
+      always()
+      && needs.deploy.outputs.primary_ssh_failed == 'true'
+      && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: production
@@ -510,7 +521,7 @@ jobs:
     if: >-
       always()
       && github.event_name != 'pull_request'
-      && (needs.deploy.result == 'success' || needs['deploy-fallback'].result == 'success')
+      && (needs.deploy.result == 'success' && needs.deploy.outputs.primary_ssh_failed != 'true' || needs['deploy-fallback'].result == 'success')
     uses: ./.github/workflows/production-smoke.yml
     with:
       # The emergency dispatch can deploy a SHA other than this ref's head, so
@@ -524,7 +535,7 @@ jobs:
       always()
       && github.event_name != 'pull_request'
       && needs.smoke.result == 'success'
-      && (needs.deploy.result == 'success' || needs['deploy-fallback'].result == 'success')
+      && (needs.deploy.result == 'success' && needs.deploy.outputs.primary_ssh_failed != 'true' || needs['deploy-fallback'].result == 'success')
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.request.outputs.should_run }}
@@ -556,7 +567,7 @@ jobs:
       && needs.smoke.result == 'success'
       && needs['seed-request'].result == 'success'
       && needs['seed-request'].outputs.should_run == 'true'
-      && (needs.deploy.result == 'success' || needs['deploy-fallback'].result == 'success')
+      && (needs.deploy.result == 'success' && needs.deploy.outputs.primary_ssh_failed != 'true' || needs['deploy-fallback'].result == 'success')
     uses: ./.github/workflows/seed-marketplace-test-data.yml
     with:
       target_sha: ${{ inputs.sha || github.sha }}
@@ -574,7 +585,7 @@ jobs:
     if: >-
       always()
       && github.event_name != 'pull_request'
-      && (needs.deploy.result == 'success' || needs['deploy-fallback'].result == 'success')
+      && (needs.deploy.result == 'success' && needs.deploy.outputs.primary_ssh_failed != 'true' || needs['deploy-fallback'].result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -601,7 +612,7 @@ jobs:
       always()
       && github.event_name != 'pull_request'
       && needs.smoke.result == 'success'
-      && (needs.deploy.result == 'success' || needs['deploy-fallback'].result == 'success')
+      && (needs.deploy.result == 'success' && needs.deploy.outputs.primary_ssh_failed != 'true' || needs['deploy-fallback'].result == 'success')
     runs-on: ubuntu-latest
     permissions:
       actions: write
