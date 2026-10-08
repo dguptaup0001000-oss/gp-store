@@ -91,4 +91,27 @@ public record StoreStatusResponse(
                 status.closureReason(),
                 status.pausedUntil());
     }
+
+    /**
+     * A neutral response for the legacy single-shop banner while no shop is
+     * selected in marketplace mode. Browsing remains open and the response
+     * makes no delivery-time promise for an unspecified shop.
+     */
+    public static StoreStatusResponse noShopSelected(Instant serverTime) {
+        return new StoreStatusResponse(
+                serverTime,
+                true,
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                false,
+                "Select a shop to see its delivery schedule.",
+                null);
+    }
 }
