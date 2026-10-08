@@ -1,5 +1,6 @@
 package com.gpstore.controller;
 
+import com.gpstore.platform.TenantDefaults;
 import com.gpstore.store.DeliveryScheduleService;
 import com.gpstore.store.StoreStatusResponse;
 import org.springframework.http.CacheControl;
@@ -56,9 +57,14 @@ public class StoreStatusController {
      */
     @GetMapping("/status")
     public ResponseEntity<StoreStatusResponse> status() {
-        StoreStatusResponse body = StoreStatusResponse.from(
-                scheduleService.getStoreStatus(), scheduleService.getProperties(),
-                scheduleService.shopZone());
+        // This route predates marketplace mode. Without one authenticated or
+        // explicitly selected shop, do not report Shop #1 or calculate an
+        // invented platform-wide schedule.
+        StoreStatusResponse body = TenantDefaults.shopIdIfKnown().isEmpty()
+                ? StoreStatusResponse.noShopSelected(scheduleService.now())
+                : StoreStatusResponse.from(
+                        scheduleService.getStoreStatus(), scheduleService.getProperties(),
+                        scheduleService.shopZone());
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.maxAge(10, TimeUnit.SECONDS).cachePrivate())
                 .body(body);
